@@ -25,10 +25,10 @@ describe('cashflow-policy', () => {
     expect(parseCashflowCategoryLabel('알 수 없음')).toBeUndefined();
   });
 
-  it('returns canonical line labels and aliases', () => {
+  it('returns canonical line labels without removed aliases', () => {
     expect(getCashflowLineLabel('DIRECT_COST_OUT')).toBe('직접사업비');
-    expect(parseCashflowLineLabelAlias('직접사업비(공급가액)+매입부가세')).toBe('DIRECT_COST_OUT');
-    expect(parseCashflowLineLabelAlias('MYSC선입금')).toBe('MYSC_PREPAY_IN');
+    expect(parseCashflowLineLabelAlias('직접사업비(공급가액)+매입부가세')).toBeUndefined();
+    expect(parseCashflowLineLabelAlias('MYSC선입금')).toBeUndefined();
   });
 
   it('returns the approved labels for projection and actual modes', () => {
@@ -58,12 +58,12 @@ describe('cashflow-policy', () => {
     expect(getCashflowExportLabel('MYSC_PROFIT_OUT')).toBe('MYSC 수익(간접비 등)');
   });
 
-  it('parses explicit sheet labels without overwriting ambiguous projection labels', () => {
-    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등')).toBe('MYSC_PREPAY_IN');
-    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등(입금)')).toBe('MYSC_PREPAY_IN');
+  it('parses canonical labels without reviving mode-specific aliases', () => {
+    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등')).toBeUndefined();
+    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등(입금)')).toBeUndefined();
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - MYSC 인건비(입금)')).toBe('MYSC_PREPAY_LABOR_IN');
-    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 매입부가세')).toBe('MYSC_PREPAY_INPUT_VAT_IN');
-    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 메입부가세')).toBe('MYSC_PREPAY_INPUT_VAT_IN');
+    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 매입부가세')).toBeUndefined();
+    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 메입부가세')).toBeUndefined();
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 매입부가세(입금)')).toBe('MYSC_PREPAY_INPUT_VAT_IN');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등(출금)')).toBe('MYSC_PREPAY_DIRECT_OUT');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - MYSC 인건비(출금)')).toBe('MYSC_PREPAY_LABOR_OUT');

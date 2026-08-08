@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { toA1 } from './cashflow-sheet-template.mjs';
+import { annualYearsFor, requireWeeklyYear, weekOrdinal } from './cashflow-coordinates.mjs';
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -25,9 +26,11 @@ function compareCodeUnits(left, right) {
   return 0;
 }
 
+const DASH_ONLY_RE = /^[-–—―]+$/;
+
 export function classifyCashflowSheetCell(value) {
   const rawValue = normalizedText(value);
-  if (!rawValue || /^[-–—―]+$/.test(rawValue)) return { state: 'EMPTY' };
+  if (!rawValue || DASH_ONLY_RE.test(rawValue)) return { state: 'EMPTY' };
 
   const normalizedMinus = rawValue.replace(/[−﹣－]/g, '-');
   const parenthesizedNegative = /^\(.*\)$/.test(normalizedMinus);
@@ -81,11 +84,18 @@ export function computeCashflowTargetRevision(snapshot = {}) {
   return revisionOf({ weeks });
 }
 
-function snapshotCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
-  const cell = classified.state === 'VALUE' && classified.amount === 0
+// Actual 은 회계 서식이 0 을 '-' 로 그린다. 시트의 '-' 는 확정된 0원이므로 ZERO 로 읽는다.
+// Projection 의 '-' 는 기존 계약 그대로 미기입(EMPTY)이다.
+function classifyModeCell(mode, value) {
+  if (mode === 'actual' && DASH_ONLY_RE.test(normalizedText(value))) return { state: 'ZERO', amount: 0 };
+  const classified = classifyCashflowSheetCell(value);
+  return classified.state === 'VALUE' && classified.amount === 0
     ? { state: 'ZERO', amount: 0 }
     : classified;
+}
+
+function snapshotCell(mapping, matrix) {
+  const cell = classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     yearMonth: mapping.yearMonth,
@@ -99,10 +109,7 @@ function snapshotCell(mapping, matrix) {
 }
 
 function snapshotAnnualCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
-  const annualClassified = classified.state === 'VALUE' && classified.amount === 0
-    ? { state: 'ZERO', amount: 0 }
-    : classified;
+  const annualClassified = classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
@@ -116,24 +123,18 @@ function snapshotAnnualCell(mapping, matrix) {
 }
 
 function snapshotAnnualDerivedCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
     periodKind: mapping.periodKind,
     derivedKind: mapping.derivedKind,
     sourceCell: mapping.a1,
-    ...(classified.state === 'VALUE' && classified.amount === 0
-      ? { state: 'ZERO', amount: 0 }
-      : classified),
+    ...classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]),
   };
 }
 
 function snapshotTotalCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
-  const totalClassified = classified.state === 'VALUE' && classified.amount === 0
-    ? { state: 'ZERO', amount: 0 }
-    : classified;
+  const totalClassified = classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     kind: mapping.kind,
@@ -224,37 +225,61 @@ function summarizeAnnualMode(cells, source) {
   };
 }
 
-function reconcileAnnualMode(weekly, annual) {
-  if (weekly.source !== 'WEEKLY' || annual.source !== 'ANNUAL') {
-    return { status: 'NOT_APPLICABLE', mismatchedLineIds: [] };
+const DERIVED_FIELD_BY_KIND = {
+  deposit_total: 'depositTotal',
+  withdrawal_total: 'withdrawalTotal',
+  balance: 'balance',
+};
+
+// 연 단위 연도의 합계는 시트 합계 행 좌표(입금 합계 / 출금 합계 / 잔액)에서 읽는다.
+// 좌표 칸이 금액을 담고 있지 않으면 값이 없는 것이며, 라인 합으로 대체하지 않는다.
+function declaredAnnualTotals(annualDerivedCells, year, mode) {
+  const result = { depositTotal: null, withdrawalTotal: null, balance: null };
+  for (const [kind, field] of Object.entries(DERIVED_FIELD_BY_KIND)) {
+    const cell = annualDerivedCells.find((candidate) => (
+      Number(candidate?.year) === year
+      && candidate?.mode === mode
+      && candidate?.derivedKind === kind
+    ));
+    if (!['VALUE', 'ZERO'].includes(cell?.state) || !Number.isSafeInteger(Number(cell.amount))) continue;
+    result[field] = Number(cell.amount);
   }
-  if (weekly.coverage.status !== 'COMPLETE') {
-    return { status: 'PARTIAL_WEEKLY', mismatchedLineIds: [] };
-  }
-  const lineIds = new Set([...Object.keys(weekly.lineAmounts), ...Object.keys(annual.lineAmounts)]);
-  const mismatchedLineIds = [...lineIds]
-    .filter((lineId) => (weekly.lineAmounts[lineId] || 0) !== (annual.lineAmounts[lineId] || 0))
-    .sort(compareCodeUnits);
-  return { status: mismatchedLineIds.length > 0 ? 'MISMATCH' : 'MATCH', mismatchedLineIds };
+  return result;
 }
 
-export function buildAnnualCashflowTotals({ cells, annualCells }) {
-  const years = new Set([
-    ...cells.map((cell) => Number(String(cell.yearMonth).slice(0, 4))),
-    ...annualCells.map((cell) => Number(cell.year)),
-  ].filter(Number.isSafeInteger));
-  return [...years]
-    .sort((left, right) => left - right)
+// 좌표 계약상 한 연도가 주별과 연간을 겸할 수 없으므로 둘을 대조할 일이 없다.
+const NO_RECONCILIATION = Object.freeze({ status: 'NOT_APPLICABLE', mismatchedLineIds: [] });
+
+export function buildAnnualCashflowTotals({ cells = [], annualCells = [], annualDerivedCells = [], weeklyYear }) {
+  const year0 = requireWeeklyYear(weeklyYear);
+  const years = [...annualYearsFor(year0), year0].sort((left, right) => left - right);
+  return years
     .map((year) => {
       const modeTotals = {};
       for (const mode of ['projection', 'actual']) {
-        const weeklyCells = cells.filter((cell) => cell.mode === mode && Number(String(cell.yearMonth).slice(0, 4)) === year);
-        const annualCellsForMode = annualCells.filter((cell) => cell.mode === mode && cell.year === year);
-        const weekly = summarizeAnnualMode(weeklyCells, weeklyCells.length > 0 ? 'WEEKLY' : 'NONE');
-        const annual = summarizeAnnualMode(annualCellsForMode, annualCellsForMode.length > 0 ? 'ANNUAL' : 'NONE');
+        if (year === year0) {
+          // 주별 연도: 주차 그리드가 그 해의 유일한 소스. 연간 열이 존재하지 않는다.
+          modeTotals[mode] = {
+            ...summarizeAnnualMode(
+              cells.filter((cell) => cell.mode === mode && weekOrdinal(year0, cell?.yearMonth, cell?.weekNo) !== -1),
+              'WEEKLY',
+            ),
+            reconciliation: NO_RECONCILIATION,
+          };
+          continue;
+        }
+        // 연 단위 연도: 연간 열 좌표가 유일한 소스. 주차 셀은 보지 않는다.
+        const annual = summarizeAnnualMode(
+          annualCells.filter((cell) => cell.mode === mode && Number(cell.year) === year && cell?.periodKind !== 'GRAND_TOTAL'),
+          'ANNUAL',
+        );
+        const declared = declaredAnnualTotals(annualDerivedCells, year, mode);
         modeTotals[mode] = {
-          ...(weeklyCells.length > 0 ? weekly : annual),
-          reconciliation: reconcileAnnualMode(weekly, annual),
+          ...annual,
+          totalIn: declared.depositTotal,
+          totalOut: declared.withdrawalTotal,
+          net: declared.balance,
+          reconciliation: NO_RECONCILIATION,
         };
       }
       return { year, ...modeTotals };
@@ -462,7 +487,9 @@ function annualSheetFinancialTotals({ depositScheduleRows, projectionControls })
     }));
 }
 
-export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = [], annualCells = [], totalCells = [] } = {}) {
+export function extractCashflowSheetFacts({
+  template = {}, matrix = [], cells = [], annualCells = [], annualDerivedCells = [], totalCells = [], weeklyYear,
+} = {}) {
   const issues = [];
   const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
   const weekColumns = (projectionSection?.weekColumns || [])
@@ -542,7 +569,9 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = 
     },
     depositScheduleRows,
     annualFinancialTotals: annualSheetFinancialTotals({ depositScheduleRows, projectionControls }),
-    annualCashflowTotals: buildAnnualCashflowTotals({ cells, annualCells }),
+    annualCashflowTotals: cells.length || annualCells.length || annualDerivedCells.length
+      ? buildAnnualCashflowTotals({ cells, annualCells, annualDerivedCells, weeklyYear })
+      : [],
     ...(weeklyCalculationChecks.length > 0 ? { weeklyCalculationChecks } : {}),
     cashflowGrandTotals: {
       projection: buildCashflowSheetTotal(totalCells, 'projection'),
@@ -595,7 +624,11 @@ export function createCashflowPinnedSnapshot({
     .sort((left, right) => String(left.mode).localeCompare(String(right.mode))
       || String(left.kind).localeCompare(String(right.kind))
       || String(left.lineId || left.derivedKind || '').localeCompare(String(right.lineId || right.derivedKind || '')));
-  const sheetFacts = extractCashflowSheetFacts({ template, matrix, cells, annualCells, totalCells });
+  const weeklyYear = template?.sections?.flatMap((section) => section.weekColumns || [])[0]?.year
+    ?? Number(String(mappings[0]?.yearMonth || '').slice(0, 4));
+  const sheetFacts = extractCashflowSheetFacts({
+    template, matrix, cells, annualCells, annualDerivedCells, totalCells, weeklyYear,
+  });
   const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, annualDerivedCells, totalCells, sheetFacts });
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;

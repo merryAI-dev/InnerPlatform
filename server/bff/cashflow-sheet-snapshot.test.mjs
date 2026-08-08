@@ -1,10 +1,95 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAnnualCashflowTotals,
   classifyCashflowSheetCell,
   computeCashflowTargetRevision,
   createCashflowPinnedSnapshot,
   extractCashflowSheetFacts,
 } from './cashflow-sheet-snapshot.mjs';
+import { CashflowTemplateMismatchError } from './cashflow-coordinates.mjs';
+
+const annualAccidentFixture = (overrides = {}) => ({
+  weeklyYear: 2026,
+  cells: [{
+    yearMonth: '2025-12', weekNo: 4, mode: 'actual', lineId: 'SALES_IN', direction: 'IN',
+    state: 'VALUE', amount: 7_582_243,
+  }],
+  annualCells: [{
+    year: 2025, mode: 'actual', lineId: 'SALES_IN', direction: 'IN',
+    state: 'VALUE', amount: 317_449_417,
+  }],
+  annualDerivedCells: [{
+    year: 2025, mode: 'actual', derivedKind: 'deposit_total',
+    state: 'VALUE', amount: 317_449_417,
+  }],
+  ...overrides,
+});
+
+describe('annual cashflow coordinate contract', () => {
+  it('T1 keeps the annual coordinate value when an orphan weekly cell exists', () => {
+    const totals = buildAnnualCashflowTotals(annualAccidentFixture());
+    expect(totals.find(({ year }) => year === 2025).actual.lineAmounts.SALES_IN).toBe(317_449_417);
+  });
+
+  it('T2 uses the declared sheet deposit total', () => {
+    const totals = buildAnnualCashflowTotals(annualAccidentFixture());
+    expect(totals.find(({ year }) => year === 2025).actual.totalIn).toBe(317_449_417);
+  });
+
+  it('T3 returns only the years declared by the coordinate contract', () => {
+    const totals = buildAnnualCashflowTotals(annualAccidentFixture());
+    expect(totals.map(({ year }) => year)).toEqual([2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032]);
+  });
+
+  it('T4 preserves an empty declared total as null', () => {
+    const fixture = annualAccidentFixture();
+    fixture.annualDerivedCells[0] = { ...fixture.annualDerivedCells[0], state: 'EMPTY', amount: undefined };
+    const totals = buildAnnualCashflowTotals(fixture);
+    expect(totals.find(({ year }) => year === 2025).actual.totalIn).toBeNull();
+  });
+
+  it('T6 sums only weekly coordinates for the weekly year', () => {
+    const fixture = annualAccidentFixture({
+      cells: [
+        { yearMonth: '2026-01', weekNo: 1, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 100 },
+        { yearMonth: '2026-01', weekNo: 2, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 200 },
+      ],
+    });
+    const actual = buildAnnualCashflowTotals(fixture).find(({ year }) => year === 2026).actual;
+    expect(actual.totalIn).toBe(300);
+    expect(actual.reconciliation.status).toBe('NOT_APPLICABLE');
+  });
+
+  it('T7 excludes cells outside the coordinate years', () => {
+    const fixture = annualAccidentFixture({
+      cells: [{ yearMonth: '2023-12', weekNo: 4, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 1 }],
+      annualCells: [
+        ...annualAccidentFixture().annualCells,
+        { year: 2033, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 2, sourceCell: 'ZZ1' },
+      ],
+    });
+    const totals = buildAnnualCashflowTotals(fixture);
+    expect(totals.map(({ year }) => year)).not.toContain(2023);
+    expect(totals.map(({ year }) => year)).not.toContain(2033);
+  });
+
+  it('T8 rejects a missing weekly year', () => {
+    expect(() => buildAnnualCashflowTotals({ cells: [], annualCells: [] }))
+      .toThrow(CashflowTemplateMismatchError);
+  });
+
+  it('T9 preserves explicit zero and omits empty line amounts', () => {
+    const totals = buildAnnualCashflowTotals(annualAccidentFixture({
+      annualCells: [
+        { year: 2025, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'ZERO', amount: 0 },
+        { year: 2025, mode: 'actual', lineId: 'TEAM_SUPPORT_IN', direction: 'IN', state: 'EMPTY' },
+      ],
+    }));
+    const amounts = totals.find(({ year }) => year === 2025).actual.lineAmounts;
+    expect(amounts).toHaveProperty('SALES_IN', 0);
+    expect(amounts).not.toHaveProperty('TEAM_SUPPORT_IN');
+  });
+});
 
 describe('cashflow sheet pinned snapshot', () => {
   it.each(['', '  ', '-', '―', '–'])('classifies %j as an empty cell', (rawValue) => {
@@ -26,20 +111,41 @@ describe('cashflow sheet pinned snapshot', () => {
       projectId: 'project-a',
       spreadsheetId: 'sheet-a',
       selectedSheetName: 'cashflow(사용내역 연동)',
-      template: { sections: [{ mode: 'projection', annualMappings: [annualMapping] }] },
+      template: { sections: [{ mode: 'projection', weekColumns: [{ year: 2026 }], annualMappings: [annualMapping] }] },
       matrix: [[0]],
     });
     const empty = createCashflowPinnedSnapshot({
       projectId: 'project-a',
       spreadsheetId: 'sheet-a',
       selectedSheetName: 'cashflow(사용내역 연동)',
-      template: { sections: [{ mode: 'projection', annualMappings: [annualMapping] }] },
+      template: { sections: [{ mode: 'projection', weekColumns: [{ year: 2026 }], annualMappings: [annualMapping] }] },
       matrix: [['']],
     });
 
     expect(zero.annualCells).toEqual([expect.objectContaining({ state: 'ZERO', amount: 0 })]);
     expect(empty.annualCells).toEqual([expect.objectContaining({ state: 'EMPTY' })]);
     expect(zero.sourceRevision).not.toBe(empty.sourceRevision);
+  });
+
+  it('reads an accounting-format dash as zero in Actual but as empty in Projection', () => {
+    const mappingFor = (mode) => ({
+      mode, year: 2025, lineId: 'SALES_IN', direction: 'IN',
+      rowIndex: 0, columnIndex: 0, a1: 'A1', label: '매출액(입금)',
+    });
+    const snapshotFor = (mode) => createCashflowPinnedSnapshot({
+      projectId: 'project-a',
+      spreadsheetId: 'sheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      template: { sections: [{ mode, weekColumns: [{ year: 2026 }], annualMappings: [mappingFor(mode)] }] },
+      matrix: [['-']],
+    });
+
+    // Actual 의 '-' 는 회계 서식이 0 을 그린 것이다. 확정된 0원(ZERO)으로 읽어 화면에 0 이 뜬다.
+    expect(snapshotFor('actual').annualCells)
+      .toEqual([expect.objectContaining({ state: 'ZERO', amount: 0 })]);
+    // Projection 의 '-' 는 기존 계약 그대로 미기입(EMPTY)이다.
+    expect(snapshotFor('projection').annualCells)
+      .toEqual([expect.objectContaining({ state: 'EMPTY' })]);
   });
 
   it('pins annual totals and running balances as sheet evidence', () => {
@@ -50,6 +156,7 @@ describe('cashflow sheet pinned snapshot', () => {
       template: {
         sections: [{
           mode: 'projection',
+          weekColumns: [{ year: 2026 }],
           annualDerivedMappings: [
             { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'deposit_total', rowIndex: 0, columnIndex: 2, a1: 'C1' },
             { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'withdrawal_total', rowIndex: 1, columnIndex: 2, a1: 'C2' },
@@ -350,6 +457,7 @@ describe('cashflow sheet pinned snapshot', () => {
 
   it('sums repeated weekly line values and marks an incomplete year as partial', () => {
     const facts = extractCashflowSheetFacts({
+      weeklyYear: 2026,
       cells: [
         { mode: 'projection', yearMonth: '2026-01', weekNo: 1, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 100 },
         { mode: 'projection', yearMonth: '2026-01', weekNo: 2, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 200 },
@@ -357,7 +465,7 @@ describe('cashflow sheet pinned snapshot', () => {
       ],
     });
 
-    expect(facts.annualCashflowTotals).toEqual([
+    expect(facts.annualCashflowTotals).toEqual(expect.arrayContaining([
       expect.objectContaining({
         year: 2026,
         projection: expect.objectContaining({
@@ -375,29 +483,32 @@ describe('cashflow sheet pinned snapshot', () => {
           },
         }),
       }),
-    ]);
+    ]));
   });
 
   it('keeps the workbook 2,300,000 won prepayment separate by mode', () => {
     const facts = extractCashflowSheetFacts({
+      weeklyYear: 2026,
       cells: [
         { mode: 'projection', yearMonth: '2026-01', weekNo: 3, lineId: 'MYSC_PREPAY_IN', direction: 'IN', state: 'VALUE', amount: 2_300_000 },
         { mode: 'actual', yearMonth: '2026-01', weekNo: 3, lineId: 'MYSC_PREPAY_IN', direction: 'IN', state: 'VALUE', amount: 2_300_000 },
       ],
     });
 
-    expect(facts.annualCashflowTotals[0].projection.totalIn).toBe(2_300_000);
-    expect(facts.annualCashflowTotals[0].actual.totalIn).toBe(2_300_000);
+    const totals2026 = facts.annualCashflowTotals.find(({ year }) => year === 2026);
+    expect(totals2026.projection.totalIn).toBe(2_300_000);
+    expect(totals2026.actual.totalIn).toBe(2_300_000);
   });
 
   it('keeps annual-only values distinct from weekly coverage', () => {
     const facts = extractCashflowSheetFacts({
+      weeklyYear: 2026,
       annualCells: [
         { mode: 'actual', year: 2025, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 500 },
       ],
     });
 
-    expect(facts.annualCashflowTotals[0].actual).toMatchObject({
+    expect(facts.annualCashflowTotals.find(({ year }) => year === 2025).actual).toMatchObject({
       source: 'ANNUAL',
       lineAmounts: { SALES_IN: 500 },
       coverage: {
@@ -410,7 +521,7 @@ describe('cashflow sheet pinned snapshot', () => {
     });
   });
 
-  it('reports an item-level mismatch when a complete weekly year differs from its annual column', () => {
+  it('does not reconcile the weekly year against a non-annual total column', () => {
     const cells = Array.from({ length: 60 }, (_, index) => ({
       mode: 'projection',
       yearMonth: `2026-${String(Math.floor(index / 5) + 1).padStart(2, '0')}`,
@@ -421,6 +532,7 @@ describe('cashflow sheet pinned snapshot', () => {
       amount: 10,
     }));
     const facts = extractCashflowSheetFacts({
+      weeklyYear: 2026,
       cells,
       annualCells: [
         { mode: 'projection', year: 2026, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 599 },
@@ -428,9 +540,10 @@ describe('cashflow sheet pinned snapshot', () => {
     });
 
     expect(facts.annualCashflowTotals[0].projection).toMatchObject({
-      source: 'WEEKLY',
-      totalIn: 600,
-      reconciliation: { status: 'MISMATCH', mismatchedLineIds: ['SALES_IN'] },
+      source: 'ANNUAL',
+    });
+    expect(facts.annualCashflowTotals.find(({ year }) => year === 2026).projection).toMatchObject({
+      source: 'WEEKLY', totalIn: 600, reconciliation: { status: 'NOT_APPLICABLE' },
     });
   });
 

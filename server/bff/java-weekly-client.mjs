@@ -572,10 +572,12 @@ export function createJavaWeeklyClient({
     context,
     projectId,
     idempotencyKey,
+    editSession,
     sourceRevision,
     year,
     expectedRevision,
     cells,
+    amendmentReason = '',
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
@@ -585,8 +587,16 @@ export function createJavaWeeklyClient({
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/annual/apply`,
       command: 'apply_cashflow_annual_total',
+      editSession,
       dataProjectId: bffDataProjectId,
-      body: { idempotencyKey, sourceRevision, year, expectedRevision, cells },
+      body: {
+        idempotencyKey,
+        sourceRevision,
+        year,
+        expectedRevision,
+        cells,
+        ...(readOptionalText(amendmentReason) ? { amendmentReason: readOptionalText(amendmentReason) } : {}),
+      },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
       throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');

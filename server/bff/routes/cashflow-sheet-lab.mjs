@@ -749,7 +749,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     next?.sheetFacts?.annualFinancialTotals,
     (row) => Number(row?.year),
   );
-  const annualCashflowTotals = buildAnnualCashflowTotals({ cells, annualCells });
+  const annualCashflowTotals = buildAnnualCashflowTotals({ cells, annualCells, annualDerivedCells, weeklyYear: sourceYear });
   const cashflowGrandTotalsBySourceYear = [
     ...(previous?.sheetFacts?.cashflowGrandTotalsBySourceYear || [])
       .filter((row) => Number(row?.sourceYear) !== sourceYear),
@@ -3493,6 +3493,7 @@ async function applyStagedCashflowSheetLab({
               year: stagedYear.year,
               expectedRevision: stagedYear.expectedRevision,
               cells: stagedYear.cells,
+              amendmentReason: closedMonthChangeReason,
             }),
             verifyMutation: (javaResult) => ({
               status: 'APPLIED',
@@ -4308,7 +4309,7 @@ export function mountCashflowSheetLabRoutes(app, {
       if (!template.supported) {
         throw Object.assign(createHttpError(
           400,
-          '지원하지 않는 cashflow 시트 구조라 연동할 수 없습니다.',
+          '시트 양식이 표준과 다릅니다. 표시된 칸을 표준 양식으로 맞춘 뒤 다시 불러와 주세요.',
           'cashflow_sheet_template_unsupported',
         ), {
           diagnostics: template.reasons.slice(0, 20),
@@ -4337,6 +4338,7 @@ export function mountCashflowSheetLabRoutes(app, {
           role: req.context?.actorRole || 'workspace_user',
         },
       }));
+      mirror.weeklyYear = template.weeklyYear;
       mirror.activeWeekRange = {
         startWeek: weekRange.startWeek,
         endWeek: weekRange.endWeek,

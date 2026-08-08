@@ -16,7 +16,7 @@ import { stableStringify } from '../utils.mjs';
 const PROJECTION_IN_LABELS = [
   'MYSC 선입금 - 직접사업비 등',
   'MYSC 선입금 - MYSC 인건비',
-  'MYSC 선입금 - 메입부가세',
+  'MYSC 선입금 - 매입부가세',
   '매출액(입금)',
   '매출부가세(입금)',
   '팀지원금(입금)',
@@ -403,6 +403,7 @@ async function loadSanitized260701FullYearFixture() {
       matrix[headerRowIndex][columnIndex] = columnIndex === 70 ? 'Total' : `${year}년`;
     }
   }
+  matrix[16][0] = 'MYSC 선입금 - 매입부가세';
   matrix[32][0] = '잔액 (※ 중요)';
   matrix[55][0] = '잔액';
   return matrix;
@@ -1169,6 +1170,7 @@ describe('cashflow sheet lab route', () => {
     expect(refreshed.body).toMatchObject({
       projectId: 'project-a',
       status: 'FRESH',
+      weeklyYear: 2026,
       sourceRevision: expect.stringMatching(/^sha256:/),
       targetRevisionAtFetch: expect.stringMatching(/^sha256:/),
       summary: { cellCount: 1920, valueCount: 1920, emptyCount: 0, invalidCount: 0 },
@@ -1180,6 +1182,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(pinned.body.sourceRevision).toBe(refreshed.body.sourceRevision);
     expect(pinned.body.cells).toHaveLength(1920);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({ weeklyYear: 2026 });
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
     await new Promise((resolve) => setImmediate(resolve));
@@ -1385,7 +1388,11 @@ describe('cashflow sheet lab route', () => {
 
     const applied = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-apply-001' })
+      .send({
+        stageRunId: stage.body.runId,
+        closedMonthChangeReason: '결산 후 연간 합계 정정',
+        idempotencyKey: 'annual-apply-001',
+      })
       .expect(200);
     expect(applied.body).toMatchObject({
       appliedMonths: Array.from({ length: 12 }, (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`),
@@ -1405,6 +1412,7 @@ describe('cashflow sheet lab route', () => {
       projectId: 'project-a',
       year: 2025,
       expectedRevision: 0,
+      amendmentReason: '결산 후 연간 합계 정정',
       cells: expect.arrayContaining([
         expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'ZERO', amount: 0 }),
         expect.objectContaining({ mode: 'actual', cashflowLine: 'BANK_INTEREST_OUT', cellState: 'VALUE', amount: 50 }),
@@ -1602,7 +1610,7 @@ describe('cashflow sheet lab route', () => {
     expect(retried2025[0].idempotencyKey).toBe(retried2025[1].idempotencyKey);
   });
 
-  it('warns but does not block when a complete weekly year conflicts with its annual total', async () => {
+  it('gives the weekly year no annual column so weekly and annual totals cannot conflict', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1631,9 +1639,16 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'conflicting-year-refresh' })
       .expect(200);
 
-    expect(mirror.body.reconciliationWarnings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ year: 2026, mode: 'projection', status: 'MISMATCH' }),
-    ]));
+    // 좌표 계약: 주별 블록은 E:BL 하나뿐이고 연간 열은 그 해를 포함하지 않는다.
+    // 따라서 2026 은 주차 그리드에만 존재하고, 주차합과 연간값이 어긋날 자리가 없다.
+    const totals2026 = mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2026);
+    expect(totals2026.projection.source).toBe('WEEKLY');
+    expect(totals2026.projection.reconciliation.status).toBe('NOT_APPLICABLE');
+    // 2026 으로 태깅된 셀은 Total 열(BS)의 GRAND_TOTAL 뿐이며 연간 열이 아니다.
+    expect(mirror.body.annualCells.some((cell) => (
+      Number(cell.year) === 2026 && cell.periodKind !== 'GRAND_TOTAL'
+    ))).toBe(false);
+    expect(mirror.body.reconciliationWarnings).toEqual([]);
 
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
@@ -1869,6 +1884,44 @@ describe('cashflow sheet lab route', () => {
         code: 'cashflow_sheet_template_unsupported',
         diagnostics: expect.arrayContaining([
           expect.objectContaining({ code: 'cashflow_week_header_invalid', sourceCell: 'E13' }),
+        ]),
+      },
+    });
+  });
+
+  it('rejects a sheet whose weekly header row mixes years', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const matrix = buildMatrix();
+    matrix[12][31] = '25-6-3';
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-mixed-weekly-years' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'ERROR',
+      lastRefreshError: {
+        code: 'cashflow_sheet_template_unsupported',
+        statusCode: 400,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'cashflow_week_years_mixed', sourceCell: 'AF13' }),
         ]),
       },
     });
@@ -2232,7 +2285,12 @@ describe('cashflow sheet lab route', () => {
     const cells2025 = mirror.body.annualCells.filter((cell) => cell.year === 2025);
     expect(cells2025).toHaveLength(32);
     expect(new Set(cells2025.map((cell) => cell.sourceYear))).toEqual(new Set([2026]));
-    expect(mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2025).projection.totalIn).toBe(700);
+    const totals2025 = mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2025).projection;
+    expect(totals2025.valueCellCount).toBe(16);
+    expect(totals2025.lineAmounts.SALES_IN).toBe(100);
+    // 합계는 시트의 입금 합계 행 좌표에서만 온다. 이 fixture 는 그 칸이 비어 있으므로
+    // 라인 합(700)으로 대체하지 않고 값이 없는 채로 둔다.
+    expect(totals2025.totalIn).toBeNull();
   });
 
   it('invalidates the pinned mirror and staged run when the saved sheet config changes', async () => {
@@ -3070,7 +3128,8 @@ describe('cashflow sheet lab route', () => {
 
   it('shows legacy aggregate Actual removals for human review before the one-time sheet overwrite', async () => {
     const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-    matrix[40][4] = '-';
+    // 진짜 빈칸이어야 미기입이다. Actual 의 '-' 는 회계 서식의 0 이라 제거가 아니라 0 변경 제안이 된다.
+    matrix[40][4] = '';
     const db = createDb({
       project: {
         id: 'project-a',

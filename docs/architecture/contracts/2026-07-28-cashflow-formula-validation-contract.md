@@ -50,7 +50,9 @@ Every imported accounting cell retains both its numeric meaning and its authorin
 
 | Sheet content | JVM state | Arithmetic value | Meaning |
 | --- | --- | ---: | --- |
-| Empty or `-` | `EMPTY` | 0 | Not entered |
+| Empty | `EMPTY` | 0 | Not entered |
+| `-` in Projection | `EMPTY` | 0 | Not entered |
+| `-` in Actual | `ZERO` | 0 | Accounting number format renders 0 as `-`; confirmed zero (2026-08-08 결정) |
 | Explicit `0` | `ZERO` | 0 | Entered and confirmed as zero |
 | Whole-won positive or negative number | `VALUE` | Original amount | Entered amount |
 | Decimal, malformed text, non-finite value | `INVALID` | None | Invalid source value |

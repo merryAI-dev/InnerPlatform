@@ -1,4 +1,4 @@
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
 import type { CashflowSheetLineId } from '../../data/types';
 import type {
   CashflowMonthCloseCell,
@@ -9,6 +9,8 @@ import type {
   CashflowManagementCheck,
   CashflowManagementConfirmation,
   CashflowDeadlineSummary,
+  CanonicalCashflowAnnualModeTotal,
+  CanonicalCashflowAnnualTotal,
 } from '../../lib/platform-bff-client';
 import type {
   CashflowSheetLabMirrorResult,
@@ -24,39 +26,18 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
 
-type CanonicalCashflowMonth = {
-  yearMonth: string;
-  projection?: { weeks?: Array<{ amounts?: Partial<Record<CashflowSheetLineId, number>> }> };
-  actual?: { weeks?: Array<{ amounts?: Partial<Record<CashflowSheetLineId, number>> }> };
-};
-
-export function canonicalCashflowAnnualYears(months: CanonicalCashflowMonth[], selectedYear: number): number[] {
-  return [...new Set(months
-    .map((month) => Number(month.yearMonth.slice(0, 4)))
-    .filter((year) => Number.isSafeInteger(year) && year !== selectedYear))]
-    .sort((left, right) => left - right);
+export function annualYearsFor(weeklyYear: number | undefined): number[] {
+  if (!Number.isSafeInteger(weeklyYear)) return [];
+  const year = Number(weeklyYear);
+  return [year - 2, year - 1, ...Array.from({ length: 6 }, (_, index) => year + index + 1)];
 }
 
-export function summarizeCanonicalCashflowYear(
-  months: CanonicalCashflowMonth[],
+export function canonicalCashflowAnnualTotalFor(
+  annualTotals: CanonicalCashflowAnnualTotal[],
   year: number,
   mode: 'projection' | 'actual',
-) {
-  const selected = months.filter((month) => Number(month.yearMonth.slice(0, 4)) === year);
-  if (!selected.length) return null;
-  const lineAmounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-    lineId,
-    selected.reduce((total, month) => total + (month[mode]?.weeks || [])
-      .reduce((monthTotal, week) => monthTotal + Number(week.amounts?.[lineId] || 0), 0), 0),
-  ])) as Record<CashflowSheetLineId, number>;
-  const lineStates = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => {
-    const hasValue = selected.some((month) => (month[mode]?.weeks || [])
-      .some((week) => Object.prototype.hasOwnProperty.call(week.amounts || {}, lineId)));
-    return [lineId, hasValue ? (lineAmounts[lineId] === 0 ? 'ZERO' : 'VALUE') : 'EMPTY'];
-  })) as Record<CashflowSheetLineId, 'VALUE' | 'ZERO' | 'EMPTY'>;
-  const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + lineAmounts[lineId], 0);
-  const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + lineAmounts[lineId], 0);
-  return { lineAmounts, lineStates, totalIn, totalOut, net: totalIn - totalOut };
+): CanonicalCashflowAnnualModeTotal | null {
+  return annualTotals.find((total) => total.year === year)?.[mode] ?? null;
 }
 
 export function shouldHideCashflowValuesAfterLoadError(error: string | null, hasCanonical: boolean): boolean {
@@ -73,7 +54,6 @@ export function isCashflowComparisonWeekVisible(
 }
 
 export function resolveCashflowComparisonScope<T extends { yearMonth: string; weekNo: number }>(input: {
-  selectedYear: number;
   annualYears: number[];
   weeks: T[];
   comparisonAsOfWeek?: { yearMonth: string; weekNo: number };
@@ -81,7 +61,7 @@ export function resolveCashflowComparisonScope<T extends { yearMonth: string; we
   const asOf = input.comparisonAsOfWeek;
   if (!asOf) return { annualYears: [], weeks: [], periodLabel: '서버 기준 주차 확인 중' };
   const asOfYear = Number.parseInt(asOf.yearMonth.slice(0, 4), 10);
-  const annualYears = input.annualYears.filter((year) => year !== input.selectedYear && year < asOfYear);
+  const annualYears = input.annualYears.filter((year) => year < asOfYear);
   const weeks = input.weeks.filter((week) => isCashflowComparisonWeekVisible(week, asOf));
   const periodStart = annualYears.length > 0
     ? `${annualYears[0]}년`

@@ -39,6 +39,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
@@ -90,6 +91,7 @@ class WeeklyExpenseControllerTest {
 
     @BeforeEach
     void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
+        doReturn(2026).when(weeklyExpensePersistence).findCashflowDeclaredWeeklyYear(any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
@@ -362,6 +364,28 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void cashflowSnapshotWithoutDeclaredWeeklyYearDoesNotReadGlobalLedger() {
+        WeeklyExpenseCommandService snapshotCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence snapshotPersistence = mock(WeeklyExpensePersistence.class);
+        when(snapshotPersistence.findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year"))
+            .thenReturn(null);
+        WeeklyExpenseController snapshotController = new WeeklyExpenseController(
+            snapshotCommandService, snapshotPersistence, false
+        );
+
+        CashflowSnapshotResponse response = snapshotController.cashflowSnapshot(
+            "project-no-year", "tenant-no-year", "viewer-no-year", "viewer", "viewer@example.com"
+        );
+
+        assertThat(response.projection()).isEmpty();
+        assertThat(response.actual()).isEmpty();
+        assertThat(response.readModel().months()).isEmpty();
+        verify(snapshotPersistence).findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year");
+        verify(snapshotPersistence, never()).findCashflowLedgerSource(any(), any(), anyInt());
+        verify(snapshotPersistence, never()).findCashflowGlobalLedgerSource(any(), any());
+    }
+
+    @Test
     void saveDraftPersistsRowsActualsAuditAndIdempotentResponse() throws Exception {
         String body = """
             {
@@ -476,25 +500,21 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void projectionActualSummaryBatchSerializesTheStrictThinBffContract() throws Exception {
-        dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
-            dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator.currentFinanceWeek(
-                java.time.Clock.systemUTC()
-            );
+    void projectionActualSummaryBatchReturnsPerProjectErrorsWithoutDeclaredWeeklyYears() throws Exception {
+        doReturn(null).when(weeklyExpensePersistence)
+            .findCashflowDeclaredWeeklyYear(eq("tenant-summary"), any());
+
         mockMvc.perform(asActor(post("/api/v1/cashflow/projection-actual-summary/batch"),
                 "tenant-summary", "viewer-summary", "viewer")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"projectIds\":[\"project-b\",\"project-a\"]}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.version").value("1"))
-            .andExpect(jsonPath("$.items[0].projectId").value("project-a"))
-            .andExpect(jsonPath("$.items[0].fromMonth").value("2023-01"))
-            .andExpect(jsonPath("$.items[0].comparisonAsOfWeek.yearMonth").value(boundary.yearMonth()))
-            .andExpect(jsonPath("$.items[0].comparisonAsOfWeek.weekNo").value(boundary.weekNo()))
-            .andExpect(jsonPath("$.items[0].settlementDifferenceAmount").value(0))
-            .andExpect(jsonPath("$.items[0].settlementMatches").value(true))
-            .andExpect(jsonPath("$.items[1].projectId").value("project-b"))
-            .andExpect(jsonPath("$.errors").isEmpty());
+            .andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.errors[0].projectId").value("project-a"))
+            .andExpect(jsonPath("$.errors[0].code").value("SUMMARY_UNAVAILABLE"))
+            .andExpect(jsonPath("$.errors[1].projectId").value("project-b"))
+            .andExpect(jsonPath("$.errors[1].code").value("SUMMARY_UNAVAILABLE"));
 
         mockMvc.perform(asActor(post("/api/v1/cashflow/projection-actual-summary/batch"),
                 "tenant-summary", "viewer-summary", "viewer")
@@ -1548,9 +1568,11 @@ class WeeklyExpenseControllerTest {
             "2026-07-20", "2026-07-10", true,
             null, null, null, null, null, null, null, null, null, null, null
         ));
+        when(dashboardPersistence.findCashflowDeclaredWeeklyYear("tenant-month-dashboard", "project-month-dashboard"))
+            .thenReturn(2026);
         WeeklyExpensePersistence.CashflowLedgerSource dashboardSource =
-            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of(), List.of(2024));
-        when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard"))
+            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of());
+        when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026))
             .thenReturn(dashboardSource);
         when(dashboardCommandService.readCashflowProjectionActualSummary(
             any(), eq("project-month-dashboard"), same(dashboardSource)
@@ -1566,8 +1588,7 @@ class WeeklyExpenseControllerTest {
         when(dashboardPersistence.findCashflowOpeningBalance(
             "tenant-month-dashboard",
             "project-month-dashboard",
-            2026,
-            List.of(2024)
+            2026
         )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
             2026,
             new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
@@ -1579,7 +1600,7 @@ class WeeklyExpenseControllerTest {
                     completeAnnualStates
                 )),
                 List.of(2025),
-                List.of(2024)
+                List.of()
             ),
             new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
                 new java.math.BigDecimal("1800000"),
@@ -1590,7 +1611,7 @@ class WeeklyExpenseControllerTest {
                     completeAnnualStates
                 )),
                 List.of(2025),
-                List.of(2024)
+                List.of()
             )
         ));
 
@@ -1614,7 +1635,7 @@ class WeeklyExpenseControllerTest {
         assertThat(response.openingBalances().projection().amount()).isEqualByComparingTo("2000000");
         assertThat(response.openingBalances().actual().amount()).isEqualByComparingTo("1800000");
         assertThat(response.openingBalances().projection().includedYears()).containsExactly(2025);
-        assertThat(response.openingBalances().projection().excludedWeeklyYears()).containsExactly(2024);
+        assertThat(response.openingBalances().projection().excludedWeeklyYears()).isEmpty();
         assertThat(response.openingBalances().projection().lineAmounts()).containsEntry("SALES_IN", new java.math.BigDecimal("2000000"));
         assertThat(response.openingBalances().projection().sources()).singleElement().satisfies(source -> {
             assertThat(source.year()).isEqualTo(2025);
@@ -1623,11 +1644,60 @@ class WeeklyExpenseControllerTest {
         assertThat(response.projectionActualSummary().settlementDifferenceAmount())
             .isEqualByComparingTo("18371453");
         verify(dashboardPersistence, times(1))
-            .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard");
+            .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026);
         verify(dashboardCommandService).readCashflowProjectionActualSummary(
             any(), eq("project-month-dashboard"), same(dashboardSource)
         );
         verify(dashboardCommandService, never()).readCashflowProjectionActualSummaries(any(), any());
+    }
+
+    @Test
+    void openDashboardWithoutDeclaredWeeklyYearReturnsSourceBlockerAndKeepsOtherData() {
+        WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        when(dashboardPersistence.findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year"))
+            .thenReturn(null);
+        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-no-year"), eq("2026-06")))
+            .thenReturn(new CashflowMonthCloseResponse(
+                true, "cashflowMonth.read", "project-no-year", "2026-06", "OPEN",
+                0, 0, 0, 0, 0, null, null, null, null, null, false,
+                Map.of(), null, null, Map.of(), Map.of(), false,
+                "2026-07-20", "2026-07-10", true,
+                null, null, null, null, null, null, null, null, null, null, null
+            ));
+        when(dashboardPersistence.findCashflowOpeningBalance("tenant-no-year", "project-no-year", 2026))
+            .thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+                2026,
+                new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                    java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+                ),
+                new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                    java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+                )
+            ));
+        when(dashboardCommandService.readCashflowProjectionActualSummary(
+            any(), eq("project-no-year"), any(WeeklyExpensePersistence.CashflowLedgerSource.class)
+        )).thenReturn(new CashflowProjectionActualSummaryBatchResponse.Item(
+            "project-no-year", "2023-01",
+            new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
+            java.math.BigDecimal.ZERO, true
+        ));
+
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
+            dashboardCommandService, dashboardPersistence, false
+        ).readCashflowMonthDashboardSource(
+            "project-no-year", "2026-06", "tenant-no-year", "viewer-no-year", "viewer", "viewer@example.com"
+        );
+
+        assertThat(response.monthClose().status()).isEqualTo("OPEN");
+        assertThat(response.cashflow().readModel().months()).isEmpty();
+        assertThat(response.openingBalances().selectedYear()).isEqualTo(2026);
+        assertThat(response.blockers()).containsExactly(new CashflowMonthDashboardSourceResponse.Blocker(
+            "SHEET_SOURCE_REQUIRED", "먼저 시트값을 불러와 주세요."
+        ));
+        verify(dashboardPersistence, times(1))
+            .findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year");
+        verify(dashboardPersistence, never()).findCashflowLedgerSource(any(), any(), anyInt());
     }
 
     @Test
@@ -1676,8 +1746,8 @@ class WeeklyExpenseControllerTest {
         assertThat(response.monthClose().status()).isEqualTo("CLOSED");
         assertThat(response.cashflow()).isNull();
         assertThat(response.openingBalances().selectedYear()).isEqualTo(2026);
-        verify(dashboardPersistence, never()).findCashflowLedgerSource(any(), any());
-        verify(dashboardPersistence, never()).findCashflowOpeningBalance(any(), any(), anyInt(), any());
+        verify(dashboardPersistence, never()).findCashflowLedgerSource(any(), any(), anyInt());
+        verify(dashboardPersistence, never()).findCashflowOpeningBalance(any(), any(), anyInt());
     }
 
     @Test
@@ -1723,16 +1793,14 @@ class WeeklyExpenseControllerTest {
             new WeeklyExpensePersistence.CashflowLedgerSource(
                 List.of(),
                 List.of(),
-                List.of(),
                 targetRevision
             );
-        when(dashboardPersistence.findCashflowLedgerSource("tenant-amended", "project-amended"))
+        when(dashboardPersistence.findCashflowGlobalLedgerSource("tenant-amended", "project-amended"))
             .thenReturn(liveSource);
         when(dashboardPersistence.findCashflowOpeningBalance(
             "tenant-amended",
             "project-amended",
-            2026,
-            List.of()
+            2026
         )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
             2026,
             new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
@@ -1765,12 +1833,11 @@ class WeeklyExpenseControllerTest {
             eq("project-amended"),
             eq("2026-06")
         );
-        verify(dashboardPersistence).findCashflowLedgerSource("tenant-amended", "project-amended");
+        verify(dashboardPersistence).findCashflowGlobalLedgerSource("tenant-amended", "project-amended");
         verify(dashboardPersistence).findCashflowOpeningBalance(
             "tenant-amended",
             "project-amended",
-            2026,
-            List.of()
+            2026
         );
     }
 
@@ -1817,12 +1884,12 @@ class WeeklyExpenseControllerTest {
         );
         when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-drift"), eq("2026-06")))
             .thenReturn(first, drifted, first, drifted);
-        when(dashboardPersistence.findCashflowLedgerSource("tenant-drift", "project-drift"))
+        when(dashboardPersistence.findCashflowGlobalLedgerSource("tenant-drift", "project-drift"))
             .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(
-                List.of(), List.of(), List.of(), targetRevision
+                List.of(), List.of(), targetRevision
             ));
         when(dashboardPersistence.findCashflowOpeningBalance(
-            "tenant-drift", "project-drift", 2026, List.of()
+            "tenant-drift", "project-drift", 2026
         )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
             2026,
             new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
@@ -1889,8 +1956,8 @@ class WeeklyExpenseControllerTest {
         assertThat(response.snapshotCompatibility().status()).isEqualTo("LEGACY_EVIDENCE_ONLY");
         assertThat(response.snapshotCompatibility().missingEvidence())
             .containsExactly("OPENING_BALANCES", "LEDGER_WEEKS");
-        verify(dashboardPersistence, never()).findCashflowLedgerSource(any(), any());
-        verify(dashboardPersistence, never()).findCashflowOpeningBalance(any(), any(), anyInt(), any());
+        verify(dashboardPersistence, never()).findCashflowLedgerSource(any(), any(), anyInt());
+        verify(dashboardPersistence, never()).findCashflowOpeningBalance(any(), any(), anyInt());
     }
 
     @Test

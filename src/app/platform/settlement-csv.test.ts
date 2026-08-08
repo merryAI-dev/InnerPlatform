@@ -82,9 +82,9 @@ describe('parseCashflowLineLabel', () => {
     expect(parseCashflowLineLabel('매입부가세')).toBe('INPUT_VAT_OUT');
   });
 
-  it('matches alias labels', () => {
-    expect(parseCashflowLineLabel('MYSC선입금')).toBe('MYSC_PREPAY_IN');
-    expect(parseCashflowLineLabel('MYSC 선입금(입금필요시)')).toBe('MYSC_PREPAY_IN');
+  it('does not match removed aliases', () => {
+    expect(parseCashflowLineLabel('MYSC선입금')).toBeUndefined();
+    expect(parseCashflowLineLabel('MYSC 선입금(입금필요시)')).toBeUndefined();
     expect(parseCashflowLineLabel('MYSC인건비')).toBe('MYSC_LABOR_OUT');
     expect(parseCashflowLineLabel('MYSC수익(간접비등)')).toBe('MYSC_PROFIT_OUT');
   });
