@@ -1,4 +1,4 @@
-import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
 import type { CashflowSheetLineId } from '../../data/types';
 import type {
   CashflowMonthCloseCell,
@@ -38,6 +38,29 @@ export function canonicalCashflowAnnualTotalFor(
   mode: 'projection' | 'actual',
 ): CanonicalCashflowAnnualModeTotal | null {
   return annualTotals.find((total) => total.year === year)?.[mode] ?? null;
+}
+
+// 연간 열의 합계 표시값. 시트 합계 행에서 읽은 저장값이 우선이고, 아직 저장되지 않은
+// 문서는 기입된 라인의 합으로 보완한다 — Total 열의 buildCashflowSheetTotal 과 같은
+// 순서다. 라인이 전부 미기입일 때만 합계도 없는 값으로 남는다. 표시 전용이며 계약대비
+// Projection 합계 같은 판정 연산에는 쓰지 않는다.
+export function annualSummaryAmountFor(
+  total: CanonicalCashflowAnnualModeTotal | null,
+  kind: 'totalIn' | 'totalOut' | 'net',
+): number | null {
+  if (!total) return null;
+  if (typeof total[kind] === 'number') return total[kind];
+  const entered = (lineId: CashflowSheetLineId) => (
+    total.lineStates?.[lineId] === 'VALUE' || total.lineStates?.[lineId] === 'ZERO'
+  );
+  const sumOf = (lineIds: readonly CashflowSheetLineId[]) => (lineIds.some(entered)
+    ? lineIds.reduce((sum, lineId) => sum + (entered(lineId) ? Number(total.lineAmounts?.[lineId] || 0) : 0), 0)
+    : null);
+  if (kind === 'totalIn') return sumOf(CASHFLOW_IN_LINES);
+  if (kind === 'totalOut') return sumOf(CASHFLOW_OUT_LINES);
+  const totalIn = sumOf(CASHFLOW_IN_LINES);
+  const totalOut = sumOf(CASHFLOW_OUT_LINES);
+  return totalIn === null && totalOut === null ? null : (totalIn ?? 0) - (totalOut ?? 0);
 }
 
 export function shouldHideCashflowValuesAfterLoadError(error: string | null, hasCanonical: boolean): boolean {
