@@ -38,10 +38,12 @@ class CashflowProjectionActualSummaryServiceTest {
             "tenant-a", "project-a", "2023-01", 1, "SALES_IN"
         );
         projection.setAmount(BigDecimal.TEN);
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq("2023-01"), anyString()))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of(), List.of(2023)));
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-b"), eq("2023-01"), anyString()))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of(), List.of()));
+        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
+        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-b")).thenReturn(2026);
+        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq(2026), eq("2023-01"), anyString()))
+            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of()));
+        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-b"), eq(2026), eq("2023-01"), anyString()))
+            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of()));
 
         CashflowProjectionActualSummaryBatchResponse response = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-b", "project-a"))
@@ -58,7 +60,7 @@ class CashflowProjectionActualSummaryServiceTest {
         InOrder order = inOrder(authorization, persistence);
         order.verify(authorization).requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-a");
         order.verify(authorization).requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-b");
-        order.verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", "2023-01", response.items().getFirst().comparisonAsOfWeek().yearMonth());
+        order.verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", response.items().getFirst().comparisonAsOfWeek().yearMonth());
     }
 
     @Test
@@ -70,8 +72,9 @@ class CashflowProjectionActualSummaryServiceTest {
             "tenant-a", "project-a", "2026-11", 2, "SALES_IN"
         );
         projection.setAmount(BigDecimal.valueOf(300));
-        when(persistence.findCashflowLedgerSource("tenant-a", "project-a", "2023-01", "2026-11"))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of(), List.of(2026)));
+        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
+        when(persistence.findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-11"))
+            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of()));
 
         CashflowProjectionActualSummaryBatchResponse.Item item = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-a"), "2026-11")
@@ -83,7 +86,7 @@ class CashflowProjectionActualSummaryServiceTest {
         assertThat(item.periods()).filteredOn(period -> period.period().equals("WEEK_2"))
             .extracting(CashflowProjectionActualSummaryBatchResponse.PeriodSummary::projectionAmount)
             .containsExactly(BigDecimal.valueOf(300));
-        verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", "2023-01", "2026-11");
+        verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-11");
     }
 
     @Test
@@ -94,13 +97,14 @@ class CashflowProjectionActualSummaryServiceTest {
         List<String> projectIds = IntStream.rangeClosed(1, 10)
             .mapToObj(number -> "project-%02d".formatted(number))
             .toList();
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), anyString(), eq("2023-01"), anyString()))
+        when(persistence.findCashflowDeclaredWeeklyYear(eq("tenant-a"), anyString())).thenReturn(2026);
+        when(persistence.findCashflowLedgerSource(eq("tenant-a"), anyString(), eq(2026), eq("2023-01"), anyString()))
             .thenAnswer(invocation -> {
                 String projectId = invocation.getArgument(1);
                 if ("project-07".equals(projectId)) {
                     throw new IllegalStateException("secret datastore path and credential");
                 }
-                return new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of(), List.of());
+                return new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of());
             });
 
         CashflowProjectionActualSummaryBatchResponse response = service.readCashflowProjectionActualSummaries(
@@ -138,7 +142,7 @@ class CashflowProjectionActualSummaryServiceTest {
         )).isInstanceOf(WeeklyExpenseForbiddenException.class)
             .hasMessage("One or more projects are not accessible.");
 
-        verify(persistence, never()).findCashflowLedgerSource(anyString(), anyString(), anyString(), anyString());
+        verify(persistence, never()).findCashflowLedgerSource(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), anyString());
         verify(authorization).requireProjectAllowed(
             WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-b"
         );
@@ -164,8 +168,9 @@ class CashflowProjectionActualSummaryServiceTest {
         );
         projection.setAmount(BigDecimal.TEN);
         WeeklyExpensePersistence.CashflowLedgerSource source =
-            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of(), List.of(2023));
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq("2023-01"), anyString()))
+            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of());
+        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
+        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq(2026), eq("2023-01"), anyString()))
             .thenReturn(source);
 
         CashflowProjectionActualSummaryBatchResponse.Item batch = service.readCashflowProjectionActualSummaries(

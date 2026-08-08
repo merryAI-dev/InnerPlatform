@@ -279,8 +279,16 @@ public class WeeklyExpenseCommandService {
         List<CashflowProjectionActualSummaryBatchResponse.ErrorItem> errors = new ArrayList<>();
         for (String projectId : projectIds) {
             try {
+                Integer weeklyYear = persistence.findCashflowDeclaredWeeklyYear(actor.tenantId(), projectId);
+                if (weeklyYear == null) {
+                    errors.add(new CashflowProjectionActualSummaryBatchResponse.ErrorItem(
+                        projectId, CashflowProjectionActualSummaryBatchResponse.SUMMARY_UNAVAILABLE
+                    ));
+                    continue;
+                }
                 WeeklyExpensePersistence.CashflowLedgerSource source = persistence.findCashflowLedgerSource(
-                    actor.tenantId(), projectId, CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
+                    actor.tenantId(), projectId, weeklyYear,
+                    CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
                 );
                 items.add(toProjectionActualSummary(projectId, source, boundary, selectedYearMonth));
             } catch (WeeklyExpenseForbiddenException denied) {
