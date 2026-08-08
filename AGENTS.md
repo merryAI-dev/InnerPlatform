@@ -52,6 +52,14 @@ npm run build
 ## High-Priority Operating Policies
 These policies override lower-priority workflow suggestions when they apply.
 
+### ERP Minimum-Scope Implementation
+- Treat this repository as a production ERP: implement only the behavior explicitly requested by the user.
+- Reuse the existing data path, helper, type, and UI pattern before adding code. Do not add speculative features, configuration, abstractions, or unrelated refactors.
+- Keep the changed files and diff as small as practical, and ensure every changed line is traceable to the request.
+- Minimum scope must not remove trust-boundary validation, authorization, audit/history integrity, idempotency, data-loss protection, accessibility basics, or required error handling.
+- Fix shared root causes once when multiple requested callers use the same flow; do not patch only a visible symptom or duplicate the fix across screens.
+- Verify the affected persisted data path and its user-visible readback. A successful build or cosmetic UI change alone is not completion.
+
 ### QA Stage Gates
 - For implementation work that can affect users, data, integrations, permissions, deployment, or cross-screen behavior, run the work with an independent QA lens based on `/Users/boram/gstack/.agents/skills/gstack-qa/SKILL.md`.
 - Where subagents are available, assign a separate QA subagent to define stage pass criteria and challenge the implementation. If subagents are unavailable, perform a separate QA pass in the main thread using the same criteria.
