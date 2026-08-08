@@ -289,6 +289,17 @@ function fullMonthCloseSource({
       cells, sheetFacts,
     }],
   ]);
+  for (const year of [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]) {
+    const annualId = Buffer.from(`project-a\n${year}`, 'utf8').toString('base64url');
+    documents.set(`orgs/tenant-a/cashflow_sheet_year_totals/${annualId}`, {
+      projectId: 'project-a',
+      year,
+      projection: {},
+      projectionStates: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 'EMPTY'])),
+      actual: {},
+      actualStates: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 'EMPTY'])),
+    });
+  }
   return {
     db: {
       doc: (path) => memoryDoc(documents, path),
@@ -1933,6 +1944,7 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06',
       depositScheduleRows: draft.payload.monthClose.depositScheduleRows,
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+      weeklyYear: 2026,
       monthState: 'MONTH_CELLS',
     });
 
@@ -1995,6 +2007,8 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06',
       depositScheduleRows,
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+      weeklyYear: 2026,
+      monthState: 'LIVE_CURRENT',
     });
 
     expect(checks.map((check) => [check.id, check.status])).toEqual([
@@ -2027,6 +2041,7 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06',
       depositScheduleRows: [],
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+      weeklyYear: 2026,
       monthState: 'MONTH_CELLS',
     });
 
@@ -2053,6 +2068,7 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06',
       depositScheduleRows: [],
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+      weeklyYear: 2026,
       monthState: 'MONTH_CELLS',
     });
 
@@ -2085,6 +2101,8 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-07',
       depositScheduleRows: [],
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 4 } },
+      weeklyYear: 2026,
+      monthState: 'LIVE_CURRENT',
     });
 
     expect(checks.find((check) => check.id === 'profit-vat-after-deposit')?.findings).toEqual([
@@ -2112,6 +2130,8 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-07',
       depositScheduleRows: [],
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 3 } },
+      weeklyYear: 2026,
+      monthState: 'LIVE_CURRENT',
     });
 
     const transferCheck = checks.find((check) => check.id === 'profit-vat-after-deposit');
@@ -2148,6 +2168,7 @@ describe('JVM weekly API BFF proxy', () => {
         yearMonth: '2026-07', weekNo: 1, actualDepositDate: '2026-07-01', actualDepositAmount: 1_000_000,
       }],
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-08', weekNo: 3 } },
+      weeklyYear: 2026,
       monthState: 'FROZEN_COMPLETE',
     });
 
@@ -2183,6 +2204,8 @@ describe('JVM weekly API BFF proxy', () => {
       pinnedSheetCells,
       depositScheduleRows: [],
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-06', weekNo: 5 } },
+      weeklyYear: 2026,
+      monthState: 'LIVE_CURRENT',
     });
 
     const negative = checks.find((check) => check.id === 'negative-projection-balance');
@@ -2192,6 +2215,34 @@ describe('JVM weekly API BFF proxy', () => {
       title: 'Projection 잔액 마이너스',
     });
     expect(negative).not.toHaveProperty('findings');
+  });
+
+  it.each([
+    ['weeklyYear', undefined, 'LIVE_CURRENT'],
+    ['monthState', 2025, undefined],
+  ])('does not read p1773651024850-2025-12-w4 when %s is missing', (_missing, weeklyYear, monthState) => {
+    const checks = buildCashflowManagementChecks({
+      cashflow: {
+        readModel: {
+          months: [{
+            yearMonth: '2025-12',
+            projection: { weeks: [{ weekNo: 4, amounts: { DIRECT_COST_OUT: 1_773_651_024_850 } }] },
+            actual: { weeks: [] },
+          }],
+        },
+      },
+      cells: [],
+      yearMonth: '2025-12',
+      depositScheduleRows: [],
+      comparisonBoundary: { asOfWeek: { yearMonth: '2025-12', weekNo: 4 } },
+      weeklyYear,
+      monthState,
+    });
+
+    expect(checks.find((check) => check.id === 'negative-projection-balance')).toMatchObject({
+      status: 'OK',
+      detail: 'Projection 누적 잔액이 0원 이상입니다.',
+    });
   });
 
   it('starts the negative Projection check from the prior-year opening balance', () => {
@@ -2210,6 +2261,8 @@ describe('JVM weekly API BFF proxy', () => {
       depositScheduleRows: [],
       projectionOpeningBalance: 2_000_000,
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-01', weekNo: 5 } },
+      weeklyYear: 2026,
+      monthState: 'LIVE_CURRENT',
     });
 
     expect(checks.find((check) => check.id === 'negative-projection-balance')).toMatchObject({
@@ -2225,6 +2278,8 @@ describe('JVM weekly API BFF proxy', () => {
     const mirror = documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     mirror.appliedAnnualYears = [2025];
     mirror.appliedWeeklyYears = [2026];
+    const missingAnnualId = Buffer.from('project-a\n2024', 'utf8').toString('base64url');
+    documents.delete(`orgs/tenant-a/cashflow_sheet_year_totals/${missingAnnualId}`);
     const annualId = Buffer.from('project-a\n2025', 'utf8').toString('base64url');
     documents.set(`orgs/tenant-a/cashflow_sheet_year_totals/${annualId}`, {
       projectId: 'project-a',
@@ -2264,16 +2319,16 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.openingBalances).toEqual(jvmOpeningBalances);
         expect(response.body.dashboard.canonical.weeklyYear).toBe(2026);
         expect(response.body.dashboard.canonical.annualTotals.map((row) => row.year)).toEqual([
-          2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032,
+          2025, 2027, 2028, 2029, 2030, 2031, 2032,
         ]);
-        expect(response.body.dashboard.canonical.annualTotals[1]).toMatchObject({
+        expect(response.body.dashboard.canonical.annualTotals[0]).toMatchObject({
           year: 2025,
           projection: { lineStates: { SALES_IN: 'VALUE', BANK_INTEREST_IN: 'EMPTY' }, totalIn: null, totalOut: null, net: null },
           actual: { lineStates: { SALES_IN: 'VALUE', BANK_INTEREST_IN: 'EMPTY' }, totalIn: null, totalOut: null, net: null },
         });
-        expect(response.body.dashboard.canonical.annualTotals[1].projection.lineAmounts).toEqual({ SALES_IN: 9_000_000 });
-        expect(response.body.dashboard.canonical.annualTotals[0]).toEqual({
-          year: 2024, status: 'UNKNOWN', reason: 'annual_totals_missing',
+        expect(response.body.dashboard.canonical.annualTotals[0].projection.lineAmounts).toEqual({ SALES_IN: 9_000_000 });
+        expect(response.body.dashboard.validation.blockers).toContainEqual({
+          code: 'SHEET_SOURCE_REQUIRED', message: '먼저 시트값을 불러와 주세요.',
         });
       });
   });
@@ -2561,6 +2616,15 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('uses the CLOSED snapshot instead of current project or mirror values', async () => {
     const current = fullMonthCloseSource();
+    const annualId = Buffer.from('project-a\n2025', 'utf8').toString('base64url');
+    current.documents.set(`orgs/tenant-a/cashflow_sheet_year_totals/${annualId}`, {
+      projectId: 'project-a',
+      year: 2025,
+      projection: { SALES_IN: 900 },
+      projectionStates: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, lineId === 'SALES_IN' ? 'VALUE' : 'EMPTY'])),
+      actual: { SALES_IN: 800 },
+      actualStates: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, lineId === 'SALES_IN' ? 'VALUE' : 'EMPTY'])),
+    });
     const weeklyTotals = Array.from({ length: 5 }, (_, index) => ({
       weekNo: index + 1,
       projection: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 20])),
@@ -2625,6 +2689,11 @@ describe('JVM weekly API BFF proxy', () => {
             actual: { totalIn: 350, totalOut: 450, balance: -100 },
           },
           canonical: {
+            annualTotals: expect.arrayContaining([expect.objectContaining({
+              year: 2025,
+              projection: expect.objectContaining({ lineAmounts: { SALES_IN: 900 } }),
+              actual: expect.objectContaining({ lineAmounts: { SALES_IN: 800 } }),
+            })]),
             range: {
               projection: { totalIn: 700, totalOut: 900, net: -200 },
               actual: { totalIn: 350, totalOut: 450, net: -100 },

@@ -880,11 +880,17 @@ function futurePrepayCheck(weeks, asOfKey) {
 
 export function buildCashflowManagementChecks({
   cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary, pinnedSheetCells,
-  projectionOpeningBalance = 0, weeklyYear = Number(yearMonth?.slice(0, 4)), monthState = 'LIVE_CURRENT',
+  projectionOpeningBalance = 0, weeklyYear = null, monthState = null,
 }) {
   const canonicalWeeklyYear = readWeeklyYear(weeklyYear);
-  const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells, canonicalWeeklyYear, monthState);
-  const cellStates = canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells, canonicalWeeklyYear, monthState);
+  const hasCanonicalSource = canonicalWeeklyYear !== null
+    && ['FROZEN_COMPLETE', 'MONTH_CELLS', 'LIVE_CURRENT', 'LIVE_AMENDED'].includes(monthState);
+  const weeks = hasCanonicalSource
+    ? canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells, canonicalWeeklyYear, monthState)
+    : [];
+  const cellStates = hasCanonicalSource
+    ? canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells, canonicalWeeklyYear, monthState)
+    : new Map();
   const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
   const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({
     ...row,
@@ -1733,32 +1739,19 @@ function annualModeFromStoredDocument(document, mode) {
   };
 }
 
-async function readAnnualTotals({ db, tenantId, projectId, weeklyYear, frozen }) {
+async function readAnnualTotals({ db, tenantId, projectId, weeklyYear }) {
   if (readWeeklyYear(weeklyYear) === null) return null;
   const years = annualYearsFor(weeklyYear);
-  if (frozen) {
-    return years.map((year) => ({ year, status: 'UNKNOWN', reason: 'annual_totals_not_frozen' }));
-  }
   const documents = await Promise.all(years.map((year) => (
     readDocument(db, cashflowAnnualTotalDocPath(tenantId, projectId, year))
-      .catch(() => ({ unavailable: true }))
+      .catch(() => null)
   )));
-  return years.map((year, index) => {
+  return years.flatMap((year, index) => {
     const document = documents[index];
     const identityMatches = document?.projectId === projectId && Number(document?.year) === year;
     const projection = identityMatches ? annualModeFromStoredDocument(document, 'projection') : null;
     const actual = identityMatches ? annualModeFromStoredDocument(document, 'actual') : null;
-    return projection && actual
-      ? { year, projection, actual }
-      : {
-        year,
-        status: 'UNKNOWN',
-        reason: document?.unavailable
-          ? 'annual_totals_unavailable'
-          : document
-            ? 'annual_totals_incomplete'
-            : 'annual_totals_missing',
-      };
+    return projection && actual ? [{ year, projection, actual }] : [];
   });
 }
 
@@ -1970,7 +1963,6 @@ async function composeCashflowMonthDashboard({
     tenantId,
     projectId,
     weeklyYear,
-    frozen: Boolean(closedSnapshot) && !amendedCurrent,
   });
   const projectionMode = buildMonthModeReadModel(cells, 'projection');
   const actualMode = buildMonthModeReadModel(cells, 'actual');
@@ -2060,6 +2052,9 @@ async function composeCashflowMonthDashboard({
     blockers.push(...monthSheetCalculationBlockers(sheetFacts, yearMonth));
     if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
+  }
+  if (weeklyYear !== null && annualTotals.length !== annualYearsFor(weeklyYear).length) {
+    blockers.push({ code: 'SHEET_SOURCE_REQUIRED', message: '먼저 시트값을 불러와 주세요.' });
   }
   const contractAmount = safeAmount(project?.contractAmount);
   let projectionComposition;
