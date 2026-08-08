@@ -3128,7 +3128,8 @@ describe('cashflow sheet lab route', () => {
 
   it('shows legacy aggregate Actual removals for human review before the one-time sheet overwrite', async () => {
     const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-    matrix[40][4] = '-';
+    // 진짜 빈칸이어야 미기입이다. Actual 의 '-' 는 회계 서식의 0 이라 제거가 아니라 0 변경 제안이 된다.
+    matrix[40][4] = '';
     const db = createDb({
       project: {
         id: 'project-a',

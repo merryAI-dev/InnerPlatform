@@ -26,9 +26,11 @@ function compareCodeUnits(left, right) {
   return 0;
 }
 
+const DASH_ONLY_RE = /^[-–—―]+$/;
+
 export function classifyCashflowSheetCell(value) {
   const rawValue = normalizedText(value);
-  if (!rawValue || /^[-–—―]+$/.test(rawValue)) return { state: 'EMPTY' };
+  if (!rawValue || DASH_ONLY_RE.test(rawValue)) return { state: 'EMPTY' };
 
   const normalizedMinus = rawValue.replace(/[−﹣－]/g, '-');
   const parenthesizedNegative = /^\(.*\)$/.test(normalizedMinus);
@@ -82,11 +84,18 @@ export function computeCashflowTargetRevision(snapshot = {}) {
   return revisionOf({ weeks });
 }
 
-function snapshotCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
-  const cell = classified.state === 'VALUE' && classified.amount === 0
+// Actual 은 회계 서식이 0 을 '-' 로 그린다. 시트의 '-' 는 확정된 0원이므로 ZERO 로 읽는다.
+// Projection 의 '-' 는 기존 계약 그대로 미기입(EMPTY)이다.
+function classifyModeCell(mode, value) {
+  if (mode === 'actual' && DASH_ONLY_RE.test(normalizedText(value))) return { state: 'ZERO', amount: 0 };
+  const classified = classifyCashflowSheetCell(value);
+  return classified.state === 'VALUE' && classified.amount === 0
     ? { state: 'ZERO', amount: 0 }
     : classified;
+}
+
+function snapshotCell(mapping, matrix) {
+  const cell = classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     yearMonth: mapping.yearMonth,
@@ -100,10 +109,7 @@ function snapshotCell(mapping, matrix) {
 }
 
 function snapshotAnnualCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
-  const annualClassified = classified.state === 'VALUE' && classified.amount === 0
-    ? { state: 'ZERO', amount: 0 }
-    : classified;
+  const annualClassified = classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
@@ -117,24 +123,18 @@ function snapshotAnnualCell(mapping, matrix) {
 }
 
 function snapshotAnnualDerivedCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
     periodKind: mapping.periodKind,
     derivedKind: mapping.derivedKind,
     sourceCell: mapping.a1,
-    ...(classified.state === 'VALUE' && classified.amount === 0
-      ? { state: 'ZERO', amount: 0 }
-      : classified),
+    ...classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]),
   };
 }
 
 function snapshotTotalCell(mapping, matrix) {
-  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
-  const totalClassified = classified.state === 'VALUE' && classified.amount === 0
-    ? { state: 'ZERO', amount: 0 }
-    : classified;
+  const totalClassified = classifyModeCell(mapping.mode, matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   return {
     mode: mapping.mode,
     kind: mapping.kind,

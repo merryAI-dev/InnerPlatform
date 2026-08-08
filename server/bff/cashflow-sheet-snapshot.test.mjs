@@ -127,6 +127,27 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(zero.sourceRevision).not.toBe(empty.sourceRevision);
   });
 
+  it('reads an accounting-format dash as zero in Actual but as empty in Projection', () => {
+    const mappingFor = (mode) => ({
+      mode, year: 2025, lineId: 'SALES_IN', direction: 'IN',
+      rowIndex: 0, columnIndex: 0, a1: 'A1', label: '매출액(입금)',
+    });
+    const snapshotFor = (mode) => createCashflowPinnedSnapshot({
+      projectId: 'project-a',
+      spreadsheetId: 'sheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      template: { sections: [{ mode, weekColumns: [{ year: 2026 }], annualMappings: [mappingFor(mode)] }] },
+      matrix: [['-']],
+    });
+
+    // Actual 의 '-' 는 회계 서식이 0 을 그린 것이다. 확정된 0원(ZERO)으로 읽어 화면에 0 이 뜬다.
+    expect(snapshotFor('actual').annualCells)
+      .toEqual([expect.objectContaining({ state: 'ZERO', amount: 0 })]);
+    // Projection 의 '-' 는 기존 계약 그대로 미기입(EMPTY)이다.
+    expect(snapshotFor('projection').annualCells)
+      .toEqual([expect.objectContaining({ state: 'EMPTY' })]);
+  });
+
   it('pins annual totals and running balances as sheet evidence', () => {
     const snapshot = createCashflowPinnedSnapshot({
       projectId: 'project-a',
