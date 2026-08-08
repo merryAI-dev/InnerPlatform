@@ -598,15 +598,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
-    expect(source).toContain('CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]');
+    expect(source).toContain('const weeklyYear = canonicalReadModel?.weeklyYear');
+    expect(source).toContain('annualYearsFor(weeklyYear)');
+    expect(source).not.toContain('CASHFLOW_STANDARD_ANNUAL_YEARS');
     expect(source).toContain('canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)');
-    expect(source).toContain('dashboard?.canonical as { annualTotals?: CanonicalCashflowAnnualTotal[] }');
+    expect(source).toContain('canonicalReadModel?.annualTotals || []');
+    expect(source).not.toContain('dashboard?.canonical as');
     expect(source).not.toContain('summarizeCanonicalCashflowYear');
-    expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < selectedYear)');
-    expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > selectedYear)');
+    expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < Number(weeklyYear))');
+    expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > Number(weeklyYear))');
     expect(source).toContain('const renderAnnualSummaryCell');
     expect(source).not.toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
-    expect(source).toContain('annualYears.some((year) => !annualTotalFor(year, mode))');
+    expect(source).toContain('annualYears.some((year) => !annualTotalFor(year, mode)?.lineStates?.[lineId])');
     expect(source).toContain('Total');
     expect(source).toContain('const visibleWeeks = annualWeeks');
     expect(source).toContain('openingBalances?.selectedYear === selectedYear');
@@ -614,7 +617,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
     expect(source).toContain('>미입력</');
-    expect(source).toContain("cell.difference === null ? '미입력'");
+    expect(source).not.toContain('>확인 불가</');
   });
 
   it('never renders synthetic zero cashflow values after the canonical read fails', () => {

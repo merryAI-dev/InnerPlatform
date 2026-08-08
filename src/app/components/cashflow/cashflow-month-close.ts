@@ -9,6 +9,8 @@ import type {
   CashflowManagementCheck,
   CashflowManagementConfirmation,
   CashflowDeadlineSummary,
+  CanonicalCashflowAnnualModeTotal,
+  CanonicalCashflowAnnualTotal,
 } from '../../lib/platform-bff-client';
 import type {
   CashflowSheetLabMirrorResult,
@@ -24,19 +26,11 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
 
-export type CanonicalCashflowAnnualModeTotal = {
-  lineAmounts: Partial<Record<CashflowSheetLineId, number>>;
-  lineStates: Partial<Record<CashflowSheetLineId, 'VALUE' | 'ZERO' | 'EMPTY'>>;
-  totalIn: number;
-  totalOut: number;
-  net: number;
-};
-
-export type CanonicalCashflowAnnualTotal = {
-  year: number;
-  projection: CanonicalCashflowAnnualModeTotal;
-  actual: CanonicalCashflowAnnualModeTotal;
-};
+export function annualYearsFor(weeklyYear: number | undefined): number[] {
+  if (!Number.isSafeInteger(weeklyYear)) return [];
+  const year = Number(weeklyYear);
+  return [year - 2, year - 1, ...Array.from({ length: 6 }, (_, index) => year + index + 1)];
+}
 
 export function canonicalCashflowAnnualTotalFor(
   annualTotals: CanonicalCashflowAnnualTotal[],
@@ -60,7 +54,6 @@ export function isCashflowComparisonWeekVisible(
 }
 
 export function resolveCashflowComparisonScope<T extends { yearMonth: string; weekNo: number }>(input: {
-  selectedYear: number;
   annualYears: number[];
   weeks: T[];
   comparisonAsOfWeek?: { yearMonth: string; weekNo: number };
@@ -68,7 +61,7 @@ export function resolveCashflowComparisonScope<T extends { yearMonth: string; we
   const asOf = input.comparisonAsOfWeek;
   if (!asOf) return { annualYears: [], weeks: [], periodLabel: '서버 기준 주차 확인 중' };
   const asOfYear = Number.parseInt(asOf.yearMonth.slice(0, 4), 10);
-  const annualYears = input.annualYears.filter((year) => year !== input.selectedYear && year < asOfYear);
+  const annualYears = input.annualYears.filter((year) => year < asOfYear);
   const weeks = input.weeks.filter((week) => isCashflowComparisonWeekVisible(week, asOf));
   const periodStart = annualYears.length > 0
     ? `${annualYears[0]}년`
