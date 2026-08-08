@@ -68,7 +68,7 @@ describe('buildSettlementActualSyncPayload', () => {
           '26-03-01',
         ),
         8,
-        '직접사업비(공급가액)+매입부가세',
+        '직접사업비',
       ),
     );
     row.cells[13] = '100,000';

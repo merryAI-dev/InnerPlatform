@@ -24,8 +24,7 @@
       "projectionLabel": "MYSC 선입금 - 직접사업비 등",
       "actualLabel": "MYSC 선입금 - 직접사업비 등(입금)",
       "direction": "IN",
-      "defaultCategory": "CONTRACT_PAYMENT",
-      "aliases": ["MYSC선입금", "MYSC선입금(입금필요시)", "MYSC 선입금(입금필요시)", "MYSC 선입금 - 직접사업비 등", "MYSC 선입금 - 직접사업비 등(입금)"]
+      "defaultCategory": "CONTRACT_PAYMENT"
     },
     {
       "lineId": "MYSC_PREPAY_LABOR_IN",
@@ -33,8 +32,7 @@
       "projectionLabel": "MYSC 선입금 - MYSC 인건비",
       "actualLabel": "MYSC 선입금 - MYSC 인건비(입금)",
       "direction": "IN",
-      "defaultCategory": "CONTRACT_PAYMENT",
-      "aliases": []
+      "defaultCategory": "CONTRACT_PAYMENT"
     },
     {
       "lineId": "MYSC_PREPAY_INPUT_VAT_IN",
@@ -42,36 +40,31 @@
       "projectionLabel": "MYSC 선입금 - 매입부가세",
       "actualLabel": "MYSC 선입금 - 매입부가세(입금)",
       "direction": "IN",
-      "defaultCategory": "VAT_REFUND",
-      "aliases": ["MYSC 선입금 - 매입부가세", "MYSC 선입금 - 메입부가세"]
+      "defaultCategory": "VAT_REFUND"
     },
     {
       "lineId": "SALES_IN",
       "label": "매출액(입금)",
       "direction": "IN",
-      "defaultCategory": "CONTRACT_PAYMENT",
-      "aliases": ["매출액"]
+      "defaultCategory": "CONTRACT_PAYMENT"
     },
     {
       "lineId": "SALES_VAT_IN",
       "label": "매출부가세(입금)",
       "direction": "IN",
-      "defaultCategory": "VAT_REFUND",
-      "aliases": ["매출부가세"]
+      "defaultCategory": "VAT_REFUND"
     },
     {
       "lineId": "TEAM_SUPPORT_IN",
       "label": "팀지원금(입금)",
       "direction": "IN",
-      "defaultCategory": "MISC_INCOME",
-      "aliases": []
+      "defaultCategory": "MISC_INCOME"
     },
     {
       "lineId": "BANK_INTEREST_IN",
       "label": "은행이자(입금)",
       "direction": "IN",
-      "defaultCategory": "MISC_INCOME",
-      "aliases": []
+      "defaultCategory": "MISC_INCOME"
     },
     {
       "lineId": "MYSC_PREPAY_DIRECT_OUT",
@@ -79,8 +72,7 @@
       "projectionLabel": "MYSC 선입금 - 직접사업비 등",
       "actualLabel": "MYSC 선입금 - 직접사업비 등(출금)",
       "direction": "OUT",
-      "defaultCategory": "OUTSOURCING",
-      "aliases": []
+      "defaultCategory": "OUTSOURCING"
     },
     {
       "lineId": "MYSC_PREPAY_LABOR_OUT",
@@ -88,8 +80,7 @@
       "projectionLabel": "MYSC 선입금 - MYSC 인건비",
       "actualLabel": "MYSC 선입금 - MYSC 인건비(출금)",
       "direction": "OUT",
-      "defaultCategory": "LABOR_COST",
-      "aliases": []
+      "defaultCategory": "LABOR_COST"
     },
     {
       "lineId": "DIRECT_COST_OUT",
@@ -97,15 +88,13 @@
       "projectionLabel": "직접사업비(공급가액)",
       "actualLabel": "직접사업비(공급가액)",
       "direction": "OUT",
-      "defaultCategory": "OUTSOURCING",
-      "aliases": ["직접사업비(공급가액)", "직접사업비(공급가액)+매입부가세"]
+      "defaultCategory": "OUTSOURCING"
     },
     {
       "lineId": "INPUT_VAT_OUT",
       "label": "매입부가세",
       "direction": "OUT",
-      "defaultCategory": "TAX_PAYMENT",
-      "aliases": []
+      "defaultCategory": "TAX_PAYMENT"
     },
     {
       "lineId": "MYSC_LABOR_OUT",
@@ -113,8 +102,7 @@
       "projectionLabel": "MYSC인건비",
       "actualLabel": "MYSC인건비",
       "direction": "OUT",
-      "defaultCategory": "LABOR_COST",
-      "aliases": ["MYSC인건비"]
+      "defaultCategory": "LABOR_COST"
     },
     {
       "lineId": "MYSC_PROFIT_OUT",
@@ -122,29 +110,25 @@
       "projectionLabel": "MYSC수익",
       "actualLabel": "MYSC수익",
       "direction": "OUT",
-      "defaultCategory": "MISC_EXPENSE",
-      "aliases": ["MYSC수익(간접비등)", "MYSC 수익(간접비등)", "MYSC수익"]
+      "defaultCategory": "MISC_EXPENSE"
     },
     {
       "lineId": "SALES_VAT_OUT",
       "label": "매출부가세(출금)",
       "direction": "OUT",
-      "defaultCategory": "TAX_PAYMENT",
-      "aliases": []
+      "defaultCategory": "TAX_PAYMENT"
     },
     {
       "lineId": "TEAM_SUPPORT_OUT",
       "label": "팀지원금(출금)",
       "direction": "OUT",
-      "defaultCategory": "MISC_EXPENSE",
-      "aliases": []
+      "defaultCategory": "MISC_EXPENSE"
     },
     {
       "lineId": "BANK_INTEREST_OUT",
       "label": "은행이자(출금)",
       "direction": "OUT",
-      "defaultCategory": "MISC_EXPENSE",
-      "aliases": []
+      "defaultCategory": "MISC_EXPENSE"
     }
   ]
 }

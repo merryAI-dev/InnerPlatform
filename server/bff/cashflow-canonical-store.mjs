@@ -55,12 +55,10 @@ function normalizePolicyLabel(value) {
 }
 
 for (const entry of cashflowPolicyData.lineEntries || []) {
-  LINE_BY_LABEL.set(normalizePolicyLabel(entry.lineId), entry.lineId);
-  LINE_BY_LABEL.set(normalizePolicyLabel(entry.label), entry.lineId);
-  LINE_BY_LABEL.set(normalizePolicyLabel(entry.label).replace(/\s+/g, ''), entry.lineId);
-  for (const alias of entry.aliases || []) {
-    LINE_BY_LABEL.set(normalizePolicyLabel(alias), entry.lineId);
-    LINE_BY_LABEL.set(normalizePolicyLabel(alias).replace(/\s+/g, ''), entry.lineId);
+  for (const label of [entry.lineId, entry.label, entry.actualLabel]) {
+    if (!label) continue;
+    LINE_BY_LABEL.set(normalizePolicyLabel(label), entry.lineId);
+    LINE_BY_LABEL.set(normalizePolicyLabel(label).replace(/\s+/g, ''), entry.lineId);
   }
 }
 
