@@ -8,16 +8,34 @@ public record CashflowMonthDashboardSourceResponse(
     CashflowOpeningBalancesResponse openingBalances,
     SnapshotCompatibility snapshotCompatibility,
     CumulativeClose cumulativeClose,
-    CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary
+    CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary,
+    List<Blocker> blockers
 ) {
+    public CashflowMonthDashboardSourceResponse(
+        CashflowMonthCloseResponse monthClose,
+        CashflowSnapshotResponse cashflow,
+        CashflowOpeningBalancesResponse openingBalances,
+        SnapshotCompatibility snapshotCompatibility,
+        CumulativeClose cumulativeClose,
+        CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary
+    ) {
+        this(monthClose, cashflow, openingBalances, snapshotCompatibility, cumulativeClose, projectionActualSummary, List.of());
+    }
+
     public CashflowMonthDashboardSourceResponse(
         CashflowMonthCloseResponse monthClose,
         CashflowSnapshotResponse cashflow,
         CashflowOpeningBalancesResponse openingBalances,
         SnapshotCompatibility snapshotCompatibility
     ) {
-        this(monthClose, cashflow, openingBalances, snapshotCompatibility, new CumulativeClose("OPEN", "2023-01", "", "", 0), null);
+        this(monthClose, cashflow, openingBalances, snapshotCompatibility, new CumulativeClose("OPEN", "2023-01", "", "", 0), null, List.of());
     }
+
+    public CashflowMonthDashboardSourceResponse {
+        blockers = blockers == null ? List.of() : List.copyOf(blockers);
+    }
+
+    public record Blocker(String code, String message) {}
 
     public record CumulativeClose(
         String status,

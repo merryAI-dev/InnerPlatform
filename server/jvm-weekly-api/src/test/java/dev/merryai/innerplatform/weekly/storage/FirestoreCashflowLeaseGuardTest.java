@@ -1821,8 +1821,8 @@ class FirestoreCashflowLeaseGuardTest {
                 "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w1",
                 "orgs/tenant-a/cashflow_weeks/project-a-2026-08-w1"
             );
-        assertThat(fixture.persistence.findCashflowWeeklyYears("tenant-a", "project-a"))
-            .containsExactly(2026);
+        assertThat(fixture.persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a"))
+            .isEqualTo(2026);
     }
 
     @Test
@@ -1861,28 +1861,41 @@ class FirestoreCashflowLeaseGuardTest {
         );
 
         WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
-            .findCashflowLedgerSource("tenant-a", "project-a");
+            .findCashflowLedgerSource("tenant-a", "project-a", 2026);
 
-        assertThat(source.weeklyYears()).containsExactly(2026);
         assertThat(source.projection()).singleElement().satisfies(line ->
             assertThat(line.getAmount()).isEqualByComparingTo("2000000")
         );
         assertThat(source.actual()).singleElement().satisfies(line ->
             assertThat(line.getAmount()).isEqualByComparingTo("1800000")
         );
+        assertThat(source.targetRevision()).isEqualTo(FirestoreInheritedWeeklyExpensePersistence
+            .computeCashflowTargetRevision(List.of(fixture.documents.get(
+                "orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1"
+            ))));
         assertThat(fixture.queryReadSizes.getLast()).isEqualTo(1);
     }
 
     @Test
-    void dashboardLedgerSourceRejectsAnInvalidWeeklyYearDeclaration() {
+    void absentWeeklyYearDeclarationReturnsNullForExistingAndMissingMirrors() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String mirrorPath = "orgs/tenant-a/cashflow_sheet_mirrors/project-a";
+        fixture.documents.put(mirrorPath, Map.of("projectId", "project-a"));
+
+        assertThat(fixture.persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).isNull();
+
+        fixture.documents.remove(mirrorPath);
+        assertThat(fixture.persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).isNull();
+    }
+
+    @Test
+    void invalidWeeklyYearDeclarationIsUnavailableInsteadOfThrowingOnARead() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
             "projectId", "project-a", "weeklyYear", "2026.0"
         ));
 
-        assertThatThrownBy(() -> fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a"))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessage("양식이 다릅니다.");
+        assertThat(fixture.persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).isNull();
     }
 
     @Test
@@ -1902,7 +1915,7 @@ class FirestoreCashflowLeaseGuardTest {
         )));
 
         WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
-            .findCashflowLedgerSource("tenant-a", "project-a", "2023-01", "2026-07");
+            .findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-07");
 
         assertThat(source.projection()).singleElement().satisfies(line -> {
             assertThat(line.getYearMonth()).isEqualTo("2026-07");
@@ -1927,11 +1940,11 @@ class FirestoreCashflowLeaseGuardTest {
             .as("unscoped baseline")
             .isEqualTo(540);
 
-        fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a", "2026-07", "2026-07");
+        fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a", 2026, "2026-07", "2026-07");
 
         assertThat(fixture.queryReadSizes.getLast()).isEqualTo(5).isLessThanOrEqualTo(10);
 
-        fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a", "2026-07", "2026-09");
+        fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a", 2026, "2026-07", "2026-09");
 
         assertThat(fixture.queryReadSizes.getLast()).isEqualTo(15);
     }
@@ -1942,9 +1955,14 @@ class FirestoreCashflowLeaseGuardTest {
             "src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreInheritedWeeklyExpensePersistence.java"
         ));
         assertThat(source).doesNotContain("SPEC-12 approved full scan:");
+        assertThat(source).contains(
+            "SPEC-16: completion targetRevision remains global",
+            "SPEC-16: LIVE_AMENDED compares the historical global targetRevision",
+            "QuerySnapshot projectWeekSnapshot = query(cashflowWeeks(actor.tenantId()).whereEqualTo(\"projectId\", projectId))"
+        );
         assertThat(source.split(Pattern.quote("cashflowWeeks(tenantId).whereEqualTo(\"projectId\", projectId)"), -1).length - 1)
-            .as("the bounded query helper adds yearMonth before execution")
-            .isEqualTo(1);
+            .as("only the bounded helper and SPEC-16 LIVE_AMENDED global read use this shape")
+            .isEqualTo(2);
     }
 
     @Test

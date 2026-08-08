@@ -15,7 +15,6 @@ class WeeklyExpensePersistenceOpeningBalanceTest {
     @Test
     void priorYearsAlwaysComeFromAnnualTotalsEvenWhenWeeklyDocumentsExist() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class, CALLS_REAL_METHODS);
-        when(persistence.findCashflowWeeklyYears("tenant-a", "project-a")).thenReturn(List.of(2024, 2026));
         when(persistence.findCashflowSheetYearTotals("tenant-a", "project-a")).thenReturn(List.of(
             annual(2024, "9000000", "9000000"),
             annual(2025, "500000", "400000"),

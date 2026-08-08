@@ -163,21 +163,18 @@ public interface WeeklyExpensePersistence {
     record CashflowLedgerSource(
         List<WeeklyExpenseProjectionEntity> projection,
         List<WeeklyExpenseActualEntity> actual,
-        List<Integer> weeklyYears,
         String targetRevision
     ) {
         public CashflowLedgerSource(
             List<WeeklyExpenseProjectionEntity> projection,
-            List<WeeklyExpenseActualEntity> actual,
-            List<Integer> weeklyYears
+            List<WeeklyExpenseActualEntity> actual
         ) {
-            this(projection, actual, weeklyYears, "");
+            this(projection, actual, "");
         }
 
         public CashflowLedgerSource {
             projection = projection == null ? List.of() : List.copyOf(projection);
             actual = actual == null ? List.of() : List.copyOf(actual);
-            weeklyYears = weeklyYears == null ? List.of() : weeklyYears.stream().distinct().sorted().toList();
             targetRevision = targetRevision == null ? "" : targetRevision;
         }
     }
@@ -714,30 +711,39 @@ public interface WeeklyExpensePersistence {
         return List.of();
     }
 
-    default List<Integer> findCashflowWeeklyYears(String tenantId, String projectId) {
-        return List.of();
+    default Integer findCashflowDeclaredWeeklyYear(String tenantId, String projectId) {
+        return null;
     }
 
-    default CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId) {
+    default CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId, int weeklyYear) {
         List<WeeklyExpenseProjectionEntity> projection = findProjectionLines(tenantId, projectId);
         List<WeeklyExpenseActualEntity> actual = findActualLines(tenantId, projectId);
-        return new CashflowLedgerSource(projection, actual, findCashflowWeeklyYears(tenantId, projectId));
+        String yearPrefix = weeklyYear + "-";
+        return new CashflowLedgerSource(
+            projection.stream().filter(line -> line.getYearMonth().startsWith(yearPrefix)).toList(),
+            actual.stream().filter(line -> line.getYearMonth().startsWith(yearPrefix)).toList()
+        );
+    }
+
+    default CashflowLedgerSource findCashflowGlobalLedgerSource(String tenantId, String projectId) {
+        return new CashflowLedgerSource(findProjectionLines(tenantId, projectId), findActualLines(tenantId, projectId));
     }
 
     default CashflowLedgerSource findCashflowLedgerSource(
         String tenantId,
         String projectId,
+        int weeklyYear,
         String fromMonth,
         String throughMonth
     ) {
-        CashflowLedgerSource source = findCashflowLedgerSource(tenantId, projectId);
+        CashflowLedgerSource source = findCashflowLedgerSource(tenantId, projectId, weeklyYear);
         List<WeeklyExpenseProjectionEntity> projection = source.projection().stream()
             .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
             .toList();
         List<WeeklyExpenseActualEntity> actual = source.actual().stream()
             .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
             .toList();
-        return new CashflowLedgerSource(projection, actual, source.weeklyYears(), source.targetRevision());
+        return new CashflowLedgerSource(projection, actual, source.targetRevision());
     }
 
     /** Prior-year carry-forward comes only from the fixed annual columns. */
@@ -745,20 +751,6 @@ public interface WeeklyExpensePersistence {
         String tenantId,
         String projectId,
         int selectedYear
-    ) {
-        return findCashflowOpeningBalance(
-            tenantId,
-            projectId,
-            selectedYear,
-            List.of()
-        );
-    }
-
-    default CashflowOpeningBalance findCashflowOpeningBalance(
-        String tenantId,
-        String projectId,
-        int selectedYear,
-        Collection<Integer> sourceWeeklyYears
     ) {
         if (selectedYear < 2000 || selectedYear > 2099) {
             throw new IllegalArgumentException("Cashflow opening-balance year must be between 2000 and 2099.");

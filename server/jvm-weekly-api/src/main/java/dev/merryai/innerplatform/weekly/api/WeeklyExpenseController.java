@@ -283,7 +283,10 @@ public class WeeklyExpenseController {
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
         commandService.requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
-        WeeklyExpensePersistence.CashflowLedgerSource source = readCashflowSource(tenantId, projectId);
+        Integer weeklyYear = persistence.findCashflowDeclaredWeeklyYear(tenantId, projectId);
+        WeeklyExpensePersistence.CashflowLedgerSource source = weeklyYear == null
+            ? new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of())
+            : readCashflowSource(tenantId, projectId, weeklyYear);
         return buildCashflowSnapshot(projectId, source);
     }
 
@@ -300,8 +303,12 @@ public class WeeklyExpenseController {
         );
     }
 
-    private WeeklyExpensePersistence.CashflowLedgerSource readCashflowSource(String tenantId, String projectId) {
-        return persistence.findCashflowLedgerSource(tenantId, projectId);
+    private WeeklyExpensePersistence.CashflowLedgerSource readCashflowSource(
+        String tenantId,
+        String projectId,
+        int weeklyYear
+    ) {
+        return persistence.findCashflowLedgerSource(tenantId, projectId, weeklyYear);
     }
 
     private CashflowSnapshotResponse buildCashflowSnapshot(
@@ -474,16 +481,26 @@ public class WeeklyExpenseController {
             : open
                 ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
                 : frozenSnapshotCompatibility(monthClose);
-        WeeklyExpensePersistence.CashflowLedgerSource source = currentLedgerView
-            ? readCashflowSource(tenantId, projectId)
-            : null;
+        Integer weeklyYear = open ? persistence.findCashflowDeclaredWeeklyYear(tenantId, projectId) : null;
+        List<CashflowMonthDashboardSourceResponse.Blocker> blockers = open && weeklyYear == null
+            ? List.of(new CashflowMonthDashboardSourceResponse.Blocker(
+                "SHEET_SOURCE_REQUIRED",
+                "먼저 시트값을 불러와 주세요."
+            ))
+            : List.of();
+        WeeklyExpensePersistence.CashflowLedgerSource source = amendedClosed
+            ? persistence.findCashflowGlobalLedgerSource(tenantId, projectId)
+            : open && weeklyYear != null
+                ? readCashflowSource(tenantId, projectId, weeklyYear)
+                : open
+                    ? new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of())
+                    : null;
         CashflowSnapshotResponse cashflow = currentLedgerView ? buildCashflowSnapshot(projectId, source) : null;
         CashflowOpeningBalancesResponse openingBalances = currentLedgerView
             ? toOpeningBalancesResponse(persistence.findCashflowOpeningBalance(
                 tenantId,
                 projectId,
-                Integer.parseInt(yearMonth.substring(0, 4)),
-                source.weeklyYears()
+                Integer.parseInt(yearMonth.substring(0, 4))
             ))
             : snapshotCompatibility.missingEvidence().contains("OPENING_BALANCES")
                 ? null
@@ -536,7 +553,8 @@ public class WeeklyExpenseController {
                 cumulative.status(), cumulative.fromMonth(), cumulative.closedThrough(), cumulative.rootHash(),
                 cumulative.headRevision()
             ),
-            projectionActualSummary
+            projectionActualSummary,
+            blockers
         );
     }
 
