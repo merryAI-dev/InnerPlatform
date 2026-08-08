@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeCashflowSheetTemplate,
-  buildCashflowLineLookup,
   parseCashflowWeekLabel,
   toA1,
 } from './cashflow-sheet-template.mjs';
+import {
+  CashflowTemplateMismatchError,
+  lineIndexOfRow,
+  lineRowFor,
+} from './cashflow-coordinates.mjs';
 
 const PROJECTION_LABELS = [
   'MYSC 선입금 - 직접사업비 등',
@@ -120,41 +124,29 @@ describe('cashflow official fixed template', () => {
     ]));
   });
 
-  it('fails closed instead of guessing when an official coordinate changes', () => {
+  it('rejects instead of downgrading when a fixed row label changes', () => {
     const matrix = makeOfficialMatrix();
     matrix[14][0] = '';
 
-    const result = analyzeCashflowSheetTemplate(matrix);
-
-    expect(result.supported).toBe(false);
-    expect(result.reasons).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        code: 'cashflow_line_invalid',
-        mode: 'projection',
-        sourceCell: 'A15',
-        lineIds: ['MYSC_PREPAY_IN'],
-      }),
-    ]));
+    expect(() => analyzeCashflowSheetTemplate(matrix)).toThrow(CashflowTemplateMismatchError);
+    expect(() => analyzeCashflowSheetTemplate(matrix)).toThrow('양식이 다릅니다.');
   });
 
-  it('fails when Projection and Actual no longer describe the same 60 weeks', () => {
+  it('rejects when Projection and Actual no longer describe the same 60 weeks', () => {
     const matrix = makeOfficialMatrix();
     matrix[35][63] = '26-12-4';
 
-    const result = analyzeCashflowSheetTemplate(matrix);
-
-    expect(result.supported).toBe(false);
-    expect(result.reasons).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'cashflow_week_headers_mismatch' }),
-    ]));
+    expect(() => analyzeCashflowSheetTemplate(matrix)).toThrow(CashflowTemplateMismatchError);
   });
 
-  it('keeps ambiguous labels unresolved at the trust boundary', () => {
-    const resolve = buildCashflowLineLookup([
-      { lineId: 'LINE_A', label: '공 유 라벨', direction: 'IN', aliases: [] },
-      { lineId: 'LINE_B', label: '공유라벨', direction: 'IN', aliases: [] },
-    ]);
+  it('uses fixed row coordinates as line identity', () => {
+    const result = analyzeCashflowSheetTemplate(makeOfficialMatrix());
 
-    expect(resolve('공유라벨', 'projection', 'IN')).toBeNull();
+    for (const section of result.sections) {
+      section.lineRows.forEach((row, index) => {
+        expect(row.rowIndex).toBe(lineRowFor(section.mode, index));
+        expect(lineIndexOfRow(section.mode, row.rowIndex)).toBe(index);
+      });
+    }
   });
 });

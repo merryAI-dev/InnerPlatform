@@ -41,9 +41,10 @@ describe('cashflow canonical BFF helpers', () => {
     });
   });
 
-  it('parses cashflow labels and aliases without relying on frontend code', () => {
+  it('parses canonical and Actual labels without legacy aliases', () => {
     expect(parseCashflowLineLabel('직접사업비(공급가액)')).toBe('DIRECT_COST_OUT');
     expect(parseCashflowLineLabel('MYSC인건비')).toBe('MYSC_LABOR_OUT');
+    expect(parseCashflowLineLabel('MYSC선입금')).toBeUndefined();
   });
 
   it('aggregates actuals from persisted expense rows without injecting zero lines', () => {
