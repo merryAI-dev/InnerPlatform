@@ -10,7 +10,10 @@
   },
   "functions": {
     "api/bff.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "regions": [
+        "icn1"
+      ]
     }
   },
   "crons": [
@@ -34,31 +37,56 @@
   "redirects": [
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "inner-platform.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "inner-platform.vercel.app"
+        }
+      ],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "inner-platform-h799435np-merryai-devs-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "inner-platform-h799435np-merryai-devs-projects.vercel.app"
+        }
+      ],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app"
+        }
+      ],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "inner-platform-gq6813nqh-merryai-devs-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "inner-platform-gq6813nqh-merryai-devs-projects.vercel.app"
+        }
+      ],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "inner-platform-k2x121b33-merryai-devs-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "inner-platform-k2x121b33-merryai-devs-projects.vercel.app"
+        }
+      ],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
     }
@@ -67,36 +95,81 @@
     {
       "source": "/sw.js",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store, max-age=0, must-revalidate" }
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0, must-revalidate"
+        }
       ]
     },
     {
       "source": "/__/auth/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        }
       ]
     },
     {
       "source": "/__/firebase/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        }
       ]
     },
     {
       "source": "/((?!(?:__/auth|__/firebase)/).*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(), geolocation=()" },
-        { "key": "X-DNS-Prefetch-Control", "value": "on" },
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(), geolocation=()"
+        },
+        {
+          "key": "X-DNS-Prefetch-Control",
+          "value": "on"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        }
       ]
     }
   ],

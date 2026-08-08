@@ -87,6 +87,7 @@ import {
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
   annualYearsFor,
+  annualSummaryAmountFor,
   canonicalCashflowAnnualTotalFor,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
@@ -2135,14 +2136,14 @@ export function CashflowProjectSheet({
       actual: readServerSummary('actual'),
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
-      if (annualYears.some((year) => {
-        const total = annualTotalFor(year, mode);
-        return !total || total.totalIn === null || total.totalOut === null || total.net === null;
-      })) {
+      // 연간 열 하나라도 합계를 구할 수 없으면(라인까지 전부 미기입) Total 열도 없는 값으로 둔다.
+      const annualIn = annualYears.map((year) => annualSummaryAmountFor(annualTotalFor(year, mode), 'totalIn'));
+      const annualOut = annualYears.map((year) => annualSummaryAmountFor(annualTotalFor(year, mode), 'totalOut'));
+      if (annualYears.some((year) => !annualTotalFor(year, mode))) {
         return { totalIn: null, totalOut: null, net: null };
       }
-      const totalIn = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalIn), Number(derived[mode].monthTotals.totalIn || 0));
-      const totalOut = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalOut), Number(derived[mode].monthTotals.totalOut || 0));
+      const totalIn = annualIn.reduce<number>((sum, value) => sum + Number(value ?? 0), Number(derived[mode].monthTotals.totalIn || 0));
+      const totalOut = annualOut.reduce<number>((sum, value) => sum + Number(value ?? 0), Number(derived[mode].monthTotals.totalOut || 0));
       return { totalIn, totalOut, net: totalIn - totalOut };
     };
     const scrollBoard = (direction: -1 | 1) => {
@@ -2179,7 +2180,7 @@ export function CashflowProjectSheet({
       rowTone?: 'income' | 'expense',
     ) => renderSummaryCell({
       keyName: `${mode}-${kind}-${year}-annual`,
-      value: annualTotalFor(year, mode)?.[kind] ?? null,
+      value: annualSummaryAmountFor(annualTotalFor(year, mode), kind),
       mode,
       emphasis,
       rowTone,
