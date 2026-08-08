@@ -16,7 +16,7 @@ import { stableStringify } from '../utils.mjs';
 const PROJECTION_IN_LABELS = [
   'MYSC 선입금 - 직접사업비 등',
   'MYSC 선입금 - MYSC 인건비',
-  'MYSC 선입금 - 메입부가세',
+  'MYSC 선입금 - 매입부가세',
   '매출액(입금)',
   '매출부가세(입금)',
   '팀지원금(입금)',
@@ -403,6 +403,7 @@ async function loadSanitized260701FullYearFixture() {
       matrix[headerRowIndex][columnIndex] = columnIndex === 70 ? 'Total' : `${year}년`;
     }
   }
+  matrix[16][0] = 'MYSC 선입금 - 매입부가세';
   matrix[32][0] = '잔액 (※ 중요)';
   matrix[55][0] = '잔액';
   return matrix;
@@ -1169,6 +1170,7 @@ describe('cashflow sheet lab route', () => {
     expect(refreshed.body).toMatchObject({
       projectId: 'project-a',
       status: 'FRESH',
+      weeklyYear: 2026,
       sourceRevision: expect.stringMatching(/^sha256:/),
       targetRevisionAtFetch: expect.stringMatching(/^sha256:/),
       summary: { cellCount: 1920, valueCount: 1920, emptyCount: 0, invalidCount: 0 },
@@ -1180,6 +1182,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(pinned.body.sourceRevision).toBe(refreshed.body.sourceRevision);
     expect(pinned.body.cells).toHaveLength(1920);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({ weeklyYear: 2026 });
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
     await new Promise((resolve) => setImmediate(resolve));
@@ -1869,6 +1872,44 @@ describe('cashflow sheet lab route', () => {
         code: 'cashflow_sheet_template_unsupported',
         diagnostics: expect.arrayContaining([
           expect.objectContaining({ code: 'cashflow_week_header_invalid', sourceCell: 'E13' }),
+        ]),
+      },
+    });
+  });
+
+  it('rejects a sheet whose weekly header row mixes years', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const matrix = buildMatrix();
+    matrix[12][31] = '25-6-3';
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-mixed-weekly-years' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'ERROR',
+      lastRefreshError: {
+        code: 'cashflow_sheet_template_unsupported',
+        statusCode: 400,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'cashflow_week_years_mixed', sourceCell: 'AF13' }),
         ]),
       },
     });

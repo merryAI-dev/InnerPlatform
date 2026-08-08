@@ -5,7 +5,6 @@ import {
   toA1,
 } from './cashflow-sheet-template.mjs';
 import {
-  CashflowTemplateMismatchError,
   lineIndexOfRow,
   lineRowFor,
 } from './cashflow-coordinates.mjs';
@@ -124,19 +123,73 @@ describe('cashflow official fixed template', () => {
     ]));
   });
 
-  it('rejects instead of downgrading when a fixed row label changes', () => {
+  it('collects every fixed-coordinate mismatch for one guided rejection', () => {
     const matrix = makeOfficialMatrix();
     matrix[14][0] = '';
+    matrix[15][0] = '';
+    matrix[12][4] = 'broken-week-header';
 
-    expect(() => analyzeCashflowSheetTemplate(matrix)).toThrow(CashflowTemplateMismatchError);
-    expect(() => analyzeCashflowSheetTemplate(matrix)).toThrow('양식이 다릅니다.');
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_week_header_invalid', sourceCell: 'E13' }),
+      expect.objectContaining({ code: 'cashflow_line_invalid', sourceCell: 'A15' }),
+      expect.objectContaining({ code: 'cashflow_line_invalid', sourceCell: 'A16' }),
+    ]));
   });
 
   it('rejects when Projection and Actual no longer describe the same 60 weeks', () => {
     const matrix = makeOfficialMatrix();
     matrix[35][63] = '26-12-4';
 
-    expect(() => analyzeCashflowSheetTemplate(matrix)).toThrow(CashflowTemplateMismatchError);
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_week_header_mismatch', sourceCell: 'BL36' }),
+      expect.objectContaining({ code: 'cashflow_week_headers_mismatch' }),
+    ]));
+  });
+
+  it('accepts equivalent week, annual, and total headers after normalization', () => {
+    const matrix = makeOfficialMatrix();
+    matrix[12][4] = ' 26-01-01 ';
+    matrix[35][4] = '26-1-1 ';
+    matrix[11][2] = '2024년 ';
+    matrix[34][2] = ' 2024년';
+    matrix[11][70] = 'Total ';
+    matrix[34][70] = ' Total';
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(true);
+    expect(result.weeklyYear).toBe(2026);
+  });
+
+  it('rejects a repeated week header even when all 60 labels parse', () => {
+    const matrix = makeOfficialMatrix();
+    matrix[12][5] = '26-1-1';
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_week_header_mismatch', sourceCell: 'F13' }),
+    ]));
+  });
+
+  it('rejects mixed weekly years without anchoring the contract to E13', () => {
+    const matrix = makeOfficialMatrix();
+    matrix[12][31] = '25-6-3';
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.weeklyYear).toBeUndefined();
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_week_years_mixed', sourceCell: 'AF13' }),
+    ]));
   });
 
   it('uses fixed row coordinates as line identity', () => {
@@ -148,5 +201,18 @@ describe('cashflow official fixed template', () => {
         expect(lineIndexOfRow(section.mode, row.rowIndex)).toBe(index);
       });
     }
+  });
+
+  it('does not revive a removed alias as line identity', () => {
+    const matrix = makeOfficialMatrix();
+    matrix[14][0] = 'MYSC선입금';
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.sections[0].lineRows[0].lineId).toBe('MYSC_PREPAY_IN');
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_line_invalid', sourceCell: 'A15' }),
+    ]));
   });
 });
