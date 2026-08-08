@@ -1610,7 +1610,7 @@ describe('cashflow sheet lab route', () => {
     expect(retried2025[0].idempotencyKey).toBe(retried2025[1].idempotencyKey);
   });
 
-  it('warns but does not block when a complete weekly year conflicts with its annual total', async () => {
+  it('gives the weekly year no annual column so weekly and annual totals cannot conflict', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1639,9 +1639,16 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'conflicting-year-refresh' })
       .expect(200);
 
-    expect(mirror.body.reconciliationWarnings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ year: 2026, mode: 'projection', status: 'MISMATCH' }),
-    ]));
+    // 좌표 계약: 주별 블록은 E:BL 하나뿐이고 연간 열은 그 해를 포함하지 않는다.
+    // 따라서 2026 은 주차 그리드에만 존재하고, 주차합과 연간값이 어긋날 자리가 없다.
+    const totals2026 = mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2026);
+    expect(totals2026.projection.source).toBe('WEEKLY');
+    expect(totals2026.projection.reconciliation.status).toBe('NOT_APPLICABLE');
+    // 2026 으로 태깅된 셀은 Total 열(BS)의 GRAND_TOTAL 뿐이며 연간 열이 아니다.
+    expect(mirror.body.annualCells.some((cell) => (
+      Number(cell.year) === 2026 && cell.periodKind !== 'GRAND_TOTAL'
+    ))).toBe(false);
+    expect(mirror.body.reconciliationWarnings).toEqual([]);
 
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
@@ -2278,7 +2285,12 @@ describe('cashflow sheet lab route', () => {
     const cells2025 = mirror.body.annualCells.filter((cell) => cell.year === 2025);
     expect(cells2025).toHaveLength(32);
     expect(new Set(cells2025.map((cell) => cell.sourceYear))).toEqual(new Set([2026]));
-    expect(mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2025).projection.totalIn).toBe(700);
+    const totals2025 = mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2025).projection;
+    expect(totals2025.valueCellCount).toBe(16);
+    expect(totals2025.lineAmounts.SALES_IN).toBe(100);
+    // 합계는 시트의 입금 합계 행 좌표에서만 온다. 이 fixture 는 그 칸이 비어 있으므로
+    // 라인 합(700)으로 대체하지 않고 값이 없는 채로 둔다.
+    expect(totals2025.totalIn).toBeNull();
   });
 
   it('invalidates the pinned mirror and staged run when the saved sheet config changes', async () => {
