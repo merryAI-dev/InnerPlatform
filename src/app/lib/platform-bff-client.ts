@@ -689,6 +689,20 @@ export interface CashflowComparisonTotals {
   balance: number;
 }
 
+export interface CanonicalCashflowAnnualModeTotal {
+  lineAmounts: Record<string, number>;
+  lineStates: Record<string, 'VALUE' | 'ZERO' | 'EMPTY'>;
+  totalIn: number | null;
+  totalOut: number | null;
+  net: number | null;
+}
+
+export interface CanonicalCashflowAnnualTotal {
+  year: number;
+  projection: CanonicalCashflowAnnualModeTotal;
+  actual: CanonicalCashflowAnnualModeTotal;
+}
+
 export interface CashflowComparisonWeek {
   weekNo: number;
   amounts: Record<string, number>;
@@ -739,6 +753,8 @@ export interface CashflowSnapshotResult {
   actual: CashflowActualLine[];
   comparison: CashflowProjectionActualComparison;
   readModel: {
+    weeklyYear?: number;
+    annualTotals?: CanonicalCashflowAnnualTotal[];
     range: {
       start: CashflowRangeBoundary;
       end: CashflowRangeBoundary;

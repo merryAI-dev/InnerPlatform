@@ -86,7 +86,8 @@ import {
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
-  summarizeCanonicalCashflowYear,
+  annualYearsFor,
+  canonicalCashflowAnnualTotalFor,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
@@ -96,8 +97,6 @@ import { AxrMonthCloseQaPanel } from './AxrMonthCloseQaPanel';
 import { MemberPicker } from '../ui/member-picker';
 import { buildOrgMemberPickerOptions } from '../../data/project-team-member-options';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
-
-const CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032] as const;
 
 function previousYearMonth(yearMonth: string): string {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) return '';
@@ -1748,53 +1747,32 @@ export function CashflowProjectSheet({
       || `w${weekNo}`;
   }
 
-  const annualYears = useMemo(() => {
-    return CASHFLOW_STANDARD_ANNUAL_YEARS.filter((year) => year !== selectedYear);
-  }, [selectedYear]);
-  const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
-  const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
+  const canonicalReadModel = monthCloseResult?.dashboard?.canonical;
+  const weeklyYear = canonicalReadModel?.weeklyYear;
+  const annualYears = useMemo(() => annualYearsFor(weeklyYear), [weeklyYear]);
+  const previousAnnualYears = annualYears.filter((year) => year < Number(weeklyYear));
+  const followingAnnualYears = annualYears.filter((year) => year > Number(weeklyYear));
   const comparisonAsOfWeek = monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek;
   const comparisonScope = useMemo(() => resolveCashflowComparisonScope({
-    selectedYear,
     annualYears,
     weeks: annualWeeks,
     comparisonAsOfWeek,
-  }), [annualWeeks, annualYears, comparisonAsOfWeek, selectedYear]);
+  }), [annualWeeks, annualYears, comparisonAsOfWeek]);
   const visibleComparisonWeeks = comparisonScope.weeks;
   const visibleComparisonAnnualYears = comparisonScope.annualYears;
-  const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < selectedYear);
-  const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > selectedYear);
-  const canonicalAnnualTotalFor = (year: number, mode: 'projection' | 'actual') => summarizeCanonicalCashflowYear(
-    monthCloseResult?.dashboard?.canonical?.months || [],
-    year,
-    mode,
+  const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < Number(weeklyYear));
+  const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > Number(weeklyYear));
+  const canonicalAnnualTotals = canonicalReadModel?.annualTotals || [];
+  const annualTotalFor = (year: number, mode: 'projection' | 'actual') => (
+    canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)
   );
-  const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
-    const canonical = canonicalAnnualTotalFor(year, mode);
-    if (canonical) return canonical;
-    const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
-      ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
-      : null;
-    if (jvmSource) {
-      const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
-      const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
-      return {
-        lineAmounts: jvmSource.lineAmounts,
-        lineStates: jvmSource.lineStates,
-        totalIn,
-        totalOut,
-        net: totalIn - totalOut,
-      };
-    }
-    return null;
-  };
   const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
     const rangeTotals = monthCloseResult?.dashboard?.canonical?.range?.[mode] as {
       rowTotals?: Record<CashflowSheetLineId, number>;
       lineAmounts?: Record<CashflowSheetLineId, number>;
     } | null | undefined;
     const selectedYearTotal = rangeTotals?.rowTotals?.[lineId] ?? rangeTotals?.lineAmounts?.[lineId] ?? 0;
-    if (annualYears.some((year) => !annualTotalFor(year, mode))) return null;
+    if (annualYears.some((year) => !annualTotalFor(year, mode)?.lineStates?.[lineId])) return null;
     return annualYears.reduce(
       (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
       Number(selectedYearTotal),
@@ -1824,11 +1802,10 @@ export function CashflowProjectSheet({
       const comparisonAnnualYears = visibleComparisonAnnualYears.map((year) => {
         const projectionTotal = annualTotalFor(year, 'projection');
         const actualTotal = annualTotalFor(year, 'actual');
-        const projectionState = projectionTotal?.lineStates?.[lineId]
-          || (Object.prototype.hasOwnProperty.call(projectionTotal?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
-        const actualState = actualTotal?.lineStates?.[lineId]
-          || (Object.prototype.hasOwnProperty.call(actualTotal?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
-        const hasValue = ['VALUE', 'ZERO'].includes(projectionState) || ['VALUE', 'ZERO'].includes(actualState);
+        const projectionState = projectionTotal?.lineStates?.[lineId];
+        const actualState = actualTotal?.lineStates?.[lineId];
+        const hasValue = projectionState === 'VALUE' || projectionState === 'ZERO'
+          || actualState === 'VALUE' || actualState === 'ZERO';
         const projection = Number(projectionTotal?.lineAmounts?.[lineId] || 0);
         const actual = Number(actualTotal?.lineAmounts?.[lineId] || 0);
         return { year, projection, actual, difference: hasValue ? projection - actual : null };
@@ -2109,7 +2086,6 @@ export function CashflowProjectSheet({
       return groups;
     }, []);
     const boardColumnCount = previousAnnualYears.length + visibleWeeks.length + followingAnnualYears.length + 2;
-    const canonicalReadModel = monthCloseResult?.dashboard?.canonical;
     const readServerSummary = (mode: 'projection' | 'actual') => {
       const openingBalance = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
         ? Number(monthCloseResult.dashboard.openingBalances[mode]?.amount || 0)
@@ -2159,11 +2135,14 @@ export function CashflowProjectSheet({
       actual: readServerSummary('actual'),
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
-      if (annualYears.some((year) => !annualTotalFor(year, mode))) {
+      if (annualYears.some((year) => {
+        const total = annualTotalFor(year, mode);
+        return !total || total.totalIn === null || total.totalOut === null || total.net === null;
+      })) {
         return { totalIn: null, totalOut: null, net: null };
       }
-      const totalIn = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalIn || 0), Number(derived[mode].monthTotals.totalIn || 0));
-      const totalOut = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalOut || 0), Number(derived[mode].monthTotals.totalOut || 0));
+      const totalIn = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalIn), Number(derived[mode].monthTotals.totalIn || 0));
+      const totalOut = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalOut), Number(derived[mode].monthTotals.totalOut || 0));
       return { totalIn, totalOut, net: totalIn - totalOut };
     };
     const scrollBoard = (direction: -1 | 1) => {
@@ -2184,9 +2163,8 @@ export function CashflowProjectSheet({
     };
     const renderAnnualLineCell = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId, year: number, isAltRow: boolean) => {
       const total = annualTotalFor(year, mode);
-      const state = total?.lineStates?.[lineId]
-        || (Object.prototype.hasOwnProperty.call(total?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
-      const value = Number(total?.lineAmounts?.[lineId] || 0);
+      const state = total?.lineStates?.[lineId];
+      const value = Number(total?.lineAmounts?.[lineId] ?? 0);
       return (
         <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700 ${isAltRow ? 'bg-slate-50' : 'bg-white'}`}>
           {state === 'VALUE' || state === 'ZERO' ? fmt(value) : <span className="text-slate-400">미입력</span>}
@@ -2212,6 +2190,7 @@ export function CashflowProjectSheet({
       tone: 'income' | 'expense',
     ) => lineIds.map((lineId, rowIndex) => {
       const emphasized = lineId === 'MYSC_PREPAY_IN' || lineId.startsWith('MYSC_PREPAY_');
+      const projectLineTotal = projectLineTotalFor(mode, lineId);
       return (
         <tr key={`${mode}-${lineId}`} data-cashflow-row="line" className="border-t border-white transition-colors hover:brightness-[0.98]">
           <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[12px] leading-4 ${tone === 'income' ? 'text-emerald-700' : 'text-red-700'} ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
@@ -2230,7 +2209,7 @@ export function CashflowProjectSheet({
           {followingAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {renderSummaryCell({
             keyName: `${mode}-${lineId}-range`,
-            value: projectLineTotalFor(mode, lineId),
+            value: projectLineTotal,
             mode,
             isAltRow: rowIndex % 2 === 1,
             stickyRight: true,
