@@ -115,6 +115,8 @@ describe('Java weekly cashflow client', () => {
       year: 2025,
       expectedRevision: 3,
       cells: [{ mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 2300000 }],
+      amendmentReason: '결산 후 실제 입금액 정정',
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7, finalize: true },
     });
 
     const [url, init] = fetchImpl.mock.calls[0];
@@ -125,6 +127,13 @@ describe('Java weekly cashflow client', () => {
       year: 2025,
       expectedRevision: 3,
       cells: [{ mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 2300000 }],
+      amendmentReason: '결산 후 실제 입금액 정정',
+    });
+    expect(init.headers).toMatchObject({
+      'x-edit-session-id': 'session-a',
+      'x-edit-lease-id': 'lease-a',
+      'x-edit-fence': '7',
+      'x-edit-finalize': 'true',
     });
   });
 

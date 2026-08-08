@@ -3493,6 +3493,7 @@ async function applyStagedCashflowSheetLab({
               year: stagedYear.year,
               expectedRevision: stagedYear.expectedRevision,
               cells: stagedYear.cells,
+              amendmentReason: closedMonthChangeReason,
             }),
             verifyMutation: (javaResult) => ({
               status: 'APPLIED',

@@ -1385,7 +1385,11 @@ describe('cashflow sheet lab route', () => {
 
     const applied = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-apply-001' })
+      .send({
+        stageRunId: stage.body.runId,
+        closedMonthChangeReason: '결산 후 연간 합계 정정',
+        idempotencyKey: 'annual-apply-001',
+      })
       .expect(200);
     expect(applied.body).toMatchObject({
       appliedMonths: Array.from({ length: 12 }, (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`),
@@ -1405,6 +1409,7 @@ describe('cashflow sheet lab route', () => {
       projectId: 'project-a',
       year: 2025,
       expectedRevision: 0,
+      amendmentReason: '결산 후 연간 합계 정정',
       cells: expect.arrayContaining([
         expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'ZERO', amount: 0 }),
         expect.objectContaining({ mode: 'actual', cashflowLine: 'BANK_INTEREST_OUT', cellState: 'VALUE', amount: 50 }),
