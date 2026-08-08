@@ -749,7 +749,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     next?.sheetFacts?.annualFinancialTotals,
     (row) => Number(row?.year),
   );
-  const annualCashflowTotals = buildAnnualCashflowTotals({ cells, annualCells });
+  const annualCashflowTotals = buildAnnualCashflowTotals({ cells, annualCells, annualDerivedCells, weeklyYear: sourceYear });
   const cashflowGrandTotalsBySourceYear = [
     ...(previous?.sheetFacts?.cashflowGrandTotalsBySourceYear || [])
       .filter((row) => Number(row?.sourceYear) !== sourceYear),
