@@ -52,6 +52,20 @@ npm run build
 ## High-Priority Operating Policies
 These policies override lower-priority workflow suggestions when they apply.
 
+### 캐시플로 좌표 계약 (변경 불가)
+사업비 관리 시트는 전사 단일 고정 양식이다. 읽기는 고정 좌표에서 값을 꺼내는 것이고, 그 이상은 하지 않는다.
+계약의 단일 진실은 `server/bff/cashflow-coordinates.mjs` 이며 근거는
+`docs/architecture/contracts/2026-07-28-cashflow-formula-validation-contract.md` 다.
+
+- **주별 블록은 `E:BL` 60칸 하나뿐이다.** 그 연도는 프로젝트당 단일 상수다. "어느 연도들이 주별인가"는 집합 질문이 아니다. `weeklyYears` 배열·Set·연도 집합 유도를 새로 만들지 않는다.
+- **연간 열은 `C:D`(이전 2개)와 `BM:BR`(이후 6개) 고정이다.** 연간 값은 이 좌표에서 읽는다. 주차 문서를 합산해 연간값을 만들지 않는다.
+- **라인 정체성은 행 인덱스다** (`LINE_ROWS`). 라벨 문자열, alias, 동명이인 방어로 라인을 찾지 않는다.
+- **좌표 밖의 데이터는 존재하지 않는다.** `weekOrdinal(...) === -1` 이면 읽기 경로에 진입시키지 않는다. 문서 존재 여부로 구조를 유추하지 않는다.
+- **양식이 다르면 적응하지 않고 거부한다.** `CashflowTemplateMismatchError` 로 "양식이 다릅니다."를 낸다. 폴백 체인·보정·추론으로 메우지 않는다.
+- `EMPTY` 와 `ZERO` 는 절대 뭉개지 않는다. 셀 상태는 저장된 값이며 금액에서 역산하지 않는다.
+
+새 코드가 위 항목을 어기면 리뷰에서 반려한다. 기존 위반은 좌표 계약으로 대체하며, 대체 시 사보타주 검증(계약을 깨면 테스트가 실패하는지)을 함께 붙인다.
+
 ### QA Stage Gates
 - For implementation work that can affect users, data, integrations, permissions, deployment, or cross-screen behavior, run the work with an independent QA lens based on `/Users/boram/gstack/.agents/skills/gstack-qa/SKILL.md`.
 - Where subagents are available, assign a separate QA subagent to define stage pass criteria and challenge the implementation. If subagents are unavailable, perform a separate QA pass in the main thread using the same criteria.
