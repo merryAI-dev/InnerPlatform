@@ -430,10 +430,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("week.status === 'COMPLETED_LATE'");
   });
 
-  it('keeps Projection and Actual on independent native horizontal scroll regions', () => {
-    expect(source).toContain('aria-label="Projection 현금흐름 가로 스크롤 표"');
-    expect(source).toContain('aria-label="Actual 현금흐름 가로 스크롤 표"');
-    expect(source).toContain('ref={cashflowBoardScrollRef} className="overflow-x-auto scroll-smooth"');
+  // 계약 변경(2026-08-09): sticky 는 가장 가까운 스크롤 조상에만 붙는다
+  // (w3c/csswg-drafts#9140). 표마다 독립 overflow-x 래퍼를 두면 주차 헤더의
+  // sticky top 이 죽고 두 표의 가로 스크롤이 어긋나므로, 스크롤 컨테이너를
+  // 하나로 합쳐 그 사실 자체를 고정한다.
+  it('keeps Projection and Actual inside one shared scroll container so sticky headers work', () => {
+    expect(source).toContain('aria-label="Projection과 Actual 현금흐름 스크롤 표"');
+    // 컨테이너는 하나이고, 세로(max-height)와 가로 스크롤을 모두 소유한다.
+    expect(source).toContain('max-h-[calc(100vh-240px)] space-y-5 overflow-auto scroll-smooth');
+    expect(source).not.toContain('overflow-x-auto scroll-smooth');
+    // 두 표는 같은 컨테이너 안의 비스크롤 블록이다 — sticky 조상이 되면 안 된다.
+    expect(source.indexOf('data-cashflow-block="projection"')).toBeGreaterThan(source.indexOf('ref={cashflowBoardScrollRef}'));
+    expect(source.indexOf('data-cashflow-block="actual"')).toBeGreaterThan(source.indexOf('data-cashflow-block="projection"'));
     expect(source).not.toContain('onScroll=');
   });
 

@@ -2377,16 +2377,26 @@ export function CashflowProjectSheet({
             <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <div className="space-y-5 rounded-md border border-slate-200 bg-white p-3">
-              <section ref={cashflowBoardScrollRef} className="overflow-x-auto scroll-smooth" data-cashflow-block="projection" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3} tabIndex={0} aria-label="Projection 현금흐름 가로 스크롤 표">
+            {/* 스크롤 컨테이너는 하나여야 한다. sticky 는 가장 가까운 스크롤 조상에만 붙으므로
+                (w3c/csswg-drafts#9140), 표마다 overflow-x 래퍼를 두면 주차 헤더의 sticky top 은
+                페이지 세로 스크롤에서 아무것도 하지 못하고, Projection·ACTUAL 의 가로 스크롤도
+                서로 어긋난다. 세로·가로 스크롤을 이 컨테이너 안으로 모아 헤더·항목 열이 실제로
+                고정되고 두 표가 항상 같은 주차 열을 보이게 한다. */}
+            <section
+              ref={cashflowBoardScrollRef}
+              className="max-h-[calc(100vh-240px)] space-y-5 overflow-auto scroll-smooth rounded-md border border-slate-200 bg-white p-3"
+              tabIndex={0}
+              aria-label="Projection과 Actual 현금흐름 스크롤 표"
+            >
+              <div className="w-max min-w-full" data-cashflow-block="projection" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
                 <h3 className="sticky left-0 z-30 w-fit border-l-4 border-[#17324D] bg-[#17324D] px-3 py-2 text-[14px] font-bold text-white">Projection</h3>
                 {renderModeTable('projection')}
-              </section>
-              <section className="overflow-x-auto" data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3} tabIndex={0} aria-label="Actual 현금흐름 가로 스크롤 표">
+              </div>
+              <div className="w-max min-w-full" data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
                 <h3 className="sticky left-0 z-30 w-fit border-l-4 border-[#17324D] bg-[#17324D] px-3 py-2 text-[14px] font-bold text-white">ACTUAL</h3>
                 {renderModeTable('actual')}
-              </section>
-            </div>
+              </div>
+            </section>
           </div>
           {monthCloseLoading ? <div className="px-3 py-2 text-[12px] text-slate-500">불러오는 중...</div> : null}
         </CardContent>
