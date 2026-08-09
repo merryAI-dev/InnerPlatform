@@ -23,6 +23,9 @@ import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-a
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import { WEEKS_PER_MONTH, annualYearsFor, weekOrdinal } from '../cashflow-coordinates.mjs';
 import { TENANT_WIDE_PROJECT_ROLES, isProjectInActorScope } from '../cashflow-project-scope.mjs';
+import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
+
+export { cashflowMonthCloseDeadline };
 import { createHash } from 'node:crypto';
 
 const CASHFLOW_MANAGEMENT_CHECK_IDS = [
@@ -1584,15 +1587,6 @@ function assertCashflowSheetPublicationReady(state) {
   throw error;
 }
 
-// 월 결산 기한은 대상월 다음 달 10일이다. 판정 주체는 JVM이며(WeeklyExpensePersistence.closeDeadline),
-// 대시보드는 선택된 달 하나가 아니라 모든 달을 한 번에 그려야 해서 같은 규칙이 여기에도 필요하다.
-export function cashflowMonthCloseDeadline(yearMonth) {
-  const [year, month] = String(yearMonth).split('-').map(Number);
-  if (!Number.isInteger(year) || !Number.isInteger(month)) return null;
-  const deadlineYear = month === 12 ? year + 1 : year;
-  const deadlineMonth = month === 12 ? 1 : month + 1;
-  return `${deadlineYear}-${String(deadlineMonth).padStart(2, '0')}-10`;
-}
 
 export function cashflowCumulativeCloseCycle(yearMonth, businessDate) {
   if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(yearMonth))
@@ -1634,7 +1628,7 @@ async function readCashflowMonthCloseStatuses({ db, tenantId, projectId, busines
         status,
         closeDeadline,
         // 기준일을 모르면 기한 초과를 단정하지 않는다.
-        closeOverdue: Boolean(businessDate && closeDeadline && status !== 'CLOSED' && businessDate > closeDeadline),
+        closeOverdue: isCashflowCloseOverdue({ yearMonth, status, businessDate }),
         sheetCalculationChecks: Array.isArray(calculationChecks)
           ? calculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
           : [],
