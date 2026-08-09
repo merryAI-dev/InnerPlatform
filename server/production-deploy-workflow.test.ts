@@ -30,16 +30,36 @@ function extractRunBlocks(text: string) {
 describe('production deployment workflow safety', () => {
   it('deploys only through the Production environment from the full main ref', () => {
     expect(workflowText).toMatch(/environment:\n\s+name: Production/);
-    expect(workflowText).toContain('if [ "${GITHUB_REF}" != "refs/heads/main" ]; then');
-    expect(workflowText).toContain('ref: main');
-    expect(workflowText).toContain('test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"');
+    // 수동 dispatch 는 main 에서만.
+    expect(workflowText).toContain('if [ "${DISPATCH_REF}" != "refs/heads/main" ]; then');
+    // 자동/수동 모두 preflight 가 확정한 SHA 를 체크아웃하고, 그것과 일치하는지 다시 확인한다.
+    expect(workflowText).toContain('ref: ${{ needs.preflight.outputs.sha }}');
+    expect(workflowText).toContain('test "$(git rev-parse HEAD)" = "${DEPLOY_SHA}"');
+    // 배포 대상은 반드시 main 의 현재 head 여야 한다.
+    expect(workflowText).toContain('head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"');
+  });
+
+  it('auto-deploys only a green main commit and skips superseded ones', () => {
+    expect(workflowText).toMatch(/workflow_run:\n\s+workflows: \[CI\]/);
+    expect(workflowText).toContain('branches: [main]');
+    // CI 가 실패했거나 PR 이벤트로 돈 CI 는 배포 대상이 아니다.
+    expect(workflowText).toContain("github.event.workflow_run.conclusion == 'success'");
+    expect(workflowText).toContain("github.event.workflow_run.event == 'push'");
+    expect(workflowText).toContain('CI_SHA: ${{ github.event.workflow_run.head_sha }}');
+    // 뒤처진 커밋은 조용히 건너뛴다. 최신 커밋의 CI 가 자기 배포를 띄운다.
+    expect(workflowText).toContain('skipping superseded');
+    expect(workflowText).toContain("if: needs.preflight.outputs.proceed == 'true'");
+    // 자동 경로라고 CI 초록 가드를 건너뛰지 않는다.
+    expect(workflowText).toContain('CI must be green for ${DEPLOY_SHA} before production deploy.');
   });
 
   it('does not interpolate manual workflow inputs directly inside shell run blocks', () => {
     const runBlocks = extractRunBlocks(workflowText);
 
     expect(runBlocks.some((block) => block.includes('${{ inputs.'))).toBe(false);
-    expect(workflowText).toContain('DEPLOY_NOTE: ${{ inputs.note }}');
+    expect(runBlocks.some((block) => block.includes('${{ needs.'))).toBe(false);
+    expect(workflowText).toContain('DISPATCH_NOTE: ${{ inputs.note }}');
+    expect(workflowText).toContain('DEPLOY_NOTE: ${{ needs.preflight.outputs.note }}');
     expect(workflowText).toContain('printf \'%s\\n\' "- Note: ${DEPLOY_NOTE}"');
   });
 
@@ -55,7 +75,7 @@ describe('production deployment workflow safety', () => {
   it('promotes the canonical production alias before verifying it', () => {
     expect(workflowText).toContain('promote_alias:');
     expect(workflowText).toContain('default: true');
-    expect(workflowText.match(/if: inputs\.promote_alias/g)).toHaveLength(2);
+    expect(workflowText.match(/if: needs\.preflight\.outputs\.promote == 'true'/g)).toHaveLength(2);
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
     expect(workflowText).toContain('Promote canonical production alias');
