@@ -289,3 +289,7 @@
 ## [2026-07-21] patch-note | portal-project-registration | 사업관리 폴더와 다년도 재무 입력 복구
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 프로젝트 등록·수정의 계약 대상 아래에 사업관리 Google Drive 폴더 링크를 추가하고, 다년도 사업은 연도별 계약금액·매출부가세·수익·지원금의 합계만 상단에 반영하도록 정리했다. 계약기간의 한 해라도 빠지거나 확인하지 않으면 BFF가 저장을 거절한다.
+
+## [2026-08-09] patch-note | cashflow-month-cell-count | 결산 셀 수를 정책 파생 상수로 통합
+- pages: [shared-label-policy](./pages/shared-label-policy.md)
+- summary: 한 달 결산 셀 수를 policy JSON 파생 상수(`CASHFLOW_MONTH_CELL_COUNT`)로 통합했다. BFF 라우트의 리터럴 160과 안내 문구가 상수를 따르고, JVM 하드코딩 카탈로그는 같은 JSON 을 대조하는 parity 테스트로 고정된다. 라인이 추가되면 두 런타임이 함께 움직인다.

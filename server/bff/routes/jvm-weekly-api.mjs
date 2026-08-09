@@ -17,7 +17,7 @@ import {
   buildCashflowProjectionActualComparison,
   resolveCashflowComparisonAsOf,
 } from '../cashflow-comparison.mjs';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, CASHFLOW_MONTH_CELL_COUNT } from '../cashflow-policy.mjs';
 import { stableStringify } from '../utils.mjs';
 import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
@@ -595,9 +595,9 @@ function normalizeMonthCloseCells(cells, yearMonth) {
 }
 
 function completeMonthCloseCells(cells) {
-  if (cells.length !== CASHFLOW_ALL_LINES.length * 2 * 5) return false;
+  if (cells.length !== CASHFLOW_MONTH_CELL_COUNT) return false;
   const keys = new Set(cells.map((cell) => `${cell.mode}:${cell.weekNo}:${cell.cashflowLine}`));
-  return keys.size === CASHFLOW_ALL_LINES.length * 2 * 5;
+  return keys.size === CASHFLOW_MONTH_CELL_COUNT;
 }
 
 function sumSafe(values) {
@@ -1410,7 +1410,7 @@ function validConfirmationKeys(confirmations) {
 }
 
 function completeMonthCloseConfirmations(confirmations) {
-  const expectedCount = CASHFLOW_ALL_LINES.length * 2 * 5;
+  const expectedCount = CASHFLOW_MONTH_CELL_COUNT;
   return Array.isArray(confirmations)
     && confirmations.length === expectedCount
     && validConfirmationKeys(confirmations).size === expectedCount;
@@ -2067,7 +2067,7 @@ async function composeCashflowMonthDashboard({
     }
     blockers.push(...sheetControlBlockers(sheetFacts));
     blockers.push(...monthSheetCalculationBlockers(sheetFacts, yearMonth));
-    if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
+    if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: `선택한 월의 ${CASHFLOW_MONTH_CELL_COUNT}개 캐시플로우 값을 다시 불러와 주세요.` });
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
   }
   if (weeklyYear !== null && annualTotals.length !== annualYearsFor(weeklyYear).length) {
@@ -2107,7 +2107,7 @@ async function composeCashflowMonthDashboard({
     ? 100
     : Math.round((projectionSalesAndVatTotal / contractAmount) * 10_000) / 100;
   const projectionProgressPercent = Math.max(0, rawProjectionProgressPercent);
-  const requiredCellConfirmationCount = CASHFLOW_ALL_LINES.length * 2 * 5;
+  const requiredCellConfirmationCount = CASHFLOW_MONTH_CELL_COUNT;
   const requiredManagementConfirmationCount = CASHFLOW_MANAGEMENT_CHECK_IDS.length;
   const confirmationProgressPercent = Math.round(
     Math.min(
@@ -2248,7 +2248,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
   const project = projectSnap.exists ? projectSnap.data() || {} : {};
   const normalizedCells = normalizeMonthCloseCells(closeInput.cells, yearMonth);
   if (!completeMonthCloseCells(normalizedCells)) {
-    throw createHttpError(409, '월 결산 대상 160개 캐시플로우 값을 다시 확인해 주세요.', 'cashflow_month_close_cells_incomplete');
+    throw createHttpError(409, `월 결산 대상 ${CASHFLOW_MONTH_CELL_COUNT}개 캐시플로우 값을 다시 확인해 주세요.`, 'cashflow_month_close_cells_incomplete');
   }
   const sourceWarnings = [];
   if (!mirror) {
@@ -2312,7 +2312,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
     details: { requested: closeInput.managementChecks || [], authoritative: managementChecks },
   }];
   if (!completeMonthCloseConfirmations(closeInput.confirmations)) {
-    throw createHttpError(409, '월 결산 대상 160개 항목을 모두 확인해 주세요.', 'cashflow_month_close_confirmations_incomplete');
+    throw createHttpError(409, `월 결산 대상 ${CASHFLOW_MONTH_CELL_COUNT}개 항목을 모두 확인해 주세요.`, 'cashflow_month_close_confirmations_incomplete');
   }
   const deadlineSummary = deadlineSummaryFromCompliance(
     weeklyCompliance,
@@ -3258,7 +3258,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     ));
     const normalizedCells = normalizeMonthCloseCells(cells, yearMonth);
     if (!completeMonthCloseCells(normalizedCells)) {
-      throw createHttpError(409, '저장된 월 결산 160셀 근거를 확인할 수 없습니다.', 'cashflow_month_close_request_evidence_invalid');
+      throw createHttpError(409, `저장된 월 결산 ${CASHFLOW_MONTH_CELL_COUNT}셀 근거를 확인할 수 없습니다.`, 'cashflow_month_close_request_evidence_invalid');
     }
     return {
       projectId,
@@ -3467,7 +3467,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         manifestHash: manifest.manifestHash,
         monthCount: shards.length,
         weekCount: shards.length * 5,
-        cellCount: shards.length * 160,
+        cellCount: shards.length * CASHFLOW_MONTH_CELL_COUNT,
         source: prepared.shardSource,
         totals,
         annualSummaries,
@@ -3535,7 +3535,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       )).get();
       const stored = snapshot.exists ? snapshot.data() || {} : null;
       const { shardHash, ...base } = stored || {};
-      if (!stored || stored.cells?.length !== 160 || shardHash !== cashflowCloseHash(base)) {
+      if (!stored || stored.cells?.length !== CASHFLOW_MONTH_CELL_COUNT || shardHash !== cashflowCloseHash(base)) {
         throw createHttpError(409, '저장된 누적 월 결산 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
       }
       shards.push(stored);
@@ -3779,7 +3779,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       )).get();
       const stored = snapshot.exists ? snapshot.data() || {} : null;
       const { shardHash, ...base } = stored || {};
-      if (!stored || stored.cells?.length !== 160 || shardHash !== cashflowCloseHash(base)) {
+      if (!stored || stored.cells?.length !== CASHFLOW_MONTH_CELL_COUNT || shardHash !== cashflowCloseHash(base)) {
         throw createHttpError(409, '저장된 누적 월 결산 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
       }
       months.push(stored);
@@ -3833,7 +3833,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         || stored.projectId !== projectId
         || Number(stored.requestRevision) !== revision
         || stored.yearMonth !== throughMonth
-        || stored.cells?.length !== 160
+        || stored.cells?.length !== CASHFLOW_MONTH_CELL_COUNT
         || shardHash !== cashflowCloseHash(base)) {
         throw createHttpError(409, '저장된 revision 비교 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
       }
