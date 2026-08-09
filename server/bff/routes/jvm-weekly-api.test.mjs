@@ -5027,6 +5027,127 @@ describe('JVM weekly API BFF proxy', () => {
 
   });
 
+  it('lets only the requester withdraw a PENDING cumulative close request, and never after review starts', async () => {
+    const source = fullMonthCloseSource();
+    source.closeInput.yearMonth = '2026-08';
+    const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    mirror.yearMonths = ['2026-08'];
+    mirror.cells.forEach((cell) => { cell.yearMonth = '2026-08'; });
+    mirror.sheetFacts.depositScheduleRows.forEach((row) => { row.yearMonth = '2026-08'; });
+    const months = [];
+    for (let year = 2023, month = 1; year < 2026 || month <= 8; month += 1) {
+      if (month === 13) { year += 1; month = 1; }
+      months.push({ yearMonth: `${year}-${String(month).padStart(2, '0')}`, projection: { weeks: [] }, actual: { weeks: [] } });
+    }
+    const cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months } };
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/dashboard-source')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(monthDashboardSource({
+            ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0,
+            reopenCount: 0, projectWarningCount: 0, snapshot: {},
+          }, cashflow)),
+        };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify(cashflow) };
+    });
+    const appOptions = { env: runtimeEnv, db: source.db, now: () => new Date('2026-09-10T00:00:00.000Z') };
+    const requester = createApp(fetchImpl, createIdempotencyService(), { actorId: 'pm-1', actorRole: 'pm' }, appOptions).app;
+    const approver = createApp(fetchImpl, createIdempotencyService(), { actorId: 'finance-1', actorRole: 'finance' }, appOptions).app;
+
+    const dashboard = await request(requester).get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08').expect(200);
+    const createPayload = {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      yearMonth: '2026-08', expectedRevision: 0,
+      expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
+      expectedOpeningBalances: dashboard.body.dashboard.openingBalances,
+      closeInput: { ...source.closeInput, managementChecks: dashboard.body.dashboard.managementChecks },
+    };
+    const created = await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'withdraw-create')
+      .send(createPayload)
+      .expect(202);
+    const settlementPath = 'orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08';
+    expect(source.documents.get(settlementPath).periods.MONTH).toMatchObject({ status: 'PENDING_APPROVAL' });
+    const withdrawPayload = {
+      expectedRevision: created.body.revision,
+      expectedManifestHash: created.body.manifestHash,
+      reason: '기초잔액을 다시 확인하겠습니다.',
+    };
+
+    // 조직장은 회수할 수 없다. 반려는 사유가 남는 별도 행위다.
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/withdraw')
+      .set('idempotency-key', 'withdraw-by-approver')
+      .send(withdrawPayload)
+      .expect(403)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_withdraw_forbidden'));
+    // manifest 가 다르면 지금 화면이 보고 있는 요청이 아니다.
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/withdraw')
+      .set('idempotency-key', 'withdraw-stale-manifest')
+      .send({ ...withdrawPayload, expectedManifestHash: 'sha256:' + '0'.repeat(64) })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_manifest_invalid'));
+
+    const withdrawn = await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/withdraw')
+      .set('idempotency-key', 'withdraw-once')
+      .send(withdrawPayload)
+      .expect(200)
+      .expect((response) => expect(response.body.request).toMatchObject({
+        status: 'WITHDRAWN', revision: created.body.revision, withdrawReason: '기초잔액을 다시 확인하겠습니다.',
+      }));
+    expect(source.documents.get(`orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r${created.body.revision}-withdrawn`)).toMatchObject({
+      action: 'WITHDRAWN', revision: created.body.revision, actorUid: 'pm-1', reason: '기초잔액을 다시 확인하겠습니다.',
+    });
+    // 정산 상태는 실무자 입력 대기로 되돌아간다.
+    expect(source.documents.get(settlementPath).periods.MONTH).toMatchObject({
+      status: 'WAITING_FOR_UPDATE', submittedBy: '', approvedBy: '',
+    });
+    // 회수된 요청은 조직장 대기함에서 사라진다.
+    await request(approver)
+      .get('/api/v1/cashflow/month-close/requests/pending')
+      .expect(200)
+      .expect((response) => expect(response.body.count).toBe(0));
+    // 같은 키 재전송은 같은 결과를 돌려준다.
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/withdraw')
+      .set('idempotency-key', 'withdraw-once')
+      .send(withdrawPayload)
+      .expect(200)
+      .expect((response) => expect(response.body).toEqual(withdrawn.body));
+    // 다른 키로 다시 회수하면 이미 회수된 요청이라 거부한다.
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/withdraw')
+      .set('idempotency-key', 'withdraw-twice')
+      .send(withdrawPayload)
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_already_reviewed'));
+    // 회수 후에는 다시 요청할 수 있고 회차가 올라간다.
+    const resubmitted = await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'withdraw-resubmit')
+      .send(createPayload)
+      .expect(202);
+    expect(resubmitted.body).toMatchObject({ status: 'PENDING', revision: created.body.revision + 1 });
+
+    // 조직장이 검토를 시작한 뒤에는 회수 불가 - JVM 확정이 이미 나갔을 수 있다.
+    const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
+    for (const status of ['APPROVING', 'UNCERTAIN', 'APPROVED']) {
+      source.documents.set(requestPath, { ...source.documents.get(requestPath), status });
+      await request(requester)
+        .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/withdraw')
+        .set('idempotency-key', `withdraw-after-${status.toLowerCase()}`)
+        .send({ ...withdrawPayload, expectedRevision: resubmitted.body.revision, expectedManifestHash: resubmitted.body.manifestHash })
+        .expect(409)
+        .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_already_reviewed'));
+    }
+  });
+
   it('blocks the legacy direct month-close mutation route', async () => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async () => ({

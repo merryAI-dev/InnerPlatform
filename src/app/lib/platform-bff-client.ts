@@ -1089,7 +1089,7 @@ export interface CloseCashflowMonthPayload {
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED' | 'REOPENED';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
 
 export interface CashflowMonthCloseStoredSource {
   sourceRevision: string | null;
@@ -1201,6 +1201,8 @@ export interface CashflowMonthCloseRequest {
   reviewedByName?: string | null;
   reviewedAt: string | null;
   decisionReason: string | null;
+  withdrawnAt?: string | null;
+  withdrawReason?: string | null;
   reviewWarnings: Array<{ code: string; message: string; details?: unknown }>;
   monthSnapshot: CashflowMonthCloseMonthSnapshot | null;
 }
@@ -3261,6 +3263,32 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
   );
   if (params.payload.decision === 'APPROVE' && response.data.request.status !== 'APPROVED') {
     throw new Error('월 결산 승인 상태를 확인하지 못했습니다.');
+  }
+  return response.data;
+}
+
+export async function withdrawCashflowMonthCloseRequestViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  requestId: string;
+  payload: { expectedRevision: number; expectedManifestHash: string; reason?: string };
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<{ request: CashflowMonthCloseRequest }> {
+  const response = await resolveClient(params.client).post<{ request: CashflowMonthCloseRequest }>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/withdraw`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  if (response.data.request.status !== 'WITHDRAWN') {
+    throw new Error('월 결산 요청 회수 결과를 확인하지 못했습니다.');
   }
   return response.data;
 }

@@ -39,6 +39,7 @@ import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-tran
 import {
   fetchCashflowActivityViaBff,
   requestCashflowMonthCloseViaBff,
+  withdrawCashflowMonthCloseRequestViaBff,
   saveCashflowMonthCloseApproverViaBff,
   completeCashflowWeeklyUpdateViaBff,
   decideCashflowMonthReopenViaBff,
@@ -416,6 +417,8 @@ export function CashflowProjectSheet({
     () => createEmptyCashflowMonthCloseDepositRows(),
   );
   const [monthCloseReviewDirty, setMonthCloseReviewDirty] = useState(false);
+  const [monthCloseWithdrawOpen, setMonthCloseWithdrawOpen] = useState(false);
+  const [monthCloseWithdrawReason, setMonthCloseWithdrawReason] = useState('');
   const [reopenAction, setReopenAction] = useState<'request' | 'approve' | 'reject' | null>(null);
   const [reopenReason, setReopenReason] = useState('');
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
@@ -470,6 +473,14 @@ export function CashflowProjectSheet({
   const selectedYearMonthRef = useRef(yearMonth);
   selectedYearMonthRef.current = yearMonth;
   const monthCloseRequestLocked = isCashflowMonthCloseRequestLocked(monthCloseRequest?.status);
+  // 조직장이 검토를 시작하면(APPROVING) JVM 확정이 이미 나갔을 수 있어 회수할 수 없다.
+  const canWithdrawMonthCloseRequest = Boolean(
+    monthCloseRequest
+    && monthCloseRequest.status === 'PENDING'
+    && monthCloseRequest.manifestHash
+    && user?.uid
+    && monthCloseRequest.requestedByUid === user.uid,
+  );
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
   const selectedYear = useMemo(() => {
@@ -1315,6 +1326,65 @@ export function CashflowProjectSheet({
     projectId,
     project?.version,
     savedExecutiveApproverId,
+    resolveBffActor,
+    yearMonth,
+  ]);
+
+  const handleWithdrawMonthCloseRequest = useCallback(async (): Promise<void> => {
+    if (!monthCloseRequest || monthCloseRequest.status !== 'PENDING' || !monthCloseRequest.manifestHash) return;
+    const startedAt = Date.now();
+    setMonthCloseBusy(true);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const { request } = await withdrawCashflowMonthCloseRequestViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        requestId: monthCloseRequest.requestId,
+        payload: {
+          expectedRevision: monthCloseRequest.revision,
+          expectedManifestHash: monthCloseRequest.manifestHash,
+          reason: monthCloseWithdrawReason.trim(),
+        },
+        idempotencyKey: `cashflow-month-close-withdraw:${monthCloseRequest.requestId}:r${monthCloseRequest.revision}`,
+      });
+      monthCloseCurrentRequestGenerationRef.current += 1;
+      setMonthCloseRequest(request);
+      setMonthCloseWithdrawOpen(false);
+      setMonthCloseWithdrawReason('');
+      toast.success('월결산 결재 요청을 회수했습니다.');
+      await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest(), loadCashflowEvents()]);
+      logCashflowSettlement({
+        phase: 'success',
+        operation: 'cashflow.month_close.withdraw',
+        projectId,
+        yearMonth,
+        durationMs: Date.now() - startedAt,
+        summary: { status: request.status, revision: request.revision },
+      });
+    } catch (error) {
+      logCashflowSettlement({
+        phase: 'error',
+        operation: 'cashflow.month_close.withdraw',
+        projectId,
+        yearMonth,
+        durationMs: Date.now() - startedAt,
+        error,
+      });
+      toast.error(resolveApiErrorMessage(error, '월 결산 요청 회수에 실패했습니다. 최신 상태를 확인해 주세요.'));
+      await loadMonthCloseRequest();
+    } finally {
+      setMonthCloseBusy(false);
+    }
+  }, [
+    loadCashflowEvents,
+    loadCashflowMonthClose,
+    loadMonthCloseRequest,
+    monthCloseRequest,
+    monthCloseWithdrawReason,
+    orgId,
+    projectId,
     resolveBffActor,
     yearMonth,
   ]);
@@ -2797,6 +2867,8 @@ export function CashflowProjectSheet({
                         ? monthCloseRequest.status === 'UNCERTAIN' ? '서버 처리 결과를 다시 확인하고 있습니다.' : '지정 조직장의 검토를 기다리고 있습니다.'
                         : monthCloseRequest?.status === 'REJECTED'
                           ? `반려됨${monthCloseRequest.decisionReason ? ` · ${monthCloseRequest.decisionReason}` : ''}`
+                        : monthCloseRequest?.status === 'WITHDRAWN'
+                          ? `회수됨${monthCloseRequest.withdrawReason ? ` · ${monthCloseRequest.withdrawReason}` : ''} · 수정 후 다시 요청해 주세요.`
                         : monthCloseRequest?.status === 'REOPENED'
                           ? '재오픈됨 · 수정 후 월 결산을 다시 요청해 주세요.'
                       : monthClosePreparation.status === 'READY'
@@ -2814,7 +2886,19 @@ export function CashflowProjectSheet({
                         onClick={handleOpenMonthCloseReview}
                       >
                         <CheckCircle2 className="mr-1 h-3 w-3" />
-                        {monthCloseError || !monthCloseResult ? '월 결산 점검' : ['REJECTED', 'REOPENED'].includes(monthCloseRequest?.status || '') ? '월 결산 재요청' : '월 결산 요청'}
+                        {monthCloseError || !monthCloseResult ? '월 결산 점검' : ['REJECTED', 'REOPENED', 'WITHDRAWN'].includes(monthCloseRequest?.status || '') ? '월 결산 재요청' : '월 결산 요청'}
+                      </Button>
+                    ) : null}
+                    {canWithdrawMonthCloseRequest ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700"
+                        disabled={monthCloseBusy || monthCloseLoading}
+                        onClick={() => { setMonthCloseWithdrawReason(''); setMonthCloseWithdrawOpen(true); }}
+                      >
+                        결재 요청 회수
                       </Button>
                     ) : null}
                     {!monthCloseError && canRequestMonthReopen && monthCloseResult?.status === 'CLOSED' ? (
@@ -3298,6 +3382,48 @@ export function CashflowProjectSheet({
           void handleApplyStagedSheetValues(pending.stage, pending.closedMonthChangeReason, true);
         }}
       />
+
+      <AlertDialog
+        open={monthCloseWithdrawOpen}
+        onOpenChange={(open) => {
+          if (!open && !monthCloseBusy) {
+            setMonthCloseWithdrawOpen(false);
+            setMonthCloseWithdrawReason('');
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>월 결산 결재 요청 회수</AlertDialogTitle>
+            <AlertDialogDescription>
+              조직장 검토 전이라 회수할 수 있습니다. 회수하면 정산 상태가 입력 대기로 돌아가고, 수정 후 다시 요청해야 합니다.
+              회수 이력은 감사 기록에 남습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="grid gap-2 text-[12px] font-semibold text-slate-700">
+            사유 (선택)
+            <textarea
+              value={monthCloseWithdrawReason}
+              className="min-h-[96px] rounded-md border border-slate-200 p-3 text-[12px] font-normal outline-none focus:border-[#17324D]"
+              placeholder="회수하는 이유를 남겨 두면 이후 확인이 쉬워집니다."
+              disabled={monthCloseBusy}
+              onChange={(event) => setMonthCloseWithdrawReason(event.target.value)}
+            />
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={monthCloseBusy}>닫기</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={monthCloseBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleWithdrawMonthCloseRequest();
+              }}
+            >
+              {monthCloseBusy ? '처리 중…' : '회수하기'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={reopenAction !== null}
