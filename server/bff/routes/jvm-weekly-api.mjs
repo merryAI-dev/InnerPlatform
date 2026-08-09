@@ -22,6 +22,7 @@ import { stableStringify } from '../utils.mjs';
 import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import { WEEKS_PER_MONTH, annualYearsFor, weekOrdinal } from '../cashflow-coordinates.mjs';
+import { TENANT_WIDE_PROJECT_ROLES, isProjectInActorScope } from '../cashflow-project-scope.mjs';
 import { createHash } from 'node:crypto';
 
 const CASHFLOW_MANAGEMENT_CHECK_IDS = [
@@ -294,6 +295,47 @@ function assertCashflowMonthCloseRequestSize(record) {
     '월 결산 요청 자료가 너무 큽니다. 시트 범위를 확인해 주세요.',
     'cashflow_month_close_request_too_large',
   );
+}
+
+// JVM FirestoreWeeklyProjectAccessRepository.memberDocuments 와 같은 두 경로로 찾는다 —
+// uid 문서 1건과 email 로 조회한 최대 3건. 조회는 서비스 계층인 여기서 하고,
+// 판정은 순수 모듈(cashflow-project-scope)이 한다.
+async function readActorMemberDocuments({ db, tenantId, actorId, actorEmail }) {
+  const normalizedTenantId = readOptionalText(tenantId);
+  if (!normalizedTenantId) return [];
+  const normalizedActorId = readOptionalText(actorId);
+  const normalizedEmail = readOptionalText(actorEmail);
+  const documents = [];
+  if (normalizedActorId && !normalizedActorId.includes('/')) {
+    const snapshot = await db.doc(`orgs/${normalizedTenantId}/members/${normalizedActorId}`).get();
+    if (snapshot.exists) documents.push(snapshot.data() || {});
+  }
+  if (normalizedEmail && typeof db.collection === 'function') {
+    const snapshot = await db.collection(`orgs/${normalizedTenantId}/members`)
+      .where('email', '==', normalizedEmail)
+      .limit(3)
+      .get();
+    for (const doc of snapshot?.docs || []) documents.push(doc.data() || {});
+  }
+  return documents;
+}
+
+// 프로젝트 스코프 인가. 지금까지 이 검사는 JVM 에만 있었고 BFF 는 역할만 봤다.
+// BFF 가 Firestore 를 직접 읽는 경로가 늘어날수록 그 비대칭이 우회 통로가 되므로
+// 같은 규칙을 BFF 에도 세운다. 판정 규칙은 cashflow-project-scope 가 단일 소유한다.
+async function assertCashflowProjectInScope({ db, req, projectId, authMode, workspaceEmailDomain }) {
+  if (!db?.doc) return;
+  const workspaceUser = isWorkspaceAuthMode(authMode) && isWorkspaceUser(req.context, workspaceEmailDomain);
+  const role = readOptionalText(req.context?.actorRole);
+  if (workspaceUser || TENANT_WIDE_PROJECT_ROLES.includes(role.toLowerCase())) return;
+  const members = await readActorMemberDocuments({
+    db,
+    tenantId: req.context?.tenantId,
+    actorId: req.context?.actorId,
+    actorEmail: req.context?.actorEmail,
+  });
+  if (isProjectInActorScope({ role, members, actorId: req.context?.actorId, projectId, workspaceUser })) return;
+  throw createHttpError(403, '이 프로젝트에 접근할 권한이 없습니다.', 'cashflow_project_forbidden');
 }
 
 async function readActiveCashflowMember({ db, tenantId, actorId }) {
@@ -2650,6 +2692,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
         throw createHttpError(400, 'Cashflow month close yearMonth must use YYYY-MM.', 'cashflow_month_close_request_invalid');
       }
+      await assertCashflowProjectInScope({ db, req, projectId: rawProjectId, authMode, workspaceEmailDomain });
       cumulativeCloseMonths(yearMonth);
       const currentNow = now();
       const comparisonBoundary = {

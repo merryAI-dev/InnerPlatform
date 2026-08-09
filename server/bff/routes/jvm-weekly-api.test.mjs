@@ -102,6 +102,12 @@ const emptyManagementChecks = [
   { id: 'future-prepay-over-million', status: 'OK', title: '금주 이후 선입금 요청 100만원 초과', detail: '금주 이후 100만원 초과 요청이 없습니다.' },
 ];
 
+// pm 역할은 테넌트 전역이 아니므로 프로젝트 스코프가 있어야 읽을 수 있다.
+// 라이브 멤버 문서와 같은 형태로 배정을 모델링한다.
+const ACTOR_MEMBER_ENTRY = ['orgs/tenant-a/members/pm-1', {
+  uid: 'pm-1', email: 'pm@example.com', status: 'ACTIVE', role: 'pm', projectIds: ['project-a'],
+}];
+
 function monthDashboardSource(
   monthClose,
   cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months: [] } },
@@ -268,6 +274,7 @@ function fullMonthCloseSource({
   };
   const draftId = `v1_${Buffer.from(JSON.stringify(['cashflow', 'project-a', 'pm-1']), 'utf8').toString('base64url')}`;
   const documents = new Map([
+    ACTOR_MEMBER_ENTRY,
     ['orgs/tenant-a/projects/project-a', {
       id: 'project-a', settlementType: 'TYPE1', basis: '공급가액', accountType: 'DEDICATED',
       fundInputMode: 'BANK_UPLOAD', contractAmount, executiveApproverId: 'finance-1',
@@ -333,6 +340,7 @@ function createMonthCloseDb() {
   }));
   const draftId = `v1_${Buffer.from(JSON.stringify(['cashflow', 'project-a', 'pm-1']), 'utf8').toString('base64url')}`;
   const documents = new Map([
+    ACTOR_MEMBER_ENTRY,
     [`orgs/tenant-a/privateEditDrafts/${draftId}`, {
       tenantId: 'tenant-a', ownerUid: 'pm-1', resourceType: 'cashflow', resourceId: 'project-a',
       status: 'ACTIVE', draftRevision: 7,
@@ -2401,6 +2409,7 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('returns an empty usable dashboard when the project has no linked sheet', async () => {
     const documents = new Map([
+      ACTOR_MEMBER_ENTRY,
       ['orgs/tenant-a/projects/project-a', { id: 'project-a', contractAmount: 1000 }],
     ]);
     const db = {
@@ -3480,8 +3489,67 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  // 프로젝트 스코프 인가는 지금까지 JVM 에만 있었다. BFF 가 Firestore 를 직접 읽는
+  // 경로가 늘면서 그 비대칭이 우회 통로가 되므로 BFF 에도 같은 규칙을 세운다.
+  it('blocks a scoped actor from reading a project outside their assignment', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/members/pm-1', {
+      uid: 'pm-1', email: 'pm@example.com', status: 'ACTIVE', role: 'pm', projectIds: ['project-b'],
+    });
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(403)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_project_forbidden');
+      });
+    // JVM 까지 가기 전에 막혀야 한다 — 데이터가 프로세스 경계를 넘지 않는다.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('blocks an inactive member even when the project is in their assignment', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/members/pm-1', {
+      uid: 'pm-1', email: 'pm@example.com', status: 'DISABLED', role: 'pm', projectIds: ['project-a'],
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(403);
+  });
+
+  it.each(['admin', 'finance', 'auditor', 'tenant_admin', 'support', 'security'])(
+    'lets tenant-wide role %s read without a project assignment',
+    async (actorRole) => {
+      const source = fullMonthCloseSource();
+      source.documents.delete('orgs/tenant-a/members/pm-1');
+      const fetchImpl = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(monthDashboardSource({
+          ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+          reopenCount: 0, projectWarningCount: 0, snapshot: {},
+        })),
+      }));
+      const { app } = createApp(fetchImpl, createIdempotencyService(), {
+        actorId: `${actorRole}-1`, actorRole, actorEmail: `${actorRole}@example.com`,
+      }, { env: runtimeEnv, db: source.db });
+      await request(app)
+        .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+        .expect(200);
+    },
+  );
+
   it.each(['viewer', 'pm', 'finance', 'admin'])('blocks a reviewed %s direct month close after authoritative preflight', async (actorRole) => {
     const source = fullMonthCloseSource();
+    // 이 케이스만 actorId 가 역할별로 달라진다. viewer/pm 은 테넌트 전역이 아니므로
+    // 각자의 멤버 문서로 프로젝트 배정을 모델링한다.
+    source.documents.set(`orgs/tenant-a/members/${actorRole}-1`, {
+      uid: `${actorRole}-1`, email: `${actorRole}@example.com`, status: 'ACTIVE',
+      role: actorRole, projectIds: ['project-a'],
+    });
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,
       status: 200,
