@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,7 +33,6 @@ import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyUpdateCompletionResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyComplianceHistoryResponse;
-import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsResponse;
 import dev.merryai.innerplatform.weekly.api.BankStatementImportLinesResponse;
@@ -46,7 +46,6 @@ import dev.merryai.innerplatform.weekly.api.PasteCellsRequest;
 import dev.merryai.innerplatform.weekly.api.RowCommandResponse;
 import dev.merryai.innerplatform.weekly.api.RowDeleteRequest;
 import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
-import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
@@ -1429,7 +1428,7 @@ public class WeeklyExpenseCommandService {
         TrustedActorContext actor,
         String projectId,
         String dataProjectId,
-        RequestCashflowMonthReopenRequest request
+        CashflowMonthReopenCommands.RequestReopen request
     ) {
         if (request.reason().isBlank()) {
             throw new IllegalArgumentException("A reason is required to request a cashflow month reopen.");
@@ -1483,7 +1482,7 @@ public class WeeklyExpenseCommandService {
         TrustedActorContext actor,
         String projectId,
         String dataProjectId,
-        DecideCashflowMonthReopenRequest request
+        CashflowMonthReopenCommands.DecideReopen request
     ) {
         if (!("APPROVE".equals(request.decision()) || "REJECT".equals(request.decision()))
             || request.reason().isBlank()) {

@@ -1,8 +1,8 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
-import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseAtomicWriteLimitException;
@@ -133,7 +133,7 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm"),
             "project-a",
             "wrong-live-project",
-            new RequestCashflowMonthReopenRequest("reopen-live", "2026-06", 1, "정정 필요")
+            new CashflowMonthReopenCommands.RequestReopen("reopen-live", "2026-06", 1, "정정 필요")
         ))
             .isInstanceOf(WeeklyExpenseEditLeaseException.class)
             .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
