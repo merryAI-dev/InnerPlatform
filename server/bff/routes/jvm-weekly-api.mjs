@@ -24,6 +24,15 @@ import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-co
 import { WEEKS_PER_MONTH, annualYearsFor, weekOrdinal } from '../cashflow-coordinates.mjs';
 import { TENANT_WIDE_PROJECT_ROLES, isProjectInActorScope } from '../cashflow-project-scope.mjs';
 import { cashflowCloseHash } from '../cashflow-close-hash.mjs';
+import {
+  CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
+  CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+  cashflowCumulativeCloseCycle,
+  cumulativeCloseMonthsOrNull,
+  monthsBetween,
+  previousYearMonth,
+} from '../cashflow-close-calendar.mjs';
+export { cashflowCumulativeCloseCycle };
 import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
 
 export { cashflowMonthCloseDeadline };
@@ -38,8 +47,6 @@ const CASHFLOW_LINE_INDEX = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [l
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
 const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
 const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
-const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
-const CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH = '2023-01';
 
 function readWeeklyYear(value) {
   const year = Number(value);
@@ -1472,31 +1479,11 @@ function projectMetadata(project) {
   };
 }
 
-function monthsBetween(startYearMonth, endYearMonth) {
-  const result = [];
-  let cursor = new Date(`${startYearMonth}-01T00:00:00Z`);
-  const end = new Date(`${endYearMonth}-01T00:00:00Z`);
-  while (cursor <= end && result.length < 240) {
-    result.push(cursor.toISOString().slice(0, 7));
-    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
-  }
-  return result;
-}
 
-function previousYearMonth(yearMonth) {
-  const month = new Date(`${yearMonth}-01T00:00:00Z`);
-  month.setUTCMonth(month.getUTCMonth() - 1);
-  return month.toISOString().slice(0, 7);
-}
-
+// 달력 규칙은 cashflow-close-calendar 에 있다. 여기는 "성립 불가"를 사용자 문구로 바꾼다.
 function cumulativeCloseMonths(yearMonth) {
-  const throughMonth = previousYearMonth(yearMonth);
-  const months = monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, throughMonth);
-  if (
-    throughMonth < CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
-    || months.length === 0
-    || months.at(-1) !== throughMonth
-  ) {
+  const months = cumulativeCloseMonthsOrNull(yearMonth);
+  if (months === null) {
     throw createHttpError(
       400,
       '누적 월 결산 범위는 2023-01부터 최대 240개월까지 선택할 수 있습니다.',
@@ -1587,17 +1574,6 @@ function assertCashflowSheetPublicationReady(state) {
 }
 
 
-export function cashflowCumulativeCloseCycle(yearMonth, businessDate) {
-  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(yearMonth))
-    || !/^20\d{2}-(0[1-9]|1[0-2])-\d{2}$/.test(String(businessDate))) return null;
-  const targetYearMonth = previousYearMonth(yearMonth);
-  return {
-    cycleYearMonth: yearMonth,
-    targetYearMonth,
-    deadline: `${yearMonth}-10`,
-    eligible: targetYearMonth < String(businessDate).slice(0, 7),
-  };
-}
 
 async function readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate = '' }) {
   if (!db?.collection) return [];
