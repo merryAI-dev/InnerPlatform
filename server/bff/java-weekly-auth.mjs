@@ -18,6 +18,12 @@ export function isWorkspaceUser(context, workspaceEmailDomain = 'mysc.co.kr') {
   return Boolean(domain) && email.endsWith(`@${domain}`);
 }
 
+// audience+자격증명별 IdTokenClient 캐시. 클라이언트는 토큰 만료를 스스로 관리하며
+// 갱신하므로(google-auth-library), 요청마다 GoogleAuth 를 새로 만들어 RS256 서명
+// 왕복을 반복할 이유가 없다. month-close 한 번에 JVM 호출이 두 번이라 이 비용이
+// 요청마다 두 배로 들었다. 캐시 키에 자격증명을 포함해 SA 교체 시 자연히 분리된다.
+const identityTokenClients = new Map();
+
 async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
   let credentials;
   try {
@@ -26,13 +32,19 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
     throw createHttpError(503, '서버 인증 정보가 올바르지 않습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
   try {
-    const auth = new GoogleAuth({ credentials });
-    const client = await auth.getIdTokenClient(audience);
+    const cacheKey = `${credentials.client_email || ''}\n${audience}`;
+    let clientPromise = identityTokenClients.get(cacheKey);
+    if (!clientPromise) {
+      clientPromise = new GoogleAuth({ credentials }).getIdTokenClient(audience);
+      identityTokenClients.set(cacheKey, clientPromise);
+    }
+    const client = await clientPromise;
     const authorization = readOptionalText((await client.getRequestHeaders()).Authorization);
     const token = authorization.replace(/^Bearer\s+/i, '');
     if (!token) throw new Error('Missing identity token');
     return token;
   } catch {
+    identityTokenClients.clear();
     throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
 }

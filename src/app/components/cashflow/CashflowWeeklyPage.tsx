@@ -206,8 +206,18 @@ export function CashflowWeeklyPage() {
       setStatusesLoading(false);
     };
     void load(true);
-    const interval = window.setInterval(() => void load(false), 15_000);
-    return () => { active = false; window.clearInterval(interval); };
+    // 백그라운드 탭에서는 폴링을 멈추고, 다시 보일 때 즉시 한 번 갱신한다.
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void load(false);
+    }, 15_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void load(false); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [departmentProjects, orgId, user, yearMonth]);
 
   async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE') {

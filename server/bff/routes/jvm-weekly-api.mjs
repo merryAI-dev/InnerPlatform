@@ -2662,25 +2662,36 @@ export function mountJvmWeeklyApiRoutes(app, {
       };
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const traceAttempt = attempt + 1;
-        const publicationBefore = await trace.measure(
-          'publication_before',
-          () => readCashflowSheetPublicationState({
-            db,
-            tenantId: req.context.tenantId,
-            projectId: rawProjectId,
-            nowMs: currentNow.getTime(),
-          }),
-          { attempt: traceAttempt },
-        );
-        const source = await trace.measure(
-          'jvm_dashboard',
-          () => proxyJavaWeeklyRequest({
-            context: req.context,
-            method: 'GET',
-            path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
-          }),
-          { attempt: traceAttempt },
-        );
+        // 세 읽기는 서로 독립이라 함께 출발한다. 직렬이던 시절에는 왕복 지연이
+        // 세 번 겹겹이 쌓였다. publication 은 어차피 대시보드 읽기 뒤(after)에
+        // 한 번 더 확인해 변경 여부를 판정하므로, before 를 병렬로 시작해도
+        // 읽기 일관성 계약은 그 fingerprint 비교가 그대로 지킨다.
+        const [publicationBefore, source, weeklyCompliance] = await Promise.all([
+          trace.measure(
+            'publication_before',
+            () => readCashflowSheetPublicationState({
+              db,
+              tenantId: req.context.tenantId,
+              projectId: rawProjectId,
+              nowMs: currentNow.getTime(),
+            }),
+            { attempt: traceAttempt },
+          ),
+          trace.measure(
+            'jvm_dashboard',
+            () => proxyJavaWeeklyRequest({
+              context: req.context,
+              method: 'GET',
+              path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
+            }),
+            { attempt: traceAttempt },
+          ),
+          trace.measure(
+            'jvm_compliance',
+            () => readWeeklyCompliance(req.context, rawProjectId),
+            { attempt: traceAttempt },
+          ),
+        ]);
         const result = objectValue(source?.monthClose);
         const cashflow = objectValue(source?.cashflow);
         const snapshotCompatibility = objectValue(source?.snapshotCompatibility) || {
@@ -2712,11 +2723,6 @@ export function mountJvmWeeklyApiRoutes(app, {
           || typeof projectionActualSummary?.settlementMatches !== 'boolean') {
           throw createHttpError(502, 'JVM 누적 Projection-Actual 요약을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
         }
-        const weeklyCompliance = await trace.measure(
-          'jvm_compliance',
-          () => readWeeklyCompliance(req.context, rawProjectId),
-          { attempt: traceAttempt },
-        );
         const cycleBusinessDate = readOptionalText(result?.evaluatedBusinessDate) || comparisonBoundary.asOfDate;
         const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
         if (!cumulativeCycle) {
