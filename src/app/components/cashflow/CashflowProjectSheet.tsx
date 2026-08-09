@@ -2860,7 +2860,7 @@ export function CashflowProjectSheet({
                 </div>
               </div>
               {monthCloseSectionErrors.length > 0 ? (
-                <div role="status" className="flex flex-wrap items-center gap-2 border-t border-amber-200 bg-amber-50 px-4 py-2 text-[12px] text-amber-900">
+                <div role="status" className="flex flex-wrap items-center gap-2 border-t border-border bg-accent px-4 py-2 text-[12px] text-card-foreground">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     일부 정보를 불러오지 못했습니다
