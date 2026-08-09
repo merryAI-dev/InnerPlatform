@@ -231,4 +231,22 @@ class CloseCashflowMonthRequestTest {
         }
         return rows;
     }
+
+    @Test
+    void managementCheckVocabularyMatchesTheBffParityTable() throws Exception {
+        // BFF cashflow-management-checks.mjs 가 정확히 이 어휘를 계산의 소스로 쓴다
+        // (cashflow-management-checks.test.mjs 의 parity 표). 여기의 @Pattern 이 갈리면
+        // BFF 가 만든 검사 결과가 Bean Validation 에서 400 으로 거부된다.
+        java.lang.reflect.RecordComponent id = java.util.Arrays.stream(
+            CloseCashflowMonthRequest.ManagementCheck.class.getRecordComponents()
+        ).filter(component -> component.getName().equals("id")).findFirst().orElseThrow();
+        java.lang.reflect.RecordComponent status = java.util.Arrays.stream(
+            CloseCashflowMonthRequest.ManagementCheck.class.getRecordComponents()
+        ).filter(component -> component.getName().equals("status")).findFirst().orElseThrow();
+
+        assertThat(id.getAccessor().getAnnotation(jakarta.validation.constraints.Pattern.class).regexp())
+            .isEqualTo("labor-transfer|profit-vat-after-deposit|negative-projection-balance|future-prepay-over-million");
+        assertThat(status.getAccessor().getAnnotation(jakarta.validation.constraints.Pattern.class).regexp())
+            .isEqualTo("OK|WARNING|REVIEW_REQUIRED");
+    }
 }

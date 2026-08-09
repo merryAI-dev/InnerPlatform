@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
@@ -1569,8 +1572,8 @@ class WeeklyExpenseControllerTest {
         ));
         when(dashboardPersistence.findCashflowDeclaredWeeklyYear("tenant-month-dashboard", "project-month-dashboard"))
             .thenReturn(2026);
-        WeeklyExpensePersistence.CashflowLedgerSource dashboardSource =
-            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of());
+        CashflowLedgerSource dashboardSource =
+            new CashflowLedgerSource(List.of(), List.of());
         when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026))
             .thenReturn(dashboardSource);
         when(dashboardCommandService.readCashflowProjectionActualSummary(
@@ -1588,12 +1591,12 @@ class WeeklyExpenseControllerTest {
             "tenant-month-dashboard",
             "project-month-dashboard",
             2026
-        )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+        )).thenReturn(new CashflowOpeningBalance(
             2026,
-            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+            new CashflowOpeningBalance.Mode(
                 new java.math.BigDecimal("2000000"),
                 Map.of("SALES_IN", new java.math.BigDecimal("2000000")),
-                List.of(new WeeklyExpensePersistence.CashflowOpeningBalance.YearSource(
+                List.of(new CashflowOpeningBalance.YearSource(
                     2025,
                     Map.of("SALES_IN", new java.math.BigDecimal("2000000")),
                     completeAnnualStates
@@ -1601,10 +1604,10 @@ class WeeklyExpenseControllerTest {
                 List.of(2025),
                 List.of()
             ),
-            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+            new CashflowOpeningBalance.Mode(
                 new java.math.BigDecimal("1800000"),
                 Map.of("SALES_IN", new java.math.BigDecimal("1800000")),
-                List.of(new WeeklyExpensePersistence.CashflowOpeningBalance.YearSource(
+                List.of(new CashflowOpeningBalance.YearSource(
                     2025,
                     Map.of("SALES_IN", new java.math.BigDecimal("1800000")),
                     completeAnnualStates
@@ -1661,17 +1664,17 @@ class WeeklyExpenseControllerTest {
                 null, null, null, null, null, null, null, null, null, null, null
             ));
         when(dashboardPersistence.findCashflowOpeningBalance("tenant-no-year", "project-no-year", 2026))
-            .thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+            .thenReturn(new CashflowOpeningBalance(
                 2026,
-                new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                new CashflowOpeningBalance.Mode(
                     java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
                 ),
-                new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                new CashflowOpeningBalance.Mode(
                     java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
                 )
             ));
         when(dashboardCommandService.readCashflowProjectionActualSummary(
-            any(), eq("project-no-year"), any(WeeklyExpensePersistence.CashflowLedgerSource.class)
+            any(), eq("project-no-year"), any(CashflowLedgerSource.class)
         )).thenReturn(new CashflowProjectionActualSummaryBatchResponse.Item(
             "project-no-year", "2023-01",
             new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
@@ -1778,8 +1781,8 @@ class WeeklyExpenseControllerTest {
                 "2026-07-08T00:00:00Z", "finance-1", "재무",
                 null, null, null, null, null, null, null, "audit-amended"
             ));
-        WeeklyExpensePersistence.CashflowLedgerSource liveSource =
-            new WeeklyExpensePersistence.CashflowLedgerSource(
+        CashflowLedgerSource liveSource =
+            new CashflowLedgerSource(
                 List.of(),
                 List.of(),
                 targetRevision
@@ -1790,12 +1793,12 @@ class WeeklyExpenseControllerTest {
             "tenant-amended",
             "project-amended",
             2026
-        )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+        )).thenReturn(new CashflowOpeningBalance(
             2026,
-            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+            new CashflowOpeningBalance.Mode(
                 java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
             ),
-            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+            new CashflowOpeningBalance.Mode(
                 java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
             )
         ));
@@ -1870,17 +1873,17 @@ class WeeklyExpenseControllerTest {
         when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-drift"), eq("2026-06")))
             .thenReturn(first, drifted, first, drifted);
         when(dashboardPersistence.findCashflowGlobalLedgerSource("tenant-drift", "project-drift"))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(
+            .thenReturn(new CashflowLedgerSource(
                 List.of(), List.of(), targetRevision
             ));
         when(dashboardPersistence.findCashflowOpeningBalance(
             "tenant-drift", "project-drift", 2026
-        )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+        )).thenReturn(new CashflowOpeningBalance(
             2026,
-            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+            new CashflowOpeningBalance.Mode(
                 java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
             ),
-            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+            new CashflowOpeningBalance.Mode(
                 java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
             )
         ));

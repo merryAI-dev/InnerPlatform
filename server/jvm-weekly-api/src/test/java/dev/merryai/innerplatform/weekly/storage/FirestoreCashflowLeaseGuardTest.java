@@ -1,5 +1,10 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.firestore.CollectionReference;
@@ -18,7 +23,6 @@ import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalanceCell;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
-import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
@@ -1309,7 +1313,7 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void annualTotalWriteDoesNotRequireAMonthKey() {
         Fixture fixture = fixture(activeMember(), activeLease());
-        CashflowSheetAnnualApplyRequest request = new CashflowSheetAnnualApplyRequest(
+        CashflowSheetAnnualApplyCommand request = new CashflowSheetAnnualApplyCommand(
             "annual-2025",
             SOURCE_REVISION,
             2025,
@@ -1346,14 +1350,14 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void annualTotalWritePreservesExplicitZeroAsARowValueAndState() {
         Fixture fixture = fixture(activeMember(), activeLease());
-        List<CashflowSheetAnnualApplyRequest.Cell> cells = annualCells().stream()
+        List<CashflowAnnualCellSet.Cell> cells = annualCells().stream()
             .map(cell -> "projection".equals(cell.mode()) && "SALES_IN".equals(cell.cashflowLine())
-                ? new CashflowSheetAnnualApplyRequest.Cell(
+                ? new CashflowAnnualCellSet.Cell(
                     cell.mode(), cell.cashflowLine(), "ZERO", BigDecimal.ZERO, "A1", cell.sourceLabel()
                 )
                 : cell)
             .toList();
-        CashflowSheetAnnualApplyRequest request = new CashflowSheetAnnualApplyRequest(
+        CashflowSheetAnnualApplyCommand request = new CashflowSheetAnnualApplyCommand(
             "annual-zero-2025",
             SOURCE_REVISION,
             2025,
@@ -1859,7 +1863,7 @@ class FirestoreCashflowLeaseGuardTest {
             ))
         );
 
-        WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
+        CashflowLedgerSource source = fixture.persistence
             .findCashflowLedgerSource("tenant-a", "project-a", 2026);
 
         assertThat(source.projection()).singleElement().satisfies(line ->
@@ -1913,7 +1917,7 @@ class FirestoreCashflowLeaseGuardTest {
             "projection", Map.of("SALES_IN", 88L)
         )));
 
-        WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
+        CashflowLedgerSource source = fixture.persistence
             .findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-07");
 
         assertThat(source.projection()).singleElement().satisfies(line -> {
@@ -3162,7 +3166,7 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void monthCloseRejectsChangedOpeningRowsEvenWhenTheNetTotalIsUnchanged() {
         Fixture fixture = fixture(activeMember(), activeLease());
-        CashflowSheetAnnualApplyRequest annual = new CashflowSheetAnnualApplyRequest(
+        CashflowSheetAnnualApplyCommand annual = new CashflowSheetAnnualApplyCommand(
             "annual-opening-rows",
             SOURCE_REVISION,
             2025,
@@ -4101,11 +4105,11 @@ class FirestoreCashflowLeaseGuardTest {
         );
     }
 
-    private static List<CashflowSheetAnnualApplyRequest.Cell> annualCells() {
-        List<CashflowSheetAnnualApplyRequest.Cell> cells = new ArrayList<>();
+    private static List<CashflowAnnualCellSet.Cell> annualCells() {
+        List<CashflowAnnualCellSet.Cell> cells = new ArrayList<>();
         for (String mode : List.of("projection", "actual")) {
             for (String lineId : CashflowLineCatalog.ALL_LINES) {
-                cells.add(new CashflowSheetAnnualApplyRequest.Cell(
+                cells.add(new CashflowAnnualCellSet.Cell(
                     mode,
                     lineId,
                     "EMPTY",
@@ -4636,13 +4640,13 @@ class FirestoreCashflowLeaseGuardTest {
         }
     }
 
-    private static List<CashflowSheetAnnualApplyRequest.Cell> annualCellsWithProjection(
+    private static List<CashflowAnnualCellSet.Cell> annualCellsWithProjection(
         String lineId,
         BigDecimal amount
     ) {
         return annualCells().stream()
             .map(cell -> "projection".equals(cell.mode()) && lineId.equals(cell.cashflowLine())
-                ? new CashflowSheetAnnualApplyRequest.Cell(
+                ? new CashflowAnnualCellSet.Cell(
                     cell.mode(), cell.cashflowLine(), "VALUE", amount, "A1", cell.sourceLabel()
                 )
                 : cell)

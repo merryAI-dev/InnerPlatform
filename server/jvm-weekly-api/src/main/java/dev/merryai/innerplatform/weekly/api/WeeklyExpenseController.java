@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
@@ -26,7 +29,8 @@ import org.springframework.web.server.ResponseStatusException;
 import dev.merryai.innerplatform.weekly.domain.CashflowWeekTotals;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
-import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -287,8 +291,8 @@ public class WeeklyExpenseController {
     ) {
         commandService.requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
         Integer weeklyYear = readService.declaredWeeklyYear(tenantId, projectId);
-        WeeklyExpensePersistence.CashflowLedgerSource source = weeklyYear == null
-            ? new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of())
+        CashflowLedgerSource source = weeklyYear == null
+            ? new CashflowLedgerSource(List.of(), List.of())
             : readCashflowSource(tenantId, projectId, weeklyYear);
         return buildCashflowSnapshot(projectId, source);
     }
@@ -306,7 +310,7 @@ public class WeeklyExpenseController {
         );
     }
 
-    private WeeklyExpensePersistence.CashflowLedgerSource readCashflowSource(
+    private CashflowLedgerSource readCashflowSource(
         String tenantId,
         String projectId,
         int weeklyYear
@@ -316,7 +320,7 @@ public class WeeklyExpenseController {
 
     private CashflowSnapshotResponse buildCashflowSnapshot(
         String projectId,
-        WeeklyExpensePersistence.CashflowLedgerSource source
+        CashflowLedgerSource source
     ) {
         List<CashflowSnapshotResponse.ProjectionLine> projection = source.projection().stream()
             .map(line -> new CashflowSnapshotResponse.ProjectionLine(
@@ -491,12 +495,12 @@ public class WeeklyExpenseController {
                 "먼저 시트값을 불러와 주세요."
             ))
             : List.of();
-        WeeklyExpensePersistence.CashflowLedgerSource source = amendedClosed
+        CashflowLedgerSource source = amendedClosed
             ? readService.globalLedgerSource(tenantId, projectId)
             : open && weeklyYear != null
                 ? readCashflowSource(tenantId, projectId, weeklyYear)
                 : open
-                    ? new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of())
+                    ? new CashflowLedgerSource(List.of(), List.of())
                     : null;
         CashflowSnapshotResponse cashflow = currentLedgerView ? buildCashflowSnapshot(projectId, source) : null;
         CashflowOpeningBalancesResponse openingBalances = currentLedgerView
@@ -528,9 +532,9 @@ public class WeeklyExpenseController {
             }
             monthClose = verified;
         }
-        WeeklyExpensePersistence.CashflowCumulativeCloseHead cumulative = readService.cumulativeCloseHead(tenantId, projectId);
+        CashflowCumulativeCloseHead cumulative = readService.cumulativeCloseHead(tenantId, projectId);
         if (cumulative == null) {
-            cumulative = new WeeklyExpensePersistence.CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
+            cumulative = new CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
         }
         CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary;
         if (source != null) {
@@ -820,11 +824,24 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody CashflowSheetAnnualApplyRequest request
     ) {
+        // HTTP 표현은 여기까지다. 서비스에는 런타임 중립 커맨드와 도메인 셀만 넘긴다.
         return commandService.applyCashflowSheetAnnualTotal(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
             editSession(httpRequest),
-            request
+            new CashflowSheetAnnualApplyCommand(
+                request.idempotencyKey(),
+                request.sourceRevision(),
+                request.year(),
+                request.expectedRevision(),
+                request.cells().stream()
+                    .map(cell -> new CashflowAnnualCellSet.Cell(
+                        cell.mode(), cell.cashflowLine(), cell.cellState(),
+                        cell.amount(), cell.sourceCell(), cell.sourceLabel()
+                    ))
+                    .toList(),
+                request.amendmentReason()
+            )
         );
     }
 
@@ -942,7 +959,7 @@ public class WeeklyExpenseController {
     }
 
     private CashflowOpeningBalancesResponse toOpeningBalancesResponse(
-        WeeklyExpensePersistence.CashflowOpeningBalance opening
+        CashflowOpeningBalance opening
     ) {
         return new CashflowOpeningBalancesResponse(
             opening.selectedYear(),
@@ -952,7 +969,7 @@ public class WeeklyExpenseController {
     }
 
     private CashflowOpeningBalancesResponse.Mode toOpeningBalanceMode(
-        WeeklyExpensePersistence.CashflowOpeningBalance.Mode mode
+        CashflowOpeningBalance.Mode mode
     ) {
         return new CashflowOpeningBalancesResponse.Mode(
             mode.amount(),

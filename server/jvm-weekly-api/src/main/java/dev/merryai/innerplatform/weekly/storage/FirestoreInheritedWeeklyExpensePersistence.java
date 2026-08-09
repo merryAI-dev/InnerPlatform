@@ -1,5 +1,10 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,7 +25,6 @@ import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
-import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
@@ -2471,7 +2475,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String tenantId,
         String projectId,
         String sourceSheetKey,
-        CashflowSheetAnnualApplyRequest request
+        CashflowSheetAnnualApplyCommand request
     ) {
         requireValidatedCashflowWriteScope(tenantId, projectId);
         requireCashflowMonthsOpen(
@@ -2481,8 +2485,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 .mapToObj(month -> "%04d-%02d".formatted(request.year(), month))
                 .toList()
         );
-        List<CashflowSheetAnnualApplyRequest.Cell> cells = CashflowSheetAnnualApplyRequest
-            .requireCompleteYear(request.cells());
+        List<CashflowAnnualCellSet.Cell> cells = CashflowAnnualCellSet.requireComplete(request.cells());
         DocumentReference ref = cashflowYearTotalRef(tenantId, projectId, request.year());
         DocumentSnapshot snapshot = get(ref);
         Map<String, Object> current = snapshot.exists() ? data(snapshot) : Map.of();
@@ -2496,7 +2499,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, String> projectionStates = new TreeMap<>();
         Map<String, String> actualStates = new TreeMap<>();
         List<Map<String, Object>> sourceCells = new ArrayList<>();
-        for (CashflowSheetAnnualApplyRequest.Cell cell : cells) {
+        for (CashflowAnnualCellSet.Cell cell : cells) {
             Map<String, BigDecimal> amounts = "projection".equals(cell.mode()) ? projection : actual;
             Map<String, String> states = "projection".equals(cell.mode()) ? projectionStates : actualStates;
             states.put(cell.cashflowLine(), cell.cellState());

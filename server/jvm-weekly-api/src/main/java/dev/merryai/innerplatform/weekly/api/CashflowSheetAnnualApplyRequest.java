@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -47,45 +48,18 @@ public record CashflowSheetAnnualApplyRequest(
     }
 
     public static List<Cell> requireCompleteYear(List<Cell> cells) {
-        if (cells == null || cells.size() != 32) {
-            throw new IllegalArgumentException("Cashflow annual total must contain complete Projection and Actual cells.");
-        }
-        Map<String, Cell> cellsByKey = new LinkedHashMap<>();
-        for (Cell cell : cells) {
-            String lineId = CashflowLineCatalog.canonicalize(cell == null ? null : cell.cashflowLine());
-            if (cell == null || lineId.isBlank() || !CashflowLineCatalog.ALL_LINES.contains(lineId)) {
-                throw new IllegalArgumentException("Unsupported cashflow line.");
-            }
-            String mode = cell.mode() == null ? "" : cell.mode().trim().toLowerCase(Locale.ROOT);
-            String state = cell.cellState() == null ? "" : cell.cellState().trim().toUpperCase(Locale.ROOT);
-            if (!List.of("projection", "actual").contains(mode)) {
-                throw new IllegalArgumentException("Cashflow annual mode must be projection or actual.");
-            }
-            if (List.of("VALUE", "ZERO").contains(state)) {
-                if (cell.amount() == null) throw new IllegalArgumentException("VALUE cashflow cells require an amount.");
-                try {
-                    cell.amount().longValueExact();
-                } catch (ArithmeticException error) {
-                    throw new IllegalArgumentException("Cashflow amounts must be whole won values in the supported range.");
-                }
-                if ("ZERO".equals(state) && cell.amount().compareTo(BigDecimal.ZERO) != 0) {
-                    throw new IllegalArgumentException("ZERO cashflow cells require an explicit zero amount.");
-                }
-            } else if (!"EMPTY".equals(state) || cell.amount() != null) {
-                throw new IllegalArgumentException("EMPTY cashflow cells must not include an amount.");
-            }
-            Cell canonical = new Cell(mode, lineId, state, cell.amount(), cell.sourceCell(), cell.sourceLabel());
-            if (cellsByKey.putIfAbsent(mode + ":" + lineId, canonical) != null) {
-                throw new IllegalArgumentException("Cashflow annual total contains duplicate cells.");
-            }
-        }
-        for (String mode : List.of("projection", "actual")) {
-            for (String lineId : CashflowLineCatalog.ALL_LINES) {
-                if (!cellsByKey.containsKey(mode + ":" + lineId)) {
-                    throw new IllegalArgumentException("Cashflow annual total must contain every cashflow line.");
-                }
-            }
-        }
-        return List.copyOf(cellsByKey.values());
+        // 규칙은 domain/CashflowAnnualCellSet 에 있다. 여기는 표현 <-> 도메인 매핑만 한다.
+        List<CashflowAnnualCellSet.Cell> domainCells = cells == null ? null : cells.stream()
+            .map(cell -> cell == null ? null : new CashflowAnnualCellSet.Cell(
+                cell.mode(), cell.cashflowLine(), cell.cellState(),
+                cell.amount(), cell.sourceCell(), cell.sourceLabel()
+            ))
+            .toList();
+        return CashflowAnnualCellSet.requireComplete(domainCells).stream()
+            .map(cell -> new Cell(
+                cell.mode(), cell.cashflowLine(), cell.cellState(),
+                cell.amount(), cell.sourceCell(), cell.sourceLabel()
+            ))
+            .toList();
     }
 }

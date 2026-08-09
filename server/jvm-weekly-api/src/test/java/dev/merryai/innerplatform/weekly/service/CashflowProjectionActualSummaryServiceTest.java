@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatchRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatchResponse;
@@ -41,9 +44,9 @@ class CashflowProjectionActualSummaryServiceTest {
         when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
         when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-b")).thenReturn(2026);
         when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq(2026), eq("2023-01"), anyString()))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of()));
+            .thenReturn(new CashflowLedgerSource(List.of(projection), List.of()));
         when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-b"), eq(2026), eq("2023-01"), anyString()))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of()));
+            .thenReturn(new CashflowLedgerSource(List.of(), List.of()));
 
         CashflowProjectionActualSummaryBatchResponse response = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-b", "project-a"))
@@ -74,7 +77,7 @@ class CashflowProjectionActualSummaryServiceTest {
         projection.setAmount(BigDecimal.valueOf(300));
         when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
         when(persistence.findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-11"))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of()));
+            .thenReturn(new CashflowLedgerSource(List.of(projection), List.of()));
 
         CashflowProjectionActualSummaryBatchResponse.Item item = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-a"), "2026-11")
@@ -104,7 +107,7 @@ class CashflowProjectionActualSummaryServiceTest {
                 if ("project-07".equals(projectId)) {
                     throw new IllegalStateException("secret datastore path and credential");
                 }
-                return new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of());
+                return new CashflowLedgerSource(List.of(), List.of());
             });
 
         CashflowProjectionActualSummaryBatchResponse response = service.readCashflowProjectionActualSummaries(
@@ -167,8 +170,8 @@ class CashflowProjectionActualSummaryServiceTest {
             "tenant-a", "project-a", "2023-01", 1, "SALES_IN"
         );
         projection.setAmount(BigDecimal.TEN);
-        WeeklyExpensePersistence.CashflowLedgerSource source =
-            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of());
+        CashflowLedgerSource source =
+            new CashflowLedgerSource(List.of(projection), List.of());
         when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
         when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq(2026), eq("2023-01"), anyString()))
             .thenReturn(source);
