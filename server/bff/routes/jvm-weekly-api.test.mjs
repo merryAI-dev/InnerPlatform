@@ -3399,8 +3399,12 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
+  // 계약 변경(2026-08-09): publication·JVM 대시보드·컴플라이언스는 서로 독립 읽기라
+  // 함께 출발한다. 이전에는 publication 이 매달리면 JVM 호출이 시작되지 않는 직렬
+  // 순서를 단언했지만, 그 순서가 왕복 지연을 겹겹이 쌓았다. 총 시간 보호는 라우트
+  // 데드라인(504)이 그대로 담당한다.
   it('bounds slow Firestore composition inside the full month-close route deadline', async () => {
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn(() => new Promise(() => {}));
     const stalledDb = {
       doc: () => ({ get: () => new Promise(() => {}) }),
     };
@@ -3416,8 +3420,6 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => {
         expect(response.body.code).toBe('cashflow_month_close_route_timeout');
       });
-
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('never starts the final JVM close mutation after the preflight deadline', async () => {
