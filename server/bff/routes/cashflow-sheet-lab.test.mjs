@@ -1129,6 +1129,76 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
+  it('skips the whole pipeline when the sheet has not changed (freshness fast-path)', async () => {
+    // 검색엔진 원칙: 읽기 요청이 크롤링을 트리거하지 않는다. 시트가 안 바뀌었으면
+    // 두 번째 불러오기는 Drive modifiedTime 한 번만 묻고 고정본을 그대로 돌려준다.
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2024-01-01',
+        contractEnd: '2028-12-31',
+        cashflowSheetLab: {
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    let modifiedTime = '2026-08-09T10:00:00.000Z';
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: 'Cashflow workbook',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const getSpreadsheetFreshness = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a', modifiedTime, version: '7',
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet, getSpreadsheetFreshness } });
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'fresh-001' })
+      .expect(200);
+    expect(first.body.status).toBe('FRESH');
+    expect(first.body.unchanged).toBeUndefined();
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a').sourceFileModifiedTime)
+      .toBe(modifiedTime);
+
+    // 변경 없음 -> 풀 리드 없이 고정본 반환
+    const second = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'fresh-002' })
+      .expect(200);
+    expect(second.body.unchanged).toBe(true);
+    expect(second.body.sourceRevision).toBe(first.body.sourceRevision);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(getSpreadsheetFreshness).toHaveBeenCalledTimes(2);
+
+    // 시트가 바뀌면 다시 풀 리드
+    modifiedTime = '2026-08-09T11:00:00.000Z';
+    const third = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'fresh-003' })
+      .expect(200);
+    expect(third.body.unchanged).toBeUndefined();
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a').sourceFileModifiedTime)
+      .toBe(modifiedTime);
+
+    // probe 실패는 열화가 아니라 풀 리드로 폴백한다 - 낡은 데이터를 최신이라 말하지 않는다.
+    getSpreadsheetFreshness.mockRejectedValueOnce(new Error('drive down'));
+    const fourth = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'fresh-004' })
+      .expect(200);
+    expect(fourth.body.unchanged).toBeUndefined();
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(3);
+  });
+
   it('reads Google Sheets only on explicit mirror refresh and pins the result', async () => {
     const performanceEvents = [];
     const db = createDb({
