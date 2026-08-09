@@ -17,7 +17,6 @@ export const ADMIN_LAB_ROUTES = [
   '/business-cards',
   '/board',
   '/evidence',
-  '/bank-reconciliation',
   '/payroll',
   '/budget-summary',
   '/expense-management',

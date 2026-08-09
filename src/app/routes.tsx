@@ -70,7 +70,6 @@ const UserManagementPage = lazyRoute(() => import('./components/users/UserManage
 const AdminHrAnnouncementPage = lazyRoute(() => import('./components/hr/AdminHrAnnouncementPage'), 'AdminHrAnnouncementPage');
 const AdminPayrollPage = lazyRoute(() => import('./components/payroll/AdminPayrollPage'), 'AdminPayrollPage');
 const TrainingManagePage = lazyRoute(() => import('./components/training/TrainingManagePage'), 'TrainingManagePage');
-const BankReconciliationPage = lazyRoute(() => import('./components/cashflow/BankReconciliationPage'), 'BankReconciliationPage');
 const NotFoundPage = lazyRoute(() => import('./components/layout/NotFoundPage'), 'NotFoundPage');
 
 // Portal pages
@@ -158,7 +157,6 @@ export const router = createBrowserRouter([
       { path: 'cashflow/projects', element: <S C={CashflowPage} /> },
       { path: 'cashflow/projects/:projectId', element: <S C={ProjectCashflowSheetPage} /> },
       { path: 'evidence', element: <S C={EvidenceQueuePage} /> },
-      { path: 'bank-reconciliation', element: <S C={BankReconciliationPage} /> },
       { path: 'participation', element: <S C={ParticipationPage} /> },
       { path: 'koica-personnel', element: <S C={KoicaPersonnelPage} /> },
       { path: 'personnel-changes', element: <S C={PersonnelChangePage} /> },
