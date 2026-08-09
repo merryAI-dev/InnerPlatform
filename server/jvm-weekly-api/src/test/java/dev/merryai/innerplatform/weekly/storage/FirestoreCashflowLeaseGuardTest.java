@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.firestore.CollectionReference;
@@ -1859,7 +1862,7 @@ class FirestoreCashflowLeaseGuardTest {
             ))
         );
 
-        WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
+        CashflowLedgerSource source = fixture.persistence
             .findCashflowLedgerSource("tenant-a", "project-a", 2026);
 
         assertThat(source.projection()).singleElement().satisfies(line ->
@@ -1913,7 +1916,7 @@ class FirestoreCashflowLeaseGuardTest {
             "projection", Map.of("SALES_IN", 88L)
         )));
 
-        WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
+        CashflowLedgerSource source = fixture.persistence
             .findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-07");
 
         assertThat(source.projection()).singleElement().satisfies(line -> {

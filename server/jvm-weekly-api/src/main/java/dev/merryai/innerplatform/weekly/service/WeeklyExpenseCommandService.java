@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -285,7 +288,7 @@ public class WeeklyExpenseCommandService {
                     ));
                     continue;
                 }
-                WeeklyExpensePersistence.CashflowLedgerSource source = persistence.findCashflowLedgerSource(
+                CashflowLedgerSource source = persistence.findCashflowLedgerSource(
                     actor.tenantId(), projectId, weeklyYear,
                     CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
                 );
@@ -304,7 +307,7 @@ public class WeeklyExpenseCommandService {
     public CashflowProjectionActualSummaryBatchResponse.Item readCashflowProjectionActualSummary(
         TrustedActorContext actor,
         String projectId,
-        WeeklyExpensePersistence.CashflowLedgerSource source
+        CashflowLedgerSource source
     ) {
         authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
@@ -314,7 +317,7 @@ public class WeeklyExpenseCommandService {
 
     private CashflowProjectionActualSummaryBatchResponse.Item toProjectionActualSummary(
         String projectId,
-        WeeklyExpensePersistence.CashflowLedgerSource source,
+        CashflowLedgerSource source,
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary,
         String selectedYearMonth
     ) {

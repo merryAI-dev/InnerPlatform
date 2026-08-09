@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -21,7 +24,7 @@ class WeeklyExpensePersistenceOpeningBalanceTest {
             annual(2027, "7000000", "7000000")
         ));
 
-        WeeklyExpensePersistence.CashflowOpeningBalance result = persistence.findCashflowOpeningBalance(
+        CashflowOpeningBalance result = persistence.findCashflowOpeningBalance(
             "tenant-a",
             "project-a",
             2026
@@ -32,7 +35,7 @@ class WeeklyExpensePersistenceOpeningBalanceTest {
         assertThat(result.projection().includedYears()).containsExactly(2024, 2025);
         assertThat(result.projection().excludedWeeklyYears()).isEmpty();
         assertThat(result.projection().lineAmounts()).containsEntry("SALES_IN", new BigDecimal("9500000"));
-        assertThat(result.projection().sources()).extracting(WeeklyExpensePersistence.CashflowOpeningBalance.YearSource::year)
+        assertThat(result.projection().sources()).extracting(CashflowOpeningBalance.YearSource::year)
             .containsExactly(2024, 2025);
     }
 

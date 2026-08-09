@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
+import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseWeeklyStatusEntity;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.springframework.stereotype.Service;
@@ -27,7 +30,7 @@ public class CashflowReadService {
         return persistence.findCashflowDeclaredWeeklyYear(tenantId, projectId);
     }
 
-    public WeeklyExpensePersistence.CashflowLedgerSource ledgerSource(
+    public CashflowLedgerSource ledgerSource(
         String tenantId,
         String projectId,
         Integer weeklyYear
@@ -35,11 +38,11 @@ public class CashflowReadService {
         return persistence.findCashflowLedgerSource(tenantId, projectId, weeklyYear);
     }
 
-    public WeeklyExpensePersistence.CashflowLedgerSource globalLedgerSource(String tenantId, String projectId) {
+    public CashflowLedgerSource globalLedgerSource(String tenantId, String projectId) {
         return persistence.findCashflowGlobalLedgerSource(tenantId, projectId);
     }
 
-    public WeeklyExpensePersistence.CashflowOpeningBalance openingBalance(
+    public CashflowOpeningBalance openingBalance(
         String tenantId,
         String projectId,
         int year
@@ -47,7 +50,7 @@ public class CashflowReadService {
         return persistence.findCashflowOpeningBalance(tenantId, projectId, year);
     }
 
-    public WeeklyExpensePersistence.CashflowCumulativeCloseHead cumulativeCloseHead(
+    public CashflowCumulativeCloseHead cumulativeCloseHead(
         String tenantId,
         String projectId
     ) {
