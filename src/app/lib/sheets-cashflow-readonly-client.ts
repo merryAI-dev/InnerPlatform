@@ -920,6 +920,34 @@ export async function getCashflowSheetLabShareAccountViaBff(params: {
   return response.data;
 }
 
+export interface CashflowSheetFreshnessProbe {
+  status: 'AVAILABLE' | 'UNAVAILABLE';
+  mirrorLoaded: boolean;
+  sheetChangedSinceMirror: boolean;
+  checkedAt: string;
+}
+
+// 진입 전용 경량 변경 감지. 시트 풀 리드 없이 modifiedTime 만 대조한다 (~0.1s).
+export async function probeCashflowSheetFreshnessViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetFreshnessProbe> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.post<CashflowSheetFreshnessProbe>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/changes/probe`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {},
+      timeoutMs: 12000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
 export async function checkCashflowSheetChangesViaBff(params: {
   tenantId: string;
   actor: ActorLike;

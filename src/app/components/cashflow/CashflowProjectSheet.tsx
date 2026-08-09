@@ -63,7 +63,7 @@ import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
   applyCashflowSheetLabViaBff,
   cashflowFormulaMismatchesFromError,
-  checkCashflowSheetChangesViaBff,
+  probeCashflowSheetFreshnessViaBff,
   getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
@@ -71,7 +71,7 @@ import {
   refreshCashflowSheetLabMirrorViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabMirrorResult,
-  type CashflowSheetChangeCheckResult,
+  type CashflowSheetFreshnessProbe,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabStageResult,
   type CashflowFormulaMismatch,
@@ -383,7 +383,7 @@ export function CashflowProjectSheet({
     lastActualLineCount?: number;
   } | null>(null);
   const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
-  const [cashflowSheetChangeCheck, setCashflowSheetChangeCheck] = useState<CashflowSheetChangeCheckResult | null>(null);
+  const [cashflowSheetFreshness, setCashflowSheetFreshness] = useState<CashflowSheetFreshnessProbe | null>(null);
   const [cashflowSystemAccountEmail, setCashflowSystemAccountEmail] = useState('');
   const [cashflowSystemAccountError, setCashflowSystemAccountError] = useState(false);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
@@ -587,63 +587,36 @@ export function CashflowProjectSheet({
 
   useEffect(() => {
     let cancelled = false;
-    setCashflowSheetChangeCheck(null);
+    setCashflowSheetFreshness(null);
     if (!cashflowSheetConfigLoaded || !cashflowSheetConfig?.value || !projectId || !orgId || !user?.uid) {
       return () => { cancelled = true; };
     }
 
-    setCashflowSheetChangeCheck({
-      status: 'CHECKING',
-      classification: 'PARTIAL',
-      checkedAt: '',
-      sheet: { status: 'AVAILABLE' },
-      comparisons: {
-        sheetToJvm: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
-        sheetToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
-        jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
-      },
-    });
-    const checkSheetChanges = async (): Promise<void> => {
+    // 진입은 시트를 풀 리드하지 않는다. modifiedTime 만 싸게 대조해 '변경됨' 배지만 띄운다.
+    // 실제 diff 와 풀 리드는 사용자가 '시트 불러오기'를 누를 때만.
+    const probeFreshness = async (): Promise<void> => {
       try {
         let actor = await resolveBffActor();
-        if (!actor?.idToken) throw new Error('Cashflow sheet change check requires authentication.');
-        let result: CashflowSheetChangeCheckResult;
+        if (!actor?.idToken) throw new Error('Cashflow sheet freshness probe requires authentication.');
+        let result: CashflowSheetFreshnessProbe;
         try {
-          result = await checkCashflowSheetChangesViaBff({
-            tenantId: orgId,
-            actor,
-            projectId,
-            sourceYear: cashflowSheetConfig.sourceYear || selectedYear,
-          });
+          result = await probeCashflowSheetFreshnessViaBff({ tenantId: orgId, actor, projectId });
         } catch (error) {
           if (!isBffAuthRejection(error)) throw error;
           actor = await resolveBffActor({ forceRefresh: true });
           if (!actor?.idToken) throw error;
-          result = await checkCashflowSheetChangesViaBff({
-            tenantId: orgId,
-            actor,
-            projectId,
-            sourceYear: cashflowSheetConfig.sourceYear || selectedYear,
+          result = await probeCashflowSheetFreshnessViaBff({ tenantId: orgId, actor, projectId });
+        }
+        if (!cancelled) setCashflowSheetFreshness(result);
+      } catch {
+        if (!cancelled) {
+          setCashflowSheetFreshness({
+            status: 'UNAVAILABLE', mirrorLoaded: false, sheetChangedSinceMirror: false, checkedAt: '',
           });
         }
-        if (!cancelled) {
-          setCashflowSheetChangeCheck(result);
-        }
-      } catch {
-        if (!cancelled) setCashflowSheetChangeCheck({
-          status: 'UNAVAILABLE',
-          classification: 'PARTIAL',
-          checkedAt: '',
-          sheet: { status: 'UNAVAILABLE' },
-          comparisons: {
-            sheetToJvm: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
-            sheetToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
-            jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
-          },
-        });
       }
     };
-    void checkSheetChanges();
+    void probeFreshness();
     return () => { cancelled = true; };
   }, [
     cashflowSheetConfig?.sourceYear,
@@ -1802,10 +1775,6 @@ export function CashflowProjectSheet({
     }
   }, [cashflowSheetMirror, handleApplyStagedSheetValues, orgId, projectId, resolveBffActor, yearMonth]);
 
-  const handleOpenSheetReviewDialog = useCallback(() => {
-    setSheetReviewDialogOpen(true);
-  }, []);
-
   const handleOpenSheetOnboarding = useCallback(() => {
     setSheetReviewDialogOpen(true);
   }, []);
@@ -1921,11 +1890,8 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
-  const sheetChangeCount = [
-    cashflowSheetChangeCheck?.comparisons.jvmToFirestore,
-    cashflowSheetChangeCheck?.comparisons.sheetToFirestore,
-    cashflowSheetChangeCheck?.comparisons.sheetToJvm,
-  ].find((comparison) => comparison?.status === 'AVAILABLE' && Number(comparison.changeCount) > 0)?.changeCount || 0;
+  const sheetChangedSinceMirror = cashflowSheetFreshness?.status === 'AVAILABLE'
+    && cashflowSheetFreshness.sheetChangedSinceMirror === true;
   const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
   const configuredSheetUrl = (() => {
     try {
@@ -2731,17 +2697,6 @@ export function CashflowProjectSheet({
               >
                 {cashflowSheetConfig ? '시트 설정' : '시트 연결'}
               </Button>
-              {cashflowSheetConfig && sheetChangeCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 shrink-0 rounded-md border-yellow-300 bg-yellow-50 px-2.5 text-[12px] font-semibold text-yellow-900 hover:bg-yellow-100"
-                  onClick={handleOpenSheetReviewDialog}
-                >
-                  {`변경 ${sheetChangeCount.toLocaleString()}건`}
-                </Button>
-              ) : null}
               {configuredSheetUrl ? (
                 <a
                   className="inline-flex h-7 shrink-0 items-center rounded-md px-2 text-[12px] font-semibold text-[#17324D] hover:bg-accent"
@@ -2754,16 +2709,22 @@ export function CashflowProjectSheet({
                 </a>
               ) : null}
               {cashflowSheetConfig ? (
+                // 단일 진입점: 평소엔 '시트 불러오기', 변경이 감지되면 상태 배지를 겸한다.
+                // 진입 시 풀 리드를 하지 않으므로 이 버튼을 눌러야 실제 diff·반영이 시작된다.
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="h-7 shrink-0 rounded-md border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
+                  className={`h-7 shrink-0 rounded-md px-2.5 text-[12px] font-semibold ${
+                    sheetChangedSinceMirror
+                      ? 'border-yellow-300 bg-yellow-50 text-yellow-900 hover:bg-yellow-100'
+                      : 'border-slate-300 bg-white text-[#17324D] hover:bg-accent'
+                  }`}
                   disabled={sheetRefreshLoading}
                   onClick={() => void handleRefreshSheetMirror()}
                 >
                   {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  시트 값 불러오기
+                  {sheetChangedSinceMirror ? '시트 변경됨 · 불러오기' : '시트 불러오기'}
                 </Button>
               ) : null}
               {project && members ? (

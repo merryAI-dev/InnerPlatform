@@ -4723,6 +4723,64 @@ export function mountCashflowSheetLabRoutes(app, {
     };
   };
 
+  // 진입 전용 경량 변경 감지. 검색엔진 원칙: 진입은 인덱스(고정본)만 읽고, 크롤(시트 풀
+  // 리드 + 3방향 diff)은 사용자가 '시트 불러오기'를 누를 때만 한다. 여기서는 Drive
+  // modifiedTime(~수십 ms)만 저장된 고정본과 대조해 "변경됨/없음"만 판정한다 - 건수·diff
+  // 는 계산하지 않는다. 판정 불능(probe 실패, 미러 없음)은 보수적으로 "불러오기 필요"로
+  // 기울인다 - 낡은 값을 최신이라 말하지 않는다.
+  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/changes/probe', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    const checkedAt = new Date().toISOString();
+    try {
+      const project = await readProjectDocument(db, tenantId, projectId);
+      const configs = readCashflowSheetLabConfigs(project);
+      if (configs.length === 0) {
+        throw createHttpError(400, 'Cashflow sheet URL is not configured.', 'cashflow_sheet_config_required');
+      }
+      const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+      if (!mirror || readOptionalText(mirror.status) !== 'FRESH' || !readOptionalText(mirror.sourceRevision)) {
+        res.status(200).json({
+          status: 'AVAILABLE', mirrorLoaded: false, sheetChangedSinceMirror: true, checkedAt,
+        });
+        return;
+      }
+      // 미러의 sourceFileModifiedTime 은 마지막으로 불러온 소스 하나의 값이다. 단일 소스
+      // 프로젝트(대부분)는 정확하고, 멀티 소스는 하나라도 새로우면 changed 로 기운다.
+      const storedModifiedTime = readOptionalText(mirror.sourceFileModifiedTime);
+      if (!storedModifiedTime) {
+        res.status(200).json({
+          status: 'AVAILABLE', mirrorLoaded: true, sheetChangedSinceMirror: true, checkedAt,
+        });
+        return;
+      }
+      let changed = false;
+      for (const config of configs) {
+        const freshness = await loadSheetFreshness(config.value);
+        if (!freshness?.modifiedTime) { changed = true; break; }
+        if (configs.length > 1 || freshness.modifiedTime !== storedModifiedTime) {
+          if (freshness.modifiedTime !== storedModifiedTime) { changed = true; break; }
+        }
+      }
+      res.status(200).json({
+        status: 'AVAILABLE',
+        mirrorLoaded: true,
+        sheetChangedSinceMirror: changed,
+        checkedAt,
+      });
+    } catch (error) {
+      logCashflowSheetLab('changes.probe.unavailable', req, {
+        projectId,
+        ...routeErrorDetails(normalizeRouteError(error)),
+      }, 'warn');
+      // probe 실패는 판정 불능이다. 조용히 '변경 없음'이라 하지 않는다.
+      res.status(200).json({
+        status: 'UNAVAILABLE', mirrorLoaded: false, sheetChangedSinceMirror: false, checkedAt,
+      });
+    }
+  }));
+
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/changes/check', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
     const { tenantId } = req.context;
