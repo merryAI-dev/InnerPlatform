@@ -72,18 +72,20 @@ describe('java weekly identity token cache', () => {
     expect(fetchIdToken).toHaveBeenCalledTimes(1);
   });
 
-  it('re-mints when the cached token is inside the refresh margin', async () => {
-    // 5분 마진 안쪽이면 아직 유효해도 새로 발급한다. 만료 직전 토큰을 들고 나가
-    // JVM 에서 401 을 맞는 것보다 한 번 더 서명하는 쪽이 싸다.
+  it('serves a near-margin token without caching it, then re-mints next time', async () => {
+    // 5분 마진 안쪽 토큰은 캐시하지 않는다. 다만 요청 자체는 그 토큰으로 진행한다 -
+    // 발급기가 준 토큰을 버리고 503 을 내는 것보다, 이번 요청을 살리고 다음 요청이
+    // 새로 발급하는 쪽이 가용성에서 옳다.
     const nearExpiry = jwtWithExpiry('near-expiry', 4 * 60 * 1000);
     const fresh = jwtWithExpiry('fresh', 60 * 60 * 1000);
     const fetchIdToken = mockClientMinting([nearExpiry, fresh]);
     const audience = 'https://jvm-weekly.example/refresh-margin';
 
-    // 발급 결과 자체가 마진 안쪽이면 캐시에 넣지 않고 실패로 처리한다.
-    await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).rejects.toMatchObject({
-      code: 'jvm_weekly_api_identity_token_unavailable',
-    });
+    await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).resolves.toBe(nearExpiry);
+    await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).resolves.toBe(fresh);
+    // 첫 토큰이 캐시되지 않았으므로 두 번째 요청은 새로 발급한다.
+    expect(fetchIdToken).toHaveBeenCalledTimes(2);
+    // 새 토큰은 정상 캐시된다.
     await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).resolves.toBe(fresh);
     expect(fetchIdToken).toHaveBeenCalledTimes(2);
   });
@@ -97,7 +99,10 @@ describe('java weekly identity token cache', () => {
 
   it('drops only the failed key so the next request can recover', async () => {
     const audience = 'https://jvm-weekly.example/recover';
-    getIdTokenClient.mockRejectedValueOnce(new Error('signer down'));
+    // 발급은 호출당 두 번 시도한다. 확정 실패를 만들려면 두 번 다 죽여야 한다.
+    getIdTokenClient
+      .mockRejectedValueOnce(new Error('signer down'))
+      .mockRejectedValueOnce(new Error('signer still down'));
     await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).rejects.toMatchObject({
       code: 'jvm_weekly_api_identity_token_unavailable',
     });
@@ -117,7 +122,38 @@ describe('java weekly identity token cache', () => {
     const assertion = expect(pending).rejects.toMatchObject({
       code: 'jvm_weekly_api_identity_token_unavailable',
     });
-    await vi.advanceTimersByTimeAsync(8_000);
+    // 시도당 8s, 새 클라이언트로 한 번 더 - 최악 16s 에서 확정 실패한다.
+    await vi.advanceTimersByTimeAsync(16_000);
     await assertion;
+  });
+
+  it('retries once with a fresh client before failing the waiters', async () => {
+    // 한 번의 일시 장애(서명 클라이언트 오염 등)가 대기 중인 요청 전부를
+    // 동시 503 으로 만들지 않게, 실패하면 새 클라이언트로 정확히 한 번 더 발급한다.
+    const recovered = jwtWithExpiry('second-attempt', 60 * 60 * 1000);
+    const fetchIdToken = vi.fn()
+      .mockRejectedValueOnce(new Error('transient signer error'))
+      .mockResolvedValue(recovered);
+    getIdTokenClient.mockResolvedValue({ idTokenProvider: { fetchIdToken } });
+    const audience = 'https://jvm-weekly.example/retry-once';
+
+    await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).resolves.toBe(recovered);
+    expect(fetchIdToken).toHaveBeenCalledTimes(2);
+    // 재시도는 오염됐을 수 있는 클라이언트를 버리고 새로 만든다.
+    expect(getIdTokenClient).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps serving when the minted expiry cannot be trusted, without caching it', async () => {
+    // 시계 스큐나 exp 파싱 실패는 판정 불능이지 인증 실패가 아니다. 요청은 그 토큰으로
+    // 진행하고 캐시만 하지 않는다 - 느려질 뿐 멈추지 않는다.
+    const skewed = jwtWithExpiry('clock-skew', -60 * 1000);
+    const fetchIdToken = vi.fn(async () => skewed);
+    getIdTokenClient.mockResolvedValue({ idTokenProvider: { fetchIdToken } });
+    const audience = 'https://jvm-weekly.example/clock-skew';
+
+    await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).resolves.toBe(skewed);
+    await expect(fetchGoogleIdentityToken(fetch, audience, serviceAccountJson)).resolves.toBe(skewed);
+    // 캐시가 없으니 매번 발급한다. 전면 차단(영구 503)이 아니라는 것이 요점이다.
+    expect(fetchIdToken).toHaveBeenCalledTimes(2);
   });
 });

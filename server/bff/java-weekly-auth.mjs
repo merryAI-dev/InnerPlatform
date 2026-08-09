@@ -34,8 +34,12 @@ export function isWorkspaceUser(context, workspaceEmailDomain = 'mysc.co.kr') {
 // 규칙:
 //   - 같은 키의 동시 요청은 발급 하나를 공유한다 (single-flight).
 //   - 만료 5분 전부터는 새로 발급한다. 경계에서 만료 직전 토큰을 들고 나가지 않게.
-//   - 발급에는 자체 데드라인(8s)을 건다. 토큰 발급이 라우트 예산 전체를 먹으면
-//     사용자는 원인 코드 대신 504 만 본다.
+//   - 발급 시도당 데드라인 8s, 실패하면 새 클라이언트로 한 번 더 (최악 16s).
+//     한 번의 일시 장애가 대기 중인 요청 전부를 동시 503 으로 만들지 않게 하고,
+//     attempt 예산 24s 인 쓰기 경로가 8s 짜리 단일 시도에 조기 절단되지 않게 한다.
+//     읽기 경로는 자체 attempt 타임아웃(12s)이 먼저 끊으므로 영향 없다.
+//   - 발급된 토큰의 exp 가 이상해도(시계 스큐, 파싱 실패) 요청은 그 토큰으로 계속
+//     진행한다. 캐시만 하지 않는다. 판정 불능이 가용성 손실이 되면 안 된다.
 //   - 실패는 해당 키만 버린다. 전체를 비우면 한 요청의 일시 장애가 무관한 audience 의
 //     정상 토큰까지 축출해 발급 폭주(thundering herd)를 만든다.
 const IDENTITY_TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
@@ -62,11 +66,23 @@ async function mintIdentityToken(cacheKey, audience, credentials) {
   // 토큰 문자열이 필요할 뿐이므로 공식 발급 API 를 쓴다. 헤더 형태에 의존하지 않는다.
   const token = readOptionalText(await client.idTokenProvider.fetchIdToken(audience));
   if (!token) throw new Error('Missing identity token');
-  const expiryMs = decodeJwtExpiryMs(token);
-  if (expiryMs <= Date.now() + IDENTITY_TOKEN_REFRESH_MARGIN_MS) {
-    throw new Error('Identity token expiry is invalid or too near');
-  }
-  return { token, expiryMs };
+  return { token, expiryMs: decodeJwtExpiryMs(token) };
+}
+
+function raceMintTimeout(mint) {
+  let timeoutId;
+  // 타임아웃이 이긴 뒤 배경에 남은 발급이 늦게 거부되어도 프로세스를 흔들지 않게.
+  mint.catch(() => {});
+  return Promise.race([
+    mint,
+    new Promise((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error('Identity token mint timed out')),
+        IDENTITY_TOKEN_MINT_TIMEOUT_MS,
+      );
+      timeoutId.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timeoutId));
 }
 
 export function __clearIdentityTokenCachesForTest() {
@@ -88,22 +104,28 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
   }
   try {
     // 발급 중이면 그 발급을 같이 기다린다. 동시 N 요청이 N 번 서명하지 않게.
+    // 재시도까지 mintPromise 안에 접어 넣어, 대기자들이 두 시도를 함께 공유한다.
     let mintPromise = cached?.mintPromise;
     if (!mintPromise) {
-      let timeoutId;
-      mintPromise = Promise.race([
-        mintIdentityToken(cacheKey, audience, credentials),
-        new Promise((_, reject) => {
-          timeoutId = setTimeout(
-            () => reject(new Error('Identity token mint timed out')),
-            IDENTITY_TOKEN_MINT_TIMEOUT_MS,
-          );
-        }),
-      ]).finally(() => clearTimeout(timeoutId));
+      mintPromise = (async () => {
+        try {
+          return await raceMintTimeout(mintIdentityToken(cacheKey, audience, credentials));
+        } catch {
+          // 서명 클라이언트가 오염됐을 수 있다. 새 클라이언트로 정확히 한 번 더.
+          identityTokenClients.delete(cacheKey);
+          return raceMintTimeout(mintIdentityToken(cacheKey, audience, credentials));
+        }
+      })();
       identityTokenCache.set(cacheKey, { ...(cached || {}), mintPromise });
     }
     const minted = await mintPromise;
-    identityTokenCache.set(cacheKey, { token: minted.token, expiryMs: minted.expiryMs });
+    if (minted.expiryMs > Date.now() + IDENTITY_TOKEN_REFRESH_MARGIN_MS) {
+      identityTokenCache.set(cacheKey, { token: minted.token, expiryMs: minted.expiryMs });
+    } else {
+      // exp 를 신뢰할 수 없으면(시계 스큐, 파싱 실패) 캐시 없이 이 요청만 진행한다.
+      // 느려질 뿐 멈추지 않는다 - 판정 불능을 전면 차단으로 바꾸지 않는다.
+      identityTokenCache.delete(cacheKey);
+    }
     return minted.token;
   } catch {
     identityTokenClients.delete(cacheKey);
