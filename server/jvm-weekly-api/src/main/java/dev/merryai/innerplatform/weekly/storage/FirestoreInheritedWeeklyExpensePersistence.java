@@ -33,6 +33,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmatio
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationExpiredException;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
+import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenApprovalPolicy;
@@ -594,7 +595,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             String key = monthStateKey(actor.tenantId(), projectId, yearMonth);
             Map<String, Object> close = closedMonthDocuments.get(yearMonth);
             if (close == null) continue;
-            LocalDate deadline = YearMonth.parse(yearMonth).plusMonths(1).atDay(10);
+            LocalDate deadline = CashflowCloseDeadline.forTargetMonth(YearMonth.parse(yearMonth));
             boolean postDeadline = businessDate.isAfter(deadline);
             long closeRevision = canonicalMonthCounter(close, "revision");
             addMonthCounters(closeRevision, 1);
@@ -3855,7 +3856,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private LocalDate monthCloseDeadline(YearMonth cycleOrTargetMonth, boolean cumulative) {
-        return cumulative ? cycleOrTargetMonth.atDay(10) : cycleOrTargetMonth.plusMonths(1).atDay(10);
+        return CashflowCloseDeadline.forMonth(cycleOrTargetMonth, cumulative);
     }
 
     private void requireCashflowSheetPublicationReady(String tenantId, String projectId) {
