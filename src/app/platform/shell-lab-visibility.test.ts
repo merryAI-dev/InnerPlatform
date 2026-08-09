@@ -40,7 +40,6 @@ describe('shell LAB visibility', () => {
       '/business-cards',
       '/board',
       '/evidence',
-      '/bank-reconciliation',
       '/payroll',
       '/budget-summary',
       '/expense-management',
