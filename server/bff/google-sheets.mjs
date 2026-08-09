@@ -4,6 +4,9 @@ import { resolveServiceAccount } from './firestore.mjs';
 
 const SHEETS_API_BASE_URL = 'https://sheets.googleapis.com/v4';
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
+// 변경 감지용. 시트 내용을 읽지 않고 파일 메타데이터(modifiedTime)만 본다.
+const DRIVE_METADATA_SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
+const DRIVE_FILES_API_BASE_URL = 'https://www.googleapis.com/drive/v3';
 
 export class GoogleSheetsServiceError extends Error {
   constructor(message, options = {}) {
@@ -155,6 +158,40 @@ export function createGoogleSheetsService(options = {}) {
       });
     }
     return jwtClient.getRequestHeaders();
+  }
+
+  let driveMetadataJwtClient = null;
+
+  // 시트가 바뀌었는지 "싸게" 묻는다 (Drive files.get, ~수십 ms). 시트 본문 읽기(수 초)와
+  // 분리하는 것이 핵심이다 - 검색엔진이 쿼리마다 크롤링하지 않는 것과 같은 원리로,
+  // 변경이 없으면 고정본을 그대로 쓴다. 같은 서비스 계정을 쓰므로 시트가 SA 에
+  // 공유돼 있으면 메타데이터도 읽힌다.
+  async function getSpreadsheetFreshness(value) {
+    const spreadsheetId = extractSpreadsheetId(value);
+    if (!spreadsheetId) return null;
+    assertConfigured();
+    if (!driveMetadataJwtClient) {
+      driveMetadataJwtClient = new JWT({
+        email: config.serviceAccount.client_email,
+        key: config.serviceAccount.private_key,
+        scopes: [DRIVE_METADATA_SCOPE],
+      });
+    }
+    const authHeaders = await driveMetadataJwtClient.getRequestHeaders();
+    const response = await fetchImpl(
+      `${DRIVE_FILES_API_BASE_URL}/files/${encodeURIComponent(spreadsheetId)}?supportsAllDrives=true&fields=modifiedTime,version`,
+      { headers: { ...authHeaders } },
+    );
+    if (!response.ok) {
+      throw new GoogleSheetsServiceError(
+        '시트 변경 여부를 확인하지 못했습니다.',
+        { statusCode: response.status, code: 'spreadsheet_freshness_unavailable' },
+      );
+    }
+    const payload = await readJsonResponse(response);
+    const modifiedTime = readOptionalText(payload?.modifiedTime);
+    if (!modifiedTime) return null;
+    return { spreadsheetId, modifiedTime, version: readOptionalText(payload?.version) };
   }
 
   async function sheetsFetch(pathname, init = {}, accessToken) {
@@ -337,6 +374,7 @@ export function createGoogleSheetsService(options = {}) {
     serviceAccountEmail: readOptionalText(config.serviceAccount?.client_email),
     getServiceAccountEmail: () => readOptionalText(config.serviceAccount?.client_email),
     getSpreadsheetMeta,
+    getSpreadsheetFreshness,
     getSheetValues,
     batchUpdateValues,
     previewSpreadsheet,

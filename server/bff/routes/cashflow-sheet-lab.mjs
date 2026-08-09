@@ -4128,6 +4128,11 @@ export function mountCashflowSheetLabRoutes(app, {
     googleSheetsService,
     cacheTtlMs: sheetPreviewCacheTtlMs,
   });
+  const loadSheetFreshness = (value) => (
+    typeof googleSheetsService?.getSpreadsheetFreshness === 'function'
+      ? googleSheetsService.getSpreadsheetFreshness(value)
+      : Promise.resolve(null)
+  );
   const deployEnv = readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() || 'local';
   const authoritativeWritesEnabled = deployEnv === 'live'
     || (deployEnv === 'local' && Boolean(javaWeeklyClient));
@@ -4252,6 +4257,29 @@ export function mountCashflowSheetLabRoutes(app, {
     ) {
       throw createHttpError(409, '같은 idempotencyKey에 다른 시트 연동 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
     }
+    // 시트 검색 원칙: 읽기 요청이 크롤링을 트리거하지 않는다. 시트가 안 바뀌었으면
+    // (Drive modifiedTime 대조, ~수십 ms) 풀 리드·파싱·JVM 대조·저장을 전부 건너뛰고
+    // 고정본을 그대로 돌려준다. 저장된 modifiedTime 은 항상 데이터 읽기 "이전"에 찍은
+    // 값이라, 경합이 나면 불필요한 풀 리드 쪽으로만 틀린다 - 낡은 데이터를 최신이라고
+    // 말하는 방향으로는 틀리지 않는다.
+    let freshness = null;
+    if (
+      previousMirror?.status === 'FRESH'
+      && readOptionalText(previousMirror?.sourceFileModifiedTime)
+      && readOptionalText(previousMirror?.lastRefreshRequestHash) === refreshRequestHash
+    ) {
+      freshness = await trace.measure(
+        'freshness_probe',
+        () => loadSheetFreshness(source.value).catch(() => null),
+      );
+      if (freshness?.modifiedTime && freshness.modifiedTime === previousMirror.sourceFileModifiedTime) {
+        logCashflowSheetLab('mirror.refresh.unchanged', req, {
+          projectId,
+          sourceFileModifiedTime: freshness.modifiedTime,
+        });
+        return { ...previousMirror, unchanged: true, freshnessCheckedAt: attemptedAt };
+      }
+    }
     const refreshRun = await trace.measure(
       'refresh_reserve',
       () => beginCashflowSheetRefreshRun({
@@ -4292,6 +4320,12 @@ export function mountCashflowSheetLabRoutes(app, {
     });
 
     try {
+      if (!freshness) {
+        freshness = await trace.measure(
+          'freshness_probe',
+          () => loadSheetFreshness(source.value).catch(() => null),
+        );
+      }
       const preview = await trace.measure(
         'google_sheet_fetch',
         () => loadSheetPreview({
@@ -4347,6 +4381,8 @@ export function mountCashflowSheetLabRoutes(app, {
         activeWeeks: buildActiveWeeksFromTemplate(template, weekRange),
       };
       mirror.configRevision = configRevision;
+      // 데이터 읽기 이전에 찍은 값. 다음 불러오기의 변경 감지 기준.
+      mirror.sourceFileModifiedTime = freshness?.modifiedTime || null;
       mirror.lastRefreshAttemptAt = attemptedAt;
       mirror.lastRefreshIdempotencyKey = parsed.idempotencyKey;
       mirror.lastRefreshRequestHash = refreshRequestHash;
