@@ -86,4 +86,19 @@ class CashflowLineCatalogTest {
         assertThat(CashflowLineCatalog.canonicalize("UNREVIEWED_CALLER_LINE")).isBlank();
         assertThat(CashflowLineCatalog.canonicalize("매출액(입금)")).isEqualTo("SALES_IN");
     }
+
+    @Test
+    void monthCellCountIsTheSingleSourceForTheScattered160Literals() {
+        // 애노테이션 상수(@Size 등)는 컴파일 상수여야 해서 리터럴로 남는다. 그 리터럴들이
+        // 카탈로그 파생값과 같음을 여기서 고정한다 - 라인을 추가하면 이 테스트가 깨지면서
+        // EXPECTED_CELL_COUNT 와 BFF 쪽 계약도 함께 갱신해야 함을 알린다.
+        assertThat(CashflowLineCatalog.ALL_LINES).hasSize(16);
+        assertThat(CashflowLineCatalog.monthCellCount()).isEqualTo(160);
+        assertThat(
+            dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT
+        ).isEqualTo(CashflowLineCatalog.monthCellCount());
+        assertThat(
+            dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
+        ).isEqualTo(CashflowLineCatalog.WEEKS_PER_MONTH);
+    }
 }

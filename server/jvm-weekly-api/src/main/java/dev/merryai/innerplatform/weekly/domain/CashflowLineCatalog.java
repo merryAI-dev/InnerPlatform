@@ -30,6 +30,21 @@ public final class CashflowLineCatalog {
         .concat(IN_LINES.stream(), OUT_LINES.stream())
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
+    /** projection + actual. */
+    public static final int MODE_COUNT = 2;
+
+    /** 재무 주차는 월당 5주 고정 (좌표 계약 E:BL = 12개월 x 5주). */
+    public static final int WEEKS_PER_MONTH = 5;
+
+    /**
+     * 한 달 결산 셀 수 = 라인 x 모드 x 주차. api/storage 에 흩어진 리터럴 160 의 근원.
+     * 애노테이션 상수는 컴파일 상수여야 해서 리터럴로 남지만, 그 리터럴들이 이 값과
+     * 같음을 테스트가 고정한다 - 라인이 추가되면 여기서 함께 깨진다.
+     */
+    public static int monthCellCount() {
+        return ALL_LINES.size() * MODE_COUNT * WEEKS_PER_MONTH;
+    }
+
     private static final Map<String, String> ALIASES = Map.ofEntries(
         Map.entry("MYSC_PREPAY_IN", "MYSC_PREPAY_IN"),
         Map.entry("MYSC 선입금(잔금 등 입금 필요 시)", "MYSC_PREPAY_IN"),
