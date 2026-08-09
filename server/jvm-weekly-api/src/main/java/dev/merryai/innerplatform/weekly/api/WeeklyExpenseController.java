@@ -29,6 +29,8 @@ import org.springframework.web.server.ResponseStatusException;
 import dev.merryai.innerplatform.weekly.domain.CashflowWeekTotals;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -822,11 +824,24 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody CashflowSheetAnnualApplyRequest request
     ) {
+        // HTTP 표현은 여기까지다. 서비스에는 런타임 중립 커맨드와 도메인 셀만 넘긴다.
         return commandService.applyCashflowSheetAnnualTotal(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
             editSession(httpRequest),
-            request
+            new CashflowSheetAnnualApplyCommand(
+                request.idempotencyKey(),
+                request.sourceRevision(),
+                request.year(),
+                request.expectedRevision(),
+                request.cells().stream()
+                    .map(cell -> new CashflowAnnualCellSet.Cell(
+                        cell.mode(), cell.cashflowLine(), cell.cellState(),
+                        cell.amount(), cell.sourceCell(), cell.sourceLabel()
+                    ))
+                    .toList(),
+                request.amendmentReason()
+            )
         );
     }
 

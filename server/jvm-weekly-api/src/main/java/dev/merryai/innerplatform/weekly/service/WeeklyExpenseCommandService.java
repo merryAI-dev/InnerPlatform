@@ -1,5 +1,7 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
@@ -16,7 +18,6 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
-import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetOperationStatusResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
@@ -2088,7 +2089,7 @@ public class WeeklyExpenseCommandService {
         TrustedActorContext actor,
         String projectId,
         CashflowEditSession editSession,
-        CashflowSheetAnnualApplyRequest request
+        CashflowSheetAnnualApplyCommand request
     ) {
         TrustedActorContext writer = requireCashflowWritePermission(
             CASHFLOW_SHEET_LAB_APPLY_COMMAND,
@@ -2106,7 +2107,7 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        CashflowSheetAnnualApplyRequest.requireCompleteYear(request.cells());
+        CashflowAnnualCellSet.requireComplete(request.cells());
         assertAtomicWriteBudget(1, 2, "Cashflow annual total apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         List<String> annualMonths = java.util.stream.IntStream.rangeClosed(1, 12)

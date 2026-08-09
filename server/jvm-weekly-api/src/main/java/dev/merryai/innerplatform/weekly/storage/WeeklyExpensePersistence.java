@@ -1,5 +1,7 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
@@ -12,7 +14,6 @@ import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
-import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
@@ -643,7 +644,7 @@ public interface WeeklyExpensePersistence {
         String tenantId,
         String projectId,
         String sourceSheetKey,
-        CashflowSheetAnnualApplyRequest request
+        CashflowSheetAnnualApplyCommand request
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,

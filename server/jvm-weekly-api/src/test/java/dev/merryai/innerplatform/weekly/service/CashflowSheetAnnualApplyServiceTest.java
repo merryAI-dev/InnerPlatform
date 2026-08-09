@@ -1,8 +1,9 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
-import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
@@ -49,7 +50,7 @@ class CashflowSheetAnnualApplyServiceTest {
         ));
         when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        CashflowSheetAnnualApplyRequest request = new CashflowSheetAnnualApplyRequest(
+        CashflowSheetAnnualApplyCommand request = new CashflowSheetAnnualApplyCommand(
             "annual-apply-1", SOURCE_REVISION, 2025, 3, completeCells()
         );
 
@@ -65,12 +66,12 @@ class CashflowSheetAnnualApplyServiceTest {
         );
     }
 
-    private static List<CashflowSheetAnnualApplyRequest.Cell> completeCells() {
-        List<CashflowSheetAnnualApplyRequest.Cell> cells = new ArrayList<>();
+    private static List<CashflowAnnualCellSet.Cell> completeCells() {
+        List<CashflowAnnualCellSet.Cell> cells = new ArrayList<>();
         for (String mode : List.of("projection", "actual")) {
             for (String lineId : CashflowLineCatalog.ALL_LINES) {
                 boolean explicitValue = "MYSC_PREPAY_IN".equals(lineId);
-                cells.add(new CashflowSheetAnnualApplyRequest.Cell(
+                cells.add(new CashflowAnnualCellSet.Cell(
                     mode,
                     lineId,
                     explicitValue ? ("projection".equals(mode) ? "ZERO" : "VALUE") : "EMPTY",
