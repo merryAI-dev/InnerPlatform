@@ -36,6 +36,7 @@ import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
+import dev.merryai.innerplatform.weekly.domain.CashflowCloseHash;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenApprovalPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowSettlementApproverPolicy;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
@@ -2782,15 +2783,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private static Object normalizedRevisionNumber(Number number) {
-        BigDecimal value = number instanceof BigDecimal decimal
-            ? decimal
-            : new BigDecimal(number.toString());
-        value = value.signum() == 0 ? BigDecimal.ZERO : value.stripTrailingZeros();
-        try {
-            return value.longValueExact();
-        } catch (ArithmeticException ignored) {
-            return value;
-        }
+        return CashflowCloseHash.normalizedNumber(number);
     }
 
     private static boolean isFinite(Number number) {
@@ -3766,30 +3759,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     String hashCanonicalJson(Map<String, Object> value) {
-        try {
-            String json = JSON.writeValueAsString(canonicalValue(value));
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(json.getBytes(StandardCharsets.UTF_8));
-            return "sha256:" + HexFormat.of().formatHex(digest);
-        } catch (JsonProcessingException | NoSuchAlgorithmException error) {
-            throw new IllegalStateException("Could not hash cashflow month close snapshot.", error);
-        }
-    }
-
-    private Object canonicalValue(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> sorted = new TreeMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                sorted.put(String.valueOf(entry.getKey()), canonicalValue(entry.getValue()));
-            }
-            return sorted;
-        }
-        if (value instanceof Iterable<?> iterable) {
-            List<Object> values = new ArrayList<>();
-            for (Object item : iterable) values.add(canonicalValue(item));
-            return values;
-        }
-        if (value instanceof Number number) return normalizedRevisionNumber(number);
-        return value;
+        return CashflowCloseHash.hash(value);
     }
 
     private Map<String, Object> merge(Map<String, Object> current, Map<String, Object> patch) {

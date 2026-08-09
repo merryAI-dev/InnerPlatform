@@ -10,6 +10,7 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseBankImportLineRe
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseIdempotencyRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
+import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
@@ -369,9 +370,7 @@ class WeeklyExpenseControllerTest {
         WeeklyExpensePersistence snapshotPersistence = mock(WeeklyExpensePersistence.class);
         when(snapshotPersistence.findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year"))
             .thenReturn(null);
-        WeeklyExpenseController snapshotController = new WeeklyExpenseController(
-            snapshotCommandService, snapshotPersistence, false
-        );
+        WeeklyExpenseController snapshotController = new WeeklyExpenseController(snapshotCommandService, new CashflowReadService(snapshotPersistence), false);
 
         CashflowSnapshotResponse response = snapshotController.cashflowSnapshot(
             "project-no-year", "tenant-no-year", "viewer-no-year", "viewer", "viewer@example.com"
@@ -1615,11 +1614,7 @@ class WeeklyExpenseControllerTest {
             )
         ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
-            dashboardCommandService,
-            dashboardPersistence,
-            false
-        ).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
             "project-month-dashboard",
             "2026-06",
             "tenant-month-dashboard",
@@ -1683,9 +1678,7 @@ class WeeklyExpenseControllerTest {
             java.math.BigDecimal.ZERO, true
         ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
-            dashboardCommandService, dashboardPersistence, false
-        ).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
             "project-no-year", "2026-06", "tenant-no-year", "viewer-no-year", "viewer", "viewer@example.com"
         );
 
@@ -1730,11 +1723,7 @@ class WeeklyExpenseControllerTest {
                 null, null, null, null, null, null, null, "audit-1"
             ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
-            dashboardCommandService,
-            dashboardPersistence,
-            false
-        ).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
             "project-frozen",
             "2026-06",
             "tenant-frozen",
@@ -1811,11 +1800,7 @@ class WeeklyExpenseControllerTest {
             )
         ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
-            dashboardCommandService,
-            dashboardPersistence,
-            false
-        ).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
             "project-amended",
             "2026-06",
             "tenant-amended",
@@ -1900,11 +1885,7 @@ class WeeklyExpenseControllerTest {
             )
         ));
 
-        WeeklyExpenseController controller = new WeeklyExpenseController(
-            dashboardCommandService,
-            dashboardPersistence,
-            false
-        );
+        WeeklyExpenseController controller = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false);
         assertThatThrownBy(() -> controller.readCashflowMonthDashboardSource(
             "project-drift",
             "2026-06",
@@ -1937,11 +1918,7 @@ class WeeklyExpenseControllerTest {
                 null, null, null, null, null, null, null, "audit-legacy"
             ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
-            dashboardCommandService,
-            dashboardPersistence,
-            false
-        ).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
             "project-legacy-frozen",
             "2026-06",
             "tenant-frozen",

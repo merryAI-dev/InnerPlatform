@@ -1,6 +1,7 @@
 package dev.merryai.innerplatform.weekly.api;
 
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthCellSet;
 import dev.merryai.innerplatform.weekly.domain.CashflowFormulaValidator;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -196,73 +197,19 @@ public record CashflowSheetLabApplyRequest(
     }
 
     public static List<Cell> requireCompleteMonth(List<Cell> cells) {
-        if (cells == null || cells.size() != EXPECTED_CELL_COUNT) {
-            throw new IllegalArgumentException(
-                "Cashflow sheet month must contain exactly five weeks with complete cells (160 cells)."
-            );
-        }
-
-        Map<String, Cell> cellsByKey = new LinkedHashMap<>();
-        for (Cell cell : cells) {
-            if (cell == null || cell.weekNo() < 1 || cell.weekNo() > FINANCE_WEEK_COUNT) {
-                throw new IllegalArgumentException("Cashflow sheet month must contain exactly five weeks.");
-            }
-            String lineId = CashflowLineCatalog.canonicalize(cell.cashflowLine());
-            if (lineId.isBlank() || !CashflowLineCatalog.ALL_LINES.contains(lineId)) {
-                throw new IllegalArgumentException("Unsupported cashflow line.");
-            }
-            String state = cell.cellState() == null
-                ? ""
-                : cell.cellState().trim().toUpperCase(Locale.ROOT);
-            if (("VALUE".equals(state) || "ZERO".equals(state)) && cell.amount() == null) {
-                throw new IllegalArgumentException("VALUE cashflow cells require an amount.");
-            }
-            if ("VALUE".equals(state) || "ZERO".equals(state)) {
-                try {
-                    cell.amount().longValueExact();
-                } catch (ArithmeticException error) {
-                    throw new IllegalArgumentException(
-                        "Cashflow amounts must be whole won values in the supported range."
-                    );
-                }
-            }
-            if ("ZERO".equals(state) && cell.amount().compareTo(BigDecimal.ZERO) != 0) {
-                throw new IllegalArgumentException("ZERO cashflow cells require an explicit zero amount.");
-            }
-            if ("EMPTY".equals(state) && cell.amount() != null) {
-                throw new IllegalArgumentException("EMPTY cashflow cells must not include an amount.");
-            }
-            if (!"VALUE".equals(state) && !"ZERO".equals(state) && !"EMPTY".equals(state)) {
-                throw new IllegalArgumentException("Cashflow cellState must be VALUE, ZERO, or EMPTY.");
-            }
-
-            Cell canonical = new Cell(
-                cell.mode(),
-                cell.weekNo(),
-                lineId,
-                state,
-                cell.amount(),
-                cell.sourceCell(),
-                cell.sourceLabel()
-            );
-            String key = canonical.mode() + ":" + canonical.weekNo() + ":" + canonical.cashflowLine();
-            if (cellsByKey.putIfAbsent(key, canonical) != null) {
-                throw new IllegalArgumentException("Cashflow sheet month contains duplicate cells.");
-            }
-        }
-
-        for (int weekNo = 1; weekNo <= FINANCE_WEEK_COUNT; weekNo += 1) {
-            for (String mode : List.of("projection", "actual")) {
-                for (String lineId : CashflowLineCatalog.ALL_LINES) {
-                    if (!cellsByKey.containsKey(mode + ":" + weekNo + ":" + lineId)) {
-                        throw new IllegalArgumentException(
-                            "Cashflow sheet month must contain complete cells for exactly five weeks."
-                        );
-                    }
-                }
-            }
-        }
-        return List.copyOf(cellsByKey.values());
+        // 규칙은 domain/CashflowMonthCellSet 에 있다. 여기는 표현 <-> 도메인 매핑만 한다.
+        List<CashflowMonthCellSet.Cell> domainCells = cells == null ? null : cells.stream()
+            .map(cell -> cell == null ? null : new CashflowMonthCellSet.Cell(
+                cell.mode(), cell.weekNo(), cell.cashflowLine(), cell.cellState(),
+                cell.amount(), cell.sourceCell(), cell.sourceLabel()
+            ))
+            .toList();
+        return CashflowMonthCellSet.requireComplete(domainCells).stream()
+            .map(cell -> new Cell(
+                cell.mode(), cell.weekNo(), cell.cashflowLine(), cell.cellState(),
+                cell.amount(), cell.sourceCell(), cell.sourceLabel()
+            ))
+            .toList();
     }
 
     public static List<Map<String, Object>> recalculateCalculationChecks(

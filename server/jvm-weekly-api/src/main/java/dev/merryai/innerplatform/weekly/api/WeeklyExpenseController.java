@@ -23,6 +23,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.server.ResponseStatusException;
+import dev.merryai.innerplatform.weekly.domain.CashflowWeekTotals;
+import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 
 import java.math.BigDecimal;
@@ -41,16 +43,16 @@ public class WeeklyExpenseController {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
     private final WeeklyExpenseCommandService commandService;
-    private final WeeklyExpensePersistence persistence;
+    private final CashflowReadService readService;
     private final boolean legacyWeekCloseEnabled;
 
     public WeeklyExpenseController(
         WeeklyExpenseCommandService commandService,
-        WeeklyExpensePersistence persistence,
+        CashflowReadService readService,
         @Value("${weekly.legacy-week-close-enabled:false}") boolean legacyWeekCloseEnabled
     ) {
         this.commandService = commandService;
-        this.persistence = persistence;
+        this.readService = readService;
         this.legacyWeekCloseEnabled = legacyWeekCloseEnabled;
     }
 
@@ -283,7 +285,7 @@ public class WeeklyExpenseController {
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
         commandService.requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
-        Integer weeklyYear = persistence.findCashflowDeclaredWeeklyYear(tenantId, projectId);
+        Integer weeklyYear = readService.declaredWeeklyYear(tenantId, projectId);
         WeeklyExpensePersistence.CashflowLedgerSource source = weeklyYear == null
             ? new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of())
             : readCashflowSource(tenantId, projectId, weeklyYear);
@@ -308,7 +310,7 @@ public class WeeklyExpenseController {
         String projectId,
         int weeklyYear
     ) {
-        return persistence.findCashflowLedgerSource(tenantId, projectId, weeklyYear);
+        return readService.ledgerSource(tenantId, projectId, weeklyYear);
     }
 
     private CashflowSnapshotResponse buildCashflowSnapshot(
@@ -481,7 +483,7 @@ public class WeeklyExpenseController {
             : open
                 ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
                 : frozenSnapshotCompatibility(monthClose);
-        Integer weeklyYear = open ? persistence.findCashflowDeclaredWeeklyYear(tenantId, projectId) : null;
+        Integer weeklyYear = open ? readService.declaredWeeklyYear(tenantId, projectId) : null;
         List<CashflowMonthDashboardSourceResponse.Blocker> blockers = open && weeklyYear == null
             ? List.of(new CashflowMonthDashboardSourceResponse.Blocker(
                 "SHEET_SOURCE_REQUIRED",
@@ -489,7 +491,7 @@ public class WeeklyExpenseController {
             ))
             : List.of();
         WeeklyExpensePersistence.CashflowLedgerSource source = amendedClosed
-            ? persistence.findCashflowGlobalLedgerSource(tenantId, projectId)
+            ? readService.globalLedgerSource(tenantId, projectId)
             : open && weeklyYear != null
                 ? readCashflowSource(tenantId, projectId, weeklyYear)
                 : open
@@ -497,7 +499,7 @@ public class WeeklyExpenseController {
                     : null;
         CashflowSnapshotResponse cashflow = currentLedgerView ? buildCashflowSnapshot(projectId, source) : null;
         CashflowOpeningBalancesResponse openingBalances = currentLedgerView
-            ? toOpeningBalancesResponse(persistence.findCashflowOpeningBalance(
+            ? toOpeningBalancesResponse(readService.openingBalance(
                 tenantId,
                 projectId,
                 Integer.parseInt(yearMonth.substring(0, 4))
@@ -525,8 +527,7 @@ public class WeeklyExpenseController {
             }
             monthClose = verified;
         }
-        WeeklyExpensePersistence.CashflowCumulativeCloseHead cumulative = persistence
-            .findCashflowCumulativeCloseHead(tenantId, projectId);
+        WeeklyExpensePersistence.CashflowCumulativeCloseHead cumulative = readService.cumulativeCloseHead(tenantId, projectId);
         if (cumulative == null) {
             cumulative = new WeeklyExpensePersistence.CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
         }
@@ -873,7 +874,7 @@ public class WeeklyExpenseController {
         commandService.requireProjectAllowed(WeeklyExpenseCommandService.WEEKLY_STATUS_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
         return new WeeklyExpenseStatusesResponse(
             projectId,
-            persistence.findWeeklyStatuses(tenantId, projectId).stream()
+            readService.weeklyStatuses(tenantId, projectId).stream()
                 .map(status -> new WeeklyExpenseStatusesResponse.WeeklyStatusLine(
                     status.getProjectId() + "-" + status.getYearMonth() + "-w" + status.getWeekNo(),
                     status.getProjectId(),
@@ -969,7 +970,7 @@ public class WeeklyExpenseController {
             amountsByMonth
                 .computeIfAbsent(line.yearMonth(), ignored -> new TreeMap<>())
                 .computeIfAbsent(line.weekNo(), ignored -> new LinkedHashMap<>())
-                .merge(lineId, safeAmount(line.amount()), BigDecimal::add);
+                .merge(lineId, CashflowWeekTotals.safeAmount(line.amount()), BigDecimal::add);
         }
 
         Map<String, CashflowSnapshotResponse.ModeReadModel> readModels = new LinkedHashMap<>();
@@ -985,8 +986,8 @@ public class WeeklyExpenseController {
                 for (Map.Entry<String, BigDecimal> amountEntry : weekAmounts.entrySet()) {
                     rowTotals.merge(amountEntry.getKey(), amountEntry.getValue(), BigDecimal::add);
                 }
-                BigDecimal weekIn = sumLines(weekAmounts, CashflowLineCatalog.IN_LINES);
-                BigDecimal weekOut = sumLines(weekAmounts, CashflowLineCatalog.OUT_LINES);
+                BigDecimal weekIn = CashflowWeekTotals.sumLines(weekAmounts, CashflowLineCatalog.IN_LINES);
+                BigDecimal weekOut = CashflowWeekTotals.sumLines(weekAmounts, CashflowLineCatalog.OUT_LINES);
                 monthIn = monthIn.add(weekIn);
                 monthOut = monthOut.add(weekOut);
                 runningIn = runningIn.add(weekIn);
@@ -1031,21 +1032,11 @@ public class WeeklyExpenseController {
             .sorted(Comparator.comparing(Map.Entry::getKey))
             .collect(
                 LinkedHashMap::new,
-                (target, entry) -> target.put(entry.getKey(), safeAmount(entry.getValue())),
+                (target, entry) -> target.put(entry.getKey(), CashflowWeekTotals.safeAmount(entry.getValue())),
                 LinkedHashMap::putAll
             );
     }
 
-    private BigDecimal sumLines(Map<String, BigDecimal> amounts, Set<String> lineIds) {
-        return amounts.entrySet().stream()
-            .filter(entry -> lineIds.contains(entry.getKey()))
-            .map(entry -> safeAmount(entry.getValue()))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    private BigDecimal safeAmount(BigDecimal amount) {
-        return amount == null ? BigDecimal.ZERO : amount;
-    }
 
     private void requireCashflowWeeklyUpdateScope(String yearMonth, int weekNo) {
         if (

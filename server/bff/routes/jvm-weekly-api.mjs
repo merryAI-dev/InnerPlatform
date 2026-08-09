@@ -23,10 +23,10 @@ import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-a
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import { WEEKS_PER_MONTH, annualYearsFor, weekOrdinal } from '../cashflow-coordinates.mjs';
 import { TENANT_WIDE_PROJECT_ROLES, isProjectInActorScope } from '../cashflow-project-scope.mjs';
+import { cashflowCloseHash } from '../cashflow-close-hash.mjs';
 import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
 
 export { cashflowMonthCloseDeadline };
-import { createHash } from 'node:crypto';
 
 const CASHFLOW_MANAGEMENT_CHECK_IDS = [
   'labor-transfer',
@@ -163,9 +163,6 @@ function cashflowMonthCloseRequestMonthPath(tenantId, requestId, revision, yearM
   return `orgs/${tenantId}/cashflow_month_close_request_months/${requestId}-r${revision}-${yearMonth}`;
 }
 
-function cashflowCloseHash(value) {
-  return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
-}
 
 export function buildCashflowMonthCloseRevisionChanges(previousCells, currentCells) {
   const key = (cell) => `${cell.mode}|${cell.weekNo}|${cell.cashflowLine}`;
