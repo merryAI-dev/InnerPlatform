@@ -18,11 +18,77 @@ export function isWorkspaceUser(context, workspaceEmailDomain = 'mysc.co.kr') {
   return Boolean(domain) && email.endsWith(`@${domain}`);
 }
 
-// audience+자격증명별 IdTokenClient 캐시. 클라이언트는 토큰 만료를 스스로 관리하며
-// 갱신하므로(google-auth-library), 요청마다 GoogleAuth 를 새로 만들어 RS256 서명
-// 왕복을 반복할 이유가 없다. month-close 한 번에 JVM 호출이 두 번이라 이 비용이
-// 요청마다 두 배로 들었다. 캐시 키에 자격증명을 포함해 SA 교체 시 자연히 분리된다.
+// ── JVM 호출용 ID 토큰 캐시 ────────────────────────────────────────────────
+//
+// 토큰 "문자열"을 우리가 직접 캐시한다. 만료는 발급받은 JWT 의 exp 클레임에서 읽는다.
+// 이렇게 하면 두 가지에서 자유로워진다.
+//
+//   1) 라이브러리 내부 캐시/헤더 형태. getRequestHeaders() 는 v9 가 평범한 객체를,
+//      v10 이 Headers 를 반환한다. 그 형태를 긁는 코드는 설치 트리가 바뀌는 순간
+//      조용히 죽는다 - 실제로 전 요청 503 을 만들 뻔했다. 여기서는 클라이언트를
+//      "새 토큰이 필요할 때"만 쓰고, 평소에는 우리가 검증해 둔 문자열을 돌려준다.
+//   2) 발급 왕복. RS256 서명 + oauth2.googleapis.com 교환은 수백 ms 다. month-close
+//      읽기 한 번에 JVM 호출이 여러 번이라, 이 비용이 매 호출마다 들면 사용자에게
+//      "서버가 느립니다"로 보인다. 정상 상태에서 발급은 토큰 수명(1시간)당 한 번이다.
+//
+// 규칙:
+//   - 같은 키의 동시 요청은 발급 하나를 공유한다 (single-flight).
+//   - 만료 5분 전부터는 새로 발급한다. 경계에서 만료 직전 토큰을 들고 나가지 않게.
+//   - 발급 시도당 데드라인 8s, 실패하면 새 클라이언트로 한 번 더 (최악 16s).
+//     한 번의 일시 장애가 대기 중인 요청 전부를 동시 503 으로 만들지 않게 하고,
+//     attempt 예산 24s 인 쓰기 경로가 8s 짜리 단일 시도에 조기 절단되지 않게 한다.
+//     읽기 경로는 자체 attempt 타임아웃(12s)이 먼저 끊으므로 영향 없다.
+//   - 발급된 토큰의 exp 가 이상해도(시계 스큐, 파싱 실패) 요청은 그 토큰으로 계속
+//     진행한다. 캐시만 하지 않는다. 판정 불능이 가용성 손실이 되면 안 된다.
+//   - 실패는 해당 키만 버린다. 전체를 비우면 한 요청의 일시 장애가 무관한 audience 의
+//     정상 토큰까지 축출해 발급 폭주(thundering herd)를 만든다.
+const IDENTITY_TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+const IDENTITY_TOKEN_MINT_TIMEOUT_MS = 8_000;
 const identityTokenClients = new Map();
+const identityTokenCache = new Map();
+
+function decodeJwtExpiryMs(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString('utf8'));
+    return Number.isSafeInteger(payload?.exp) ? payload.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function mintIdentityToken(cacheKey, audience, credentials) {
+  let clientPromise = identityTokenClients.get(cacheKey);
+  if (!clientPromise) {
+    clientPromise = new GoogleAuth({ credentials }).getIdTokenClient(audience);
+    identityTokenClients.set(cacheKey, clientPromise);
+  }
+  const client = await clientPromise;
+  // 토큰 문자열이 필요할 뿐이므로 공식 발급 API 를 쓴다. 헤더 형태에 의존하지 않는다.
+  const token = readOptionalText(await client.idTokenProvider.fetchIdToken(audience));
+  if (!token) throw new Error('Missing identity token');
+  return { token, expiryMs: decodeJwtExpiryMs(token) };
+}
+
+function raceMintTimeout(mint) {
+  let timeoutId;
+  // 타임아웃이 이긴 뒤 배경에 남은 발급이 늦게 거부되어도 프로세스를 흔들지 않게.
+  mint.catch(() => {});
+  return Promise.race([
+    mint,
+    new Promise((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error('Identity token mint timed out')),
+        IDENTITY_TOKEN_MINT_TIMEOUT_MS,
+      );
+      timeoutId.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timeoutId));
+}
+
+export function __clearIdentityTokenCachesForTest() {
+  identityTokenClients.clear();
+  identityTokenCache.clear();
+}
 
 async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
   let credentials;
@@ -32,30 +98,38 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
     throw createHttpError(503, '서버 인증 정보가 올바르지 않습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
   const cacheKey = `${credentials.client_email || ''}\n${audience}`;
+  const cached = identityTokenCache.get(cacheKey);
+  if (cached?.token && cached.expiryMs > Date.now() + IDENTITY_TOKEN_REFRESH_MARGIN_MS) {
+    return cached.token;
+  }
   try {
-    let clientPromise = identityTokenClients.get(cacheKey);
-    if (!clientPromise) {
-      clientPromise = new GoogleAuth({ credentials }).getIdTokenClient(audience);
-      identityTokenClients.set(cacheKey, clientPromise);
+    // 발급 중이면 그 발급을 같이 기다린다. 동시 N 요청이 N 번 서명하지 않게.
+    // 재시도까지 mintPromise 안에 접어 넣어, 대기자들이 두 시도를 함께 공유한다.
+    let mintPromise = cached?.mintPromise;
+    if (!mintPromise) {
+      mintPromise = (async () => {
+        try {
+          return await raceMintTimeout(mintIdentityToken(cacheKey, audience, credentials));
+        } catch {
+          // 서명 클라이언트가 오염됐을 수 있다. 새 클라이언트로 정확히 한 번 더.
+          identityTokenClients.delete(cacheKey);
+          return raceMintTimeout(mintIdentityToken(cacheKey, audience, credentials));
+        }
+      })();
+      identityTokenCache.set(cacheKey, { ...(cached || {}), mintPromise });
     }
-    const client = await clientPromise;
-    // google-auth-library v9 는 getRequestHeaders() 가 평범한 객체를, v10 은 Headers 를
-    // 반환한다. 이 패키지는 hoist 로 끌려오는 간접 의존성이라(직접 선언은 package.json 참고)
-    // 설치 트리가 바뀌면 반환 타입도 조용히 바뀐다. 둘 다 읽는다 - v10 에서 .Authorization 만
-    // 읽으면 undefined 가 되어 전 요청이 503 으로 죽는다.
-    const rawHeaders = await client.getRequestHeaders();
-    const authorization = readOptionalText(
-      typeof rawHeaders?.get === 'function'
-        ? rawHeaders.get('authorization')
-        : (rawHeaders?.Authorization ?? rawHeaders?.authorization),
-    );
-    const token = authorization.replace(/^Bearer\s+/i, '');
-    if (!token) throw new Error('Missing identity token');
-    return token;
+    const minted = await mintPromise;
+    if (minted.expiryMs > Date.now() + IDENTITY_TOKEN_REFRESH_MARGIN_MS) {
+      identityTokenCache.set(cacheKey, { token: minted.token, expiryMs: minted.expiryMs });
+    } else {
+      // exp 를 신뢰할 수 없으면(시계 스큐, 파싱 실패) 캐시 없이 이 요청만 진행한다.
+      // 느려질 뿐 멈추지 않는다 - 판정 불능을 전면 차단으로 바꾸지 않는다.
+      identityTokenCache.delete(cacheKey);
+    }
+    return minted.token;
   } catch {
-    // 실패한 키만 버린다. Map 전체를 비우면 한 요청의 일시적 실패가 다른 audience 의
-    // 정상 클라이언트까지 축출해 동시 요청 전부가 토큰을 다시 서명하게 된다.
     identityTokenClients.delete(cacheKey);
+    identityTokenCache.delete(cacheKey);
     throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
 }
