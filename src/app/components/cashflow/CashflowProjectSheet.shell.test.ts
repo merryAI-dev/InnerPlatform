@@ -302,19 +302,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('setInterval');
   });
 
-  it('checks linked sheet changes on entry without applying them', () => {
-    expect(source).toContain('checkCashflowSheetChangesViaBff');
-    expect(source).toContain("status: 'CHECKING'");
-    expect(source).toContain('setCashflowSheetChangeCheck(result)');
-    expect(source).toContain('const sheetChangeCount = [');
-    expect(source).toContain('cashflowSheetChangeCheck?.comparisons.jvmToFirestore');
-    expect(source).toContain('변경 ${sheetChangeCount.toLocaleString()}건');
-    expect(source).toContain('onClick={handleOpenSheetReviewDialog}');
-    expect(source).toMatch(/const handleOpenSheetReviewDialog = useCallback\(\(\) => \{\s*setSheetReviewDialogOpen\(true\);\s*\}, \[\]\);/);
-    expect(source).not.toContain("['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm]");
-    expect(source).not.toContain("['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore]");
-    expect(source).not.toContain("['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore]");
-    expect(source).not.toContain('시트 변경 확인 불가');
+  it('probes sheet freshness on entry without a full read', () => {
+    // 진입은 modifiedTime 만 싸게 대조한다. 시트 풀 리드(checkCashflowSheetChangesViaBff)는
+    // 진입 경로에서 사라졌고, 사용자가 '시트 불러오기' 를 누를 때만 일어난다.
+    expect(source).toContain('probeCashflowSheetFreshnessViaBff');
+    expect(source).toContain('setCashflowSheetFreshness');
+    expect(source).toContain('sheetChangedSinceMirror');
+    expect(source).not.toContain('checkCashflowSheetChangesViaBff');
+    expect(source).not.toContain('const sheetChangeCount = [');
+    expect(source).not.toContain('변경 ${sheetChangeCount.toLocaleString()}건');
+    // 버튼 통일: '변경 N건' 별도 버튼 제거, 단일 '시트 불러오기' 가 배지를 겸한다.
+    expect(source).toContain('시트 변경됨 · 불러오기');
+    expect(source).not.toContain('onClick={handleOpenSheetReviewDialog}');
     expect(source).toContain('시트 이동');
     expect(source).toContain('href={configuredSheetUrl}');
     expect(source).toContain('target="_blank"');

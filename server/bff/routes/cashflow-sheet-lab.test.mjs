@@ -1129,6 +1129,61 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
+  it('probes freshness on entry without reading the sheet (cheap change badge)', async () => {
+    // 진입 전용 경량 엔드포인트. 시트 풀 리드 없이 modifiedTime 만 대조한다.
+    const projectDoc = {
+      id: 'project-a', contractStart: '2024-01-01', contractEnd: '2028-12-31',
+      cashflowSheetLab: {
+        value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+        sheetName: 'cashflow(사용내역 연동)', startWeek: '26-1-1', endWeek: '26-1-1',
+      },
+    };
+    const previewSpreadsheet = vi.fn();
+    let modifiedTime = '2026-08-09T10:00:00.000Z';
+    const getSpreadsheetFreshness = vi.fn(async () => ({ spreadsheetId: 'spreadsheet-a', modifiedTime, version: '3' }));
+
+    // 미러가 없으면 '불러오기 필요'
+    const emptyDb = createDb({ project: projectDoc });
+    const before = await request(
+      createApp({ db: emptyDb, googleSheetsService: { previewSpreadsheet, getSpreadsheetFreshness } }),
+    ).post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/probe').send({}).expect(200);
+    expect(before.body).toMatchObject({ status: 'AVAILABLE', mirrorLoaded: false, sheetChangedSinceMirror: true });
+
+    // 미러를 modifiedTime 과 함께 심은 db (불러온 상태)
+    const db = createDb({
+      project: projectDoc,
+      initialDocuments: {
+        'orgs/tenant-a/cashflow_sheet_mirrors/project-a': {
+          projectId: 'project-a', status: 'FRESH', sourceRevision: 'sha256:abc',
+          sourceFileModifiedTime: modifiedTime,
+        },
+      },
+    });
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet, getSpreadsheetFreshness } });
+
+    // 변경 없음 -> 시트 안 읽음
+    const unchanged = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/probe')
+      .send({}).expect(200);
+    expect(unchanged.body).toMatchObject({ mirrorLoaded: true, sheetChangedSinceMirror: false });
+    expect(previewSpreadsheet).not.toHaveBeenCalled();
+
+    // 시트가 바뀌면 changed=true (여전히 풀 리드는 안 함)
+    modifiedTime = '2026-08-09T11:00:00.000Z';
+    const changed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/probe')
+      .send({}).expect(200);
+    expect(changed.body).toMatchObject({ mirrorLoaded: true, sheetChangedSinceMirror: true });
+    expect(previewSpreadsheet).not.toHaveBeenCalled();
+
+    // probe 실패는 '변경 없음'이라 하지 않는다 (판정 불능)
+    getSpreadsheetFreshness.mockRejectedValueOnce(new Error('drive down'));
+    const failed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/probe')
+      .send({}).expect(200);
+    expect(failed.body.status).toBe('UNAVAILABLE');
+  });
+
   it('skips the whole pipeline when the sheet has not changed (freshness fast-path)', async () => {
     // 검색엔진 원칙: 읽기 요청이 크롤링을 트리거하지 않는다. 시트가 안 바뀌었으면
     // 두 번째 불러오기는 Drive modifiedTime 한 번만 묻고 고정본을 그대로 돌려준다.
