@@ -37,6 +37,7 @@ import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenApprovalPolicy;
+import dev.merryai.innerplatform.weekly.domain.CashflowSettlementApproverPolicy;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditExportEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseBankImportBatchEntity;
@@ -384,7 +385,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 DocumentSnapshot snapshot = get(projectRef);
                 return snapshot.exists() ? data(snapshot) : Map.of();
             });
-            if (!isDesignatedCashflowSettlementApprover(project, actor.id())) {
+            if (!CashflowSettlementApproverPolicy.isDesignatedApprover(
+                textValue(project == null ? null : project.get("executiveApproverId")),
+                actor.id()
+            )) {
                 throw leaseError(
                     403,
                     "cashflow_settlement_approval_forbidden",
@@ -444,11 +448,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         );
     }
 
-    static boolean isDesignatedCashflowSettlementApprover(Map<String, Object> project, String actorId) {
-        return actorId != null && !actorId.isBlank() && actorId.equals(textValue(
-            project == null ? null : project.get("executiveApproverId")
-        ));
-    }
 
     private Map<String, Object> settlementStatusDocument(String tenantId, String projectId, String yearMonth) {
         DocumentSnapshot snapshot = get(settlementStatusRef(tenantId, projectId, yearMonth));

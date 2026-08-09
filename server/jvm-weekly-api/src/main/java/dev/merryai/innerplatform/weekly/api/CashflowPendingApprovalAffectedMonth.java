@@ -76,7 +76,7 @@ public record CashflowPendingApprovalAffectedMonth(
                 if (difference.truncatedChangeCount() != 0
                     || difference.differenceCount() != difference.changes().size()
                     || difference.changes().isEmpty()
-                    || difference.changes().size() > 160) {
+                    || difference.changes().size() > CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT) {
                     throw new IllegalArgumentException("Pending approval difference details are incomplete.");
                 }
                 Set<Integer> weeks = new HashSet<>();
@@ -149,9 +149,9 @@ public record CashflowPendingApprovalAffectedMonth(
         @NotBlank @Pattern(regexp = "PENDING|APPROVING|UNCERTAIN") String requestStatus,
         @NotBlank @Pattern(regexp = "sha256:[a-f0-9]{64}") String requestManifestHash,
         @NotBlank @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])") String yearMonth,
-        @Min(1) @Max(160) int differenceCount,
+        @Min(1) @Max(CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT) int differenceCount,
         @NotNull @Size(min = 1, max = 5) List<@Min(1) @Max(5) Integer> weeks,
-        @Valid @NotNull @Size(min = 1, max = 160) List<Change> changes,
+        @Valid @NotNull @Size(min = 1, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT) List<Change> changes,
         @Min(0) @Max(0) int truncatedChangeCount
     ) {
         public ApprovalDifference {
