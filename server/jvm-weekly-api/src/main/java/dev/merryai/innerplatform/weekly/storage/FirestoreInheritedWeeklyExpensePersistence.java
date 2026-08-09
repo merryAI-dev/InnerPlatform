@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.core.ApiFuture;
@@ -23,8 +24,6 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
-import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
-import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
@@ -1846,7 +1845,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     public CashflowMonthCloseRecord requestCashflowMonthReopen(
         TrustedActorContext actor,
         String projectId,
-        RequestCashflowMonthReopenRequest request
+        CashflowMonthReopenCommands.RequestReopen request
     ) {
         requireYearMonth(request.yearMonth());
         Map<String, Object> cumulativeHead = cumulativeCloseHead(actor.tenantId(), projectId);
@@ -1907,7 +1906,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     public CashflowMonthCloseRecord decideCashflowMonthReopen(
         TrustedActorContext actor,
         String projectId,
-        DecideCashflowMonthReopenRequest request
+        CashflowMonthReopenCommands.DecideReopen request
     ) {
         requireYearMonth(request.yearMonth());
         Map<String, Object> cumulativeHead = cumulativeCloseHead(actor.tenantId(), projectId);

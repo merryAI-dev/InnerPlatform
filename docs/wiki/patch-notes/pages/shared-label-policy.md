@@ -3,7 +3,7 @@
 - route: `shared / policy`
 - primary users: 운영자, QA, 개발자
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-08-09
 
 ## Purpose
 
@@ -25,6 +25,8 @@
 - [ ] 다른 enum 도메인까지 같은 정책 구조로 확장됨
 
 ## Recent Changes
+
+- [2026-08-09] 한 달 결산 셀 수(라인 x 모드 2 x 주차 5)를 policy JSON 파생 상수 `CASHFLOW_MONTH_CELL_COUNT` 로 통합했다. BFF 라우트의 리터럴 160(샤드 검증 포함)과 사용자 문구가 전부 이 상수를 따르고, JVM `CashflowLineCatalog.monthCellCount()` 와의 일치는 양쪽 parity 테스트가 같은 JSON 을 대조해 고정한다.
 
 - [2026-04-15] `cashflow` label <-> enum <-> sheet line id <-> export label 기준을 JSON source of truth로 통합했다.
 - [2026-04-15] `bank-import-cashflow`, `settlement-csv`, `types`, `server/bff/cashflow-export`가 policy 데이터를 공유하도록 정리했다.

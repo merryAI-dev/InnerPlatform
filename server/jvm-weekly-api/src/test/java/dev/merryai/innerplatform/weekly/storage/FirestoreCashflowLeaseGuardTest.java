@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.firestore.CollectionReference;
 import com.google.cloud.firestore.DocumentReference;
@@ -27,8 +28,6 @@ import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyUpdateCompletionResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyComplianceHistoryResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
-import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
-import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
@@ -3694,7 +3693,7 @@ class FirestoreCashflowLeaseGuardTest {
             ACTOR,
             "project-a",
             "other-data-project",
-            new RequestCashflowMonthReopenRequest("reopen-wrong-project", "2026-06", 1, "정정 필요")
+            new CashflowMonthReopenCommands.RequestReopen("reopen-wrong-project", "2026-06", 1, "정정 필요")
         )))
             .isInstanceOf(WeeklyExpenseEditLeaseException.class)
             .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
@@ -3739,7 +3738,7 @@ class FirestoreCashflowLeaseGuardTest {
             ACTOR,
             "project-a",
             "stage-data-project",
-            new RequestCashflowMonthReopenRequest("reopen-request-1", "2026-06", 1, "6월 입금 반영 오류 수정")
+            new CashflowMonthReopenCommands.RequestReopen("reopen-request-1", "2026-06", 1, "6월 입금 반영 오류 수정")
         ));
         assertThat(requested.status()).isEqualTo("REOPEN_REQUESTED");
         assertThat(requested.reopenReason()).isEqualTo("6월 입금 반영 오류 수정");
@@ -3754,7 +3753,7 @@ class FirestoreCashflowLeaseGuardTest {
             "role", "finance",
             "projectIds", List.of()
         )));
-        DecideCashflowMonthReopenRequest decision = new DecideCashflowMonthReopenRequest(
+        CashflowMonthReopenCommands.DecideReopen decision = new CashflowMonthReopenCommands.DecideReopen(
             "reopen-decision-1",
             "2026-06",
             requested.revision(),
@@ -3830,7 +3829,7 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
             ACTOR,
             "project-a",
-            new RequestCashflowMonthReopenRequest("legacy-request", "2026-06", 1, "레거시 정정")
+            new CashflowMonthReopenCommands.RequestReopen("legacy-request", "2026-06", 1, "레거시 정정")
         ));
         Map<String, Object> close = fixture.documents.get(monthClosePath("project-a", "2026-06"));
         ((Map<String, Object>) close.get("reopenRequest")).remove("requestedByUid");
@@ -3839,7 +3838,7 @@ class FirestoreCashflowLeaseGuardTest {
             fixture.persistence.decideCashflowMonthReopen(
                 ACTOR,
                 "project-a",
-                new DecideCashflowMonthReopenRequest("legacy-decision", "2026-06", 2, "APPROVE", "승인")
+                new CashflowMonthReopenCommands.DecideReopen("legacy-decision", "2026-06", 2, "APPROVE", "승인")
             )
         );
 
@@ -3915,7 +3914,7 @@ class FirestoreCashflowLeaseGuardTest {
             fixture.persistence.requestCashflowMonthReopen(
                 ACTOR,
                 "project-a",
-                new RequestCashflowMonthReopenRequest("legacy-write-guard", "2026-06", 1, "증빙 재확인")
+                new CashflowMonthReopenCommands.RequestReopen("legacy-write-guard", "2026-06", 1, "증빙 재확인")
             )
         ))
             .isInstanceOf(WeeklyExpenseConflictException.class)
@@ -3950,7 +3949,7 @@ class FirestoreCashflowLeaseGuardTest {
             revisionFixture.persistence.requestCashflowMonthReopen(
                 ACTOR,
                 "project-a",
-                new RequestCashflowMonthReopenRequest(
+                new CashflowMonthReopenCommands.RequestReopen(
                     "overflow-revision",
                     "2026-06",
                     Long.MAX_VALUE,
@@ -4355,12 +4354,12 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
             .closeCashflowMonth(ACTOR, "project-a", SESSION, first));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
-            ACTOR, "project-a", new RequestCashflowMonthReopenRequest(
+            ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
                 "legacy-reopen-request", "2026-08", 1, "레거시 결산 정정"
             )
         ));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            FINANCE_ACTOR, "project-a", new DecideCashflowMonthReopenRequest(
+            FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen(
                 "legacy-reopen-decision", "2026-08", 2, "APPROVE", "정정 승인"
             )
         ));
@@ -4419,15 +4418,15 @@ class FirestoreCashflowLeaseGuardTest {
         ));
 
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> fixture.persistence
-            .requestCashflowMonthReopen(ACTOR, "project-a", new RequestCashflowMonthReopenRequest(
+            .requestCashflowMonthReopen(ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
                 "reopen-old", "2026-07", 1, "과거 월"
             )))).isInstanceOf(WeeklyExpenseConflictException.class).hasMessageContaining("latest");
 
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
-            ACTOR, "project-a", new RequestCashflowMonthReopenRequest("reopen-latest", "2026-08", 1, "정정")
+            ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen("reopen-latest", "2026-08", 1, "정정")
         ));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            FINANCE_ACTOR, "project-a", new DecideCashflowMonthReopenRequest("reopen-decision", "2026-08", 2, "APPROVE", "승인")
+            FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen("reopen-decision", "2026-08", 2, "APPROVE", "승인")
         ));
 
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
@@ -4453,10 +4452,10 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.documents.put(completionPath, lockedWeeklyCompletion("2026-07", 1, 1));
 
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
-            ACTOR, "project-a", new RequestCashflowMonthReopenRequest("reopen-request", "2026-08", 1, "정정")
+            ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen("reopen-request", "2026-08", 1, "정정")
         ));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            FINANCE_ACTOR, "project-a", new DecideCashflowMonthReopenRequest("reopen-decision", "2026-08", 2, "APPROVE", "승인")
+            FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen("reopen-decision", "2026-08", 2, "APPROVE", "승인")
         ));
 
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))

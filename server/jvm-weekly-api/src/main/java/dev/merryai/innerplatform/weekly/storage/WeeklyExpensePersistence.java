@@ -1,12 +1,11 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
-import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
-import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
@@ -549,7 +548,7 @@ public interface WeeklyExpensePersistence {
     default CashflowMonthCloseRecord requestCashflowMonthReopen(
         TrustedActorContext actor,
         String projectId,
-        RequestCashflowMonthReopenRequest request
+        CashflowMonthReopenCommands.RequestReopen request
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,
@@ -561,7 +560,7 @@ public interface WeeklyExpensePersistence {
     default CashflowMonthCloseRecord decideCashflowMonthReopen(
         TrustedActorContext actor,
         String projectId,
-        DecideCashflowMonthReopenRequest request
+        CashflowMonthReopenCommands.DecideReopen request
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,

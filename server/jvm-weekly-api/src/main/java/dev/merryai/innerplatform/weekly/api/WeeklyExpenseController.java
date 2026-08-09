@@ -25,6 +25,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.server.ResponseStatusException;
 import dev.merryai.innerplatform.weekly.domain.CashflowWeekTotals;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 
 import java.math.BigDecimal;
@@ -707,11 +708,14 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody RequestCashflowMonthReopenRequest request
     ) {
+        // HTTP 표현은 여기까지다. 서비스에는 런타임 중립 커맨드만 넘긴다.
         return commandService.requestCashflowMonthReopen(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
             httpRequest.getHeader("x-data-project-id"),
-            request
+            new CashflowMonthReopenCommands.RequestReopen(
+                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason()
+            )
         );
     }
 
@@ -729,7 +733,10 @@ public class WeeklyExpenseController {
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
             httpRequest.getHeader("x-data-project-id"),
-            request
+            new CashflowMonthReopenCommands.DecideReopen(
+                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(),
+                request.decision(), request.reason()
+            )
         );
     }
 

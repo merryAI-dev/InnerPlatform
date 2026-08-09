@@ -17,13 +17,22 @@ import {
   buildCashflowProjectionActualComparison,
   resolveCashflowComparisonAsOf,
 } from '../cashflow-comparison.mjs';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, CASHFLOW_MONTH_CELL_COUNT } from '../cashflow-policy.mjs';
 import { stableStringify } from '../utils.mjs';
 import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import { WEEKS_PER_MONTH, annualYearsFor, weekOrdinal } from '../cashflow-coordinates.mjs';
 import { TENANT_WIDE_PROJECT_ROLES, isProjectInActorScope } from '../cashflow-project-scope.mjs';
 import { cashflowCloseHash } from '../cashflow-close-hash.mjs';
+import {
+  CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
+  CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+  cashflowCumulativeCloseCycle,
+  cumulativeCloseMonthsOrNull,
+  monthsBetween,
+  previousYearMonth,
+} from '../cashflow-close-calendar.mjs';
+export { cashflowCumulativeCloseCycle };
 import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
 
 export { cashflowMonthCloseDeadline };
@@ -38,8 +47,6 @@ const CASHFLOW_LINE_INDEX = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [l
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
 const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
 const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
-const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
-const CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH = '2023-01';
 
 function readWeeklyYear(value) {
   const year = Number(value);
@@ -588,9 +595,9 @@ function normalizeMonthCloseCells(cells, yearMonth) {
 }
 
 function completeMonthCloseCells(cells) {
-  if (cells.length !== CASHFLOW_ALL_LINES.length * 2 * 5) return false;
+  if (cells.length !== CASHFLOW_MONTH_CELL_COUNT) return false;
   const keys = new Set(cells.map((cell) => `${cell.mode}:${cell.weekNo}:${cell.cashflowLine}`));
-  return keys.size === CASHFLOW_ALL_LINES.length * 2 * 5;
+  return keys.size === CASHFLOW_MONTH_CELL_COUNT;
 }
 
 function sumSafe(values) {
@@ -1403,7 +1410,7 @@ function validConfirmationKeys(confirmations) {
 }
 
 function completeMonthCloseConfirmations(confirmations) {
-  const expectedCount = CASHFLOW_ALL_LINES.length * 2 * 5;
+  const expectedCount = CASHFLOW_MONTH_CELL_COUNT;
   return Array.isArray(confirmations)
     && confirmations.length === expectedCount
     && validConfirmationKeys(confirmations).size === expectedCount;
@@ -1472,31 +1479,11 @@ function projectMetadata(project) {
   };
 }
 
-function monthsBetween(startYearMonth, endYearMonth) {
-  const result = [];
-  let cursor = new Date(`${startYearMonth}-01T00:00:00Z`);
-  const end = new Date(`${endYearMonth}-01T00:00:00Z`);
-  while (cursor <= end && result.length < 240) {
-    result.push(cursor.toISOString().slice(0, 7));
-    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
-  }
-  return result;
-}
 
-function previousYearMonth(yearMonth) {
-  const month = new Date(`${yearMonth}-01T00:00:00Z`);
-  month.setUTCMonth(month.getUTCMonth() - 1);
-  return month.toISOString().slice(0, 7);
-}
-
+// 달력 규칙은 cashflow-close-calendar 에 있다. 여기는 "성립 불가"를 사용자 문구로 바꾼다.
 function cumulativeCloseMonths(yearMonth) {
-  const throughMonth = previousYearMonth(yearMonth);
-  const months = monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, throughMonth);
-  if (
-    throughMonth < CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
-    || months.length === 0
-    || months.at(-1) !== throughMonth
-  ) {
+  const months = cumulativeCloseMonthsOrNull(yearMonth);
+  if (months === null) {
     throw createHttpError(
       400,
       '누적 월 결산 범위는 2023-01부터 최대 240개월까지 선택할 수 있습니다.',
@@ -1587,17 +1574,6 @@ function assertCashflowSheetPublicationReady(state) {
 }
 
 
-export function cashflowCumulativeCloseCycle(yearMonth, businessDate) {
-  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(yearMonth))
-    || !/^20\d{2}-(0[1-9]|1[0-2])-\d{2}$/.test(String(businessDate))) return null;
-  const targetYearMonth = previousYearMonth(yearMonth);
-  return {
-    cycleYearMonth: yearMonth,
-    targetYearMonth,
-    deadline: `${yearMonth}-10`,
-    eligible: targetYearMonth < String(businessDate).slice(0, 7),
-  };
-}
 
 async function readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate = '' }) {
   if (!db?.collection) return [];
@@ -2091,7 +2067,7 @@ async function composeCashflowMonthDashboard({
     }
     blockers.push(...sheetControlBlockers(sheetFacts));
     blockers.push(...monthSheetCalculationBlockers(sheetFacts, yearMonth));
-    if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
+    if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: `선택한 월의 ${CASHFLOW_MONTH_CELL_COUNT}개 캐시플로우 값을 다시 불러와 주세요.` });
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
   }
   if (weeklyYear !== null && annualTotals.length !== annualYearsFor(weeklyYear).length) {
@@ -2131,7 +2107,7 @@ async function composeCashflowMonthDashboard({
     ? 100
     : Math.round((projectionSalesAndVatTotal / contractAmount) * 10_000) / 100;
   const projectionProgressPercent = Math.max(0, rawProjectionProgressPercent);
-  const requiredCellConfirmationCount = CASHFLOW_ALL_LINES.length * 2 * 5;
+  const requiredCellConfirmationCount = CASHFLOW_MONTH_CELL_COUNT;
   const requiredManagementConfirmationCount = CASHFLOW_MANAGEMENT_CHECK_IDS.length;
   const confirmationProgressPercent = Math.round(
     Math.min(
@@ -2272,7 +2248,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
   const project = projectSnap.exists ? projectSnap.data() || {} : {};
   const normalizedCells = normalizeMonthCloseCells(closeInput.cells, yearMonth);
   if (!completeMonthCloseCells(normalizedCells)) {
-    throw createHttpError(409, '월 결산 대상 160개 캐시플로우 값을 다시 확인해 주세요.', 'cashflow_month_close_cells_incomplete');
+    throw createHttpError(409, `월 결산 대상 ${CASHFLOW_MONTH_CELL_COUNT}개 캐시플로우 값을 다시 확인해 주세요.`, 'cashflow_month_close_cells_incomplete');
   }
   const sourceWarnings = [];
   if (!mirror) {
@@ -2336,7 +2312,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
     details: { requested: closeInput.managementChecks || [], authoritative: managementChecks },
   }];
   if (!completeMonthCloseConfirmations(closeInput.confirmations)) {
-    throw createHttpError(409, '월 결산 대상 160개 항목을 모두 확인해 주세요.', 'cashflow_month_close_confirmations_incomplete');
+    throw createHttpError(409, `월 결산 대상 ${CASHFLOW_MONTH_CELL_COUNT}개 항목을 모두 확인해 주세요.`, 'cashflow_month_close_confirmations_incomplete');
   }
   const deadlineSummary = deadlineSummaryFromCompliance(
     weeklyCompliance,
@@ -3282,7 +3258,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     ));
     const normalizedCells = normalizeMonthCloseCells(cells, yearMonth);
     if (!completeMonthCloseCells(normalizedCells)) {
-      throw createHttpError(409, '저장된 월 결산 160셀 근거를 확인할 수 없습니다.', 'cashflow_month_close_request_evidence_invalid');
+      throw createHttpError(409, `저장된 월 결산 ${CASHFLOW_MONTH_CELL_COUNT}셀 근거를 확인할 수 없습니다.`, 'cashflow_month_close_request_evidence_invalid');
     }
     return {
       projectId,
@@ -3491,7 +3467,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         manifestHash: manifest.manifestHash,
         monthCount: shards.length,
         weekCount: shards.length * 5,
-        cellCount: shards.length * 160,
+        cellCount: shards.length * CASHFLOW_MONTH_CELL_COUNT,
         source: prepared.shardSource,
         totals,
         annualSummaries,
@@ -3559,7 +3535,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       )).get();
       const stored = snapshot.exists ? snapshot.data() || {} : null;
       const { shardHash, ...base } = stored || {};
-      if (!stored || stored.cells?.length !== 160 || shardHash !== cashflowCloseHash(base)) {
+      if (!stored || stored.cells?.length !== CASHFLOW_MONTH_CELL_COUNT || shardHash !== cashflowCloseHash(base)) {
         throw createHttpError(409, '저장된 누적 월 결산 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
       }
       shards.push(stored);
@@ -3803,7 +3779,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       )).get();
       const stored = snapshot.exists ? snapshot.data() || {} : null;
       const { shardHash, ...base } = stored || {};
-      if (!stored || stored.cells?.length !== 160 || shardHash !== cashflowCloseHash(base)) {
+      if (!stored || stored.cells?.length !== CASHFLOW_MONTH_CELL_COUNT || shardHash !== cashflowCloseHash(base)) {
         throw createHttpError(409, '저장된 누적 월 결산 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
       }
       months.push(stored);
@@ -3857,7 +3833,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         || stored.projectId !== projectId
         || Number(stored.requestRevision) !== revision
         || stored.yearMonth !== throughMonth
-        || stored.cells?.length !== 160
+        || stored.cells?.length !== CASHFLOW_MONTH_CELL_COUNT
         || shardHash !== cashflowCloseHash(base)) {
         throw createHttpError(409, '저장된 revision 비교 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
       }
