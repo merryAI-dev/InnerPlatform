@@ -4622,6 +4622,15 @@ describe('JVM weekly API BFF proxy', () => {
       }
       if (init.method === 'POST') {
         const closeBody = JSON.parse(init.body);
+        // JVM requireCumulativeCloseApproval 이 실제로 요구하는 것: 확정을 받는 순간 헤더가
+        // APPROVING 이고 reviewIdempotencyKey 가 이번 확정 요청과 같아야 한다.
+        const header = source.documents.get('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08') || {};
+        expect({ status: header.status, reviewIdempotencyKey: header.reviewIdempotencyKey }).toEqual({
+          status: 'APPROVING',
+          reviewIdempotencyKey: closeBody.idempotencyKey,
+        });
+        expect(Number(header.revision)).toBe(closeBody.requestRevision);
+        expect(header.manifestHash).toBe(closeBody.manifestHash);
         closedMonthClose = {
           ok: true, projectId: 'project-a', requestId: 'project-a-2026-08', requestRevision: closeBody.requestRevision,
           manifestHash: closeBody.manifestHash, yearMonth: '2026-08', status: 'CLOSED',
@@ -4953,14 +4962,24 @@ describe('JVM weekly API BFF proxy', () => {
       status: 'COMPLETED', approvedBy: 'finance-1',
     });
     const closePostCount = () => fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST').length;
-    expect(closePostCount()).toBe(0);
+    // 승인은 JVM 확정까지 가야 한다. 여기서 멈추면 cumulative close head 가 비어 시트가 잠기지 않는다.
+    expect(closePostCount()).toBe(1);
+    expect(JSON.parse(fetchImpl.mock.calls.findLast(([url, init]) => url.endsWith('/month-close') && init.method === 'POST')[1].body)).toMatchObject({
+      idempotencyKey: 'cumulative-v2-approve',
+      yearMonth: '2026-08',
+      requestId: 'project-a-2026-08',
+      requestRevision: 2,
+      manifestHash: resubmitted.body.manifestHash,
+    });
+    expect(approvedResponse.body.monthClose).toMatchObject({ status: 'CLOSED', revision: 1 });
+    expect(source.documents.get(requestPath).reviewIdempotencyKey).toBe('cumulative-v2-approve');
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
       .set('idempotency-key', 'cumulative-v2-approve')
       .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(200)
       .expect((response) => expect(response.body).toEqual(approvedResponse.body));
-    expect(closePostCount()).toBe(0);
+    expect(closePostCount()).toBe(1);
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-approve-duplicate')
@@ -4982,7 +5001,8 @@ describe('JVM weekly API BFF proxy', () => {
         .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
         .expect(200)
         .expect((response) => expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 2 }));
-      expect(closePostCount()).toBe(0);
+      // 이미 확정된 것이 조회로 증명되므로 JVM 을 다시 치지 않는다.
+      expect(closePostCount()).toBe(1);
     }
     closedMonthClose = null;
     dashboardSourceUnavailable = true;
@@ -4996,7 +5016,8 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'resume-uncertain-repost')
       .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(200);
-    expect(closePostCount()).toBe(0);
+    // 확정 여부를 조회로 증명하지 못하면 같은 회차를 다시 확정 요청한다.
+    expect(closePostCount()).toBe(2);
     dashboardSourceUnavailable = false;
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
