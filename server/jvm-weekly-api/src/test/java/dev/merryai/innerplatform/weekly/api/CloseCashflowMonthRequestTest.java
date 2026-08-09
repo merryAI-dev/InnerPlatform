@@ -25,6 +25,46 @@ class CloseCashflowMonthRequestTest {
         assertThat(validator.validate(request)).isEmpty();
     }
 
+    /**
+     * BFF 가 조직장 승인 시 실제로 보내는 본문. 두 런타임의 테스트가 각자 객체를 손으로
+     * 만들면 JSON 이음매는 아무도 검증하지 않는다 - BFF 는 fetch 를 스텁하고 JVM 은 record 를
+     * 직접 만든다. 그래서 BFF 테스트가 캡처한 문자열을 그대로 여기에 둔다. 한쪽이 본문 모양을
+     * 바꾸면 이 테스트가 깨진다.
+     *
+     * 출처: server/bff/routes/jvm-weekly-api.test.mjs 의 status-review 승인 경로.
+     */
+    private static final String BFF_CUMULATIVE_APPROVAL_BODY = """
+        {"idempotencyKey":"cumulative-v2-approve","yearMonth":"2026-08","expectedRevision":0,\
+        "expectedDraftRevision":0,"humanReviewed":true,"requestId":"project-a-2026-08",\
+        "requestRevision":2,\
+        "manifestHash":"sha256:bf7b8f68cdbda3208c505fd76f7f642c08e8cf66abc31ddd11cfe6b1a93b2a08"}""";
+
+    @Test
+    void acceptsTheExactBodyTheBffSendsOnApproval() throws Exception {
+        CloseCashflowMonthRequest request = new ObjectMapper()
+            .readValue(BFF_CUMULATIVE_APPROVAL_BODY, CloseCashflowMonthRequest.class);
+
+        // 누적 계약으로 인식되어야 셀·입금일정·확인란 없이 통과한다.
+        assertThat(request.cumulativeV2()).isTrue();
+        assertThat(validator.validate(request)).isEmpty();
+
+        // requireCumulativeCloseApproval 이 헤더 대조에 쓰는 세 값이 그대로 도착해야 한다.
+        assertThat(request.requestId()).isEqualTo("project-a-2026-08");
+        assertThat(request.requestRevision()).isEqualTo(2);
+        assertThat(request.manifestHash())
+            .isEqualTo("sha256:bf7b8f68cdbda3208c505fd76f7f642c08e8cf66abc31ddd11cfe6b1a93b2a08");
+        assertThat(request.idempotencyKey()).isEqualTo("cumulative-v2-approve");
+        assertThat(request.yearMonth()).isEqualTo("2026-08");
+        assertThat(request.expectedRevision()).isEqualTo(0);
+
+        // 셀은 저장된 샤드에서 읽으므로 본문에는 없다. null 이 아니라 빈 목록으로 정규화된다.
+        assertThat(request.cells()).isEmpty();
+        assertThat(request.depositScheduleRows()).isEmpty();
+        assertThat(request.confirmations()).isEmpty();
+        assertThat(request.managementChecks()).isEmpty();
+        assertThat(request.openingBalances()).isNull();
+    }
+
     @Test
     void contractValidationFlagIsNotPartOfTheJvmJsonPayload() throws Exception {
         String json = new ObjectMapper().writeValueAsString(compactCumulativeRequest());
