@@ -100,7 +100,38 @@ describe.skipIf(!enabled)('AXR 프로젝트경비 월결산 end-to-end (BFF -> H
       expect(dashboard.status, JSON.stringify(dashboard.body).slice(0, 400)).toBe(200);
       expect(dashboard.body.status).toBe('OPEN');
 
-      const mirror = (await db.doc(`orgs/${TENANT}/cashflow_sheet_mirrors/${PROJECT}`).get()).data();
+      // 라이브에서 복사한 미러는 canonical 보다 낡아 있을 수 있다 (AXR프로젝트경비가 실제로
+      // 그렇다). 그 상태로 확정하면 JVM 이 "Cashflow target revision changed" 로 막는다.
+      // 월결산의 정상 전제는 "시트를 다시 불러와 반영한 직후" 이므로 그 상태로 맞춘다.
+      const canonical = await (await fetch(`${JVM}/api/v1/cashflow/${PROJECT}`, {
+        headers: {
+          'x-inner-platform-service-token': TOKEN,
+          'x-tenant-id': TENANT,
+          'x-actor-id': approverUid,
+          'x-actor-role': 'admin',
+          'x-actor-email': approver.email,
+        },
+      })).json();
+      const mirrorRef = db.doc(`orgs/${TENANT}/cashflow_sheet_mirrors/${PROJECT}`);
+      const pinned = (await mirrorRef.get()).data();
+      await mirrorRef.set({
+        ...pinned,
+        status: 'FRESH',
+        targetRevisionAtFetch: canonical.targetRevision,
+        appliedSourceRevision: pinned.sourceRevision,
+      });
+      const publicationRef = db.doc(`orgs/${TENANT}/cashflow_sheet_publications/${PROJECT}`);
+      const publication = (await publicationRef.get()).data();
+      await publicationRef.set({
+        ...publication,
+        status: 'APPLIED',
+        applyFailure: null,
+        applyFailedAt: null,
+        sourceRevision: pinned.sourceRevision,
+        appliedTargetRevision: canonical.targetRevision,
+        appliedAt: '2026-09-09T00:00:00.000Z',
+      });
+      const mirror = (await mirrorRef.get()).data();
       const closeInput = buildCashflowMonthCloseDraftInput({
         mirror: mirror as any,
         yearMonth: YEAR_MONTH,
