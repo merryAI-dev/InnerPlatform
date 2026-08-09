@@ -4219,13 +4219,21 @@ export function mountJvmWeeklyApiRoutes(app, {
         return;
       }
       await verifyCumulativeRequestShards(req.context.tenantId, initialRecord);
-      let approved;
+      // JVM 은 요청 헤더가 APPROVING 이고 reviewIdempotencyKey 가 이번 호출과 같을 때만 누적 확정을
+      // 받아준다 (requireCumulativeCloseApproval). 그래서 PENDING -> APPROVING -> JVM 확정 ->
+      // APPROVED 3 단계를 그대로 밟는다. 이 단계를 건너뛰면 JVM 월이 OPEN 으로 남고,
+      // cashflow_cumulative_close_heads.closedThrough 가 비어 시트 잠금과 변경 경고 누적이
+      // 통째로 동작하지 않는다.
+      const jvmMutationIdempotencyKey = readOptionalText(req.context.idempotencyKey);
+      if (!jvmMutationIdempotencyKey) {
+        throw createHttpError(400, '월 결산 승인에는 요청 키가 필요합니다.', 'cashflow_month_close_review_invalid');
+      }
+      let claimed;
       await db.runTransaction(async (transaction) => {
-        const [projectSnapshot, reviewerSnapshot, snapshot, settlementSnapshot] = await Promise.all([
+        const [projectSnapshot, reviewerSnapshot, snapshot] = await Promise.all([
           transaction.get(projectRef),
           transaction.get(reviewerRef),
           transaction.get(requestRef),
-          transaction.get(settlementStatusRef),
         ]);
         const currentProject = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
         const reviewer = reviewerSnapshot.exists ? reviewerSnapshot.data() || {} : {};
@@ -4239,14 +4247,80 @@ export function mountJvmWeeklyApiRoutes(app, {
           || readOptionalText(reviewer.status).toUpperCase() !== 'ACTIVE') {
           throw createHttpError(409, '이미 검토가 시작되었거나 변경된 월 결산 요청입니다.', 'cashflow_month_close_request_already_reviewed');
         }
-        approved = {
+        claimed = {
           ...current,
-          status: 'APPROVED',
+          status: 'APPROVING',
           reviewedByUid: req.context.actorId,
           reviewedAt,
           decisionReason: reason || null,
-          reviewIdempotencyKey: req.context.idempotencyKey,
+          reviewIdempotencyKey: jvmMutationIdempotencyKey,
         };
+        transaction.set(requestRef, claimed);
+      });
+      // 셀은 JVM 이 저장된 샤드에서 직접 읽는다. 여기서는 어느 요청·회차를 확정하는지만 지목한다.
+      const prepared = {
+        projectId: encodeURIComponent(projectId),
+        rawProjectId: projectId,
+        routeDeadlineAtMs: Date.now() + monthCloseRouteTimeoutMs,
+        closeBody: {
+          idempotencyKey: jvmMutationIdempotencyKey,
+          yearMonth: readOptionalText(claimed.yearMonth),
+          expectedRevision: Number(claimed.expectedRevision),
+          expectedDraftRevision: 0,
+          humanReviewed: true,
+          requestId,
+          requestRevision: expectedRevision,
+          manifestHash: readOptionalText(claimed.manifestHash),
+        },
+      };
+      let monthClose;
+      if (['APPROVING', 'UNCERTAIN'].includes(initialRecord.status)) {
+        // 앞선 시도가 이미 APPROVING 을 잡아둔 상태다. JVM 이 그 시도를 받았는지 모르므로 먼저
+        // 확인한다. 확정돼 있는데 다시 POST 하면 닫힌 월이라 반드시 실패한다.
+        const evidence = await reconcileCashflowMonthClose(req, prepared);
+        if (evidence.proven) monthClose = evidence.monthClose;
+      }
+      if (!monthClose) {
+        try {
+          monthClose = await executePreparedCashflowMonthClose(req, prepared);
+        } catch (error) {
+          if (readOptionalText(error?.code) === 'cashflow_month_close_reconciliation_pending') {
+            await db.runTransaction(async (transaction) => {
+              const snapshot = await transaction.get(requestRef);
+              const current = snapshot.exists ? snapshot.data() || {} : null;
+              if (
+                !current
+                || current.status !== 'APPROVING'
+                || Number(current.revision) !== expectedRevision
+                || current.reviewIdempotencyKey !== jvmMutationIdempotencyKey
+              ) return;
+              transaction.set(requestRef, {
+                ...current,
+                status: 'UNCERTAIN',
+                reconciliationEvidence: error.reconciliationEvidence,
+              });
+            });
+          }
+          throw error;
+        }
+      }
+      let approved;
+      await db.runTransaction(async (transaction) => {
+        const [snapshot, settlementSnapshot] = await Promise.all([
+          transaction.get(requestRef),
+          transaction.get(settlementStatusRef),
+        ]);
+        const current = snapshot.exists ? snapshot.data() || {} : null;
+        if (
+          !current
+          || !['APPROVING', 'UNCERTAIN'].includes(current.status)
+          || Number(current.revision) !== expectedRevision
+          || current.reviewIdempotencyKey !== jvmMutationIdempotencyKey
+        ) {
+          throw createHttpError(409, '월 결산 승인 상태가 변경되었습니다.', 'cashflow_month_close_request_revision_stale');
+        }
+        approved = { ...current, status: 'APPROVED', monthCloseResult: monthClose };
+        delete approved.reconciliationEvidence;
         transaction.set(requestRef, approved);
         completeMonthSettlement(transaction, settlementSnapshot);
         transaction.set(
@@ -4262,12 +4336,13 @@ export function mountJvmWeeklyApiRoutes(app, {
             manifestHash: approved.manifestHash,
             actorUid: req.context.actorId,
             reason: reason || null,
-            idempotencyKey: req.context.idempotencyKey,
+            idempotencyKey: jvmMutationIdempotencyKey,
+            jvmMutationIdempotencyKey,
             createdAt: reviewedAt,
           },
         );
       });
-      res.status(200).json({ request: cashflowMonthCloseRequestView(approved) });
+      res.status(200).json({ request: cashflowMonthCloseRequestView(approved), monthClose });
       return;
     }
     if (['APPROVED', 'REJECTED'].includes(initialRecord.status)) {
