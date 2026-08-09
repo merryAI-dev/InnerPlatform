@@ -341,6 +341,9 @@ export function createJavaWeeklyClient({
           attempt,
           outcome: 'error',
           statusCode: error?.statusCode || upstreamStatus,
+          // readJavaError 가 5xx 를 503 으로 정규화하므로, 원래 JVM 이 뭘 반환했는지는
+          // 이 필드가 없으면 로그에서 복구할 수 없다.
+          upstreamStatus: error?.upstreamStatus ?? upstreamStatus,
           retryable: !Number.isInteger(error?.statusCode) || Boolean(error?.transportFailure),
           errorCode: error?.code || error?.name,
         });

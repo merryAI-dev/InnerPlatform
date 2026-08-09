@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -473,6 +473,10 @@ export function CashflowProjectSheet({
   const selectedYearMonthRef = useRef(yearMonth);
   selectedYearMonthRef.current = yearMonth;
   const monthCloseRequestLocked = isCashflowMonthCloseRequestLocked(monthCloseRequest?.status);
+  // 본체는 성공했지만 부가 섹션 조회가 실패한 경우. 화면은 유지하고 안내 + 재시도를 준다.
+  const monthCloseSectionErrors = monthCloseResult?.sectionErrors || [];
+  const deadlineSummaryUnavailable = monthCloseSectionErrors.some((entry) => entry.section === 'deadlineSummary')
+    || (Boolean(monthCloseResult?.dashboard) && monthCloseResult?.dashboard?.deadlineSummary == null);
   // 조직장이 검토를 시작하면(APPROVING) JVM 확정이 이미 나갔을 수 있어 회수할 수 없다.
   const canWithdrawMonthCloseRequest = Boolean(
     monthCloseRequest
@@ -2850,11 +2854,29 @@ export function CashflowProjectSheet({
                   ) : null}
                 </div>
                 <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
-                  <span>누적 미준수 <strong className="ml-1 text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</strong></span>
-                  <span>기한 내 완료 <strong className="ml-1 text-primary">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</strong></span>
+                  <span>누적 미준수 <strong className="ml-1 text-red-700">{deadlineSummaryUnavailable ? '확인 불가' : `${monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회`}</strong></span>
+                  <span>기한 내 완료 <strong className="ml-1 text-primary">{deadlineSummaryUnavailable ? '확인 불가' : `${monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회`}</strong></span>
                   <button type="button" className="font-semibold text-[#17324D] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#17324D]" onClick={() => setWeeklyHistoryOpen(true)}>자세히</button>
                 </div>
               </div>
+              {monthCloseSectionErrors.length > 0 ? (
+                <div role="status" className="flex flex-wrap items-center gap-2 border-t border-border bg-accent px-4 py-2 text-[12px] text-card-foreground">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    일부 정보를 불러오지 못했습니다
+                    {` (${monthCloseSectionErrors.map((entry) => entry.section === 'deadlineSummary' ? '주간 준수 이력' : entry.section === 'sheetPublication' ? '시트 반영 상태' : entry.section).join(', ')})`}
+                    . 아래 현금흐름 수치는 유효합니다.
+                  </span>
+                  <button
+                    type="button"
+                    className="font-semibold underline underline-offset-2"
+                    disabled={monthCloseLoading}
+                    onClick={() => { void loadCashflowMonthClose(); }}
+                  >
+                    다시 불러오기
+                  </button>
+                </div>
+              ) : null}
               <div className="bg-card px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>

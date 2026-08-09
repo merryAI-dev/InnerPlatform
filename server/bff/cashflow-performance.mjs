@@ -43,6 +43,7 @@ export function createCashflowPerformanceTrace({
       ...(Number.isSafeInteger(details.attempt) ? { attempt: details.attempt } : {}),
       ...(details.outcome ? { outcome: safeText(details.outcome) } : {}),
       ...(Number.isInteger(details.statusCode) ? { statusCode: details.statusCode } : {}),
+      ...(Number.isInteger(details.upstreamStatus) ? { upstreamStatus: details.upstreamStatus } : {}),
       ...(typeof details.retryable === 'boolean' ? { retryable: details.retryable } : {}),
       ...(details.errorCode ? { errorCode: safeErrorCode(details.errorCode) } : {}),
       durationMs: safeDuration(details.durationMs),

@@ -821,6 +821,89 @@ describe('JVM weekly API BFF proxy', () => {
     expect(performanceEvents.every((event) => event.requestId === 'req-1')).toBe(true);
   });
 
+  it('keeps the dashboard alive when the compliance side read fails, and says so', async () => {
+    // 부가 조회(주간 준수 이력) 실패는 그 섹션만 비운다. 전 프로젝트 화면을 503 으로
+    // 죽이면 한 하위 시스템 장애가 회사 자금 화면 전체를 잠근다.
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN',
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      weeklyComplianceResponse: () => { throw new Error('compliance backend down'); },
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.status).toBe('OPEN');
+        // 판정 불능을 "지각 0회" 로 그리지 않도록 요약 자체를 비운다.
+        expect(response.body.dashboard.deadlineSummary).toBeNull();
+        expect(response.body.sectionErrors).toEqual([
+          { section: 'deadlineSummary', code: 'weekly_compliance_unavailable' },
+        ]);
+      });
+  });
+
+  it('keeps the dashboard alive when the sheet publication state read fails, and says so', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN',
+      })),
+    }));
+    const db = {
+      doc: (path) => {
+        if (path.includes('cashflow_sheet_publications')) {
+          return { get: async () => { throw new Error('firestore unavailable'); } };
+        }
+        if (path.includes('/members/')) {
+          return {
+            get: async () => ({
+              exists: true,
+              data: () => ({ uid: 'pm-1', status: 'ACTIVE', role: 'pm', projectIds: ['project-a'] }),
+            }),
+          };
+        }
+        return { get: async () => ({ exists: false }) };
+      },
+    };
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.status).toBe('OPEN');
+        expect(response.body.pendingApply).toBeNull();
+        expect(response.body.publicationChangedDuringRead).toBe(false);
+        expect(response.body.sectionErrors).toEqual([
+          { section: 'sheetPublication', code: 'sheet_publication_state_unavailable' },
+        ]);
+      });
+    // 확인 재읽기(publication_after)까지 실패해도 요청당 한 번만 알린다.
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/dashboard-source'))).toHaveLength(1);
+  });
+
+  it('still fails closed when the dashboard source itself is down', async () => {
+    // 본체가 없으면 대체 표시가 불가능하다. 이건 열화 대상이 아니다.
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ message: 'boom' }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {});
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(503)
+      .expect((response) => expect(response.body.code).toBe('jvm_weekly_api_internal_error'));
+  });
+
   it('publishes the server-owned cumulative close scope and pinned sheet source for 2026-08', async () => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async () => ({
