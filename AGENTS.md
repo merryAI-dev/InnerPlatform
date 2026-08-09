@@ -45,7 +45,7 @@ npm run build
 - Deploy Firestore rules/indexes: `npm run firebase:deploy:firestore`.
 - One-shot Firebase setup (writes `.env`, `.firebaserc`, deploys): `npm run firebase:autosetup`.
 - Vercel preview deploy: `vercel deploy`.
-- Production deploy: use the GitHub Actions `Production Deploy` workflow on `main` only.
+- Production deploy: `main` 의 CI 가 초록이면 `Production Deploy` / `JVM Production Deploy` 가 자동으로 돈다. 수동 dispatch 는 예외 경로다 (아래 배포 정책 참고).
 - Local production deploy is forbidden. `vercel --prod` and `node deploy-prod-align.mjs` must not be used from a local worktree.
 - Local production verification only: `npm run deploy:prod:verify -- <deployment-url-or-host>`.
 
@@ -65,6 +65,29 @@ These policies override lower-priority workflow suggestions when they apply.
 - `EMPTY` 와 `ZERO` 는 절대 뭉개지 않는다. 셀 상태는 저장된 값이며 금액에서 역산하지 않는다.
 
 새 코드가 위 항목을 어기면 리뷰에서 반려한다. 기존 위반은 좌표 계약으로 대체하며, 대체 시 사보타주 검증(계약을 깨면 테스트가 실패하는지)을 함께 붙인다.
+
+### 프로덕션 배포는 CI 초록에 걸어 자동으로 나간다
+
+`Production Deploy` 와 `JVM Production Deploy` 는 `main` 의 `CI` 가 성공하면
+`workflow_run` 으로 스스로 트리거된다. **손으로 dispatch 하지 않는다.**
+
+수동 dispatch 는 사람이 "CI 가 끝났겠지" 를 추측하게 만든다. 실제로 머지 25 초 뒤에 배포를
+눌렀다가 `Verify CI succeeded` 가드에 걸려 실패했고, 그 실패를 알아채기 전까지 머지된 커밋이
+라이브에 없는 상태가 이어졌다. 초록을 기다리는 일은 사람이 아니라 GitHub 가 한다.
+
+- 배포 대상은 `github.event.workflow_run.head_sha` 이고, 그 SHA 가 아직 `main` 의 head 일 때만 나간다.
+  뒤처졌으면 조용히 건너뛴다 - 최신 커밋의 CI 가 자기 배포를 띄운다.
+- CI 가 실패했거나 PR 이벤트로 돈 CI 는 배포하지 않는다 (`conclusion == 'success' && event == 'push'`).
+- **JVM 은 `server/jvm-weekly-api/**` 가 실제로 바뀐 커밋일 때만 나간다.** 마지막으로 성공한 JVM
+  배포의 SHA 와 diff 를 떠서 판단한다. 바뀐 것 없이 Cloud Run 리비전을 올리면 `--min-instances 1`
+  롤아웃 위험만 반복된다.
+- `workflow_dispatch` 는 남겨두되 예외 경로다. 되돌리기·재시도·`force` (JVM 소스 변경 없이 강제
+  배포) 처럼 이유가 있을 때만 쓴다.
+- 가드는 자동 경로에서도 그대로 통과해야 한다. `Verify CI succeeded`, `Verify checked out deploy
+  target`, Vercel 작성자 정책을 자동 트리거라고 건너뛰지 않는다.
+
+배포되지 않은 채로 머지가 쌓이는 상황을 만들지 않는다. 머지했으면 배포 워크플로가 도는지 확인하고,
+안 돌았으면 트리거 조건부터 본다.
 
 ### 오케스트레이션 워커 수명주기 (Orca dispatch)
 

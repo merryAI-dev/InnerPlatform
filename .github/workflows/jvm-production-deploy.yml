@@ -1,7 +1,20 @@
 name: JVM Production Deploy
 
 on:
+  # main 의 CI 가 초록이고 JVM 소스가 실제로 바뀐 커밋일 때만 자동 배포한다.
+  # 매 커밋마다 Cloud Run 리비전을 새로 올리면 바뀐 것 없는 배포가 쌓이고,
+  # --min-instances 1 롤아웃 위험만 반복된다.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      force:
+        description: Deploy even when JVM sources did not change
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: inner-platform-jvm-production
@@ -12,9 +25,82 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  JVM_SOURCE_PATHS: server/jvm-weekly-api .github/workflows/jvm-production-deploy.yml
+
 jobs:
+  preflight:
+    name: Resolve JVM deploy target
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push')
+    outputs:
+      proceed: ${{ steps.resolve.outputs.proceed }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve deploy target
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+          FORCE: ${{ inputs.force }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${DISPATCH_REF}" != "refs/heads/main" ]; then
+              echo "JVM production deploys must be dispatched from refs/heads/main. Current ref: ${DISPATCH_REF}" >&2
+              exit 1
+            fi
+            sha="${DISPATCH_SHA}"
+          else
+            sha="${CI_SHA}"
+          fi
+          head="$(git rev-parse origin/main)"
+          if [ "${sha}" != "${head}" ]; then
+            if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+              echo "main advanced to ${head} after dispatch; dispatch the current main commit instead." >&2
+              exit 1
+            fi
+            echo "main advanced to ${head}; skipping superseded ${sha}."
+            echo "proceed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [ "${FORCE}" = "true" ]; then
+            echo "Forced deploy of ${sha}."
+            printf 'proceed=true\nsha=%s\n' "${sha}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # 마지막으로 성공한 JVM 배포 이후 JVM 소스가 바뀌었는지만 본다.
+          # 성공 이력이 없으면(첫 배포) 배포한다.
+          last="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/jvm-production-deploy.yml/runs" \
+            -f status=success -f branch=main -f per_page=1 --jq '.workflow_runs[0].head_sha // ""')"
+          if [ -z "${last}" ] || ! git cat-file -e "${last}^{commit}" 2>/dev/null; then
+            echo "No usable previous successful JVM deploy; deploying ${sha}."
+          elif git diff --quiet "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}; then
+            echo "No JVM source change between ${last} and ${sha}; skipping."
+            echo "proceed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          else
+            echo "JVM sources changed since ${last}:"
+            git diff --name-only "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}
+          fi
+          printf 'proceed=true\nsha=%s\n' "${sha}" >> "${GITHUB_OUTPUT}"
+
   deploy:
     name: Deploy JVM candidate and promote
+    needs: preflight
+    if: needs.preflight.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: Production
@@ -26,16 +112,14 @@ jobs:
       IMAGE: asia-northeast3-docker.pkg.dev/inner-platform-live-20260316/jvm-images/innerplatform-jvm-weekly-api-live
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
       JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+      DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
       CASHFLOW_PROJECT_ID: p1773817948751
       CASHFLOW_YEAR_MONTH: 2026-07
 
     steps:
-      - name: Require main
-        run: test "${GITHUB_REF}" = refs/heads/main
-
       - uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 1
 
       - uses: actions/setup-java@v5
@@ -43,16 +127,19 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Verify dispatched main commit
-        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Verify checked out deploy target
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "${DEPLOY_SHA}"
 
       - name: Verify CI succeeded for this commit
         env:
           GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
         run: |
           runs="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
-            -f head_sha="${GITHUB_SHA}" -f branch=main -f event=push -f per_page=20)"
-          jq -e --arg sha "${GITHUB_SHA}" '
+            -f head_sha="${DEPLOY_SHA}" -f branch=main -f event=push -f per_page=20)"
+          jq -e --arg sha "${DEPLOY_SHA}" '
             [.workflow_runs[] | select(.head_sha == $sha and .status == "completed" and .conclusion == "success")]
             | length > 0
           ' <<< "${runs}" >/dev/null
@@ -82,10 +169,10 @@ jobs:
           gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
           docker build \
             -f server/jvm-weekly-api/Dockerfile \
-            -t "${IMAGE}:${GITHUB_SHA}" \
+            -t "${IMAGE}:${DEPLOY_SHA}" \
             .
-          docker push "${IMAGE}:${GITHUB_SHA}"
-          digest="$(gcloud artifacts docker images describe "${IMAGE}:${GITHUB_SHA}" --format='value(image_summary.digest)')"
+          docker push "${IMAGE}:${DEPLOY_SHA}"
+          digest="$(gcloud artifacts docker images describe "${IMAGE}:${DEPLOY_SHA}" --format='value(image_summary.digest)')"
           test -n "${digest}"
           echo "uri=${IMAGE}@${digest}" >> "${GITHUB_OUTPUT}"
 
@@ -94,7 +181,7 @@ jobs:
         env:
           IMAGE_URI: ${{ steps.image.outputs.uri }}
         run: |
-          revision_suffix="hotfix-${GITHUB_SHA::8}"
+          revision_suffix="hotfix-${DEPLOY_SHA::8}"
           gcloud run deploy "${SERVICE}" \
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
