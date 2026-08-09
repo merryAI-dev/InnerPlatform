@@ -996,7 +996,8 @@ export interface CashflowMonthCloseDashboard {
     status: 'LIVE_CURRENT' | 'LIVE_AMENDED' | 'FROZEN_COMPLETE' | 'LEGACY_EVIDENCE_ONLY';
     missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
   };
-  deadlineSummary: CashflowDeadlineSummary;
+  // 주간 준수 이력을 못 읽으면 서버가 null 로 내리고 sectionErrors 로 알린다.
+  deadlineSummary: CashflowDeadlineSummary | null;
   projectionActualSummary: CashflowProjectionActualSummary;
   cumulativeCloseScope: CashflowCumulativeCloseScope | null;
   monthCloseStatuses?: Array<{
@@ -1309,6 +1310,9 @@ export interface CashflowMonthCloseResult {
   reopenDecidedByUid: string | null;
   auditId: string | null;
   dashboard?: CashflowMonthCloseDashboard;
+  // 본체(dashboard-source)는 성공했지만 부가 조회가 실패해 일부 섹션이 비었을 때.
+  // 화면은 그대로 그리되 이 목록으로 사용자에게 알리고 재시도 경로를 준다.
+  sectionErrors?: Array<{ section: 'sheetPublication' | 'deadlineSummary' | string; code: string }>;
 }
 
 export interface CashflowWeeklyUpdateCompletionResult {

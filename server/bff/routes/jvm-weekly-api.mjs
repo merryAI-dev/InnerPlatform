@@ -2059,14 +2059,20 @@ async function composeCashflowMonthDashboard({
       monthState: 'LIVE_CURRENT',
     });
   }
-  const liveDeadlineSummary = deadlineSummaryFromCompliance(weeklyCompliance, weeklyComplianceBoundary, weeklyYear);
-  const deadlineSummary = closedSnapshot
-    ? {
-      ...(objectValue(closedSnapshot.deadlineSummary) || {}),
-      completedWeeks: liveDeadlineSummary.completedWeeks,
-      weeklyStatuses: liveDeadlineSummary.weeklyStatuses,
-    }
-    : liveDeadlineSummary;
+  // 준수 이력을 못 읽었으면 요약을 만들지 않는다. 빈 이력으로 만들면 "지각 0회" 라는
+  // 틀린 숫자가 표시된다 - 판정 불능과 "문제 없음" 은 다르다.
+  const liveDeadlineSummary = weeklyCompliance === null
+    ? null
+    : deadlineSummaryFromCompliance(weeklyCompliance, weeklyComplianceBoundary, weeklyYear);
+  const deadlineSummary = liveDeadlineSummary === null
+    ? null
+    : closedSnapshot
+      ? {
+        ...(objectValue(closedSnapshot.deadlineSummary) || {}),
+        completedWeeks: liveDeadlineSummary.completedWeeks,
+        weeklyStatuses: liveDeadlineSummary.weeklyStatuses,
+      }
+      : liveDeadlineSummary;
   const blockers = [];
   if (readOptionalText(close?.status) !== 'OPEN') {
     blockers.push({ code: 'MONTH_NOT_OPEN', message: '결산 또는 재오픈 검토 중인 월은 수정할 수 없습니다.' });
@@ -2705,6 +2711,12 @@ export function mountJvmWeeklyApiRoutes(app, {
         // 세 번 겹겹이 쌓였다. publication 은 어차피 대시보드 읽기 뒤(after)에
         // 한 번 더 확인해 변경 여부를 판정하므로, before 를 병렬로 시작해도
         // 읽기 일관성 계약은 그 fingerprint 비교가 그대로 지킨다.
+        // 본체는 jvm_dashboard 하나다. publication(시트 반영 배너)과 compliance(주간 준수
+        // 이력)는 독립 부가 조회라서, 실패하면 그 섹션만 비우고 화면은 그린다. 부가 조회
+        // 실패가 대시보드 전체를 503 으로 만들면 한 하위 시스템 장애가 전 프로젝트 화면을
+        // 동시에 죽인다 - 실제로 그렇게 죽었다. 확정(쓰기) 경로는 이 열화를 쓰지 않고
+        // 전부 fail-closed 를 유지한다.
+        const sectionErrors = [];
         const [publicationBefore, source, weeklyCompliance] = await Promise.all([
           trace.measure(
             'publication_before',
@@ -2713,6 +2725,9 @@ export function mountJvmWeeklyApiRoutes(app, {
               tenantId: req.context.tenantId,
               projectId: rawProjectId,
               nowMs: currentNow.getTime(),
+            }).catch(() => {
+              sectionErrors.push({ section: 'sheetPublication', code: 'sheet_publication_state_unavailable' });
+              return { blocked: false, fingerprint: null, unavailable: true };
             }),
             { attempt: traceAttempt },
           ),
@@ -2727,7 +2742,10 @@ export function mountJvmWeeklyApiRoutes(app, {
           ),
           trace.measure(
             'jvm_compliance',
-            () => readWeeklyCompliance(req.context, rawProjectId),
+            () => readWeeklyCompliance(req.context, rawProjectId).catch(() => {
+              sectionErrors.push({ section: 'deadlineSummary', code: 'weekly_compliance_unavailable' });
+              return null;
+            }),
             { attempt: traceAttempt },
           ),
         ]);
@@ -2795,6 +2813,8 @@ export function mountJvmWeeklyApiRoutes(app, {
           }),
           { attempt: traceAttempt },
         );
+        // 대시보드는 이미 완성됐다. 이 뒤는 "읽는 동안 시트 반영이 끼어들었는지" 일관성
+        // 표시용 확인이라, 실패해도 완성된 응답을 버리지 않는다.
         const publicationAfter = await trace.measure(
           'publication_after',
           () => readCashflowSheetPublicationState({
@@ -2802,6 +2822,11 @@ export function mountJvmWeeklyApiRoutes(app, {
             tenantId: req.context.tenantId,
             projectId: rawProjectId,
             nowMs: currentNow.getTime(),
+          }).catch(() => {
+            if (!sectionErrors.some((entry) => entry.section === 'sheetPublication')) {
+              sectionErrors.push({ section: 'sheetPublication', code: 'sheet_publication_state_unavailable' });
+            }
+            return { blocked: false, fingerprint: null, unavailable: true };
           }),
           { attempt: traceAttempt },
         );
@@ -2809,11 +2834,17 @@ export function mountJvmWeeklyApiRoutes(app, {
           startedAt: publicationAfter.applyStartedAt,
           expiresAt: publicationAfter.leaseExpiresAt,
         } : null;
-        if (publicationBefore.fingerprint === publicationAfter.fingerprint) {
-          return { ...cumulativeClose, dashboard, pendingApply, publicationChangedDuringRead: false };
+        const publicationStateUnavailable = Boolean(publicationBefore.unavailable || publicationAfter.unavailable);
+        if (publicationStateUnavailable
+          || publicationBefore.fingerprint === publicationAfter.fingerprint) {
+          return {
+            ...cumulativeClose, dashboard, pendingApply, publicationChangedDuringRead: false, sectionErrors,
+          };
         }
         if (attempt === 1) {
-          return { ...cumulativeClose, dashboard, pendingApply, publicationChangedDuringRead: true };
+          return {
+            ...cumulativeClose, dashboard, pendingApply, publicationChangedDuringRead: true, sectionErrors,
+          };
         }
       }
     }, monthCloseRouteTimeoutMs);

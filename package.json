@@ -114,6 +114,7 @@
     "express": "^5.2.1",
     "firebase": "^12.9.0",
     "firebase-admin": "^13.6.1",
+    "google-auth-library": "^9.15.1",
     "input-otp": "1.4.2",
     "lottie-react": "^2.4.1",
     "lucide-react": "0.487.0",

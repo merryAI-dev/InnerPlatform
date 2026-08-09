@@ -31,20 +31,31 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
   } catch {
     throw createHttpError(503, '서버 인증 정보가 올바르지 않습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
+  const cacheKey = `${credentials.client_email || ''}\n${audience}`;
   try {
-    const cacheKey = `${credentials.client_email || ''}\n${audience}`;
     let clientPromise = identityTokenClients.get(cacheKey);
     if (!clientPromise) {
       clientPromise = new GoogleAuth({ credentials }).getIdTokenClient(audience);
       identityTokenClients.set(cacheKey, clientPromise);
     }
     const client = await clientPromise;
-    const authorization = readOptionalText((await client.getRequestHeaders()).Authorization);
+    // google-auth-library v9 는 getRequestHeaders() 가 평범한 객체를, v10 은 Headers 를
+    // 반환한다. 이 패키지는 hoist 로 끌려오는 간접 의존성이라(직접 선언은 package.json 참고)
+    // 설치 트리가 바뀌면 반환 타입도 조용히 바뀐다. 둘 다 읽는다 - v10 에서 .Authorization 만
+    // 읽으면 undefined 가 되어 전 요청이 503 으로 죽는다.
+    const rawHeaders = await client.getRequestHeaders();
+    const authorization = readOptionalText(
+      typeof rawHeaders?.get === 'function'
+        ? rawHeaders.get('authorization')
+        : (rawHeaders?.Authorization ?? rawHeaders?.authorization),
+    );
     const token = authorization.replace(/^Bearer\s+/i, '');
     if (!token) throw new Error('Missing identity token');
     return token;
   } catch {
-    identityTokenClients.clear();
+    // 실패한 키만 버린다. Map 전체를 비우면 한 요청의 일시적 실패가 다른 audience 의
+    // 정상 클라이언트까지 축출해 동시 요청 전부가 토큰을 다시 서명하게 된다.
+    identityTokenClients.delete(cacheKey);
     throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
 }
