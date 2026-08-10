@@ -326,7 +326,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
       source.indexOf('void checkSheetChanges();'),
     );
     expect(checkFlow).not.toContain('applyCashflowSheetLabViaBff');
-    expect(source).toMatch(/expectedMirrorRevision: sourceMirror\.sourceRevision,\s*yearMonth,\s*\.\.\.\(replaceAllActualSources/);
+    expect(source).toMatch(/expectedMirrorRevision: sourceMirror\.sourceRevision,\s*\.\.\.\(replaceAllActualSources/);
     expect(checkFlow).not.toContain('refreshCashflowSheetLabMirrorViaBff');
   });
 
