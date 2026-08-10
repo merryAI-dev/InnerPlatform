@@ -267,15 +267,9 @@ public class WeeklyExpenseCommandService {
         CashflowProjectionActualSummaryBatchRequest request
     ) {
         List<String> projectIds = request.requireUniqueProjectIds();
-        boolean forbidden = false;
-        for (String projectId : projectIds) {
-            try {
-                authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
-            } catch (WeeklyExpenseForbiddenException denied) {
-                forbidden = true;
-            }
-        }
-        if (forbidden) {
+        try {
+            authorizationService.requireProjectsAllowed(CASHFLOW_READ_COMMAND, actor, projectIds);
+        } catch (WeeklyExpenseForbiddenException denied) {
             throw new WeeklyExpenseForbiddenException("One or more projects are not accessible.");
         }
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
@@ -325,8 +319,9 @@ public class WeeklyExpenseCommandService {
         CashflowWeeklyOverviewRequest request
     ) {
         List<String> projectIds = request.requireUniqueProjectIds();
-        authorizationService.requireProjectsAllowed(CASHFLOW_READ_COMMAND, actor, projectIds);
-        authorizationService.requireProjectsAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectIds);
+        authorizationService.requireProjectsAllowedForCommands(
+            List.of(CASHFLOW_READ_COMMAND, CASHFLOW_MONTH_CLOSE_READ_COMMAND), actor, projectIds
+        );
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
             CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
         String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0

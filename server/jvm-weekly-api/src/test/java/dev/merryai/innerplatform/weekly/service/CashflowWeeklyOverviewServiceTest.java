@@ -52,8 +52,10 @@ class CashflowWeeklyOverviewServiceTest {
         assertThat(response.items().get(1).settlementStatuses().items().getFirst().status()).isEqualTo("PENDING_APPROVAL");
         assertThat(response.items()).allSatisfy(item -> assertThat(item.projectionActualSummary()).isNotNull());
         assertThat(response.errors()).isEmpty();
-        verify(authorization).requireProjectsAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, projectIds);
-        verify(authorization).requireProjectsAllowed(WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND, ACTOR, projectIds);
+        verify(authorization).requireProjectsAllowedForCommands(
+            List.of(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND),
+            ACTOR, projectIds
+        );
         verify(persistence).findCashflowLedgerSources(anyString(), anyList(), anyString(), anyString());
     }
 }

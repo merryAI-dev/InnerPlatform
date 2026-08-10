@@ -6,6 +6,10 @@ exports[`resolveApiErrorPresentation > keeps the approved guides reviewable as a
     "guide": "월 결산을 맡을 조직장이 지정되지 않았어요. 프로젝트에서 조직장을 지정해 주세요.",
     "resolution": "contact",
   },
+  "cashflow_month_close_reconciliation_pending": {
+    "guide": "승인 결과를 확인하고 있어요. 잠시 후 월 결산 상태를 확인해 주세요.",
+    "resolution": "wait",
+  },
   "cashflow_month_close_request_conflict": {
     "guide": "이미 같은 월의 결산 요청이 있어요. 기존 요청의 진행 상태를 확인해 주세요.",
     "resolution": "contact",

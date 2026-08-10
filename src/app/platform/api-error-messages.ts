@@ -44,6 +44,10 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '월 결산 처리 시간이 초과됐어요. 잠시 후 진행 상태를 확인하고 다시 시도해 주세요.',
     resolution: 'retry',
   }],
+  ['cashflow_month_close_reconciliation_pending', {
+    guide: '승인 결과를 확인하고 있어요. 잠시 후 월 결산 상태를 확인해 주세요.',
+    resolution: 'wait',
+  }],
   ['internal_error', {
     guide: '요청을 처리하는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.',
     resolution: 'retry',

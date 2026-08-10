@@ -41,6 +41,29 @@ class WeeklyExpenseAuthorizationServiceTest {
     }
 
     @Test
+    void multipleCommandsReuseOneExistenceLookup() {
+        int[] batchCalls = {0};
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> false,
+            new WeeklyProjectExistenceRepository() {
+                @Override public boolean exists(String tenantId, String projectId) { return false; }
+                @Override public Set<String> existingProjectIds(String tenantId, List<String> projectIds) {
+                    batchCalls[0] += 1;
+                    return Set.copyOf(projectIds);
+                }
+            },
+            "strict"
+        );
+        TrustedActorContext admin = new TrustedActorContext("tenant-a", "admin-1", "admin@example.com", "admin");
+
+        assertThatCode(() -> service.requireProjectsAllowedForCommands(
+            List.of(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND),
+            admin, List.of("project-a", "project-b")
+        )).doesNotThrowAnyException();
+        assertThat(batchCalls[0]).isEqualTo(1);
+    }
+
+    @Test
     void pmCanMutateOnlyAssignedProject() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> "project-allowed".equals(projectId),

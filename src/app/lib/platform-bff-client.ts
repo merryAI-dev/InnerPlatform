@@ -3310,7 +3310,8 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
       body: params.payload,
       idempotencyKey: params.idempotencyKey,
       retries: 0,
-      timeoutMs: 27_000,
+      // BFF의 월 결산 확정·재확인 예산(26초)보다 길어야 최종 상태를 받을 수 있다.
+      timeoutMs: 35_000,
     },
   );
   if (params.payload.decision === 'APPROVE' && response.data.request.status !== 'APPROVED') {

@@ -219,48 +219,50 @@ export function CashflowWeeklyPage() {
     setOverviewLoading(true);
     setOverviewError('');
     setOverview(null);
-    recordDevtoolsLog({
-      kind: 'cashflow_transaction',
-      phase: 'start',
-      operation: 'cashflow.weekly_overview',
-      transport: 'bff',
-      yearMonth,
-      summary: { projectCount: projectIds.length },
-    });
-    void fetchCashflowWeeklyOverviewViaBff({
-      tenantId: orgId,
-      actor: overviewActor,
-      projectIds,
-      yearMonth,
-    }).then((result) => {
-      if (!active) return;
-      setOverview(result);
+    const requestTimer = window.setTimeout(() => {
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
-        phase: 'success',
+        phase: 'start',
         operation: 'cashflow.weekly_overview',
         transport: 'bff',
         yearMonth,
-        durationMs: Date.now() - startedAt,
-        summary: { projectCount: projectIds.length, itemCount: result.items.length, issueCount: result.errors.length },
-      });
-    }).catch((error) => {
-      if (!active) return;
-      setOverviewError('현금흐름 현황을 불러오지 못했습니다. 다시 불러와 주세요.');
-      recordDevtoolsLog({
-        kind: 'cashflow_transaction',
-        phase: 'error',
-        operation: 'cashflow.weekly_overview',
-        transport: 'bff',
-        yearMonth,
-        durationMs: Date.now() - startedAt,
         summary: { projectCount: projectIds.length },
-        error: toDevtoolsError(error),
       });
-    }).finally(() => {
-      if (active) setOverviewLoading(false);
-    });
-    return () => { active = false; };
+      void fetchCashflowWeeklyOverviewViaBff({
+        tenantId: orgId,
+        actor: overviewActor,
+        projectIds,
+        yearMonth,
+      }).then((result) => {
+        if (!active) return;
+        setOverview(result);
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'success',
+          operation: 'cashflow.weekly_overview',
+          transport: 'bff',
+          yearMonth,
+          durationMs: Date.now() - startedAt,
+          summary: { projectCount: projectIds.length, itemCount: result.items.length, issueCount: result.errors.length },
+        });
+      }).catch((error) => {
+        if (!active) return;
+        setOverviewError('현금흐름 현황을 불러오지 못했습니다. 다시 불러와 주세요.');
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'error',
+          operation: 'cashflow.weekly_overview',
+          transport: 'bff',
+          yearMonth,
+          durationMs: Date.now() - startedAt,
+          summary: { projectCount: projectIds.length },
+          error: toDevtoolsError(error),
+        });
+      }).finally(() => {
+        if (active) setOverviewLoading(false);
+      });
+    }, 120);
+    return () => { active = false; window.clearTimeout(requestTimer); };
   }, [orgId, overviewActor, overviewProjectIdsKey, refreshSequence, yearMonth]);
 
   async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE') {
