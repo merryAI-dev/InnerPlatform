@@ -581,6 +581,7 @@ export function createJavaWeeklyClient({
     expectedRevision,
     cells,
     amendmentReason = '',
+    replaceAllActualSources = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
@@ -598,6 +599,7 @@ export function createJavaWeeklyClient({
         year,
         expectedRevision,
         cells,
+        ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(readOptionalText(amendmentReason) ? { amendmentReason: readOptionalText(amendmentReason) } : {}),
       },
     });

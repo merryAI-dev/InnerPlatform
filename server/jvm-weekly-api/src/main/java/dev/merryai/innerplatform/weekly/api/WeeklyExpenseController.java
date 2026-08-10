@@ -920,7 +920,8 @@ public class WeeklyExpenseController {
                         cell.amount(), cell.sourceCell(), cell.sourceLabel()
                     ))
                     .toList(),
-                request.amendmentReason()
+                request.amendmentReason(),
+                request.replaceAllActualSources()
             )
         );
     }

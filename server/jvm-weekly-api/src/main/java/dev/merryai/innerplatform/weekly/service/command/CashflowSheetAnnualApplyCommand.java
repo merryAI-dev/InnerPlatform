@@ -15,7 +15,8 @@ public record CashflowSheetAnnualApplyCommand(
     int year,
     long expectedRevision,
     List<CashflowAnnualCellSet.Cell> cells,
-    String amendmentReason
+    String amendmentReason,
+    boolean replaceAllActualSources
 ) {
     public CashflowSheetAnnualApplyCommand {
         amendmentReason = amendmentReason == null ? "" : amendmentReason.trim();
@@ -30,6 +31,6 @@ public record CashflowSheetAnnualApplyCommand(
         long expectedRevision,
         List<CashflowAnnualCellSet.Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, year, expectedRevision, cells, "");
+        this(idempotencyKey, sourceRevision, year, expectedRevision, cells, "", false);
     }
 }
