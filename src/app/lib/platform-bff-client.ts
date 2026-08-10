@@ -3298,10 +3298,15 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
   payload: ReviewCashflowMonthCloseRequestPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<{ request: CashflowMonthCloseRequest; monthClose?: CashflowMonthCloseResult }> {
+}): Promise<{
+  request: CashflowMonthCloseRequest;
+  monthClose?: CashflowMonthCloseResult;
+  pendingLedgerClose?: boolean;
+}> {
   const response = await resolveClient(params.client).post<{
     request: CashflowMonthCloseRequest;
     monthClose?: CashflowMonthCloseResult;
+    pendingLedgerClose?: boolean;
   }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/${params.payload.expectedManifestHash ? 'status-review' : 'review'}`,
     {
@@ -3314,7 +3319,13 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
       timeoutMs: 35_000,
     },
   );
-  if (params.payload.decision === 'APPROVE' && response.data.request.status !== 'APPROVED') {
+  // 승인 선점은 끝났고 장부 잠금만 진행 중인 상태(pendingLedgerClose)는 실패가 아니다.
+  // 호출자가 같은 멱등키로 다시 호출해 마무리한다.
+  if (
+    params.payload.decision === 'APPROVE'
+    && !response.data.pendingLedgerClose
+    && response.data.request.status !== 'APPROVED'
+  ) {
     throw new Error('월 결산 승인 상태를 확인하지 못했습니다.');
   }
   return response.data;

@@ -42,6 +42,11 @@ export interface QaControl {
 
 const apiClient = createPlatformApiClient();
 
+// 승인 접수 후 장부 잠금이 끝날 때까지 이어받는 간격과 횟수 (최대 약 2분).
+// 넘어가도 승인 선점은 살아 있어, 다음에 같은 버튼을 눌러 이어서 마무리할 수 있다.
+const CASHFLOW_LEDGER_CLOSE_POLL_MS = 4_000;
+const CASHFLOW_LEDGER_CLOSE_MAX_POLLS = 30;
+
 const ACTION_LABELS: Record<QaAction, string> = {
   REQUEST_CLOSE: '월 결산 요청 준비',
   APPROVE_REQUEST: '월 결산 승인',
@@ -116,19 +121,28 @@ export async function executeAxrMonthCloseQaAction({
 
   if (action === 'APPROVE_REQUEST' || action === 'REJECT_REQUEST') {
     if (!control.request) throw new Error('검토할 월 결산 요청이 없습니다.');
-    return clients.reviewRequest({
+    const reviewInput = {
       tenantId,
       actor,
       projectId,
       requestId: control.request.requestId,
       payload: {
-        decision: action === 'APPROVE_REQUEST' ? 'APPROVE' : 'REJECT',
+        decision: action === 'APPROVE_REQUEST' ? ('APPROVE' as const) : ('REJECT' as const),
         expectedRevision: control.request.revision,
         expectedManifestHash: control.request.manifestHash || undefined,
         reason: reason.trim(),
       },
+      // 결정적 키. 이어받기 호출이 같은 키를 써야 JVM 이 앞선 시도를 인식하고 reconcile 된다.
       idempotencyKey: `axr-month-close-qa:${action}:${control.request.requestId}:r${control.request.revision}`,
-    });
+    };
+    let result = await clients.reviewRequest(reviewInput);
+    // 승인은 접수됐고 장부 잠금만 남은 상태면 끝날 때까지 이어받는다. 승인자를 한 요청에
+    // 붙잡아 두지 않으면서도, 마무리를 사용자 손에 떠넘기지 않는다.
+    for (let attempt = 0; result?.pendingLedgerClose && attempt < CASHFLOW_LEDGER_CLOSE_MAX_POLLS; attempt += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, CASHFLOW_LEDGER_CLOSE_POLL_MS); });
+      result = await clients.reviewRequest(reviewInput);
+    }
+    return result;
   }
   if (action === 'REQUEST_REOPEN') {
     return clients.requestReopen({

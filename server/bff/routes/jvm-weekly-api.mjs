@@ -57,6 +57,11 @@ export { cashflowMonthCloseDeadline };
 const CASHFLOW_LINE_INDEX = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
 const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
+// 승인 클릭이 장부 잠금 완료까지 기다리는 시간. 빠르면 한 번에 끝나고, 넘어가면
+// "확정 진행 중"으로 돌려준 뒤 같은 멱등키의 다음 호출이 이어받는다. 결재는 사람이
+// 며칠에 걸쳐 하는 일이라 잠금을 같은 요청 안에서 끝낼 이유가 없다 - 승인자를
+// 26초 동안 붙잡아 두는 쪽이 오히려 승인 자체를 실패로 보이게 만들었다.
+const CASHFLOW_MONTH_CLOSE_SYNC_CONFIRM_MS = 9_000;
 const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
 
 function readWeeklyYear(value) {
@@ -4275,7 +4280,10 @@ export function mountJvmWeeklyApiRoutes(app, {
       const prepared = {
         projectId: encodeURIComponent(projectId),
         rawProjectId: projectId,
-        routeDeadlineAtMs: Date.now() + monthCloseRouteTimeoutMs,
+        routeDeadlineAtMs: Date.now() + Math.min(
+          monthCloseRouteTimeoutMs,
+          CASHFLOW_MONTH_CLOSE_SYNC_CONFIRM_MS,
+        ),
         closeBody: {
           idempotencyKey: jvmMutationIdempotencyKey,
           yearMonth: readOptionalText(claimed.yearMonth),
@@ -4298,24 +4306,44 @@ export function mountJvmWeeklyApiRoutes(app, {
         try {
           monthClose = await executePreparedCashflowMonthClose(req, prepared);
         } catch (error) {
-          if (readOptionalText(error?.code) === 'cashflow_month_close_reconciliation_pending') {
-            await db.runTransaction(async (transaction) => {
-              const snapshot = await transaction.get(requestRef);
-              const current = snapshot.exists ? snapshot.data() || {} : null;
-              if (
-                !current
-                || current.status !== 'APPROVING'
-                || Number(current.revision) !== expectedRevision
-                || current.reviewIdempotencyKey !== jvmMutationIdempotencyKey
-              ) return;
-              transaction.set(requestRef, {
-                ...current,
-                status: 'UNCERTAIN',
-                reconciliationEvidence: error.reconciliationEvidence,
-              });
-            });
-          }
-          throw error;
+          if (readOptionalText(error?.code) !== 'cashflow_month_close_reconciliation_pending') throw error;
+          // 승인은 사람이 하는 결재이고, 장부 잠금은 그 결정의 뒷정리다. 둘을 한 HTTP 요청에
+          // 묶어 두면 JVM 확정이 라우트 예산을 넘길 때 승인 자체가 실패한 것처럼 보인다.
+          // 실제로는 선점(APPROVING)이 이미 커밋됐고 JVM 이 처리 중일 수도 있다.
+          // 그래서 여기서는 "확정 진행 중"을 정직한 상태로 돌려주고, 같은 멱등키의 다음
+          // 호출이 reconcile 로 이어받아 APPROVED 로 마무리한다.
+          //
+          // 절대 하지 않는 것: JVM 확정 없이 APPROVED 로 넘기는 것. 그러면 결재는 끝났는데
+          // 원장은 열려 있어 마감 잠금·변경 경고가 통째로 동작하지 않는다.
+          let uncertain = null;
+          await db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(requestRef);
+            const current = snapshot.exists ? snapshot.data() || {} : null;
+            if (
+              !current
+              || !['APPROVING', 'UNCERTAIN'].includes(readOptionalText(current.status))
+              || Number(current.revision) !== expectedRevision
+              || current.reviewIdempotencyKey !== jvmMutationIdempotencyKey
+            ) return;
+            uncertain = {
+              ...current,
+              status: 'UNCERTAIN',
+              reconciliationEvidence: error.reconciliationEvidence,
+            };
+            transaction.set(requestRef, uncertain);
+          });
+          if (!uncertain) throw error;
+          createCashflowPerformanceTrace({
+            requestId: req.context.requestId,
+            operation: 'cashflow.month_close.approval',
+            ...(performanceLogger ? { logger: performanceLogger } : {}),
+            ...(performanceNow ? { now: performanceNow } : {}),
+          }).emit('ledger_close_pending', { outcome: 'ok' });
+          res.status(200).json({
+            request: cashflowMonthCloseRequestView(uncertain),
+            pendingLedgerClose: true,
+          });
+          return;
         }
       }
       let approved;
