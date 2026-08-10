@@ -18,6 +18,7 @@ import {
   createPlatformApiClient,
   decideCashflowMonthReopenViaBff,
   requestCashflowMonthReopenViaBff,
+  approveCashflowMonthCloseUntilLedgerClosed,
   reviewCashflowMonthCloseRequestViaBff,
   toRequestActor,
   type ActorLike,
@@ -116,19 +117,24 @@ export async function executeAxrMonthCloseQaAction({
 
   if (action === 'APPROVE_REQUEST' || action === 'REJECT_REQUEST') {
     if (!control.request) throw new Error('검토할 월 결산 요청이 없습니다.');
-    return clients.reviewRequest({
+    const reviewInput = {
       tenantId,
       actor,
       projectId,
       requestId: control.request.requestId,
       payload: {
-        decision: action === 'APPROVE_REQUEST' ? 'APPROVE' : 'REJECT',
+        decision: action === 'APPROVE_REQUEST' ? ('APPROVE' as const) : ('REJECT' as const),
         expectedRevision: control.request.revision,
         expectedManifestHash: control.request.manifestHash || undefined,
         reason: reason.trim(),
       },
+      // 결정적 키. 이어받기 호출이 같은 키를 써야 JVM 이 앞선 시도를 인식하고 reconcile 된다.
       idempotencyKey: `axr-month-close-qa:${action}:${control.request.requestId}:r${control.request.revision}`,
-    });
+    };
+    if (action === 'REJECT_REQUEST') return clients.reviewRequest(reviewInput);
+    // 승인은 접수됐고 장부 잠금만 남은 상태면 끝날 때까지 이어받는다. 이어받기 규칙은
+    // platform-bff-client 한 곳에만 두고 승인 화면들이 공유한다.
+    return approveCashflowMonthCloseUntilLedgerClosed(reviewInput);
   }
   if (action === 'REQUEST_REOPEN') {
     return clients.requestReopen({

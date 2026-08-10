@@ -4728,6 +4728,7 @@ describe('JVM weekly API BFF proxy', () => {
     const cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months } };
     let closedMonthClose = null;
     let dashboardSourceUnavailable = false;
+    let closeMutationFails = false;
     const fetchImpl = vi.fn(async (url, init) => {
       if (url.endsWith('/month-close/reopen-decision')) {
         closedMonthClose = { ...closedMonthClose, status: 'OPEN', revision: 2 };
@@ -4745,6 +4746,7 @@ describe('JVM weekly API BFF proxy', () => {
         };
       }
       if (init.method === 'POST') {
+        if (closeMutationFails) throw new Error('JVM month-close confirmation is slow');
         const closeBody = JSON.parse(init.body);
         // JVM requireCumulativeCloseApproval 이 실제로 요구하는 것: 확정을 받는 순간 헤더가
         // APPROVING 이고 reviewIdempotencyKey 가 이번 확정 요청과 같아야 한다.
@@ -5149,6 +5151,48 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ decision: 'REJECT', reason: '취소', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(409);
 
+    // 장부 잠금이 승인 요청 안에서 안 끝나도 승인은 실패가 아니다. 결재는 사람이 하는 일이고
+    // 잠금은 그 뒤처리라, 승인자를 붙잡아 두는 대신 "확정 진행 중"으로 돌려주고 같은 멱등키의
+    // 다음 호출이 이어받는다. 단, 그 사이에도 APPROVED 로 앞서가지는 않는다.
+    closedMonthClose = null;
+    closeMutationFails = true;
+    source.documents.set(requestPath, {
+      ...source.documents.get(requestPath),
+      status: 'PENDING',
+      reviewedByUid: null,
+      reviewIdempotencyKey: null,
+    });
+    source.documents.delete('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-approved');
+    const pendingCloseCount = closePostCount();
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
+      .set('idempotency-key', 'ledger-close-pending')
+      .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.pendingLedgerClose).toBe(true);
+        expect(response.body.request).toMatchObject({ status: 'UNCERTAIN', revision: 2 });
+        expect(response.body.monthClose).toBeUndefined();
+      });
+    expect(closePostCount()).toBe(pendingCloseCount + 1);
+    // 원장이 안 닫혔으므로 승인 완료로 기록하지 않는다.
+    expect(source.documents.get(requestPath)).toMatchObject({ status: 'UNCERTAIN' });
+    expect(source.documents.has('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-approved')).toBe(false);
+
+    // 같은 멱등키로 이어받으면 마무리된다.
+    closeMutationFails = false;
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
+      .set('idempotency-key', 'ledger-close-pending')
+      .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.pendingLedgerClose).toBeUndefined();
+        expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 2 });
+      });
+    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-approved')).toMatchObject({
+      action: 'APPROVED', revision: 2,
+    });
   });
 
   it('lets only the requester withdraw a PENDING cumulative close request, and never after review starts', async () => {
