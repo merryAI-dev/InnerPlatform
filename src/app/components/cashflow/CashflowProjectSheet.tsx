@@ -1439,7 +1439,7 @@ export function CashflowProjectSheet({
         tenantId: orgId,
         actor,
         projectId,
-        sourceYear: selectedYear,
+        sourceYear: cashflowSheetConfig.sourceYear,
         value: cashflowSheetConfig.value,
         sheetName: cashflowSheetConfig.sheetName || undefined,
         idempotencyKey: refreshIdempotencyKey,
@@ -1474,7 +1474,7 @@ export function CashflowProjectSheet({
       operation: 'cashflow.sheet_refresh',
       projectId,
       yearMonth,
-      summary: { sourceYear: selectedYear, hasSheetConfig: true },
+      summary: { sourceYear: cashflowSheetConfig.sourceYear, hasSheetConfig: true },
     });
     try {
       const actor = await resolveBffActor();
@@ -1591,16 +1591,18 @@ export function CashflowProjectSheet({
         actor,
         projectId,
         stageRunId: stage.runId,
-        applyRiskCandidates: true,
+        replaceAllActualSources: true,
         closedMonthChangeReason,
         closedMonthDifferenceCount: stage.closedMonthDifferenceCount,
         closedMonthDifferenceManifestHash: stage.closedMonthDifferenceManifestHash,
+        pendingApprovalDifferenceCount: stage.pendingApprovalDifferenceCount,
+        pendingApprovalDifferenceManifestHash: stage.pendingApprovalDifferenceManifestHash,
         acceptFormulaMismatches,
         idempotencyKey: applyIdempotencyKey,
       });
     };
     const rememberApplyResult = async (result: Awaited<ReturnType<typeof apply>>) => {
-      await Promise.all([
+      void Promise.allSettled([
         loadCashflowEvents(),
         loadCashflowMonthClose(),
       ]);

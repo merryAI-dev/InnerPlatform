@@ -494,6 +494,21 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('!sheetApplyResumeRequired && (');
   });
 
+  it('uses the sheets-lab one-way apply contract and does not turn post-apply reads into a failed save', () => {
+    const applyStart = source.indexOf('const handleApplyStagedSheetValues');
+    const applyFlow = source.slice(applyStart, source.indexOf('const handleStagePinnedSheetValues', applyStart));
+    expect(applyFlow).toContain('replaceAllActualSources: true');
+    expect(applyFlow).toContain('pendingApprovalDifferenceCount: stage.pendingApprovalDifferenceCount');
+    expect(applyFlow).toContain('pendingApprovalDifferenceManifestHash: stage.pendingApprovalDifferenceManifestHash');
+    expect(applyFlow).not.toContain('applyRiskCandidates: true');
+    expect(applyFlow).toContain('void Promise.allSettled([');
+    expect(applyFlow).not.toContain('await Promise.all([\n        loadCashflowEvents(),\n        loadCashflowMonthClose(),\n      ]);');
+    const refreshStart = source.indexOf('const handleRefreshSheetMirror');
+    const refreshFlow = source.slice(refreshStart, source.indexOf('const handleMonthClosePreparationAction', refreshStart));
+    expect(refreshFlow).toContain('sourceYear: cashflowSheetConfig.sourceYear');
+    expect(refreshFlow).not.toContain('sourceYear: selectedYear');
+  });
+
   it('stops after staging closed-month differences until a reason is explicitly confirmed', () => {
     const stageStart = source.indexOf('const applyStageResult = async');
     const stageFlow = source.slice(
