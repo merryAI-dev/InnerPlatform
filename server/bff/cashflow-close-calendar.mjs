@@ -12,6 +12,10 @@ import { cashflowMonthCloseDeadline } from './cashflow-close-deadline.mjs';
 export const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
 export const CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH = '2023-01';
 
+function text(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export function monthsBetween(startYearMonth, endYearMonth) {
   const result = [];
   let cursor = new Date(`${startYearMonth}-01T00:00:00Z`);
@@ -41,6 +45,60 @@ export function cumulativeCloseMonthsOrNull(yearMonth) {
     return null;
   }
   return months;
+}
+
+/**
+ * 누적 결산 문서의 공통 범위 계약.
+ * cycleYearMonth 는 결산 회차, throughMonth 는 실제로 잠그는 마지막 월이다.
+ */
+export function cashflowCumulativeCloseScope(cycleYearMonth, throughMonth = previousYearMonth(cycleYearMonth)) {
+  const months = monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, throughMonth);
+  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(cycleYearMonth))
+    || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(throughMonth))
+    || throughMonth !== previousYearMonth(cycleYearMonth)
+    || months.length === 0
+    || months.at(-1) !== throughMonth) return null;
+  return {
+    contractVersion: CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
+    fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+    cycleYearMonth,
+    throughMonth,
+    monthCount: months.length,
+    weekCount: months.length * 5,
+    cellCount: months.length * 160,
+  };
+}
+
+/** 저장 문서의 새 scope와 레거시 top-level 필드를 동일한 계약으로 읽는다. */
+export function readCashflowCumulativeCloseScope(record = {}) {
+  const nested = record?.scope && typeof record.scope === 'object' ? record.scope : {};
+  const explicitCycleYearMonth = text(nested.cycleYearMonth) || text(record.cycleYearMonth);
+  const explicitThroughMonth = text(nested.throughMonth) || text(record.throughMonth);
+  const cycleYearMonth = explicitCycleYearMonth || text(record.yearMonth);
+  // Older requests stored `yearMonth` as the last covered month. Keep reading
+  // those documents as-is; only the explicit v2 scope uses the previous-month
+  // horizon.
+  const legacy = !explicitCycleYearMonth && !explicitThroughMonth && !Object.hasOwn(record, 'scope');
+  const throughMonth = explicitThroughMonth
+    || (legacy ? cycleYearMonth : (cycleYearMonth ? previousYearMonth(cycleYearMonth) : ''));
+  const fromMonth = text(nested.fromMonth) || text(record.fromMonth) || CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH;
+  const contractVersion = text(nested.contractVersion) || text(record.contractVersion);
+  const expected = cashflowCumulativeCloseScope(cycleYearMonth, throughMonth);
+  const legacyRange = /^20\d{2}-(0[1-9]|1[0-2])$/.test(throughMonth)
+    && fromMonth === CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
+    && monthsBetween(fromMonth, throughMonth).at(-1) === throughMonth;
+  return {
+    contractVersion,
+    fromMonth,
+    cycleYearMonth,
+    throughMonth,
+    monthCount: Number(nested.monthCount ?? record.monthCount),
+    weekCount: Number(nested.weekCount ?? record.weekCount),
+    cellCount: Number(nested.cellCount ?? record.cellCount),
+    validRange: Boolean(expected && fromMonth === expected.fromMonth) || (legacy && legacyRange),
+    strictRange: !legacy,
+    legacy,
+  };
 }
 
 export function cashflowCumulativeCloseCycle(yearMonth, businessDate) {

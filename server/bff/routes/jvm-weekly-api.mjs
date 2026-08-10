@@ -38,6 +38,7 @@ import {
 import {
   CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
   CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+  cashflowCumulativeCloseScope,
   cashflowCumulativeCloseCycle,
   cumulativeCloseMonthsOrNull,
   monthsBetween,
@@ -208,15 +209,31 @@ export function buildCashflowMonthCloseRevisionChanges(previousCells, currentCel
 
 function cashflowMonthCloseRequestView(record, partyNames = {}) {
   if (record.contractVersion === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT) {
-    const throughMonth = readOptionalText(record.throughMonth) || record.yearMonth;
+    const scope = record.scope && typeof record.scope === 'object' ? record.scope : {};
+    const cycleYearMonth = readOptionalText(scope.cycleYearMonth)
+      || readOptionalText(record.cycleYearMonth)
+      || record.yearMonth;
+    const throughMonth = readOptionalText(scope.throughMonth)
+      || readOptionalText(record.throughMonth)
+      || record.yearMonth;
     return {
       documentType: 'MONTHLY_CLOSE',
       contractVersion: record.contractVersion,
       requestId: record.requestId,
       projectId: record.projectId,
-      yearMonth: record.yearMonth,
+      yearMonth: cycleYearMonth,
+      cycleYearMonth,
       throughMonth,
-      fromMonth: record.fromMonth,
+      fromMonth: readOptionalText(scope.fromMonth) || record.fromMonth,
+      scope: {
+        contractVersion: record.contractVersion,
+        fromMonth: readOptionalText(scope.fromMonth) || record.fromMonth,
+        cycleYearMonth,
+        throughMonth,
+        monthCount: Number(scope.monthCount ?? record.monthCount),
+        weekCount: Number(scope.weekCount ?? record.weekCount),
+        cellCount: Number(scope.cellCount ?? record.cellCount),
+      },
       status: record.status,
       revision: record.revision,
       manifestHash: record.manifestHash,
@@ -240,7 +257,7 @@ function cashflowMonthCloseRequestView(record, partyNames = {}) {
       reviewWarnings: Array.isArray(record.reviewWarnings) ? record.reviewWarnings : [],
       monthSnapshot: null,
       lockRange: {
-        fromMonth: record.fromMonth,
+        fromMonth: readOptionalText(scope.fromMonth) || record.fromMonth,
         fromWeekNo: 1,
         throughMonth,
         throughWeekNo: 5,
@@ -1344,8 +1361,15 @@ function cumulativeCloseMonths(yearMonth) {
 }
 
 function buildCumulativeCloseScope(yearMonth, evidence = null) {
-  const months = cumulativeCloseMonths(yearMonth);
-  const throughMonth = months.at(-1);
+  const contract = cashflowCumulativeCloseScope(yearMonth);
+  if (!contract) {
+    throw createHttpError(
+      400,
+      '누적 월 결산 범위는 2023-01부터 최대 240개월까지 선택할 수 있습니다.',
+      'cashflow_month_close_request_invalid',
+    );
+  }
+  const { contractVersion, fromMonth, throughMonth } = contract;
   const nestedSource = objectValue(evidence?.source) || {};
   const sourceField = (...keys) => {
     for (const key of keys) {
@@ -1355,21 +1379,19 @@ function buildCumulativeCloseScope(yearMonth, evidence = null) {
     return null;
   };
   const spreadsheetId = sourceField('spreadsheetId');
-  const monthCount = months.length;
-  const weekCount = monthCount * 5;
   return {
-    contractVersion: CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
-    fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+    contractVersion,
+    fromMonth,
     throughMonth,
+    monthCount: contract.monthCount,
+    weekCount: contract.weekCount,
+    cellCount: contract.cellCount,
     lockRange: {
       fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
       fromWeekNo: 1,
       throughMonth,
       throughWeekNo: 5,
     },
-    monthCount,
-    weekCount,
-    cellCount: weekCount * CASHFLOW_ALL_LINES.length * 2,
     source: {
       sourceRevision: sourceField('sourceRevision', 'sourceFingerprint'),
       targetRevision: sourceField('targetRevision', 'targetRevisionAtFetch'),
@@ -3252,6 +3274,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         payloadFingerprint: fingerprint,
       };
     };
+    let preserveLegacyShape = false;
     return db.runTransaction(async (transaction) => {
       const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${yearMonth}`);
       const [projectSnapshot, approverSnapshot, requesterSnapshot, requestSnapshot, settlementStatusSnapshot] = await Promise.all([
@@ -3306,6 +3329,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           && existing.approverUid === approverUid
           && Number(existing.expectedRevision) === prepared.closeBody.expectedRevision;
         if (legacyBuildingReplay) replayEvidence = legacyBuildingEvidence;
+        preserveLegacyShape = legacyBuildingReplay;
         if (
           existing.createIdempotencyKey === req.context.idempotencyKey
           && (existing.requestFingerprint === requestFingerprint || legacyBuildingReplay)
@@ -3340,6 +3364,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             );
           }
           if (!existingThroughMonth) {
+            preserveLegacyShape = true;
             ({ shards, manifest, totals, annualSummaries, payloadFingerprint } = buildRevisionEvidence(
               revision,
               monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, yearMonth),
@@ -3368,8 +3393,12 @@ export function mountJvmWeeklyApiRoutes(app, {
         tenantId: req.context.tenantId,
         projectId: prepared.rawProjectId,
         yearMonth,
-        ...(shards.at(-1)?.yearMonth === yearMonth ? {} : { throughMonth: shards.at(-1)?.yearMonth }),
         fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+        ...(preserveLegacyShape ? {} : {
+          cycleYearMonth: yearMonth,
+          throughMonth: cumulativeMonths.at(-1),
+          scope: cashflowCumulativeCloseScope(yearMonth),
+        }),
         status: 'PENDING',
         revision,
         manifestHash: manifest.manifestHash,

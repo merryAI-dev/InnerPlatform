@@ -766,8 +766,11 @@ export function CashflowSheetLabPage() {
           riskLineCount: staged.riskLineCount,
           durationMs: Date.now() - startedAt,
         }, 'warn');
-        const blockedMonths = staged.blockedMonths?.join(', ');
-        setErrorMessage(`반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
+        const contractIssue = staged.pendingApprovalContractIssues?.[0];
+        const blockedMonths = (contractIssue?.blockedMonths || staged.blockedMonths || []).join(', ');
+        setErrorMessage(contractIssue
+          ? `${contractIssue.message}${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}${contractIssue.requestId !== 'unknown' ? ` (요청 ID: ${contractIssue.requestId})` : ''}`
+          : `반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
       if (staged.stagedLineCount === 0) {

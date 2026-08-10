@@ -10,6 +10,7 @@ const LINE_ENTRIES = Array.isArray(cashflowPolicyData.lineEntries) ? cashflowPol
 const WEEK_COLUMN_INDEXES = Array.from({ length: 60 }, (_, index) => index + 4); // E:BL
 const ANNUAL_COLUMN_INDEXES = [2, 3, 64, 65, 66, 67, 68, 69]; // C:D, BM:BR
 const SOURCE_YEAR_TOTAL_COLUMN_INDEX = 70; // BS
+export const CASHFLOW_SHEET_CONTRACT = 'cashflow-sheet-v1';
 const SECTION_LAYOUTS = [
   {
     mode: 'projection',
@@ -322,9 +323,17 @@ export function analyzeCashflowSheetTemplate(matrix) {
     && Number.isSafeInteger(sections[0].weeklyYear)
     ? sections[0].weeklyYear
     : undefined;
+  const contract = Number.isSafeInteger(weeklyYear) ? {
+    contractVersion: CASHFLOW_SHEET_CONTRACT,
+    weeklyYear,
+    weeklyColumnIndexes: WEEK_COLUMN_INDEXES,
+    annualColumnIndexes: ANNUAL_COLUMN_INDEXES,
+    annualYears: annualYearsFor(weeklyYear),
+  } : null;
   return {
     supported: reasons.length === 0,
     weeklyYear,
+    contract,
     policyVersion: cashflowPolicyData.version || 'cashflow-policy-v1',
     sectionOrder: ['projection', 'actual'],
     sections,

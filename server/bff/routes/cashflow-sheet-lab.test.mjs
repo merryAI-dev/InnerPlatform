@@ -90,8 +90,8 @@ function cumulativeMonths(throughMonth) {
   return months;
 }
 
-function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2026-01' } = {}) {
-  const requestId = `project-a-${throughMonth}`;
+function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2026-01', cycleYearMonth = throughMonth } = {}) {
+  const requestId = `project-a-${cycleYearMonth}`;
   const revision = 1;
   const source = { kind: 'PINNED_MIRROR', sourceRevision: 'source-a', targetRevision: 'target-a' };
   const shards = cumulativeMonths(throughMonth).map((yearMonth) => {
@@ -124,7 +124,7 @@ function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2
     requestRevision: revision,
     projectId: 'project-a',
     fromMonth: '2023-01',
-    yearMonth: throughMonth,
+    yearMonth: cycleYearMonth,
     months: shards.map((shard) => ({ yearMonth: shard.yearMonth, shardHash: shard.shardHash })),
   };
   return Object.fromEntries([
@@ -134,7 +134,8 @@ function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2
       tenantId: 'tenant-a',
       projectId: 'project-a',
       fromMonth: '2023-01',
-      yearMonth: throughMonth,
+      yearMonth: cycleYearMonth,
+      ...(cycleYearMonth !== throughMonth ? { throughMonth } : {}),
       status,
       revision,
       manifestHash: closeHash(manifest),
@@ -3088,11 +3089,40 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts the canonical cycle month plus separate throughMonth contract', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'saved-spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+      initialDocuments: cumulativeCloseRequestDocuments({ throughMonth: '2026-07', cycleYearMonth: '2026-08' }),
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+    });
+    const mirror = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-canonical-horizon' }).expect(200);
+    const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-08', idempotencyKey: 'stage-canonical-horizon' })
+      .expect(200);
+
+    expect(stage.body.pendingApprovalContractIssues).toEqual([]);
+  });
+
   it('does not mutate a malformed legacy PENDING close during sheet staging', async () => {
     const documents = cumulativeCloseRequestDocuments();
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-01';
     documents[requestPath] = {
       ...documents[requestPath],
+      fromMonth: '24-1-1',
       monthCount: 0,
       requestedByUid: 'pm-a',
     };
@@ -3119,9 +3149,16 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'refresh-malformed-close' }).expect(200);
     const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-malformed-close' })
-      .expect(409);
+      .expect(200);
 
-    expect(stage.body.code).toBe('cashflow_pending_approval_contract_unsupported');
+    expect(stage.body.status).toBe('BLOCKED');
+    expect(stage.body.pendingApprovalContractIssues).toEqual([expect.objectContaining({
+      requestId: 'project-a-2026-01',
+      reasonCode: 'cashflow_pending_approval_contract_unsupported',
+      blockedMonths: ['2026-01'],
+    })]);
+    expect(stage.body.stagedLineCount).toBe(0);
+    expect(stage.body.candidates).toEqual([]);
     expect(db.__getDocument(requestPath)).toMatchObject({
       status: 'PENDING', monthCount: 0,
     });
