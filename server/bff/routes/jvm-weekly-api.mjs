@@ -57,11 +57,6 @@ export { cashflowMonthCloseDeadline };
 const CASHFLOW_LINE_INDEX = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
 const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
-// 승인 클릭이 장부 잠금 완료까지 기다리는 시간. 빠르면 한 번에 끝나고, 넘어가면
-// "확정 진행 중"으로 돌려준 뒤 같은 멱등키의 다음 호출이 이어받는다. 결재는 사람이
-// 며칠에 걸쳐 하는 일이라 잠금을 같은 요청 안에서 끝낼 이유가 없다 - 승인자를
-// 26초 동안 붙잡아 두는 쪽이 오히려 승인 자체를 실패로 보이게 만들었다.
-const CASHFLOW_MONTH_CLOSE_SYNC_CONFIRM_MS = 9_000;
 const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
 
 function readWeeklyYear(value) {
@@ -4280,10 +4275,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       const prepared = {
         projectId: encodeURIComponent(projectId),
         rawProjectId: projectId,
-        routeDeadlineAtMs: Date.now() + Math.min(
-          monthCloseRouteTimeoutMs,
-          CASHFLOW_MONTH_CLOSE_SYNC_CONFIRM_MS,
-        ),
+        routeDeadlineAtMs: Date.now() + monthCloseRouteTimeoutMs,
         closeBody: {
           idempotencyKey: jvmMutationIdempotencyKey,
           yearMonth: readOptionalText(claimed.yearMonth),
@@ -4304,6 +4296,10 @@ export function mountJvmWeeklyApiRoutes(app, {
       }
       if (!monthClose) {
         try {
+          // 확정 예산은 "확정 시도"에 준다. 재개 경로에서는 위 reconcile 이 먼저 도는데,
+          // 그것이 예산을 먹고 나면 executePrepared 가 JVM 을 치지도 못하고 즉시
+          // route_timeout 을 내며, 이어받기가 영원히 같은 자리를 맴돈다. 실제로 그렇게 돌았다.
+          prepared.routeDeadlineAtMs = Date.now() + monthCloseRouteTimeoutMs;
           monthClose = await executePreparedCashflowMonthClose(req, prepared);
         } catch (error) {
           if (readOptionalText(error?.code) !== 'cashflow_month_close_reconciliation_pending') throw error;
