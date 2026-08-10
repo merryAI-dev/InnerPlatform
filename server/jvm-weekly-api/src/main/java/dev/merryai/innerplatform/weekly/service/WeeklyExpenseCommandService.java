@@ -284,19 +284,30 @@ public class WeeklyExpenseCommandService {
         String throughMonth = selectedYearMonth.compareTo(boundary.yearMonth()) > 0 ? selectedYearMonth : boundary.yearMonth();
         List<CashflowProjectionActualSummaryBatchResponse.Item> items = new ArrayList<>();
         List<CashflowProjectionActualSummaryBatchResponse.ErrorItem> errors = new ArrayList<>();
+        Map<String, Integer> weeklyYearsByProject;
+        Map<String, CashflowLedgerSource> sourcesByProject;
+        try {
+            weeklyYearsByProject = persistence.findCashflowDeclaredWeeklyYears(actor.tenantId(), projectIds);
+            sourcesByProject = persistence.findCashflowLedgerSources(
+                actor.tenantId(), weeklyYearsByProject,
+                CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
+            );
+        } catch (RuntimeException unavailable) {
+            return new CashflowProjectionActualSummaryBatchResponse(
+                "1", List.of(), projectIds.stream().map(projectId -> new CashflowProjectionActualSummaryBatchResponse.ErrorItem(
+                    projectId, CashflowProjectionActualSummaryBatchResponse.SUMMARY_UNAVAILABLE
+                )).toList()
+            );
+        }
         for (String projectId : projectIds) {
+            CashflowLedgerSource source = sourcesByProject.get(projectId);
+            if (source == null) {
+                errors.add(new CashflowProjectionActualSummaryBatchResponse.ErrorItem(
+                    projectId, CashflowProjectionActualSummaryBatchResponse.SUMMARY_UNAVAILABLE
+                ));
+                continue;
+            }
             try {
-                Integer weeklyYear = persistence.findCashflowDeclaredWeeklyYear(actor.tenantId(), projectId);
-                if (weeklyYear == null) {
-                    errors.add(new CashflowProjectionActualSummaryBatchResponse.ErrorItem(
-                        projectId, CashflowProjectionActualSummaryBatchResponse.SUMMARY_UNAVAILABLE
-                    ));
-                    continue;
-                }
-                CashflowLedgerSource source = persistence.findCashflowLedgerSource(
-                    actor.tenantId(), projectId, weeklyYear,
-                    CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
-                );
                 items.add(toProjectionActualSummary(projectId, source, boundary, selectedYearMonth));
             } catch (WeeklyExpenseForbiddenException denied) {
                 throw denied;

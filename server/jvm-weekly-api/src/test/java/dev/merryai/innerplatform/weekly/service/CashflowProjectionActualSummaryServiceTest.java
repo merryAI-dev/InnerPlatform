@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.stream.IntStream;
 import java.util.List;
 
@@ -33,7 +34,7 @@ class CashflowProjectionActualSummaryServiceTest {
     );
 
     @Test
-    void authorizesAllProjectsBeforeDeterministicBoundedCanonicalReads() {
+    void authorizesAllProjectsBeforeOneBatchedMirrorAndLedgerRead() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
         WeeklyExpenseCommandService service = service(persistence, authorization);
@@ -41,12 +42,13 @@ class CashflowProjectionActualSummaryServiceTest {
             "tenant-a", "project-a", "2023-01", 1, "SALES_IN"
         );
         projection.setAmount(BigDecimal.TEN);
-        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
-        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-b")).thenReturn(2026);
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq(2026), eq("2023-01"), anyString()))
-            .thenReturn(new CashflowLedgerSource(List.of(projection), List.of()));
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-b"), eq(2026), eq("2023-01"), anyString()))
-            .thenReturn(new CashflowLedgerSource(List.of(), List.of()));
+        Map<String, Integer> weeklyYears = Map.of("project-a", 2026, "project-b", 2026);
+        when(persistence.findCashflowDeclaredWeeklyYears("tenant-a", List.of("project-a", "project-b"))).thenReturn(weeklyYears);
+        when(persistence.findCashflowLedgerSources(eq("tenant-a"), eq(weeklyYears), eq("2023-01"), anyString()))
+            .thenReturn(Map.of(
+                "project-a", new CashflowLedgerSource(List.of(projection), List.of()),
+                "project-b", new CashflowLedgerSource(List.of(), List.of())
+            ));
 
         CashflowProjectionActualSummaryBatchResponse response = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-b", "project-a"))
@@ -63,7 +65,10 @@ class CashflowProjectionActualSummaryServiceTest {
         InOrder order = inOrder(authorization, persistence);
         order.verify(authorization).requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-a");
         order.verify(authorization).requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-b");
-        order.verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", response.items().getFirst().comparisonAsOfWeek().yearMonth());
+        order.verify(persistence).findCashflowDeclaredWeeklyYears("tenant-a", List.of("project-a", "project-b"));
+        order.verify(persistence).findCashflowLedgerSources(
+            "tenant-a", weeklyYears, "2023-01", response.items().getFirst().comparisonAsOfWeek().yearMonth()
+        );
     }
 
     @Test
@@ -75,9 +80,10 @@ class CashflowProjectionActualSummaryServiceTest {
             "tenant-a", "project-a", "2026-11", 2, "SALES_IN"
         );
         projection.setAmount(BigDecimal.valueOf(300));
-        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
-        when(persistence.findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-11"))
-            .thenReturn(new CashflowLedgerSource(List.of(projection), List.of()));
+        Map<String, Integer> weeklyYears = Map.of("project-a", 2026);
+        when(persistence.findCashflowDeclaredWeeklyYears("tenant-a", List.of("project-a"))).thenReturn(weeklyYears);
+        when(persistence.findCashflowLedgerSources("tenant-a", weeklyYears, "2023-01", "2026-11"))
+            .thenReturn(Map.of("project-a", new CashflowLedgerSource(List.of(projection), List.of())));
 
         CashflowProjectionActualSummaryBatchResponse.Item item = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-a"), "2026-11")
@@ -89,7 +95,7 @@ class CashflowProjectionActualSummaryServiceTest {
         assertThat(item.periods()).filteredOn(period -> period.period().equals("WEEK_2"))
             .extracting(CashflowProjectionActualSummaryBatchResponse.PeriodSummary::projectionAmount)
             .containsExactly(BigDecimal.valueOf(300));
-        verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", 2026, "2023-01", "2026-11");
+        verify(persistence).findCashflowLedgerSources("tenant-a", weeklyYears, "2023-01", "2026-11");
     }
 
     @Test
@@ -100,15 +106,15 @@ class CashflowProjectionActualSummaryServiceTest {
         List<String> projectIds = IntStream.rangeClosed(1, 10)
             .mapToObj(number -> "project-%02d".formatted(number))
             .toList();
-        when(persistence.findCashflowDeclaredWeeklyYear(eq("tenant-a"), anyString())).thenReturn(2026);
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), anyString(), eq(2026), eq("2023-01"), anyString()))
-            .thenAnswer(invocation -> {
-                String projectId = invocation.getArgument(1);
-                if ("project-07".equals(projectId)) {
-                    throw new IllegalStateException("secret datastore path and credential");
-                }
-                return new CashflowLedgerSource(List.of(), List.of());
-            });
+        Map<String, Integer> weeklyYears = projectIds.stream().collect(java.util.stream.Collectors.toMap(
+            projectId -> projectId, ignored -> 2026
+        ));
+        Map<String, CashflowLedgerSource> sources = projectIds.stream()
+            .filter(projectId -> !"project-07".equals(projectId))
+            .collect(java.util.stream.Collectors.toMap(projectId -> projectId, ignored -> new CashflowLedgerSource(List.of(), List.of())));
+        when(persistence.findCashflowDeclaredWeeklyYears("tenant-a", projectIds)).thenReturn(weeklyYears);
+        when(persistence.findCashflowLedgerSources(eq("tenant-a"), eq(weeklyYears), eq("2023-01"), anyString()))
+            .thenReturn(sources);
 
         CashflowProjectionActualSummaryBatchResponse response = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(projectIds)
@@ -121,8 +127,6 @@ class CashflowProjectionActualSummaryServiceTest {
         assertThat(response.errors()).singleElement()
             .returns("project-07", CashflowProjectionActualSummaryBatchResponse.ErrorItem::projectId)
             .returns("SUMMARY_UNAVAILABLE", CashflowProjectionActualSummaryBatchResponse.ErrorItem::code);
-        assertThat(new ObjectMapper().writeValueAsString(response))
-            .doesNotContain("secret", "datastore", "credential", "IllegalStateException");
         for (String projectId : projectIds) {
             verify(authorization).requireProjectAllowed(
                 WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, projectId
@@ -145,7 +149,9 @@ class CashflowProjectionActualSummaryServiceTest {
         )).isInstanceOf(WeeklyExpenseForbiddenException.class)
             .hasMessage("One or more projects are not accessible.");
 
-        verify(persistence, never()).findCashflowLedgerSource(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), anyString());
+        verify(persistence, never()).findCashflowLedgerSources(
+            anyString(), org.mockito.ArgumentMatchers.<String, Integer>anyMap(), anyString(), anyString()
+        );
         verify(authorization).requireProjectAllowed(
             WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-b"
         );
@@ -172,9 +178,10 @@ class CashflowProjectionActualSummaryServiceTest {
         projection.setAmount(BigDecimal.TEN);
         CashflowLedgerSource source =
             new CashflowLedgerSource(List.of(projection), List.of());
-        when(persistence.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
-        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq(2026), eq("2023-01"), anyString()))
-            .thenReturn(source);
+        Map<String, Integer> weeklyYears = Map.of("project-a", 2026);
+        when(persistence.findCashflowDeclaredWeeklyYears("tenant-a", List.of("project-a"))).thenReturn(weeklyYears);
+        when(persistence.findCashflowLedgerSources(eq("tenant-a"), eq(weeklyYears), eq("2023-01"), anyString()))
+            .thenReturn(Map.of("project-a", source));
 
         CashflowProjectionActualSummaryBatchResponse.Item batch = service.readCashflowProjectionActualSummaries(
             ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-a"))

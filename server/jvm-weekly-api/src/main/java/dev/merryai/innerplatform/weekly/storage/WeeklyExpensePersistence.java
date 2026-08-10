@@ -669,6 +669,15 @@ public interface WeeklyExpensePersistence {
         return null;
     }
 
+    default Map<String, Integer> findCashflowDeclaredWeeklyYears(String tenantId, List<String> projectIds) {
+        Map<String, Integer> yearsByProject = new LinkedHashMap<>();
+        for (String projectId : projectIds) {
+            Integer weeklyYear = findCashflowDeclaredWeeklyYear(tenantId, projectId);
+            if (weeklyYear != null) yearsByProject.put(projectId, weeklyYear);
+        }
+        return Map.copyOf(yearsByProject);
+    }
+
     default CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId, int weeklyYear) {
         List<WeeklyExpenseProjectionEntity> projection = findProjectionLines(tenantId, projectId);
         List<WeeklyExpenseActualEntity> actual = findActualLines(tenantId, projectId);
@@ -716,6 +725,21 @@ public interface WeeklyExpensePersistence {
                 .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
                 .toList();
             result.put(projectId, new CashflowLedgerSource(projection, actual, source.targetRevision()));
+        }
+        return Map.copyOf(result);
+    }
+
+    default Map<String, CashflowLedgerSource> findCashflowLedgerSources(
+        String tenantId,
+        Map<String, Integer> weeklyYearsByProject,
+        String fromMonth,
+        String throughMonth
+    ) {
+        Map<String, CashflowLedgerSource> result = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : weeklyYearsByProject.entrySet()) {
+            result.put(entry.getKey(), findCashflowLedgerSource(
+                tenantId, entry.getKey(), entry.getValue(), fromMonth, throughMonth
+            ));
         }
         return Map.copyOf(result);
     }
