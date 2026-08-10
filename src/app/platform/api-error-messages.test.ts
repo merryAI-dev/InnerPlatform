@@ -7,7 +7,6 @@ const cases = [
   ['cashflow_sheet_operation_uncertain', 'retry'],
   ['cashflow_month_close_request_conflict', 'contact'],
   ['cashflow_month_close_approver_required', 'contact'],
-  ['cashflow_month_close_self_approval_forbidden', 'contact'],
   ['cashflow_sheet_mirror_revision_conflict', 'contact'],
   ['jvm_weekly_api_identity_token_unavailable', 'contact'],
   ['jvm_weekly_api_token_unconfigured', 'contact'],

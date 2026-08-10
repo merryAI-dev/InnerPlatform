@@ -646,20 +646,6 @@ export interface CashflowSheetLabShareAccountResult {
   };
 }
 
-export interface CashflowSheetChangeCheckResult {
-  status: 'CHECKING' | 'COMPARED' | 'PARTIAL' | 'UNAVAILABLE';
-  classification: 'ALL_SYNCED' | 'FIRESTORE_DIFFERS' | 'JVM_DIFFERS' | 'SHEET_DIFFERS' | 'THREE_WAY_DIFFERENT' | 'PARTIAL';
-  checkedAt: string;
-  sheet: { status: 'AVAILABLE' | 'UNAVAILABLE'; revisions?: string[] };
-  comparisons: Record<'sheetToJvm' | 'sheetToFirestore' | 'jvmToFirestore', {
-    status: 'AVAILABLE' | 'UNAVAILABLE';
-    changeCount: number | null;
-    projectionChangeCount: number | null;
-    actualChangeCount: number | null;
-    code?: string;
-  }>;
-}
-
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
 
 let sameOriginBffClient: PlatformApiClient | undefined;
@@ -948,27 +934,6 @@ export async function probeCashflowSheetFreshnessViaBff(params: {
       actor: toRequestActor(params.actor),
       body: {},
       timeoutMs: 12000,
-      retries: 0,
-    },
-  );
-  return response.data;
-}
-
-export async function checkCashflowSheetChangesViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  sourceYear: number;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSheetChangeCheckResult> {
-  const apiClient = params.client || createSameOriginBffClient();
-  const response = await apiClient.post<CashflowSheetChangeCheckResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/changes/check`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: { sourceYear: params.sourceYear },
-      timeoutMs: 30000,
       retries: 0,
     },
   );

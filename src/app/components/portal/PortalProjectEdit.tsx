@@ -652,7 +652,6 @@ function ProjectInfoEditor({
         initialDraft={initialDraft}
         draftKey={autosaveKey}
         members={members}
-        requesterId={actor.uid}
         departmentOptions={departmentOptions}
         settlementSystemOptions={settlementSystemOptions}
         topSlot={topSlot}

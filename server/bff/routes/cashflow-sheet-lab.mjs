@@ -4834,38 +4834,6 @@ export function mountCashflowSheetLabRoutes(app, {
     }
   }));
 
-  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/changes/check', asyncHandler(async (req, res) => {
-    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
-    const { tenantId } = req.context;
-    const { projectId } = req.params;
-    const checkedAt = new Date().toISOString();
-    try {
-      const result = await compareCashflowSheetProject({
-        tenantId,
-        projectId,
-        runId: `cashflow-sheet-check:${req.context.requestId}`,
-        context: req.context,
-      });
-      res.status(200).json(result);
-    } catch (error) {
-      logCashflowSheetLab('changes.check.unavailable', req, {
-        projectId,
-        ...routeErrorDetails(normalizeRouteError(error)),
-      }, 'warn');
-      res.status(200).json({
-        status: 'UNAVAILABLE',
-        classification: 'PARTIAL',
-        sheet: { status: 'UNAVAILABLE' },
-        comparisons: {
-          sheetToJvm: unavailableComparison(error),
-          sheetToFirestore: unavailableComparison(error),
-          jvmToFirestore: unavailableComparison(error),
-        },
-        checkedAt,
-      });
-    }
-  }));
-
   app.put('/api/v1/projects/:projectId/cashflow-sheet-lab/config', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Copy, HelpCircle, Loader2, RefreshCw, Save, UserPlus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, RefreshCw, Save, UserPlus } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -284,13 +284,7 @@ export function CashflowSheetLabPage() {
   const [loadingOperation, setLoadingOperation] = useState<CashflowSheetSyncOperation | null>(null);
   const loading = loadingOperation !== null;
   const [accountLoading, setAccountLoading] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(false);
-  const [tutorialSlide, setTutorialSlide] = useState(0);
-  const sheetLinkRef = useRef<HTMLInputElement>(null);
-  const saveConfigButtonRef = useRef<HTMLButtonElement>(null);
   const configLoadGenerationRef = useRef(0);
-  const refreshButtonRef = useRef<HTMLButtonElement>(null);
-  const stageButtonRef = useRef<HTMLButtonElement>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const projectContextSync = resolvePortalProjectContextSync({
     routeProjectId,
@@ -300,7 +294,6 @@ export function CashflowSheetLabPage() {
   const projectId = projectContextSync.projectId;
   const projectContextAction = projectContextSync.action;
   const projectContextPath = projectContextSync.path;
-  const tutorialStorageKey = projectId ? `cashflow-sheet-tutorial:${projectId}` : '';
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
   const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim());
   const sourceKey = useMemo(() => buildSourceKey({
@@ -309,14 +302,6 @@ export function CashflowSheetLabPage() {
     value: sheetLink,
     sheetName,
   }), [projectId, sheetLink, sheetName, sourceYear]);
-  const detectedYearModes = useMemo(() => (mirror?.sheetFacts?.annualCashflowTotals || []).map((row) => {
-    const sources = new Set([row.projection.source, row.actual.source]);
-    const valueCellCount = row.projection.valueCellCount + row.actual.valueCellCount;
-    return {
-      year: row.year,
-      mode: valueCellCount === 0 ? '값 없음' : sources.has('WEEKLY') ? '주차별 값' : sources.has('ANNUAL') ? '연간 합계' : '값 없음',
-    };
-  }), [mirror?.sheetFacts?.annualCashflowTotals]);
   const savedConfigSourceKey = useMemo(() => (
     savedConfig?.value
       ? buildSourceKey({
@@ -508,36 +493,6 @@ export function CashflowSheetLabPage() {
     if (projectYears.includes(sourceYear)) return;
     setSourceYear(projectYears[0] || 2026);
   }, [projectYears, sourceYear]);
-
-  useEffect(() => {
-    if (!tutorialStorageKey) return;
-    try {
-      if (sessionStorage.getItem(tutorialStorageKey) === 'seen') return;
-    } catch {
-      // Storage가 차단돼도 가이드 자체는 사용할 수 있어야 한다.
-    }
-    setTutorialSlide(0);
-    setTutorialOpen(true);
-  }, [tutorialStorageKey]);
-
-  const markTutorialSeen = useCallback(() => {
-    if (!tutorialStorageKey) return;
-    try {
-      sessionStorage.setItem(tutorialStorageKey, 'seen');
-    } catch {
-      // Private browsing 등 저장소 제한은 사용자 흐름을 막지 않는다.
-    }
-  }, [tutorialStorageKey]);
-
-  function handleTutorialOpenChange(open: boolean) {
-    setTutorialOpen(open);
-    if (!open) markTutorialSeen();
-  }
-
-  function openTutorial() {
-    setTutorialSlide(0);
-    setTutorialOpen(true);
-  }
 
   function handleSourceYearChange(nextYear: number) {
     const nextConfig = savedConfigs.find((config) => config.sourceYear === nextYear) || null;
@@ -996,20 +951,6 @@ export function CashflowSheetLabPage() {
         : 'bg-slate-100 text-slate-500'
     }`;
 
-  function finishTutorial() {
-    markTutorialSeen();
-    setTutorialOpen(false);
-    window.setTimeout(() => {
-      const target = currentStep === 1
-        ? (spreadsheetId ? saveConfigButtonRef.current : sheetLinkRef.current)
-        : currentStep === 2
-          ? refreshButtonRef.current
-          : stageButtonRef.current;
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (target && !target.disabled) target.focus({ preventScroll: true });
-    }, 150);
-  }
-
   function closeClosedMonthDialog() {
     setClosedMonthStage(null);
     setApplyResumeRequired(false);
@@ -1025,17 +966,6 @@ export function CashflowSheetLabPage() {
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
           <CashflowSheetHeroAnimation />
-          <div className="mt-2 flex justify-center">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 gap-2 rounded-full border-blue-200 bg-blue-50 px-4 text-[12px] font-semibold text-blue-900 shadow-none hover:bg-blue-100"
-              onClick={openTutorial}
-            >
-              <BookOpen className="h-4 w-4" />
-              시트 연동 가이드
-            </Button>
-          </div>
         </header>
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
@@ -1062,7 +992,6 @@ export function CashflowSheetLabPage() {
                 </select>
               </label>
               <Input
-                ref={sheetLinkRef}
                 value={sheetLink}
                 onChange={(event) => setSheetLink(event.target.value)}
                 placeholder="Google Sheet 링크"
@@ -1080,7 +1009,6 @@ export function CashflowSheetLabPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Button
-                  ref={saveConfigButtonRef}
                   type="button"
                   variant={isCurrentSheetConfigSaved ? 'outline' : 'default'}
                   className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
@@ -1119,7 +1047,6 @@ export function CashflowSheetLabPage() {
                 <HelpMemo>저장한 설정으로 Google Sheet 최신값을 읽어 서버 고정본으로 만듭니다. 아직 MYSCube에는 저장하지 않습니다.</HelpMemo>
               </div>
               <Button
-                ref={refreshButtonRef}
                 type="button"
                 variant="outline"
                 className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
@@ -1175,7 +1102,6 @@ export function CashflowSheetLabPage() {
               ) : (
                 <div className="space-y-2">
                   <Button
-                    ref={stageButtonRef}
                     type="button"
                     className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
                     disabled={applyStatusState === 'error' ? loading : !canOverwrite}
@@ -1351,176 +1277,6 @@ export function CashflowSheetLabPage() {
         </DialogContent>
       </Dialog>
 
-
-      <Dialog open={tutorialOpen} onOpenChange={handleTutorialOpenChange}>
-        <DialogContent
-          aria-modal="true"
-          className="max-w-[680px] gap-0 overflow-hidden rounded-[24px] border-0 bg-white p-0 shadow-[0_28px_90px_rgba(0,30,70,0.3)] sm:max-w-[680px] [&>button]:text-white [&>button]:opacity-80"
-        >
-          <div className="bg-[#001e46] px-6 pb-5 pt-6 text-white sm:px-8">
-            <div className="mb-5 flex items-center justify-between gap-4 pr-8">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold tracking-[0.08em]">
-                <BookOpen className="h-3.5 w-3.5" />
-                SHEET QUEST
-              </div>
-              <div className="max-w-[220px] truncate text-[11px] text-blue-100" title={projectId}>
-                프로젝트 {projectId || '선택 전'}
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-2" aria-label={`가이드 ${tutorialSlide + 1}/4`}>
-              {[0, 1, 2, 3].map((step) => (
-                <span
-                  key={step}
-                  className={`h-1.5 rounded-full ${step <= tutorialSlide ? 'bg-[#4f7cff]' : 'bg-white/20'}`}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="min-h-[360px] px-6 py-7 sm:px-8">
-            {tutorialSlide === 0 && (
-              <>
-                <DialogHeader>
-                  <div className="text-[12px] font-bold text-blue-700">MISSION 1 · 전체 흐름</div>
-                  <DialogTitle className="text-[25px] font-black leading-tight text-slate-950">
-                    시트 연동은 세 번만 누르면 끝나요
-                  </DialogTitle>
-                  <DialogDescription className="text-[14px] leading-relaxed text-slate-600">
-                    안내가 끝나면 지금 해야 할 버튼으로 바로 이동해 드릴게요.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-7 grid gap-3 sm:grid-cols-3">
-                  {[
-                    ['1', '시트 정보 저장', '링크와 탭 이름을 기억해요.'],
-                    ['2', '시트 값 가져오기', '버튼을 누른 시점의 값을 고정해요.'],
-                    ['3', '시트 값으로 덮어쓰기', '별도 검토 없이 MYSCube에 반영해요.'],
-                  ].map(([number, title, description]) => (
-                    <div key={number} className="border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-5 flex h-8 w-8 items-center justify-center rounded-full bg-[#001e46] text-[12px] font-black text-white">
-                        {number}
-                      </div>
-                      <div className="text-[14px] font-bold text-slate-950">{title}</div>
-                      <div className="mt-1 text-[12px] leading-relaxed text-slate-500">{description}</div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {tutorialSlide === 1 && (
-              <>
-                <DialogHeader>
-                  <div className="text-[12px] font-bold text-blue-700">MISSION 2 · 연결 정보</div>
-                  <DialogTitle className="text-[25px] font-black leading-tight text-slate-950">
-                    이 두 칸만 시트와 똑같이 적어주세요
-                  </DialogTitle>
-                  <DialogDescription className="text-[14px] leading-relaxed text-slate-600">
-                    Google Sheet 링크와 탭 이름을 입력합니다. 선택한 탭 전체를 불러옵니다.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-6 border-2 border-blue-200 bg-blue-50/60 p-4 shadow-[0_12px_30px_rgba(79,124,255,0.1)]">
-                  <div className="mb-3 h-10 border border-blue-300 bg-white px-3 py-2 text-[12px] text-slate-400">
-                    https://docs.google.com/spreadsheets/d/...
-                  </div>
-                  <div>
-                    <div className="border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700">cashflow(사용내역 연동)</div>
-                  </div>
-                </div>
-                <div className="mt-4 flex gap-3 border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-[12px] leading-relaxed text-amber-950">
-                  <span className="font-black">TIP</span>
-                  <span>시트 연결 단계에 바로 표시된 서비스 계정을 복사해 Google Sheet에 <strong>편집자</strong>로 공유하면 돼요.</span>
-                </div>
-              </>
-            )}
-
-            {tutorialSlide === 2 && (
-              <>
-                <DialogHeader>
-                  <div className="text-[12px] font-bold text-blue-700">MISSION 3 · 연도 구조</div>
-                  <DialogTitle className="text-[25px] font-black leading-tight text-slate-950">
-                    연간 합계와 주차 값을 알아서 구분해요
-                  </DialogTitle>
-                  <DialogDescription className="text-[14px] leading-relaxed text-slate-600">
-                    시트 서식을 억지로 바꿀 필요 없이 현재 구조 그대로 가져옵니다.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  {(detectedYearModes.length > 0 ? detectedYearModes : [
-                    { year: '연도 합계 열', mode: '연간 합계' },
-                    { year: '주차 열', mode: '주차별 값' },
-                    { year: '없는 연도', mode: '오류 아님' },
-                  ]).map(({ year, mode }) => (
-                    <div key={String(year)} className={`p-4 text-center ${mode === '주차별 값' ? 'bg-[#001e46] text-white shadow-lg' : 'border border-slate-200 bg-slate-50 text-slate-900'}`}>
-                      <div className="text-[18px] font-black">{typeof year === 'number' ? `${year}년` : year}</div>
-                      <div className={`mt-2 text-[11px] font-semibold ${mode === '주차별 값' ? 'text-blue-100' : 'text-slate-500'}`}>{mode}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-5 space-y-2 text-[13px] leading-relaxed text-slate-700">
-                  <p><strong>연간 합계는 임의의 주차로 나누지 않고</strong> 해당 연도의 합계로 그대로 저장합니다.</p>
-                  <p><strong>주차 열이 있는 연도만 주차별로 저장</strong>하며, 시트에 없는 연도는 오류로 처리하지 않습니다.</p>
-                </div>
-              </>
-            )}
-
-            {tutorialSlide === 3 && (
-              <>
-                <DialogHeader>
-                  <div className="text-[12px] font-bold text-emerald-700">FINAL MISSION · 저장</div>
-                  <DialogTitle className="text-[25px] font-black leading-tight text-slate-950">
-                    버튼 문구만 보고 순서대로 눌러주세요
-                  </DialogTitle>
-                  <DialogDescription className="text-[14px] leading-relaxed text-slate-600">
-                    자동 동기화하지 않으며, 마지막 버튼을 누를 때만 시트 값으로 덮어씁니다.
-                  </DialogDescription>
-                </DialogHeader>
-                <ol className="mt-6 space-y-3">
-                  {[
-                    ['1', '시트 정보 저장', '어느 시트를 읽을지 저장'],
-                    ['2', '시트 값 가져오기', '가져온 값을 서버에 고정'],
-                    ['3', '시트 값으로 덮어쓰기', 'Projection과 Actual을 바로 반영'],
-                  ].map(([number, title, description]) => (
-                    <li key={number} className="flex items-center gap-3 border border-slate-200 px-4 py-3">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-black text-blue-800">{number}</span>
-                      <span className="min-w-0 flex-1 text-[13px] font-bold text-slate-950">{title}</span>
-                      <span className="hidden text-[11px] text-slate-500 sm:block">{description}</span>
-                    </li>
-                  ))}
-                </ol>
-              </>
-            )}
-          </div>
-
-          <DialogFooter className="flex-row items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4 sm:px-8">
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-10 gap-1 px-2 text-[13px]"
-              disabled={tutorialSlide === 0}
-              onClick={() => setTutorialSlide((current) => Math.max(0, current - 1))}
-            >
-              <ChevronLeft className="h-4 w-4" /> 이전
-            </Button>
-            {tutorialSlide < 3 ? (
-              <Button
-                type="button"
-                className="h-10 gap-1.5 bg-[#001e46] px-5 text-[13px] text-white hover:bg-[#082c5a]"
-                onClick={() => setTutorialSlide((current) => Math.min(3, current + 1))}
-              >
-                다음 미션 <ChevronRight className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                className="h-10 gap-1.5 bg-emerald-600 px-5 text-[13px] text-white hover:bg-emerald-700"
-                onClick={finishTutorial}
-              >
-                지금 해야 할 곳으로 이동 <ChevronRight className="h-4 w-4" />
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
     {loadingOperation ? <CashflowSheetSyncOverlay operation={loadingOperation} /> : null}
     </>

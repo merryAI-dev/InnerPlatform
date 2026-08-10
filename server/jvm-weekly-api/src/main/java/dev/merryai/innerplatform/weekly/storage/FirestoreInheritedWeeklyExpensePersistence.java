@@ -31,7 +31,6 @@ import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
-import dev.merryai.innerplatform.weekly.api.WeeklyExpenseForbiddenException;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmation;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationExpiredException;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
@@ -1960,12 +1959,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(nestedMap(current.get("reopenRequest")).get("requestedByUid"), ""),
             actor.id()
         );
-        if (approvalDecision == CashflowMonthReopenApprovalPolicy.Decision.SELF_APPROVAL_FORBIDDEN) {
-            throw new WeeklyExpenseForbiddenException(
-                "cashflow_month_close_self_approval_forbidden",
-                "Cashflow month reopen requester cannot decide their own request."
-            );
-        }
         if (approvalDecision == CashflowMonthReopenApprovalPolicy.Decision.LEGACY_REQUESTER_MISSING) {
             LOGGER.log(
                 System.Logger.Level.WARNING,

@@ -3979,7 +3979,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('cashflow_month_close_approver_locked'));
   });
 
-  it('rejects inactive and self approvers but lets any active member designate one', async () => {
+  it('rejects inactive approvers but lets any active member designate themselves or another member', async () => {
     const source = fullMonthCloseSource();
     source.documents.get('orgs/tenant-a/projects/project-a').version = 2;
     source.documents.get('orgs/tenant-a/members/finance-2').status = 'INACTIVE';
@@ -3995,20 +3995,20 @@ describe('JVM weekly API BFF proxy', () => {
     await request(requester)
       .post('/api/v1/cashflow/project-a/month-close/approver')
       .send({ approverUid: 'pm-1', yearMonth: '2026-07', expectedVersion: 2 })
-      .expect(409)
-      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_self_approval_forbidden'));
+      .expect(200)
+      .expect((response) => expect(response.body.executiveApproverId).toBe('pm-1'));
 
     const outsider = createApp(vi.fn(), createIdempotencyService(), {
       actorId: 'viewer-2', actorRole: 'viewer',
     }, { env: runtimeEnv, db: source.db }).app;
     await request(outsider)
       .post('/api/v1/cashflow/project-a/month-close/approver')
-      .send({ approverUid: 'finance-1', yearMonth: '2026-07', expectedVersion: 2 })
+      .send({ approverUid: 'finance-1', yearMonth: '2026-07', expectedVersion: 3 })
       .expect(200)
       .expect((response) => expect(response.body.executiveApproverId).toBe('finance-1'));
   });
 
-  it('derives the approver from the project, blocks self approval, and exposes permission-filtered reads', async () => {
+  it('derives the approver from the project, permits self approval, and exposes permission-filtered reads', async () => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,
@@ -4128,8 +4128,11 @@ describe('JVM weekly API BFF proxy', () => {
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
-      .expect(409)
-      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_self_approval_forbidden'));
+      .expect(202)
+      .expect((response) => expect(response.body).toMatchObject({
+        status: 'PENDING', requestedByUid: 'finance-1', approverUid: 'finance-1',
+      }));
+    source.documents.delete('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06');
 
     source.documents.get('orgs/tenant-a/projects/project-a').executiveApproverId = 'finance-2';
     source.documents.get('orgs/tenant-a/members/finance-2').status = 'INACTIVE';

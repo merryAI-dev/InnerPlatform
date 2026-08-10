@@ -217,7 +217,6 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       initialDraft={initialDraft}
       draftKey={`admin-${editProject?.id || 'new'}-${editProject?.updatedAt || initialPhase}`}
       members={members}
-      requesterId={currentUser?.uid}
       departmentOptions={departmentOptions}
       settlementSystemOptions={projects.flatMap((project) => project.settlementSystem === 'OTHER' && project.settlementSystemOther && !project.trashedAt ? [project.settlementSystemOther] : [])}
       actions={editProject ? [

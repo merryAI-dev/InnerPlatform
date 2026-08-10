@@ -20,10 +20,6 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '월 결산을 맡을 조직장이 지정되지 않았어요. 프로젝트에서 조직장을 지정해 주세요.',
     resolution: 'contact',
   }],
-  ['cashflow_month_close_self_approval_forbidden', {
-    guide: '요청한 사람은 자신의 월 결산을 승인할 수 없어요. 다른 조직장에게 승인을 요청해 주세요.',
-    resolution: 'contact',
-  }],
   ['cashflow_sheet_mirror_revision_conflict', {
     guide: '검토한 뒤 시트 고정본이 변경됐어요. 최신 시트 내용을 다시 검토해 주세요.',
     resolution: 'contact',

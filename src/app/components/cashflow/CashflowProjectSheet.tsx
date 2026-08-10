@@ -451,9 +451,7 @@ export function CashflowProjectSheet({
       && (lateSheetDiffWeek === 'ALL' || String(change.weekNo) === lateSheetDiffWeek)
       && (!query || `${change.yearMonth} ${change.weekNo} ${change.mode} ${label} ${change.lineId}`.toLocaleLowerCase('ko-KR').includes(query));
   });
-  const executiveApproverOptions = useMemo(() => buildOrgMemberPickerOptions(members || [])
-    .filter((member) => member.uid !== user?.uid),
-  [members, user?.uid]);
+  const executiveApproverOptions = useMemo(() => buildOrgMemberPickerOptions(members || []), [members]);
 
   useEffect(() => {
     const approverId = project?.executiveApproverId || '';

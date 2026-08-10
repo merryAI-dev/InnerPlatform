@@ -315,15 +315,12 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('>반영<');
   });
 
-  it('guides each project through the sheet workflow once per browser session', () => {
-    expect(pageSource).toContain('cashflow-sheet-tutorial:');
-    expect(pageSource).toContain('sessionStorage.getItem');
-    expect(pageSource).toContain('sessionStorage.setItem');
-    expect(pageSource).toContain('시트 연동 가이드');
-    expect(pageSource).toContain('detectedYearModes');
-    expect(pageSource).toContain('연간 합계는 임의의 주차로 나누지 않고');
-    expect(pageSource).toContain('시트에 없는 연도는 오류로 처리하지 않습니다.');
-    expect(pageSource).toContain('scrollIntoView');
-    expect(pageSource).toContain('aria-modal="true"');
+  it('does not show the retired first-entry sheet guide popup', () => {
+    expect(pageSource).not.toContain('cashflow-sheet-tutorial:');
+    expect(pageSource).not.toContain('sessionStorage.getItem');
+    expect(pageSource).not.toContain('sessionStorage.setItem');
+    expect(pageSource).not.toContain('시트 연동 가이드');
+    expect(pageSource).not.toContain('SHEET QUEST');
+    expect(pageSource).not.toContain('detectedYearModes');
   });
 });

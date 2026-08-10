@@ -2111,20 +2111,6 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void cashflowMonthReopenSelfApprovalErrorKeepsItsPublicCode() {
-        var response = controller.forbidden(new WeeklyExpenseForbiddenException(
-            "cashflow_month_close_self_approval_forbidden",
-            "Cashflow month reopen requester cannot decide their own request."
-        ));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(403);
-        assertThat(response.getBody()).containsEntry(
-            "code",
-            "cashflow_month_close_self_approval_forbidden"
-        );
-    }
-
-    @Test
     void projectionWriteRejectsViewerRole() throws Exception {
         String body = """
             {

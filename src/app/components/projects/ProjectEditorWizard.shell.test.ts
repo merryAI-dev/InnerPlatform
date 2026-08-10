@@ -104,12 +104,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('최종 결재자 지정 (사업총괄) *');
     expect(source).toContain('const selectedExecutiveApprover = useMemo');
     expect(source).toContain('const executiveApproverOptions = useMemo');
-    expect(source).toContain('requesterId?: string');
-    expect(source).toContain('member.uid !== draft.registeredById && member.uid !== requesterId');
-    expect(portalRegisterSource).toContain('requesterId={actor.uid}');
-    expect(source).toContain('requesterId, ledgerMemberOptions');
-    expect(source).toContain('const isSelfExecutiveApprover = Boolean(');
-    expect(source).toContain('사업 담당자와 최종 결재자는 달라야 합니다.');
+    expect(source).not.toContain('requesterId?: string');
+    expect(portalRegisterSource).not.toContain('requesterId={actor.uid}');
+    expect(source).not.toContain('member.uid !== draft.registeredById && member.uid !== requesterId');
+    expect(source).not.toContain('const isSelfExecutiveApprover = Boolean(');
+    expect(source).not.toContain('사업 담당자와 최종 결재자는 달라야 합니다.');
   });
 
   it('drops only members marked inactive, so members without a status still appear', () => {

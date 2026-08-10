@@ -158,7 +158,6 @@ interface ProjectEditorWizardProps {
   description?: string;
   embeddedInShell?: boolean;
   members?: OrgMember[];
-  requesterId?: string;
   departmentOptions?: string[];
   settlementSystemOptions?: string[];
   topSlot?: ReactNode;
@@ -607,7 +606,6 @@ export function ProjectEditorWizard({
   description,
   embeddedInShell = false,
   members = [],
-  requesterId,
   departmentOptions,
   settlementSystemOptions = [],
   topSlot,
@@ -1026,10 +1024,8 @@ export function ProjectEditorWizard({
       uid: draft.executiveApproverId,
       name: draft.executiveApproverName,
       email: draft.executiveApproverEmail,
-    }).filter((member) => (
-      member.uid !== draft.registeredById && member.uid !== requesterId
-    )),
-    [draft.executiveApproverEmail, draft.executiveApproverId, draft.executiveApproverName, draft.registeredById, requesterId, ledgerMemberOptions],
+    }),
+    [draft.executiveApproverEmail, draft.executiveApproverId, draft.executiveApproverName, ledgerMemberOptions],
   );
   const selectedOwner = useMemo(
     () => ledgerMemberOptions.find((member) => member.uid === draft.registeredById) || null,
@@ -1042,10 +1038,6 @@ export function ProjectEditorWizard({
   const selectedExecutiveApprover = useMemo(
     () => executiveApproverOptions.find((member) => member.uid === draft.executiveApproverId) || null,
     [draft.executiveApproverId, executiveApproverOptions],
-  );
-  const isSelfExecutiveApprover = Boolean(
-    draft.executiveApproverId
-      && (draft.executiveApproverId === draft.registeredById || draft.executiveApproverId === requesterId),
   );
   const hasUnlinkedStoredOwner = Boolean(draft.registeredById && !selectedOwner);
   const hasUnlinkedStoredExecutiveApprover = Boolean(
@@ -1408,9 +1400,7 @@ export function ProjectEditorWizard({
       }
     }
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
-    if (isSelfExecutiveApprover) {
-      issues.push({ step: 'team', label: '사업 담당자와 최종 결재자는 달라야 합니다.' });
-    } else if (!draft.executiveApproverId || !selectedExecutiveApprover) {
+    if (!draft.executiveApproverId || !selectedExecutiveApprover) {
       issues.push({ step: 'team', label: '최종 결재자 지정 (사업총괄)' });
     }
     if (usesRegistrationV2 && hasIncompleteProjectTeamMembers(draft.teamMembersDetailed)) {
@@ -2427,11 +2417,7 @@ export function ProjectEditorWizard({
           <p className="mt-1 text-[11px] text-muted-foreground">
             선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.
           </p>
-          {isSelfExecutiveApprover ? (
-            <p className="mt-1 text-[11px] text-red-700">
-              사업 담당자와 최종 결재자는 달라야 합니다.
-            </p>
-          ) : hasUnlinkedStoredExecutiveApprover ? (
+          {hasUnlinkedStoredExecutiveApprover ? (
             <p className="mt-1 text-[11px] text-red-700">
               현재 저장된 결재자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.
             </p>

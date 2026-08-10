@@ -166,8 +166,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('xl:max-h-[126px]');
   });
 
-  it('allows an active project manager to be selected as organization head by another requester', () => {
-    expect(source).toContain('.filter((member) => member.uid !== user?.uid)');
+  it('allows the current user to be selected as organization head', () => {
+    expect(source).not.toContain('.filter((member) => member.uid !== user?.uid)');
     expect(source).not.toContain('member.uid !== project?.registeredById');
     expect(source).not.toContain('member.uid !== project?.managerId');
   });
