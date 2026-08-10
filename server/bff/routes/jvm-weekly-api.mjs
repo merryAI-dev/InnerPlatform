@@ -3075,6 +3075,16 @@ export function mountJvmWeeklyApiRoutes(app, {
       );
     } catch (mutationError) {
       const evidence = await reconcileCashflowMonthClose(req, prepared, mutationError);
+      createCashflowPerformanceTrace({
+        requestId: req.context.requestId,
+        operation: 'cashflow.month_close.approval',
+        ...(performanceLogger ? { logger: performanceLogger } : {}),
+        ...(performanceNow ? { now: performanceNow } : {}),
+      }).emit('reconciliation', {
+        outcome: evidence.proven ? 'ok' : 'error',
+        errorCode: evidence.mutationErrorCode,
+        upstreamStatus: evidence.mutationUpstreamStatus,
+      });
       if (evidence.proven) return evidence.monthClose;
       const error = createHttpError(
         503,
@@ -3097,6 +3107,9 @@ export function mountJvmWeeklyApiRoutes(app, {
         revision: prepared.closeBody.expectedRevision + 1,
       },
       mutationErrorCode: readOptionalText(mutationError?.code) || null,
+      mutationUpstreamStatus: Number.isInteger(mutationError?.upstreamStatus)
+        ? mutationError.upstreamStatus
+        : null,
     };
     try {
       const source = await proxyJavaWeeklyRequest({

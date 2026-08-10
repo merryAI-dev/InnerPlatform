@@ -125,13 +125,24 @@ public class WeeklyExpenseAuthorizationService {
     }
 
     public void requireProjectsAllowed(String commandName, TrustedActorContext actor, List<String> projectIds) {
-        requireAllowed(commandName, actor);
+        requireProjectsAllowedForCommands(List.of(commandName), actor, projectIds);
+    }
+
+    public void requireProjectsAllowedForCommands(
+        List<String> commandNames,
+        TrustedActorContext actor,
+        List<String> projectIds
+    ) {
+        if (commandNames == null || commandNames.isEmpty()) {
+            throw new IllegalArgumentException("At least one command is required for project authorization.");
+        }
+        for (String commandName : commandNames) requireAllowed(commandName, actor);
         if (projectIds == null || projectIds.isEmpty()
             || !projectExistenceRepository.existingProjectIds(actor.tenantId(), projectIds).containsAll(projectIds)) {
             throw new WeeklyExpenseForbiddenException("Project does not exist in this workspace.");
         }
         String role = actor.role() == null ? "" : actor.role().trim().toLowerCase(Locale.ROOT);
-        if ((isWorkspaceMode() && "workspace_user".equals(role) && WORKSPACE_COMMANDS.contains(commandName))
+        if ((isWorkspaceMode() && "workspace_user".equals(role) && commandNames.stream().allMatch(WORKSPACE_COMMANDS::contains))
             || TENANT_WIDE_PROJECT_ROLES.contains(role)) {
             return;
         }

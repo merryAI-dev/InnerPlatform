@@ -400,7 +400,7 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/status-review', expect.objectContaining({
       idempotencyKey: 'month-close-review-1',
       body: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' },
-      timeoutMs: 27_000,
+      timeoutMs: 35_000,
     }));
     expect(client.post).toHaveBeenNthCalledWith(
       3,

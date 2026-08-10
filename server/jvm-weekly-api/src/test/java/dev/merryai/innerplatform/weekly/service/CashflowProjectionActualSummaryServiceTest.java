@@ -63,8 +63,9 @@ class CashflowProjectionActualSummaryServiceTest {
         assertThat(response.items().getLast().settlementMatches()).isTrue();
         assertThat(response.errors()).isEmpty();
         InOrder order = inOrder(authorization, persistence);
-        order.verify(authorization).requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-a");
-        order.verify(authorization).requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-b");
+        order.verify(authorization).requireProjectsAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, List.of("project-a", "project-b")
+        );
         order.verify(persistence).findCashflowDeclaredWeeklyYears("tenant-a", List.of("project-a", "project-b"));
         order.verify(persistence).findCashflowLedgerSources(
             "tenant-a", weeklyYears, "2023-01", response.items().getFirst().comparisonAsOfWeek().yearMonth()
@@ -127,11 +128,7 @@ class CashflowProjectionActualSummaryServiceTest {
         assertThat(response.errors()).singleElement()
             .returns("project-07", CashflowProjectionActualSummaryBatchResponse.ErrorItem::projectId)
             .returns("SUMMARY_UNAVAILABLE", CashflowProjectionActualSummaryBatchResponse.ErrorItem::code);
-        for (String projectId : projectIds) {
-            verify(authorization).requireProjectAllowed(
-                WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, projectId
-            );
-        }
+        verify(authorization).requireProjectsAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, projectIds);
     }
 
     @Test
@@ -140,8 +137,8 @@ class CashflowProjectionActualSummaryServiceTest {
         WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
         WeeklyExpenseCommandService service = service(persistence, authorization);
         org.mockito.Mockito.doThrow(new WeeklyExpenseForbiddenException("Project does not exist."))
-            .when(authorization).requireProjectAllowed(
-                WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-a"
+            .when(authorization).requireProjectsAllowed(
+                WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, List.of("project-a", "project-b")
             );
 
         assertThatThrownBy(() -> service.readCashflowProjectionActualSummaries(
@@ -152,8 +149,8 @@ class CashflowProjectionActualSummaryServiceTest {
         verify(persistence, never()).findCashflowLedgerSources(
             anyString(), org.mockito.ArgumentMatchers.<String, Integer>anyMap(), anyString(), anyString()
         );
-        verify(authorization).requireProjectAllowed(
-            WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, "project-b"
+        verify(authorization).requireProjectsAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, ACTOR, List.of("project-a", "project-b")
         );
     }
 

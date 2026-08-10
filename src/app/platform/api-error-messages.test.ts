@@ -13,6 +13,7 @@ const cases = [
   ['jvm_weekly_api_token_unconfigured', 'contact'],
   ['jvm_weekly_api_internal_error', 'retry'],
   ['cashflow_month_close_route_timeout', 'retry'],
+  ['cashflow_month_close_reconciliation_pending', 'wait'],
   ['internal_error', 'retry'],
   ['forbidden', 'contact'],
 ] as const;
