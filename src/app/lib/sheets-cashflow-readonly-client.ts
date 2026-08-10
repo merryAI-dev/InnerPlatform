@@ -419,19 +419,14 @@ export interface CashflowSheetLabMirrorResult {
 
 function isCashflowSheetLabMirrorResult(
   value: unknown,
-  expected: { projectId: string; idempotencyKey?: string },
+  expected: { projectId: string },
 ): value is CashflowSheetLabMirrorResult {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<CashflowSheetLabMirrorResult>;
   if (candidate.projectId !== expected.projectId) return false;
   if (!['EMPTY', 'FRESH', 'STALE', 'ERROR'].includes(String(candidate.status || ''))) return false;
-  if (expected.idempotencyKey && candidate.lastRefreshIdempotencyKey !== expected.idempotencyKey) return false;
   if (candidate.status === 'FRESH' || candidate.status === 'STALE') {
-    return typeof candidate.sourceRevision === 'string'
-      && candidate.sourceRevision.length > 0
-      && Array.isArray(candidate.cells)
-      && Array.isArray(candidate.annualCells)
-      && Boolean(candidate.summary && typeof candidate.summary === 'object');
+    return typeof candidate.sourceRevision === 'string' && candidate.sourceRevision.length > 0;
   }
   return true;
 }
@@ -564,12 +559,6 @@ export interface CashflowSheetLabStageResult {
   }>;
   pendingApprovalDifferenceCount?: number;
   pendingApprovalDifferenceManifestHash?: string;
-  withdrawnUnsupportedCloseRequests?: Array<{
-    requestId: string;
-    yearMonth: string;
-    revision: number;
-    reasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED';
-  }>;
   stagedMonths?: string[];
   stagedYears?: number[];
   annualLineCount?: number;
@@ -873,7 +862,7 @@ export async function refreshCashflowSheetLabMirrorViaBff(params: {
       retries: 0,
     },
   );
-  const expectedMirror = { projectId: params.projectId, idempotencyKey: params.idempotencyKey };
+  const expectedMirror = { projectId: params.projectId };
   if (isCashflowSheetLabMirrorResult(response.data, expectedMirror)) return response.data;
 
   // The refresh command is idempotent and may already be committed even if an

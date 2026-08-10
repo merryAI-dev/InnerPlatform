@@ -20,8 +20,32 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '월 결산을 맡을 조직장이 지정되지 않았어요. 프로젝트에서 조직장을 지정해 주세요.',
     resolution: 'contact',
   }],
+  ['cashflow_month_close_approver_locked', {
+    guide: '승인 대기 중인 월 결산이 있어 조직장을 바꿀 수 없어요. 현재 결재를 먼저 마친 뒤 다시 지정해 주세요.',
+    resolution: 'wait',
+  }],
+  ['cashflow_pending_approval_contract_unsupported', {
+    guide: '기존 결재 요청의 근거 형식을 확인할 수 없어요. 결재 요청을 먼저 정리한 뒤 시트 값을 다시 불러와 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_sheet_refresh_response_invalid', {
+    guide: '시트 값은 저장됐지만 화면 확인이 끝나지 않았어요. 최신 시트 값을 다시 불러와 주세요.',
+    resolution: 'retry',
+  }],
   ['cashflow_sheet_mirror_revision_conflict', {
     guide: '검토한 뒤 시트 고정본이 변경됐어요. 최신 시트 내용을 다시 검토해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_sheet_template_unsupported', {
+    guide: '시트 양식이 표준과 달라요. cashflow(사용내역 연동) 탭의 고정된 행과 열을 확인한 뒤 다시 불러와 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_sheet_config_required', {
+    guide: '먼저 프로젝트의 시트 링크와 탭 이름을 저장해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_sheet_mirror_required', {
+    guide: '먼저 시트 값을 가져와 최신 고정본을 만든 뒤 진행해 주세요.',
     resolution: 'contact',
   }],
   ['jvm_weekly_api_identity_token_unavailable', {
