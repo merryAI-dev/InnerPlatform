@@ -34,12 +34,13 @@ import {
 } from '../../components/ui/dialog';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
+import { resolveApiErrorPresentation } from '../../platform/api-error-messages';
 import { resolvePortalProjectContextSync, resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from '../../components/cashflow/CashflowFormulaMismatchDialog';
 
 function formatError(error: unknown) {
-  const apiError = error as { body?: { code?: string; error?: string; message?: string }; requestId?: string; status?: number };
+  const apiError = error as { body?: { code?: string; error?: string; message?: string; statusCode?: number }; requestId?: string; status?: number };
   const code = getErrorCode(error);
   if (code === 'google_sheets_not_configured') {
     return '서버의 Google Sheets 서비스 계정이 설정되지 않았습니다. 관리자에게 환경 변수 설정을 요청하세요.';
@@ -48,12 +49,15 @@ function formatError(error: unknown) {
     return '시트를 시스템 계정에 공유해 주세요. 공유 후 다시 연동하면 됩니다.';
   }
   const bodyMessage = apiError?.body?.message;
+  if (code) {
+    const presentation = resolveApiErrorPresentation(
+      code,
+      Number(apiError.status || apiError.body?.statusCode || 0),
+    );
+    return `${presentation.guide}${apiError.requestId ? ` (요청 ID: ${apiError.requestId})` : ''}`;
+  }
   if (bodyMessage) {
-    return [
-      code ? `[${code}]` : '',
-      bodyMessage,
-      apiError.requestId ? `(requestId: ${apiError.requestId})` : '',
-    ].filter(Boolean).join(' ');
+    return bodyMessage;
   }
   if (error instanceof Error) return error.message;
   return '시트 구조를 확인하지 못했습니다.';
@@ -766,12 +770,9 @@ export function CashflowSheetLabPage() {
         setErrorMessage(`반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
-      const withdrawnUnsupportedNotice = staged.withdrawnUnsupportedCloseRequests?.length
-        ? `이전 근거 형식의 월 결산 요청 ${staged.withdrawnUnsupportedCloseRequests.length}건을 회수했습니다. 시트 값은 변경되지 않았습니다. `
-        : '';
       if (staged.stagedLineCount === 0) {
         setReflectResult({ appliedLineCount: 0, projectionLineCount: 0, actualLineCount: 0 });
-        setStatusMessage(`${withdrawnUnsupportedNotice}MYSCube가 이미 시트 최신값과 같습니다.`);
+        setStatusMessage('MYSCube가 이미 시트 최신값과 같습니다.');
         logCashflowLab('overwrite.sheet_values.noop', {
           projectId,
           spreadsheetId,
@@ -846,7 +847,7 @@ export function CashflowSheetLabPage() {
       setClosedMonthPendingApprovalAccepted(false);
       setPendingApprovalStage(null);
       setFormulaMismatchPrompt(null);
-      setStatusMessage(`${withdrawnUnsupportedNotice}시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
+      setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,

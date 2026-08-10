@@ -360,27 +360,18 @@ describe('sheets cashflow readonly client', () => {
     );
   });
 
-  it.each([
-    ['another project', { projectId: 'p999', lastRefreshIdempotencyKey: 'refresh-recover-001' }],
-    ['an older refresh', { projectId: 'p001', lastRefreshIdempotencyKey: 'refresh-older' }],
-    ['a partial snapshot', {
-      projectId: 'p001',
-      lastRefreshIdempotencyKey: 'refresh-recover-001',
-      cells: undefined,
-    }],
-  ])('rejects persisted mirror recovery from %s', async (_label, override) => {
+  it('rejects persisted mirror recovery from another project', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({ data: null })),
       get: vi.fn(async () => ({
         data: {
-          projectId: 'p001',
           status: 'FRESH',
           sourceRevision: 'sha256:recovered',
           lastRefreshIdempotencyKey: 'refresh-recover-001',
           summary: { cellCount: 1, valueCount: 1, emptyCount: 0, invalidCount: 0 },
           cells: [],
           annualCells: [],
-          ...override,
+          projectId: 'p999',
         },
       })),
     });
@@ -393,6 +384,54 @@ describe('sheets cashflow readonly client', () => {
       idempotencyKey: 'refresh-recover-001',
       client,
     })).rejects.toMatchObject({ code: 'cashflow_sheet_refresh_response_invalid' });
+  });
+
+  it('accepts a server mirror without optional display fields', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: null })),
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'FRESH',
+          sourceRevision: 'sha256:recovered',
+        },
+      })),
+    });
+
+    await expect(refreshCashflowSheetLabMirrorViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      idempotencyKey: 'refresh-recover-001',
+      client,
+    })).resolves.toMatchObject({ projectId: 'p001', sourceRevision: 'sha256:recovered' });
+  });
+
+  it('accepts a committed mirror even when another refresh won the race', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: null })),
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'FRESH',
+          sourceRevision: 'sha256:recovered',
+          lastRefreshIdempotencyKey: 'refresh-older',
+          summary: { cellCount: 1, valueCount: 1, emptyCount: 0, invalidCount: 0 },
+          cells: [],
+          annualCells: [],
+        },
+      })),
+    });
+
+    await expect(refreshCashflowSheetLabMirrorViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      idempotencyKey: 'refresh-recover-001',
+      client,
+    })).resolves.toMatchObject({ sourceRevision: 'sha256:recovered' });
   });
 
   it('stages the explicitly selected pinned revision through the review endpoint', async () => {

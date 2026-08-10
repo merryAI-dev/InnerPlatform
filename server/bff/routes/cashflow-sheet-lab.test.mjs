@@ -3088,7 +3088,7 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
   });
 
-  it('withdraws a malformed legacy PENDING close before sheet staging without changing sheet values', async () => {
+  it('does not mutate a malformed legacy PENDING close during sheet staging', async () => {
     const documents = cumulativeCloseRequestDocuments();
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-01';
     documents[requestPath] = {
@@ -3119,19 +3119,15 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'refresh-malformed-close' }).expect(200);
     const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-malformed-close' })
-      .expect(200);
+      .expect(409);
 
-    expect(stage.body.withdrawnUnsupportedCloseRequests).toEqual([{
-      requestId: 'project-a-2026-01', yearMonth: '2026-01', revision: 1,
-      reasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED',
-    }]);
+    expect(stage.body.code).toBe('cashflow_pending_approval_contract_unsupported');
     expect(db.__getDocument(requestPath)).toMatchObject({
-      status: 'WITHDRAWN', withdrawnByUid: 'finance-a', withdrawReasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED',
+      status: 'PENDING', monthCount: 0,
     });
     expect(db.__getDocument('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-01').periods.MONTH)
-      .toMatchObject({ status: 'WAITING_FOR_UPDATE', revision: 4, submittedBy: '', approvedBy: '' });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-01-r1-withdrawn'))
-      .toMatchObject({ action: 'WITHDRAWN', actorUid: 'finance-a', reasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED' });
+      .toMatchObject({ status: 'PENDING_APPROVAL', revision: 3 });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-01-r1-withdrawn')).toBeUndefined();
   });
 
   it('rejects apply when an active close request status changes after staging', async () => {
