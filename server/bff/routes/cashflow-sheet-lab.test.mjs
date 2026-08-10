@@ -2233,90 +2233,6 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
   });
 
-  it('does not reserve an old staged apply when config changes during the final preflight', async () => {
-    let gateTargetQuery = false;
-    let markTargetQuery;
-    let releaseTargetQuery;
-    const targetQueryStarted = new Promise((resolve) => {
-      markTargetQuery = resolve;
-    });
-    const targetQueryGate = new Promise((resolve) => {
-      releaseTargetQuery = resolve;
-    });
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        cashflowSheetLab: {
-          value: 'spreadsheet-a',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-5',
-        },
-      },
-      onQuery: async ({ path }) => {
-        if (!gateTargetQuery || !path.endsWith('/cashflow_weeks')) return;
-        gateTargetQuery = false;
-        markTargetQuery();
-        await targetQueryGate;
-      },
-    });
-    const javaWeeklyClient = {
-      applyCashflowSheetLab: vi.fn(async () => ({
-        ok: true,
-        projectId: 'project-a',
-        yearMonth: '2026-01',
-        resultingTargetRevision: `sha256:${'6'.repeat(64)}`,
-      })),
-    };
-    const app = createApp({
-      db,
-      googleSheetsService: {
-        previewSpreadsheet: vi.fn(async () => ({
-          spreadsheetId: 'spreadsheet-a',
-          selectedSheetName: 'cashflow(사용내역 연동)',
-          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
-        })),
-      },
-      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
-    });
-    const mirror = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
-      .send({ idempotencyKey: 'refresh-config-race' })
-      .expect(200);
-    const stage = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-config-race' })
-      .expect(200);
-
-    gateTargetQuery = true;
-    const applyRequest = request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .set({
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-      })
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-config-race' })
-      .then((response) => response);
-    await targetQueryStarted;
-    await request(app)
-      .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
-      .send({
-        value: 'spreadsheet-b',
-        sheetName: 'cashflow(사용내역 연동)',
-        startWeek: '26-1-1',
-        endWeek: '26-1-5',
-      })
-      .expect(200);
-    releaseTargetQuery();
-    const applyResponse = await applyRequest;
-
-    expect(applyResponse.status).toBe(409);
-    expect(applyResponse.body.code).toBe('cashflow_sheet_config_changed');
-    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
-  });
-
   it('returns the system service account email with the saved config', async () => {
     const response = await request(createApp())
       .get('/api/v1/projects/project-a/cashflow-sheet-lab/config')
@@ -3684,6 +3600,16 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(stage.body.replaceAllActualSources).toBe(true);
+
+    // BFF는 apply 직전에 canonical weeks를 다시 읽지 않는다.
+    // 최종 target-revision 판정은 JVM transaction이 담당한다.
+    await db.doc('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w1').set({
+      id: 'project-a-2026-02-w1',
+      projectId: 'project-a',
+      yearMonth: '2026-02',
+      weekNo: 1,
+      projection: { SALES_IN: 123 },
+    });
 
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')

@@ -64,6 +64,10 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '검토 중 MYSCube 값이 변경됐어요. 최신 시트 값을 다시 가져와 검토해 주세요.',
     resolution: 'retry',
   }],
+  ['weekly_expense_conflict', {
+    guide: '검토하는 동안 MYSCube의 캐시플로우 값이 변경됐어요. 최신 시트 값을 다시 가져온 뒤 반영해 주세요.',
+    resolution: 'retry',
+  }],
   ['cashflow_sheet_month_incomplete', {
     guide: '해당 월의 주차 값이 모두 채워지지 않았어요. 월 1주차부터 5주차까지 확인한 뒤 다시 가져와 주세요.',
     resolution: 'contact',
