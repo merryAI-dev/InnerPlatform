@@ -8,6 +8,7 @@ const cases = [
   ['cashflow_month_close_request_conflict', 'contact'],
   ['cashflow_month_close_approver_required', 'contact'],
   ['cashflow_sheet_mirror_revision_conflict', 'contact'],
+  ['weekly_expense_conflict', 'retry'],
   ['jvm_weekly_api_identity_token_unavailable', 'contact'],
   ['jvm_weekly_api_token_unconfigured', 'contact'],
   ['jvm_weekly_api_internal_error', 'retry'],
