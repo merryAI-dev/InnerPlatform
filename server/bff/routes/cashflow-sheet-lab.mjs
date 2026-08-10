@@ -3130,13 +3130,18 @@ async function applyStagedCashflowSheetLab({
     }
   }
 
-  const preflightInput = cashflowFormulaPreflightInput(mirror);
-  await javaWeeklyClient.validateCashflowSheetFormulas({
-    context,
-    projectId,
-    ...preflightInput,
-    acceptFormulaMismatches,
-  });
+  // 월 반영은 JVM의 실제 월 저장 명령이 같은 계산 검사를 수행한다.
+  // BFF preflight를 앞에 한 번 더 호출하면 같은 근거를 재조회하고, 저장 명령과
+  // 다른 시점의 결과로 정상 반영을 막을 수 있다. 연간 작업이 포함될 때만 별도 검증한다.
+  if (stagedYears.length > 0) {
+    const preflightInput = cashflowFormulaPreflightInput(mirror);
+    await javaWeeklyClient.validateCashflowSheetFormulas({
+      context,
+      projectId,
+      ...preflightInput,
+      acceptFormulaMismatches,
+    });
+  }
 
   if (!resuming) {
     const pendingApproval = await readPendingApprovalDifferences({ db, tenantId, projectId, candidates: selectedCandidates });

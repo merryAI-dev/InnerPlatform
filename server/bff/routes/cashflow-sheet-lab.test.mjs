@@ -1220,6 +1220,7 @@ describe('cashflow sheet lab route', () => {
     });
     expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(1);
     expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledWith(expect.objectContaining({
       openingBalanceCells: expect.arrayContaining([
         expect.objectContaining({ year: 2025, mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'ZERO', amount: 0 }),
@@ -4539,7 +4540,7 @@ describe('cashflow sheet lab route', () => {
       sourceCell: 'BO12',
     };
     const javaWeeklyClient = {
-      validateCashflowSheetFormulas: vi.fn(async (input) => {
+      applyCashflowSheetLab: vi.fn(async (input) => {
         if (!input.acceptFormulaMismatches) {
           throw Object.assign(new Error('formula confirmation required'), {
             statusCode: 409,
@@ -4547,9 +4548,6 @@ describe('cashflow sheet lab route', () => {
             details: { mismatchCount: 1, mismatches: [mismatch] },
           });
         }
-        return { ok: true };
-      }),
-      applyCashflowSheetLab: vi.fn(async (input) => {
         return javaApplyResponse(input, resultingTargetRevision);
       }),
     };
@@ -4567,18 +4565,6 @@ describe('cashflow sheet lab route', () => {
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-formula-mismatch' })
       .expect(200);
 
-    const currentMirror = db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
-    const originalDerivedCell = currentMirror.annualDerivedCells[0];
-    currentMirror.annualDerivedCells[0] = { ...originalDerivedCell, sourceCell: '' };
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-formula-evidence-incomplete' })
-      .expect(409)
-      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_formula_evidence_incomplete'));
-    expect(javaWeeklyClient.validateCashflowSheetFormulas).not.toHaveBeenCalled();
-    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
-    currentMirror.annualDerivedCells[0] = originalDerivedCell;
-
     const rejected = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-formula-mismatch-first' })
@@ -4589,6 +4575,7 @@ describe('cashflow sheet lab route', () => {
     });
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
 
+    const currentMirror = db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     const originalSourceRevision = currentMirror.sourceRevision;
     currentMirror.sourceRevision = `sha256:${'9'.repeat(64)}`;
     await request(app)
@@ -4600,8 +4587,7 @@ describe('cashflow sheet lab route', () => {
       })
       .expect(409)
       .expect((response) => expect(response.body.code).toBe('cashflow_sheet_mirror_revision_conflict'));
-    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(1);
-    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
     currentMirror.sourceRevision = originalSourceRevision;
 
     await request(app)
@@ -4613,12 +4599,9 @@ describe('cashflow sheet lab route', () => {
       })
       .expect(200);
 
-    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(2);
-    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].annualCells[0]).not.toHaveProperty('sourceCell');
-    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].annualCells[0]).not.toHaveProperty('sourceLabel');
-    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
-    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
   });
 
   it('treats a monthly close missing only contractVersion as legacy v1 and reaches formula validation', async () => {
@@ -4642,7 +4625,7 @@ describe('cashflow sheet lab route', () => {
       },
     });
     const javaWeeklyClient = {
-      validateCashflowSheetFormulas: vi.fn(async () => {
+      applyCashflowSheetLab: vi.fn(async (input) => {
         throw Object.assign(new Error('formula confirmation required'), {
           statusCode: 409,
           code: 'cashflow_formula_mismatch_confirmation_required',
@@ -4665,7 +4648,7 @@ describe('cashflow sheet lab route', () => {
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-legacy-month-close' })
       .expect(409)
       .expect((response) => expect(response.body.code).toBe('cashflow_formula_mismatch_confirmation_required'));
-    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -5059,14 +5042,18 @@ describe('cashflow sheet apply lock release on failure', () => {
       .expect(200);
   }
 
-  // 예약 전에 실패하면 락 자체가 잡히지 않는다. 락 고착은 예약 이후에만 생긴다.
-  it('never takes an apply lock when validation fails before the reservation', async () => {
+  // 월 반영의 권위 있는 검증이 거부해도 예약 락은 즉시 해제된다.
+  it('releases the apply lock when authoritative monthly validation rejects before write', async () => {
     const db = labDb();
     const javaWeeklyClient = {
-      validateCashflowSheetFormulas: vi.fn(async () => {
-        throw new TypeError('unexpected internal failure');
+      validateCashflowSheetFormulas: vi.fn(),
+      applyCashflowSheetLab: vi.fn(async () => {
+        throw Object.assign(new Error('formula confirmation required'), {
+          statusCode: 409,
+          code: 'cashflow_formula_mismatch_confirmation_required',
+          details: { mismatchCount: 1, mismatches: [] },
+        });
       }),
-      applyCashflowSheetLab: vi.fn(),
     };
     const app = createApp({ db, googleSheetsService: { previewSpreadsheet: previewStub() }, routeOptions: { javaWeeklyClient } });
     const stage = await stageOne(app, 'internal-error');
@@ -5074,12 +5061,12 @@ describe('cashflow sheet apply lock release on failure', () => {
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-internal-error' })
-      .expect((response) => {
-        expect(response.status).toBeGreaterThanOrEqual(500);
-      });
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_formula_mismatch_confirmation_required'));
 
-    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
-    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toBeUndefined();
+    expect(javaWeeklyClient.validateCashflowSheetFormulas).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a').status).toBe('READY');
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
   });
 

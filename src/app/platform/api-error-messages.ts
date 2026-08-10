@@ -48,6 +48,38 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '먼저 시트 값을 가져와 최신 고정본을 만든 뒤 진행해 주세요.',
     resolution: 'contact',
   }],
+  ['cashflow_formula_mismatch_confirmation_required', {
+    guide: '시트의 합계·잔액과 MYSCube 계산 결과가 달라요. 차이를 확인한 뒤 그대로 반영하거나 시트 값을 다시 가져와 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_sheet_formula_evidence_incomplete', {
+    guide: '시트의 합계·잔액 확인 정보를 찾을 수 없어요. 시트 값을 다시 가져와 최신 검토본을 만들어 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_sheet_stage_evidence_missing', {
+    guide: '검토한 시트 고정본이 만료됐어요. 시트 값을 다시 가져온 뒤 반영해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_sheet_target_revision_conflict', {
+    guide: '검토 중 MYSCube 값이 변경됐어요. 최신 시트 값을 다시 가져와 검토해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_sheet_month_incomplete', {
+    guide: '해당 월의 주차 값이 모두 채워지지 않았어요. 월 1주차부터 5주차까지 확인한 뒤 다시 가져와 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_sheet_annual_incomplete', {
+    guide: '연간 합계의 Projection·Actual 항목이 모두 채워지지 않았어요. 시트의 연간 영역을 확인한 뒤 다시 가져와 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_jvm_calculation_verification_failed', {
+    guide: '저장 서버의 계산 근거가 완전하지 않아 반영하지 않았어요. 시트 값을 다시 가져와 다시 시도해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_jvm_apply_verification_failed', {
+    guide: '저장 결과가 시트 값과 일치하는지 확인하지 못했어요. 같은 요청으로 다시 확인해 주세요.',
+    resolution: 'retry',
+  }],
   ['jvm_weekly_api_identity_token_unavailable', {
     guide: '서버 인증 설정을 확인할 수 없어요. 시스템 담당자에게 문의해 주세요.',
     resolution: 'contact',
