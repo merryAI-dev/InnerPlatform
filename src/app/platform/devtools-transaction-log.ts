@@ -33,6 +33,10 @@ export interface DevtoolsLogEntry {
 
 interface DevtoolsApi {
   logs: () => DevtoolsLogEntry[];
+  cashflowTrace: () => Array<Pick<DevtoolsLogEntry,
+    'ts' | 'kind' | 'phase' | 'operation' | 'method' | 'requestId' | 'responseRequestId'
+    | 'status' | 'durationMs' | 'attempt' | 'maxRetries' | 'transport' | 'yearMonth' | 'weekNo' | 'mode'
+    | 'summary' | 'error'>>;
   clear: () => void;
   enable: () => void;
   disable: () => void;
@@ -212,6 +216,33 @@ function ensureDevtoolsApi(): DevtoolsApi {
   if (!globalState.__MYSCUBE_DEVTOOLS__) {
     globalState.__MYSCUBE_DEVTOOLS__ = {
       logs: () => [...(globalState.__MYSCUBE_DEVTOOLS_LOGS__ || [])],
+      cashflowTrace: () => (globalState.__MYSCUBE_DEVTOOLS_LOGS__ || [])
+        .filter((entry) => entry.kind === 'cashflow_transaction'
+          || entry.path?.includes('/cashflow/')
+          || entry.operation.includes('cashflow'))
+        .map((entry) => ({
+          ts: entry.ts,
+          kind: entry.kind,
+          phase: entry.phase,
+          operation: entry.operation === 'cashflow.weekly_overview'
+            ? entry.operation
+            : entry.path === '/api/v1/cashflow/weekly-overview'
+              ? 'cashflow.weekly_overview.transport'
+              : 'cashflow.request',
+          method: entry.method,
+          requestId: entry.requestId,
+          responseRequestId: entry.responseRequestId,
+          status: entry.status,
+          durationMs: entry.durationMs,
+          attempt: entry.attempt,
+          maxRetries: entry.maxRetries,
+          transport: entry.transport,
+          yearMonth: entry.yearMonth,
+          weekNo: entry.weekNo,
+          mode: entry.mode,
+          summary: entry.summary,
+          error: entry.error,
+        })),
       clear: () => {
         globalState.__MYSCUBE_DEVTOOLS_LOGS__ = [];
       },

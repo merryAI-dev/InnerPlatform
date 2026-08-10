@@ -23,6 +23,8 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetOperationStatusResponse
 import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatchRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatchResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowWeeklyOverviewRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowWeeklyOverviewResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
@@ -71,6 +73,7 @@ import dev.merryai.innerplatform.weekly.domain.CellAddress;
 import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthSettlementLifecycle;
 import dev.merryai.innerplatform.weekly.domain.CashflowFormulaValidator;
 import dev.merryai.innerplatform.weekly.domain.ClipboardCell;
 import dev.merryai.innerplatform.weekly.domain.ClipboardPayload;
@@ -113,6 +116,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -303,6 +307,88 @@ public class WeeklyExpenseCommandService {
             }
         }
         return new CashflowProjectionActualSummaryBatchResponse("1", items, errors);
+    }
+
+    public CashflowWeeklyOverviewResponse readCashflowWeeklyOverview(
+        TrustedActorContext actor,
+        CashflowWeeklyOverviewRequest request
+    ) {
+        List<String> projectIds = request.requireUniqueProjectIds();
+        authorizationService.requireProjectsAllowed(CASHFLOW_READ_COMMAND, actor, projectIds);
+        authorizationService.requireProjectsAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectIds);
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
+            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
+        String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0
+            ? request.yearMonth() : boundary.yearMonth();
+        Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> statusesByProject;
+        Map<String, String> monthCloseRequestStatuses;
+        Map<String, CashflowLedgerSource> sourcesByProject;
+        CompletableFuture<Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>>> statusesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowSettlementStatusesBatch(actor.tenantId(), projectIds, request.yearMonth()));
+        CompletableFuture<Map<String, String>> monthCloseRequestsFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowMonthCloseRequestStatusesBatch(actor.tenantId(), projectIds, request.yearMonth()));
+        CompletableFuture<Map<String, CashflowLedgerSource>> sourcesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowLedgerSources(
+                actor.tenantId(), projectIds, CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
+            ));
+        try {
+            statusesByProject = statusesFuture.join();
+        } catch (RuntimeException unavailable) {
+            statusesByProject = Map.of();
+        }
+        try {
+            monthCloseRequestStatuses = monthCloseRequestsFuture.join();
+        } catch (RuntimeException unavailable) {
+            monthCloseRequestStatuses = Map.of();
+        }
+        try {
+            sourcesByProject = sourcesFuture.join();
+        } catch (RuntimeException unavailable) {
+            sourcesByProject = Map.of();
+        }
+        List<CashflowWeeklyOverviewResponse.Item> items = new ArrayList<>();
+        List<CashflowWeeklyOverviewResponse.ErrorItem> errors = new ArrayList<>();
+        for (String projectId : projectIds) {
+            CashflowSettlementStatusesResponse statuses = null;
+            List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records = statusesByProject.get(projectId);
+            if (records == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.STATUS_UNAVAILABLE
+                ));
+            } else {
+                statuses = settlementStatusesResponse(projectId, request.yearMonth(), records);
+                statuses = resolveMonthSettlementStatus(statuses, monthCloseRequestStatuses.get(projectId));
+            }
+            CashflowProjectionActualSummaryBatchResponse.Item summary = null;
+            CashflowLedgerSource source = sourcesByProject.get(projectId);
+            if (source == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.SUMMARY_UNAVAILABLE
+                ));
+            } else {
+                summary = toProjectionActualSummary(projectId, source, boundary, request.yearMonth());
+            }
+            items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary));
+        }
+        return new CashflowWeeklyOverviewResponse("1", request.yearMonth(), items, errors);
+    }
+
+    private CashflowSettlementStatusesResponse resolveMonthSettlementStatus(
+        CashflowSettlementStatusesResponse response,
+        String monthCloseRequestStatus
+    ) {
+        return new CashflowSettlementStatusesResponse(
+            response.projectId(),
+            response.yearMonth(),
+            response.items().stream().map(item -> item.period().equals("MONTH")
+                ? new CashflowSettlementStatusesResponse.Item(
+                    item.period(),
+                    CashflowMonthSettlementLifecycle.resolveMonthStatus(item.status(), monthCloseRequestStatus),
+                    item.submittedAt(), item.submittedBy(), item.approvedAt(), item.approvedBy(), item.revision()
+                )
+                : item
+            ).toList()
+        );
     }
 
     public CashflowProjectionActualSummaryBatchResponse.Item readCashflowProjectionActualSummary(

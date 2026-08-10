@@ -52,6 +52,7 @@ describe('JVM production deploy workflow', () => {
     expect(workflow).toContain('git diff --quiet "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}');
     // min-instances 1 은 같은 인스턴스를 계속 살려둔다. 행이 걸리면 liveness probe 가
     // 죽여서 교체해야 한다 - 이게 없으면 행 걸린 인스턴스가 장애를 영구 보존한다.
+    expect(workflow).toContain('--no-cpu-throttling');
     expect(workflow).toContain("--liveness-probe 'httpGet.path=/api/v1/health");
     expect(workflow).toContain('No JVM source change between');
     // 강제 배포는 dispatch 입력으로만. shell 안에서 직접 보간하지 않는다.

@@ -2814,6 +2814,48 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json(result);
   }));
 
+  app.post('/api/v1/cashflow/weekly-overview', asyncHandler(async (req, res) => {
+    const trace = createCashflowPerformanceTrace({
+      requestId: req.context?.requestId || req.requestId,
+      operation: 'cashflow.weekly_overview',
+      ...(performanceLogger ? { logger: performanceLogger } : {}),
+      ...(performanceNow ? { now: performanceNow } : {}),
+    });
+    const { projectIds, yearMonth } = trace.measureSync('request_validation', () => {
+      assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read cashflow weekly overview', authMode, workspaceEmailDomain);
+      const projectIds = req.body?.projectIds;
+      const yearMonth = readOptionalText(req.body?.yearMonth);
+      if (!Array.isArray(projectIds)
+        || projectIds.length < 1
+        || projectIds.length > 100
+        || projectIds.some((projectId) => typeof projectId !== 'string'
+          || projectId.length < 1
+          || projectId.length > 120
+          || projectId.includes('/')
+          || projectId.trim() !== projectId)
+        || new Set(projectIds).size !== projectIds.length
+        || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
+        throw createHttpError(400, '조회할 프로젝트와 결산 연월을 정확히 입력해 주세요.', 'cashflow_weekly_overview_request_invalid');
+      }
+      return { projectIds, yearMonth };
+    });
+    const result = await trace.measure('java_overview', () => proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'POST',
+      path: '/api/v1/cashflow/weekly-overview',
+      command: 'read_cashflow_weekly_overview',
+      body: { projectIds, yearMonth },
+      mutation: false,
+    }), { projectCount: projectIds.length });
+    trace.emit('response', {
+      outcome: 'ok',
+      projectCount: projectIds.length,
+      itemCount: Array.isArray(result?.items) ? result.items.length : 0,
+      issueCount: Array.isArray(result?.errors) ? result.errors.length : 0,
+    });
+    res.status(200).json(result);
+  }));
+
   app.post('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'complete weekly cashflow update', authMode, workspaceEmailDomain);
     const projectId = readOptionalText(req.params.projectId);

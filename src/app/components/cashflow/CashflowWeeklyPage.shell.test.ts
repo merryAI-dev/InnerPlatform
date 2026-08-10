@@ -24,10 +24,10 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).not.toContain('>조회 오류</span>');
   });
 
-  it('uses the simple persisted status flow and updates only the affected project state', () => {
+  it('uses one overview snapshot and refreshes it after a status transition', () => {
     expect(source).toContain('sticky top-0');
     expect(source).toContain('sticky left-0');
-    expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
+    expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
     expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action)}");
     expect(source).toContain('주정산 이전');
@@ -35,7 +35,10 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('조직장 승인 필요');
     expect(source).toContain('승인 완료');
     expect(source).toContain("user?.uid === project.executiveApproverId");
-    expect(source).toContain("setStatuses((current) => ({ ...current, [projectId]: result }))");
+    expect(source).toContain('setRefreshSequence((current) => current + 1)');
+    expect(source).not.toContain('fetchCashflowSettlementStatusesBatchViaBff');
+    expect(source).not.toContain('useCashflowProjectionActualSummaries');
+    expect(source).not.toContain('window.setInterval');
     expect(source).not.toContain('window.location.reload');
     expect(source).not.toContain("onAction('SUBMIT')");
   });
@@ -46,7 +49,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('normalizeProjectDepartment(project.department)');
     expect(source).toContain('filterCashflowProjectsByDepartment(projects, deptFilter)');
     expect(source).not.toContain('Promise.allSettled(filteredProjects.map');
-    expect(source).toContain('projectIds.slice(index * 100, (index + 1) * 100)');
+    expect(source).toContain('const projectIds = JSON.parse(overviewProjectIdsKey) as string[]');
     expect(source).toContain('{filteredProjects.map((project) => {');
     expect(source).toContain('filteredProjects.length === 0');
     expect(source).toContain('>담당조직</Label>');

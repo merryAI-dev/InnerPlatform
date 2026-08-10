@@ -362,6 +362,29 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return Map.copyOf(result);
     }
 
+    @Override
+    public Map<String, String> findCashflowMonthCloseRequestStatusesBatch(
+        String tenantId,
+        List<String> projectIds,
+        String yearMonth
+    ) {
+        requireYearMonth(yearMonth);
+        DocumentReference[] refs = projectIds.stream()
+            .map(projectId -> db.document(
+                "orgs/" + tenantId + "/cashflow_month_close_requests/" + projectId + "-" + yearMonth
+            ))
+            .toArray(DocumentReference[]::new);
+        Map<String, String> result = new LinkedHashMap<>();
+        for (DocumentSnapshot snapshot : getAll(refs)) {
+            if (!snapshot.exists()) continue;
+            Map<String, Object> document = data(snapshot);
+            String projectId = text(document.get("projectId"), "");
+            if (!projectIds.contains(projectId)) continue;
+            result.put(projectId, text(document.get("status"), ""));
+        }
+        return Map.copyOf(result);
+    }
+
     private List<CashflowSettlementStatusRecord> settlementStatusRecords(Map<String, Object> stored) {
         Map<String, Object> periods = nestedMap(stored.get("periods"));
         List<CashflowSettlementStatusRecord> result = new ArrayList<>();
@@ -2618,6 +2641,42 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throughMonth,
             weeklyYear
         );
+    }
+
+    @Override
+    public Map<String, CashflowLedgerSource> findCashflowLedgerSources(
+        String tenantId,
+        List<String> projectIds,
+        String fromMonth,
+        String throughMonth
+    ) {
+        if (projectIds == null || projectIds.isEmpty()) return Map.of();
+        int maximumCanonicalWeeks = (2099 - 2023 + 1) * 12 * CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT;
+        Map<String, List<DocumentSnapshot>> documentsByProject = new LinkedHashMap<>();
+        for (String projectId : projectIds) documentsByProject.put(projectId, new ArrayList<>());
+        for (int index = 0; index < projectIds.size(); index += 30) {
+            List<String> group = projectIds.subList(index, Math.min(index + 30, projectIds.size()));
+            QuerySnapshot snapshot = query(cashflowWeeks(tenantId)
+                .whereIn("projectId", group)
+                .whereGreaterThanOrEqualTo("yearMonth", fromMonth)
+                .whereLessThanOrEqualTo("yearMonth", throughMonth)
+                .limit(Math.addExact(Math.multiplyExact(maximumCanonicalWeeks, group.size()), 1)));
+            if (snapshot.size() > maximumCanonicalWeeks * group.size()) {
+                throw new WeeklyExpenseConflictException("Canonical cashflow ledger exceeds the bounded read limit.");
+            }
+            for (DocumentSnapshot document : snapshot.getDocuments()) {
+                String projectId = text(data(document).get("projectId"), "");
+                List<DocumentSnapshot> target = documentsByProject.get(projectId);
+                if (target != null) target.add(document);
+            }
+        }
+        Map<String, CashflowLedgerSource> result = new LinkedHashMap<>();
+        for (Map.Entry<String, List<DocumentSnapshot>> entry : documentsByProject.entrySet()) {
+            result.put(entry.getKey(), cashflowLedgerSource(
+                tenantId, entry.getKey(), entry.getValue(), fromMonth, throughMonth, null
+            ));
+        }
+        return Map.copyOf(result);
     }
 
     private CashflowLedgerSource cashflowLedgerSource(

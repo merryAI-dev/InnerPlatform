@@ -367,6 +367,14 @@ public interface WeeklyExpensePersistence {
         return Map.copyOf(result);
     }
 
+    default Map<String, String> findCashflowMonthCloseRequestStatusesBatch(
+        String tenantId,
+        List<String> projectIds,
+        String yearMonth
+    ) {
+        return Map.of();
+    }
+
     default CashflowSettlementStatusRecord transitionCashflowSettlementStatus(
         TrustedActorContext actor,
         String projectId,
@@ -692,7 +700,31 @@ public interface WeeklyExpensePersistence {
         return new CashflowLedgerSource(projection, actual, source.targetRevision());
     }
 
-    /** Prior-year carry-forward comes only from the fixed annual columns. */
+    default Map<String, CashflowLedgerSource> findCashflowLedgerSources(
+        String tenantId,
+        List<String> projectIds,
+        String fromMonth,
+        String throughMonth
+    ) {
+        Map<String, CashflowLedgerSource> result = new LinkedHashMap<>();
+        for (String projectId : projectIds) {
+            CashflowLedgerSource source = findCashflowGlobalLedgerSource(tenantId, projectId);
+            List<WeeklyExpenseProjectionEntity> projection = source.projection().stream()
+                .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
+                .toList();
+            List<WeeklyExpenseActualEntity> actual = source.actual().stream()
+                .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
+                .toList();
+            result.put(projectId, new CashflowLedgerSource(projection, actual, source.targetRevision()));
+        }
+        return Map.copyOf(result);
+    }
+
+    /**
+     * Canonical carry-forward policy for cashflow reads and month-close snapshots.
+     * A prior year uses weekly ledger lines when that year exists in the weekly ledger;
+     * the annual-total document is only a fallback, so a year can never be counted twice.
+     */
     default CashflowOpeningBalance findCashflowOpeningBalance(
         String tenantId,
         String projectId,

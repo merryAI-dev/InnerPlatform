@@ -47,6 +47,25 @@ describe('devtools transaction log', () => {
     ]);
   });
 
+  it('exports a cashflow-only trace without tenant, actor, or project identifiers', () => {
+    clearDevtoolsLogs();
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction', phase: 'success', operation: '/api/v1/cashflow/project-secret/month-close',
+      tenantId: 'tenant-secret', actorId: 'actor-secret', projectId: 'project-secret',
+      path: '/api/v1/cashflow/project-secret/month-close',
+      summary: { projectCount: 61 },
+    });
+    const trace = (globalThis as typeof globalThis & {
+      __MYSCUBE_DEVTOOLS__?: { cashflowTrace: () => unknown[] };
+    }).__MYSCUBE_DEVTOOLS__?.cashflowTrace();
+
+    expect(trace).toEqual([expect.objectContaining({ operation: 'cashflow.request', summary: { projectCount: 61 } })]);
+    const serialized = JSON.stringify(trace);
+    expect(serialized).not.toContain('tenant-secret');
+    expect(serialized).not.toContain('actor-secret');
+    expect(serialized).not.toContain('project-secret');
+  });
+
   it('redacts tokens, emails, and binary payload fields before exposing logs', () => {
     const sanitized = sanitizeDevtoolsValue({
       idToken: 'firebase-token',
