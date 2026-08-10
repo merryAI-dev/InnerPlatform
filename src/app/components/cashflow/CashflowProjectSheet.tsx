@@ -1725,7 +1725,6 @@ export function CashflowProjectSheet({
       actor,
       projectId,
       expectedMirrorRevision: sourceMirror.sourceRevision,
-      yearMonth,
       ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
       idempotencyKey: stageIdempotencyKey,
     });
@@ -1775,7 +1774,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetMirror, handleApplyStagedSheetValues, orgId, projectId, resolveBffActor, yearMonth]);
+  }, [cashflowSheetMirror, handleApplyStagedSheetValues, orgId, projectId, resolveBffActor]);
 
   const handleOpenSheetOnboarding = useCallback(() => {
     setSheetReviewDialogOpen(true);
