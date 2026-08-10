@@ -3020,6 +3020,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(forceStage.body.status).toBe('READY');
     expect(forceStage.body.pendingApprovalDifferenceCount).toBe(0);
+    expect(forceStage.body.pendingApprovalDifferenceManifestHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: forceStage.body.runId, replaceAllActualSources: true, idempotencyKey: 'apply-pending-force' })

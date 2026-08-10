@@ -3897,7 +3897,7 @@ async function stagePinnedCashflowSheetLab({
       blockAllCandidates: false,
       differences: [],
       differenceCount: 0,
-      manifestHash: stableHash([]),
+      manifestHash: `sha256:${stableHash([])}`,
       contractIssues: [],
       evidence: [],
     }
