@@ -1731,7 +1731,11 @@ export function CashflowProjectSheet({
     });
     const applyStageResult = async (result: CashflowSheetLabStageResult) => {
       if (result.status === 'BLOCKED') {
-        toast.warning('시트 범위가 월 전체 구조와 맞지 않아 반영하지 않았습니다.');
+        const contractIssue = result.pendingApprovalContractIssues?.[0];
+        const blockedMonths = (contractIssue?.blockedMonths || result.blockedMonths || []).join(', ');
+        toast.warning(contractIssue
+          ? `${contractIssue.message}${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}${contractIssue.requestId !== 'unknown' ? ` (요청 ID: ${contractIssue.requestId})` : ''}`
+          : `반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
       if (result.stagedLineCount <= 0) {

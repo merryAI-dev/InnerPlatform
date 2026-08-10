@@ -559,6 +559,14 @@ export interface CashflowSheetLabStageResult {
   }>;
   pendingApprovalDifferenceCount?: number;
   pendingApprovalDifferenceManifestHash?: string;
+  pendingApprovalContractIssues?: Array<{
+    requestId: string;
+    yearMonth?: string;
+    blockedMonths: string[];
+    blockAllCandidates: boolean;
+    reasonCode: 'cashflow_pending_approval_contract_unsupported';
+    message: string;
+  }>;
   stagedMonths?: string[];
   stagedYears?: number[];
   annualLineCount?: number;
