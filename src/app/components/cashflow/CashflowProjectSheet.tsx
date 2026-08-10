@@ -1711,7 +1711,7 @@ export function CashflowProjectSheet({
   }, [orgId, projectId, resolveBffActor, user?.uid]);
 
   const handleStagePinnedSheetValues = useCallback(async (
-    replaceAllActualSources = false,
+    replaceAllActualSources = true,
     mirrorOverride?: CashflowSheetLabMirrorResult,
   ): Promise<void> => {
     const sourceMirror = mirrorOverride || cashflowSheetMirror;
@@ -1781,7 +1781,7 @@ export function CashflowProjectSheet({
     setSheetReviewDialogOpen(true);
   }, []);
 
-  const handleStartSheetChangeReview = useCallback(async (replaceAllActualSources = false): Promise<void> => {
+  const handleStartSheetChangeReview = useCallback(async (replaceAllActualSources = true): Promise<void> => {
     setSheetReviewDialogOpen(false);
     await handleStagePinnedSheetValues(replaceAllActualSources);
   }, [handleStagePinnedSheetValues]);
@@ -3539,7 +3539,7 @@ export function CashflowProjectSheet({
               </AlertDialogAction>
             ) : (
               <>
-                <Button type="button" variant="outline" onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'}>
+                <Button type="button" variant="outline" onClick={() => void handleStartSheetChangeReview(true)} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'}>
                   {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                   시트 값 반영
                 </Button>

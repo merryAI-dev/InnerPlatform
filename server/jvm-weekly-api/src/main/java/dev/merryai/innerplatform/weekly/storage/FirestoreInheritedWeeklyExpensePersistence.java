@@ -2306,16 +2306,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         targetDocsByMonth.values().forEach(allProjectWeeks::putAll);
         String currentRevision = computeCashflowTargetRevision(allProjectWeeks.values());
-        if (!currentRevision.equals(targetRevision)) {
+        if (!replaceAllActualSources && !currentRevision.equals(targetRevision)) {
             throw new WeeklyExpenseConflictException("Cashflow target revision changed. Refresh the sheet before applying.");
         }
         DocumentReference mirrorRef = monthClose
             ? null
             : db.document("orgs/" + tenantId + "/cashflow_sheet_mirrors/" + projectId);
         DocumentSnapshot mirrorSnapshot = mirrorRef == null ? null : get(mirrorRef);
-        boolean mirrorTracksTargetRevision = mirrorSnapshot != null
+        boolean mirrorTracksTargetRevision = replaceAllActualSources || (mirrorSnapshot != null
             && mirrorSnapshot.exists()
-            && targetRevision.equals(text(data(mirrorSnapshot).get("targetRevisionAtFetch"), ""));
+            && targetRevision.equals(text(data(mirrorSnapshot).get("targetRevisionAtFetch"), "")));
 
         Instant now = clock.instant();
         Map<String, Map<String, Object>> replacements = new LinkedHashMap<>();
@@ -2506,7 +2506,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         DocumentSnapshot snapshot = get(ref);
         Map<String, Object> current = snapshot.exists() ? data(snapshot) : Map.of();
         long currentRevision = longValue(current.get("revision"), 0);
-        if (currentRevision != request.expectedRevision()) {
+        if (!request.replaceAllActualSources() && currentRevision != request.expectedRevision()) {
             throw new WeeklyExpenseConflictException("Cashflow annual total revision changed. Reload before applying.");
         }
 

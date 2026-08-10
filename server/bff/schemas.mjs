@@ -207,6 +207,7 @@ export const cashflowSheetLabApplySchema = z.object({
   startWeek: NON_EMPTY_STRING.optional(),
   endWeek: NON_EMPTY_STRING.optional(),
   stageRunId: NON_EMPTY_STRING.optional(),
+  replaceAllActualSources: z.boolean().optional(),
   applyRiskCandidates: z.boolean().optional(),
   settledWeekChangeConfirmationId: NON_EMPTY_STRING.optional(),
   closedMonthChangeReason: z.string().trim().max(1000).optional(),

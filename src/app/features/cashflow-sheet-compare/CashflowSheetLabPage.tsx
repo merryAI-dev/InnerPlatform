@@ -731,6 +731,7 @@ export function CashflowSheetLabPage() {
             actor: requestActor,
             projectId,
             expectedMirrorRevision,
+            replaceAllActualSources: true,
             idempotencyKey: stageIdempotencyKey,
           })
         ));
@@ -813,6 +814,7 @@ export function CashflowSheetLabPage() {
           actor: requestActor,
           projectId,
           stageRunId: stagedRunId,
+          replaceAllActualSources: true,
           closedMonthChangeReason: monthCloseChangeReason,
           closedMonthDifferenceCount: stagedEvidence.closedMonthDifferenceCount,
           closedMonthDifferenceManifestHash: stagedEvidence.closedMonthDifferenceManifestHash,

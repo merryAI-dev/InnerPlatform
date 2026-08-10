@@ -697,6 +697,7 @@ export async function applyCashflowSheetLabViaBff(params: {
   startWeek?: string;
   endWeek?: string;
   stageRunId?: string;
+  replaceAllActualSources?: boolean;
   applyRiskCandidates?: boolean;
   settledWeekChangeConfirmationId?: string;
   closedMonthChangeReason?: string;
@@ -723,6 +724,7 @@ export async function applyCashflowSheetLabViaBff(params: {
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
         ...(params.stageRunId ? { stageRunId: params.stageRunId } : {}),
+        ...(params.replaceAllActualSources ? { replaceAllActualSources: true } : {}),
         ...(typeof params.applyRiskCandidates === 'boolean' ? { applyRiskCandidates: params.applyRiskCandidates } : {}),
         ...(params.settledWeekChangeConfirmationId
           ? { settledWeekChangeConfirmationId: params.settledWeekChangeConfirmationId }
@@ -872,20 +874,6 @@ export async function refreshCashflowSheetLabMirrorViaBff(params: {
   );
   const expectedMirror = { projectId: params.projectId };
   if (isCashflowSheetLabMirrorResult(response.data, expectedMirror)) return response.data;
-
-  // The refresh command is idempotent and may already be committed even if an
-  // intermediary returns an empty body. Recover the persisted server snapshot
-  // instead of treating a successful refresh as a UI failure.
-  const recovered = await apiClient.get<CashflowSheetLabMirrorResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/mirror`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      timeoutMs: 15000,
-      retries: 0,
-    },
-  );
-  if (isCashflowSheetLabMirrorResult(recovered.data, expectedMirror)) return recovered.data;
   throw invalidCashflowSheetMirrorResponse();
 }
 

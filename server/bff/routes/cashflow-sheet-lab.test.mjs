@@ -3004,6 +3004,27 @@ describe('cashflow sheet lab route', () => {
       })
       .expect(200);
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+
+    const forceMirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-pending-force' })
+      .expect(200);
+    const forceStage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: forceMirror.body.sourceRevision,
+        yearMonth: '2026-01',
+        replaceAllActualSources: true,
+        idempotencyKey: 'stage-pending-force',
+      })
+      .expect(200);
+    expect(forceStage.body.status).toBe('READY');
+    expect(forceStage.body.pendingApprovalDifferenceCount).toBe(0);
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: forceStage.body.runId, replaceAllActualSources: true, idempotencyKey: 'apply-pending-force' })
+      .expect(200);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
   });
 
   it('accepts the canonical cycle month plus separate throughMonth contract', async () => {
@@ -3531,6 +3552,16 @@ describe('cashflow sheet lab route', () => {
       .expect((response) => {
         expect(response.body.code).toBe('cashflow_sheet_target_revision_conflict');
       });
+
+    const overwriteStage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: mirror.body.sourceRevision,
+        replaceAllActualSources: true,
+        idempotencyKey: 'stage-target-drift-overwrite',
+      })
+      .expect(200);
+    expect(overwriteStage.body.replaceAllActualSources).toBe(true);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
   });
 

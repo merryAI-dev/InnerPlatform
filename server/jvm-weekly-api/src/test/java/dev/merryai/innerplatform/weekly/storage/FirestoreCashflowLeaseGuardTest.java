@@ -1348,6 +1348,59 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void annualTotalWriteKeepsRevisionGuardUnlessExplicitOverwriteIsRequested() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        CashflowSheetAnnualApplyCommand first = new CashflowSheetAnnualApplyCommand(
+            "annual-revision-2025-first",
+            SOURCE_REVISION,
+            2025,
+            0,
+            annualCells()
+        );
+        fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceCashflowSheetYearTotal(
+                "tenant-a", "project-a", "cashflow-sheet-lab", first
+            );
+            return null;
+        });
+
+        CashflowSheetAnnualApplyCommand stale = new CashflowSheetAnnualApplyCommand(
+            "annual-revision-2025-stale",
+            SOURCE_REVISION,
+            2025,
+            0,
+            annualCells()
+        );
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceCashflowSheetYearTotal(
+                "tenant-a", "project-a", "cashflow-sheet-lab", stale
+            );
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("revision changed");
+
+        CashflowSheetAnnualApplyCommand overwrite = new CashflowSheetAnnualApplyCommand(
+            "annual-revision-2025-overwrite",
+            SOURCE_REVISION,
+            2025,
+            0,
+            annualCells(),
+            "",
+            true
+        );
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceCashflowSheetYearTotal(
+                "tenant-a", "project-a", "cashflow-sheet-lab", overwrite
+            );
+            return null;
+        })).doesNotThrowAnyException();
+    }
+
+    @Test
     void annualTotalWritePreservesExplicitZeroAsARowValueAndState() {
         Fixture fixture = fixture(activeMember(), activeLease());
         List<CashflowAnnualCellSet.Cell> cells = annualCells().stream()
@@ -1403,6 +1456,33 @@ class FirestoreCashflowLeaseGuardTest {
             driftedRequest
         ))).isInstanceOf(WeeklyExpenseConflictException.class).hasMessageContaining("revision");
         assertThat(drifted.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
+
+        Fixture overwrite = fixture(activeMember(), activeLease());
+        CashflowSheetLabApplyRequest overwriteBase = monthlyRequest(
+            "monthly-overwrite-base",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ""
+        );
+        CashflowSheetLabApplyRequest overwriteRequest = new CashflowSheetLabApplyRequest(
+            "monthly-overwrite",
+            overwriteBase.sourceRevision(),
+            overwriteBase.targetRevision(),
+            overwriteBase.yearMonth(),
+            true,
+            null,
+            null,
+            overwriteBase.calculationChecks(),
+            overwriteBase.cells()
+        );
+        assertThatCode(() -> overwrite.persistence.runCommandTransaction(() -> commandService(
+            overwrite.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            overwriteRequest
+        ))).doesNotThrowAnyException();
+        assertThat(overwrite.documents.keySet()).anyMatch(path -> path.contains("/cashflow_weeks/"));
 
         Fixture legacyClosed = fixture(activeMember(), activeLease());
         legacyClosed.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(

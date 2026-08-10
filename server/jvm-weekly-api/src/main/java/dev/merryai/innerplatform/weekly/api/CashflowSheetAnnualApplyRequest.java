@@ -22,7 +22,8 @@ public record CashflowSheetAnnualApplyRequest(
     @Min(2000) @Max(2099) int year,
     @Min(0) long expectedRevision,
     @Valid @NotNull @Size(min = 32, max = 32) List<Cell> cells,
-    @Size(max = 1000) String amendmentReason
+    @Size(max = 1000) String amendmentReason,
+    boolean replaceAllActualSources
 ) {
     public CashflowSheetAnnualApplyRequest {
         amendmentReason = amendmentReason == null ? "" : amendmentReason.trim();
@@ -35,7 +36,7 @@ public record CashflowSheetAnnualApplyRequest(
         long expectedRevision,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, year, expectedRevision, cells, "");
+        this(idempotencyKey, sourceRevision, year, expectedRevision, cells, "", false);
     }
     public record Cell(
         @NotBlank @Pattern(regexp = "projection|actual") String mode,
