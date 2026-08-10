@@ -43,6 +43,11 @@ import {
   monthsBetween,
   previousYearMonth,
 } from '../cashflow-close-calendar.mjs';
+import {
+  cashflowMonthCloseRequestAuditPath,
+  cashflowMonthCloseRequestPath,
+  withdrawPendingCumulativeCloseRequest,
+} from '../cashflow-month-close-withdrawal.mjs';
 export { cashflowCumulativeCloseCycle };
 import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
 
@@ -145,10 +150,6 @@ function resolveBffDataProjectId(env = process.env) {
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
 }
 
-function cashflowMonthCloseRequestPath(tenantId, requestId) {
-  return `orgs/${tenantId}/cashflow_month_close_requests/${requestId}`;
-}
-
 async function alignMonthSettlementStatus(db, tenantId, result) {
   const projects = Array.isArray(result?.items) && result.items.some((item) => item?.projectId)
     ? result.items
@@ -203,10 +204,6 @@ export function buildCashflowMonthCloseRevisionChanges(previousCells, currentCel
       amountDelta: previousAmount === null || currentAmount === null ? null : currentAmount - previousAmount,
     }];
   });
-}
-
-function cashflowMonthCloseRequestAuditPath(tenantId, requestId, revision, action) {
-  return `orgs/${tenantId}/cashflow_month_close_request_audits/${requestId}-r${revision}-${action}`;
 }
 
 function cashflowMonthCloseRequestView(record, partyNames = {}) {
@@ -4020,7 +4017,6 @@ export function mountJvmWeeklyApiRoutes(app, {
       db, tenantId: req.context.tenantId, actorId: req.context.actorId,
     });
     const requestRef = db.doc(cashflowMonthCloseRequestPath(req.context.tenantId, requestId));
-    const requesterRef = db.doc(`orgs/${req.context.tenantId}/members/${req.context.actorId}`);
     const initialSnapshot = await requestRef.get();
     if (!initialSnapshot.exists) {
       throw createHttpError(404, '월 결산 요청을 찾을 수 없습니다.', 'cashflow_month_close_request_not_found');
@@ -4054,82 +4050,17 @@ export function mountJvmWeeklyApiRoutes(app, {
         'cashflow_month_close_request_already_reviewed',
       );
     }
-    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${projectId}-${initialRecord.yearMonth}`);
-    const withdrawnAt = now().toISOString();
-    let withdrawn;
-    await db.runTransaction(async (transaction) => {
-      const [snapshot, requesterSnapshot, settlementSnapshot] = await Promise.all([
-        transaction.get(requestRef),
-        transaction.get(requesterRef),
-        transaction.get(settlementStatusRef),
-      ]);
-      const current = snapshot.exists ? snapshot.data() || {} : null;
-      const requester = requesterSnapshot.exists ? requesterSnapshot.data() || {} : {};
-      if (
-        !current
-        || current.status !== 'PENDING'
-        || Number(current.revision) !== expectedRevision
-        || current.manifestHash !== expectedManifestHash
-        || readOptionalText(current.requestedByUid) !== readOptionalText(req.context.actorId)
-        || readOptionalText(requester.uid) !== readOptionalText(req.context.actorId)
-        || readOptionalText(requester.status).toUpperCase() !== 'ACTIVE'
-      ) {
-        throw createHttpError(
-          409,
-          '조직장 검토가 시작되었거나 변경된 월 결산 요청은 회수할 수 없습니다.',
-          'cashflow_month_close_request_already_reviewed',
-        );
-      }
-      withdrawn = {
-        ...current,
-        status: 'WITHDRAWN',
-        withdrawnByUid: readOptionalText(req.context.actorId),
-        withdrawnAt,
-        withdrawReason: reason,
-        withdrawIdempotencyKey,
-      };
-      transaction.set(requestRef, withdrawn);
-      // 요청 때 PENDING_APPROVAL 로 잡아둔 정산 상태를 실무자 입력 대기로 되돌린다.
-      const settlementStatus = settlementSnapshot.exists ? settlementSnapshot.data() || {} : {};
-      const settlementPeriods = objectValue(settlementStatus.periods) || {};
-      const monthStatus = objectValue(settlementPeriods.MONTH) || {};
-      if (readOptionalText(monthStatus.status) === 'PENDING_APPROVAL') {
-        transaction.set(settlementStatusRef, {
-          tenantId: req.context.tenantId,
-          projectId,
-          yearMonth: current.yearMonth,
-          periods: {
-            ...settlementPeriods,
-            MONTH: {
-              ...monthStatus,
-              status: 'WAITING_FOR_UPDATE',
-              revision: Number.isSafeInteger(Number(monthStatus.revision)) ? Number(monthStatus.revision) + 1 : 1,
-              submittedAt: '',
-              submittedBy: '',
-              approvedAt: '',
-              approvedBy: '',
-            },
-          },
-          updatedAt: withdrawnAt,
-        }, { merge: true });
-      }
-      transaction.set(
-        db.doc(cashflowMonthCloseRequestAuditPath(
-          req.context.tenantId, requestId, expectedRevision, 'withdrawn',
-        )),
-        {
-          requestId,
-          projectId,
-          yearMonth: current.yearMonth,
-          action: 'WITHDRAWN',
-          revision: expectedRevision,
-          manifestHash: current.manifestHash,
-          actorUid: readOptionalText(req.context.actorId),
-          reason,
-          idempotencyKey: withdrawIdempotencyKey,
-          createdAt: withdrawnAt,
-        },
-      );
+    const withdrawn = await withdrawPendingCumulativeCloseRequest({
+      db,
+      tenantId: req.context.tenantId,
+      projectId,
+      requestId,
+      expectedRevision,
+      expectedManifestHash,
+      actorId: req.context.actorId,
+      reason,
+      idempotencyKey: withdrawIdempotencyKey,
+      now: now(),
     });
     res.status(200).json({ request: cashflowMonthCloseRequestView(withdrawn) });
   }));

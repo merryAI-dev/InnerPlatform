@@ -564,6 +564,12 @@ export interface CashflowSheetLabStageResult {
   }>;
   pendingApprovalDifferenceCount?: number;
   pendingApprovalDifferenceManifestHash?: string;
+  withdrawnUnsupportedCloseRequests?: Array<{
+    requestId: string;
+    yearMonth: string;
+    revision: number;
+    reasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED';
+  }>;
   stagedMonths?: string[];
   stagedYears?: number[];
   annualLineCount?: number;

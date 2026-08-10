@@ -23,6 +23,11 @@ import { assertCashflowMutationRuntime, createJavaWeeklyClient } from '../java-w
 import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
 import { stableStringify } from '../utils.mjs';
 import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
+import {
+  CASHFLOW_CUMULATIVE_CLOSE_UNSUPPORTED_REASON,
+  CASHFLOW_CUMULATIVE_CLOSE_UNSUPPORTED_REASON_CODE,
+  withdrawPendingCumulativeCloseRequest,
+} from '../cashflow-month-close-withdrawal.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import {
   cashflowSheetLabApplySchema,
@@ -2088,7 +2093,7 @@ function buildPendingApprovalAffectedMonths(differences = []) {
   return [...byMonth.values()].sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
 }
 
-async function readPendingApprovalDifferences({ db, tenantId, projectId, candidates = [] }) {
+async function readPendingApprovalDifferences({ db, tenantId, projectId, candidates = [], context = null, idempotencyKey = '' }) {
   const requestSnapshot = await db.collection(`orgs/${tenantId}/cashflow_month_close_requests`)
     .where('projectId', '==', projectId)
     .get();
@@ -2098,13 +2103,14 @@ async function readPendingApprovalDifferences({ db, tenantId, projectId, candida
     .sort((left, right) => readOptionalText(left.requestId).localeCompare(readOptionalText(right.requestId)));
   const evidence = [];
   const differences = [];
+  const withdrawnUnsupportedCloseRequests = [];
   for (const request of requests) {
     const requestId = readOptionalText(request.requestId);
     const revision = Number(request.revision);
     const fromMonth = readOptionalText(request.fromMonth);
     const throughMonth = readOptionalText(request.yearMonth);
     const months = cumulativeCloseMonths(fromMonth, throughMonth);
-    if (
+    const incompleteHeader = (
       request.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
       || readOptionalText(request.projectId) !== projectId
       || !requestId
@@ -2116,7 +2122,49 @@ async function readPendingApprovalDifferences({ db, tenantId, projectId, candida
       || Number(request.monthCount) !== months.length
       || Number(request.weekCount) !== months.length * 5
       || Number(request.cellCount) !== months.length * 160
-    ) {
+    );
+    if (incompleteHeader) {
+      if (
+        request.status === 'PENDING'
+        && request.contractVersion === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+        && fromMonth === '2023-01'
+        && /^20\d{2}-(0[1-9]|1[0-2])$/.test(throughMonth)
+        && context?.actorId
+        && idempotencyKey
+      ) {
+        try {
+          const withdrawn = await withdrawPendingCumulativeCloseRequest({
+            db,
+            tenantId,
+            projectId,
+            requestId,
+            expectedRevision: revision,
+            actorId: context.actorId,
+            actorRole: context.actorRole,
+            reason: CASHFLOW_CUMULATIVE_CLOSE_UNSUPPORTED_REASON,
+            reasonCode: CASHFLOW_CUMULATIVE_CLOSE_UNSUPPORTED_REASON_CODE,
+            idempotencyKey: `${idempotencyKey}:withdraw-unsupported:${requestId}:r${revision}`,
+            now: new Date(),
+            allowPrivilegedActor: true,
+          });
+          withdrawnUnsupportedCloseRequests.push({
+            requestId,
+            yearMonth: withdrawn.yearMonth,
+            revision: withdrawn.revision,
+            reasonCode: CASHFLOW_CUMULATIVE_CLOSE_UNSUPPORTED_REASON_CODE,
+          });
+          continue;
+        } catch (error) {
+          if (readOptionalText(error?.code) === 'cashflow_month_close_withdraw_forbidden') {
+            throw createHttpError(
+              409,
+              '이전 형식의 월 결산 요청을 만든 담당자 또는 재무 관리자가 먼저 회수해야 시트 값을 반영할 수 있습니다.',
+              'cashflow_pending_approval_contract_unsupported',
+            );
+          }
+          throw error;
+        }
+      }
       throw pendingApprovalEvidenceError('결재 중인 누적 결산 요청 header가 완전하지 않습니다.');
     }
     const shards = await Promise.all(months.map(async (yearMonth) => {
@@ -2220,6 +2268,7 @@ async function readPendingApprovalDifferences({ db, tenantId, projectId, candida
     differences,
     differenceCount: differences.reduce((sum, difference) => sum + difference.differenceCount, 0),
     manifestHash: `sha256:${stableHash(differences)}`,
+    withdrawnUnsupportedCloseRequests,
   };
 }
 
@@ -3857,7 +3906,9 @@ async function stagePinnedCashflowSheetLab({
     forceFullReplacement: Boolean(parsed.replaceAllActualSources),
   });
   const candidates = [...weekly.candidates, ...annual.candidates];
-  const pendingApproval = await readPendingApprovalDifferences({ db, tenantId, projectId, candidates });
+  const pendingApproval = await readPendingApprovalDifferences({
+    db, tenantId, projectId, candidates, context, idempotencyKey: parsed.idempotencyKey,
+  });
   const blockedMonths = weekly.blockedMonths;
   const riskLineCount = weekly.riskLineCount;
   const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
@@ -3918,6 +3969,7 @@ async function stagePinnedCashflowSheetLab({
     pendingApprovalDifferences: pendingApproval.differences,
     pendingApprovalDifferenceCount: pendingApproval.differenceCount,
     pendingApprovalDifferenceManifestHash: pendingApproval.manifestHash,
+    withdrawnUnsupportedCloseRequests: pendingApproval.withdrawnUnsupportedCloseRequests,
     stagedMonths,
     calculationMonths,
     stagedYears: annual.stagedYears,
@@ -3952,6 +4004,7 @@ async function stagePinnedCashflowSheetLab({
     pendingApprovalDifferences: pendingApproval.differences,
     pendingApprovalDifferenceCount: pendingApproval.differenceCount,
     pendingApprovalDifferenceManifestHash: pendingApproval.manifestHash,
+    withdrawnUnsupportedCloseRequests: pendingApproval.withdrawnUnsupportedCloseRequests,
     stagedMonths,
     calculationMonths,
     stagedYears: annual.stagedYears,

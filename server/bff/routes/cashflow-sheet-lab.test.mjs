@@ -3395,6 +3395,52 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
   });
 
+  it('withdraws a malformed legacy PENDING close before sheet staging without changing sheet values', async () => {
+    const documents = cumulativeCloseRequestDocuments();
+    const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-01';
+    documents[requestPath] = {
+      ...documents[requestPath],
+      monthCount: 0,
+      requestedByUid: 'pm-a',
+    };
+    documents['orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-01'] = {
+      tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-01',
+      periods: { MONTH: { status: 'PENDING_APPROVAL', revision: 3 } },
+    };
+    const db = createDb({
+      project: { id: 'project-a', cashflowSheetLab: { value: 'saved-spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' } },
+      initialDocuments: documents,
+    });
+    const app = createApp({
+      db,
+      context: { actorId: 'finance-a', actorRole: 'finance' },
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a', selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+    });
+    const mirror = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-malformed-close' }).expect(200);
+    const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-malformed-close' })
+      .expect(200);
+
+    expect(stage.body.withdrawnUnsupportedCloseRequests).toEqual([{
+      requestId: 'project-a-2026-01', yearMonth: '2026-01', revision: 1,
+      reasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED',
+    }]);
+    expect(db.__getDocument(requestPath)).toMatchObject({
+      status: 'WITHDRAWN', withdrawnByUid: 'finance-a', withdrawReasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED',
+    });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-01').periods.MONTH)
+      .toMatchObject({ status: 'WAITING_FOR_UPDATE', revision: 4, submittedBy: '', approvedBy: '' });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-01-r1-withdrawn'))
+      .toMatchObject({ action: 'WITHDRAWN', actorUid: 'finance-a', reasonCode: 'CUMULATIVE_EVIDENCE_CONTRACT_UNSUPPORTED' });
+  });
+
   it('rejects apply when an active close request status changes after staging', async () => {
     const requestDocuments = cumulativeCloseRequestDocuments();
     const db = createDb({

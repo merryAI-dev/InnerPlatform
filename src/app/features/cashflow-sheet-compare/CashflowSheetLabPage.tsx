@@ -811,9 +811,12 @@ export function CashflowSheetLabPage() {
         setErrorMessage(`반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
+      const withdrawnUnsupportedNotice = staged.withdrawnUnsupportedCloseRequests?.length
+        ? `이전 근거 형식의 월 결산 요청 ${staged.withdrawnUnsupportedCloseRequests.length}건을 회수했습니다. 시트 값은 변경되지 않았습니다. `
+        : '';
       if (staged.stagedLineCount === 0) {
         setReflectResult({ appliedLineCount: 0, projectionLineCount: 0, actualLineCount: 0 });
-        setStatusMessage('MYSCube가 이미 시트 최신값과 같습니다.');
+        setStatusMessage(`${withdrawnUnsupportedNotice}MYSCube가 이미 시트 최신값과 같습니다.`);
         logCashflowLab('overwrite.sheet_values.noop', {
           projectId,
           spreadsheetId,
@@ -888,7 +891,7 @@ export function CashflowSheetLabPage() {
       setClosedMonthPendingApprovalAccepted(false);
       setPendingApprovalStage(null);
       setFormulaMismatchPrompt(null);
-      setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
+      setStatusMessage(`${withdrawnUnsupportedNotice}시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
