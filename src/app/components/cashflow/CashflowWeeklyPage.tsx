@@ -171,6 +171,12 @@ export function CashflowWeeklyPage() {
   const departmentProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
   const overviewProjectIds = useMemo(() => departmentProjects.map((project) => project.id), [departmentProjects]);
   const overviewProjectIdsKey = useMemo(() => JSON.stringify(overviewProjectIds), [overviewProjectIds]);
+  const overviewActor = useMemo(() => user ? {
+    uid: user.uid,
+    email: user.email,
+    role: user.role,
+    idToken: user.idToken,
+  } : null, [user?.uid, user?.email, user?.role, user?.idToken]);
   const statuses = useMemo<Record<string, CashflowSettlementStatusesResult>>(() => Object.fromEntries(
     (overview?.items || []).flatMap((item) => item.settlementStatuses ? [[item.projectId, item.settlementStatuses]] : []),
   ), [overview]);
@@ -202,7 +208,7 @@ export function CashflowWeeklyPage() {
 
   useEffect(() => {
     const projectIds = JSON.parse(overviewProjectIdsKey) as string[];
-    if (!user?.idToken || projectIds.length === 0) {
+    if (!overviewActor?.idToken || projectIds.length === 0) {
       setOverview(null);
       setOverviewLoading(false);
       setOverviewError('');
@@ -223,7 +229,7 @@ export function CashflowWeeklyPage() {
     });
     void fetchCashflowWeeklyOverviewViaBff({
       tenantId: orgId,
-      actor: user,
+      actor: overviewActor,
       projectIds,
       yearMonth,
     }).then((result) => {
@@ -255,7 +261,7 @@ export function CashflowWeeklyPage() {
       if (active) setOverviewLoading(false);
     });
     return () => { active = false; };
-  }, [orgId, overviewProjectIdsKey, refreshSequence, user, yearMonth]);
+  }, [orgId, overviewActor, overviewProjectIdsKey, refreshSequence, yearMonth]);
 
   async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE') {
     if (!user?.idToken) return;

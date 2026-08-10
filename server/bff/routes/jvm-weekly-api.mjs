@@ -2566,6 +2566,9 @@ export function mountJvmWeeklyApiRoutes(app, {
               context: req.context,
               method: 'GET',
               path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
+              // 이 읽기는 아래 publication fingerprint 재시도로만 다시 실행한다.
+              // 전송 timeout 재시도까지 겹치면 같은 무거운 JVM 읽기가 동시 두 번 돈다.
+              retry: false,
             }),
             { attempt: traceAttempt },
           ),

@@ -7,7 +7,11 @@ vi.mock('google-auth-library', () => ({
 }));
 
 const { GoogleAuth } = await import('google-auth-library');
-const { fetchGoogleIdentityToken, __clearIdentityTokenCachesForTest } = await import('./java-weekly-auth.mjs');
+const {
+  buildJavaWeeklyTrustedHeaders,
+  fetchGoogleIdentityToken,
+  __clearIdentityTokenCachesForTest,
+} = await import('./java-weekly-auth.mjs');
 
 const serviceAccountJson = JSON.stringify({ client_email: 'bff@test.iam', private_key: 'k' });
 
@@ -34,6 +38,21 @@ describe('java weekly identity token cache', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('propagates the BFF request ID to the JVM without forwarding user credentials', async () => {
+    await expect(buildJavaWeeklyTrustedHeaders({
+      fetchImpl: fetch,
+      context: {
+        requestId: 'req_dashboard_trace', tenantId: 'tenant-1', actorId: 'actor-1', actorRole: 'admin',
+      },
+      serviceToken: 'internal-service-token',
+    })).resolves.toMatchObject({
+      'x-request-id': 'req_dashboard_trace',
+      'x-tenant-id': 'tenant-1',
+      'x-actor-id': 'actor-1',
+      'x-actor-role': 'admin',
+    });
   });
 
   it('mints once per token lifetime, not once per request', async () => {

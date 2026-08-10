@@ -41,12 +41,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 @RestController
 @RequestMapping("/api/v1")
 public class WeeklyExpenseController {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
+    private static final System.Logger LOGGER = System.getLogger(WeeklyExpenseController.class.getName());
     private final WeeklyExpenseCommandService commandService;
     private final CashflowReadService readService;
     private final boolean legacyWeekCloseEnabled;
@@ -461,15 +464,20 @@ public class WeeklyExpenseController {
         @RequestHeader("x-tenant-id") String tenantId,
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
-        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest
     ) {
         TrustedActorContext actor = actorContext(tenantId, actorId, actorRole, actorEmail);
+        String requestId = httpRequest == null ? "" : httpRequest.getHeader("x-request-id");
+        requestId = requestId == null ? "" : requestId.trim();
         for (int attempt = 0; attempt < 2; attempt += 1) {
             CashflowMonthDashboardSourceResponse response = readCashflowMonthDashboardSourceAttempt(
                 actor,
                 tenantId,
                 projectId,
-                yearMonth
+                yearMonth,
+                requestId,
+                attempt + 1
             );
             if (response != null) {
                 return response;
@@ -480,13 +488,32 @@ public class WeeklyExpenseController {
         );
     }
 
+    public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
+        String projectId,
+        String yearMonth,
+        String tenantId,
+        String actorId,
+        String actorRole,
+        String actorEmail
+    ) {
+        return readCashflowMonthDashboardSource(
+            projectId, yearMonth, tenantId, actorId, actorRole, actorEmail, null
+        );
+    }
+
     private CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSourceAttempt(
         TrustedActorContext actor,
         String tenantId,
         String projectId,
-        String yearMonth
+        String yearMonth,
+        String requestId,
+        int attempt
     ) {
-        CashflowMonthCloseResponse monthClose = commandService.readCashflowMonthClose(actor, projectId, yearMonth);
+        long dashboardStartedAt = System.nanoTime();
+        CashflowMonthCloseResponse monthClose = dashboardRead(
+            requestId, projectId, attempt, "month_close",
+            () -> commandService.readCashflowMonthClose(actor, projectId, yearMonth)
+        );
         boolean open = "OPEN".equals(monthClose.status());
         String amendmentSnapshotHash = String.valueOf(
             monthClose.lastAmendmentEvidence().getOrDefault("closeSnapshotHash", "")
@@ -501,30 +528,35 @@ public class WeeklyExpenseController {
             : open
                 ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
                 : frozenSnapshotCompatibility(monthClose);
-        Integer weeklyYear = open ? readService.declaredWeeklyYear(tenantId, projectId) : null;
+        CompletableFuture<Integer> weeklyYearFuture = open
+            ? dashboardReadAsync(requestId, projectId, attempt, "declared_weekly_year", () -> readService.declaredWeeklyYear(tenantId, projectId))
+            : CompletableFuture.completedFuture(null);
+        CompletableFuture<CashflowOpeningBalancesResponse> openingBalancesFuture = currentLedgerView
+            ? dashboardReadAsync(requestId, projectId, attempt, "opening_balance", () -> toOpeningBalancesResponse(readService.openingBalance(
+                tenantId, projectId, Integer.parseInt(yearMonth.substring(0, 4))
+            )))
+            : CompletableFuture.completedFuture(snapshotCompatibility.missingEvidence().contains("OPENING_BALANCES")
+                ? null
+                : frozenOpeningBalances(monthClose, yearMonth));
+        CompletableFuture<CashflowCumulativeCloseHead> cumulativeFuture = dashboardReadAsync(
+            requestId, projectId, attempt, "cumulative_close_head",
+            () -> readService.cumulativeCloseHead(tenantId, projectId)
+        );
+        CompletableFuture<CashflowLedgerSource> sourceFuture = amendedClosed
+            ? dashboardReadAsync(requestId, projectId, attempt, "global_ledger", () -> readService.globalLedgerSource(tenantId, projectId))
+            : weeklyYearFuture.thenCompose(weeklyYear -> weeklyYear == null
+                ? CompletableFuture.completedFuture(new CashflowLedgerSource(List.of(), List.of()))
+                : dashboardReadAsync(requestId, projectId, attempt, "weekly_ledger", () -> readCashflowSource(tenantId, projectId, weeklyYear)));
+        Integer weeklyYear = weeklyYearFuture.join();
         List<CashflowMonthDashboardSourceResponse.Blocker> blockers = open && weeklyYear == null
             ? List.of(new CashflowMonthDashboardSourceResponse.Blocker(
                 "SHEET_SOURCE_REQUIRED",
                 "먼저 시트값을 불러와 주세요."
             ))
             : List.of();
-        CashflowLedgerSource source = amendedClosed
-            ? readService.globalLedgerSource(tenantId, projectId)
-            : open && weeklyYear != null
-                ? readCashflowSource(tenantId, projectId, weeklyYear)
-                : open
-                    ? new CashflowLedgerSource(List.of(), List.of())
-                    : null;
+        CashflowLedgerSource source = currentLedgerView ? sourceFuture.join() : null;
         CashflowSnapshotResponse cashflow = currentLedgerView ? buildCashflowSnapshot(projectId, source) : null;
-        CashflowOpeningBalancesResponse openingBalances = currentLedgerView
-            ? toOpeningBalancesResponse(readService.openingBalance(
-                tenantId,
-                projectId,
-                Integer.parseInt(yearMonth.substring(0, 4))
-            ))
-            : snapshotCompatibility.missingEvidence().contains("OPENING_BALANCES")
-                ? null
-                : frozenOpeningBalances(monthClose, yearMonth);
+        CashflowOpeningBalancesResponse openingBalances = openingBalancesFuture.join();
         if (openingBalances != null) {
             CloseCashflowMonthRequest.requireOpeningBalances(openingBalances, yearMonth);
         }
@@ -545,7 +577,7 @@ public class WeeklyExpenseController {
             }
             monthClose = verified;
         }
-        CashflowCumulativeCloseHead cumulative = readService.cumulativeCloseHead(tenantId, projectId);
+        CashflowCumulativeCloseHead cumulative = cumulativeFuture.join();
         if (cumulative == null) {
             cumulative = new CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
         }
@@ -563,7 +595,7 @@ public class WeeklyExpenseController {
             }
             projectionActualSummary = summaryResponse.items().getFirst();
         }
-        return new CashflowMonthDashboardSourceResponse(
+        CashflowMonthDashboardSourceResponse response = new CashflowMonthDashboardSourceResponse(
             monthClose,
             cashflow,
             openingBalances,
@@ -574,6 +606,41 @@ public class WeeklyExpenseController {
             ),
             projectionActualSummary,
             blockers
+        );
+        dashboardLog(requestId, projectId, attempt, "complete", (System.nanoTime() - dashboardStartedAt) / 1_000_000L);
+        return response;
+    }
+
+    private <T> CompletableFuture<T> dashboardReadAsync(
+        String requestId,
+        String projectId,
+        int attempt,
+        String phase,
+        Supplier<T> operation
+    ) {
+        return CompletableFuture.supplyAsync(() -> dashboardRead(requestId, projectId, attempt, phase, operation));
+    }
+
+    private <T> T dashboardRead(
+        String requestId,
+        String projectId,
+        int attempt,
+        String phase,
+        Supplier<T> operation
+    ) {
+        long startedAt = System.nanoTime();
+        try {
+            return operation.get();
+        } finally {
+            dashboardLog(requestId, projectId, attempt, phase, (System.nanoTime() - startedAt) / 1_000_000L);
+        }
+    }
+
+    private void dashboardLog(String requestId, String projectId, int attempt, String phase, long durationMs) {
+        LOGGER.log(
+            System.Logger.Level.INFO,
+            "cashflow_dashboard_source requestId={0} projectId={1} attempt={2} phase={3} durationMs={4}",
+            requestId, projectId, attempt, phase, durationMs
         );
     }
 
