@@ -608,6 +608,43 @@ describe('JVM weekly API BFF proxy', () => {
     expect(new Headers(init.headers).get('x-tenant-id')).toBe('tenant-a');
   });
 
+  it('reads a 61-project weekly overview with one JVM request and no BFF status rewrite', async () => {
+    const projectIds = Array.from({ length: 61 }, (_, index) => `project-${index + 1}`);
+    const canonical = {
+      version: '1',
+      yearMonth: '2026-08',
+      items: [{ projectId: 'project-1', settlementStatuses: null, projectionActualSummary: null }],
+      errors: [{ projectId: 'project-1', code: 'STATUS_UNAVAILABLE' }],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds, yearMonth: '2026-08' })
+      .expect(200, canonical);
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://jvm-weekly.local/api/v1/cashflow/weekly-overview',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
+    );
+  });
+
+  it('rejects invalid weekly overview scopes before JVM transport', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: Array.from({ length: 101 }, (_, index) => `project-${index}`), yearMonth: '2026-08' })
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_overview_request_invalid'));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('rejects projection-actual batch reads before JVM transport when the role is unauthorized', async () => {
     const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'external' });

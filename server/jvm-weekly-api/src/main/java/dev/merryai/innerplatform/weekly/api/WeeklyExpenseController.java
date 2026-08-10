@@ -310,6 +310,19 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/weekly-overview")
+    public CashflowWeeklyOverviewResponse readCashflowWeeklyOverview(
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody CashflowWeeklyOverviewRequest request
+    ) {
+        return commandService.readCashflowWeeklyOverview(
+            actorContext(tenantId, actorId, actorRole, actorEmail), request
+        );
+    }
+
     private CashflowLedgerSource readCashflowSource(
         String tenantId,
         String projectId,

@@ -46,10 +46,21 @@ export function createCashflowPerformanceTrace({
       ...(Number.isInteger(details.upstreamStatus) ? { upstreamStatus: details.upstreamStatus } : {}),
       ...(typeof details.retryable === 'boolean' ? { retryable: details.retryable } : {}),
       ...(details.errorCode ? { errorCode: safeErrorCode(details.errorCode) } : {}),
+      ...(Number.isSafeInteger(details.projectCount) ? { projectCount: details.projectCount } : {}),
+      ...(Number.isSafeInteger(details.itemCount) ? { itemCount: details.itemCount } : {}),
+      ...(Number.isSafeInteger(details.issueCount) ? { issueCount: details.issueCount } : {}),
       durationMs: safeDuration(details.durationMs),
       totalMs: safeDuration(now() - startedAt),
     };
     if (logger === defaultLogger && process.env.NODE_ENV === 'test') return;
+    if (logger === defaultLogger) {
+      try {
+        logger(payload);
+      } catch {
+        // Diagnostics must never affect the request being measured.
+      }
+      return;
+    }
     setImmediate(() => {
       try {
         logger(payload);

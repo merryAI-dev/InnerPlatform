@@ -43,6 +43,7 @@ import {
   fetchCashflowWeeklyComplianceViaBff,
   fetchCashflowProjectionActualSummariesViaBff,
   fetchCashflowSettlementStatusesBatchViaBff,
+  fetchCashflowWeeklyOverviewViaBff,
   transitionCashflowSettlementStatusViaBff,
   fetchCashflowActivityViaBff,
   fetchCashflowAppliedCellChangesViaBff,
@@ -166,6 +167,32 @@ describe('platform-bff-client', () => {
     }));
     expect(result.items).toHaveLength(9);
     expect(result.errors).toEqual([{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' }]);
+  });
+
+  it('posts all visible projects once to the weekly overview without rejecting per-project unavailable data', async () => {
+    const projectIds = Array.from({ length: 61 }, (_, index) => `p${index + 1}`);
+    const data = {
+      version: '1',
+      yearMonth: '2026-08',
+      items: projectIds.map((projectId) => ({
+        projectId,
+        settlementStatuses: null,
+        projectionActualSummary: null,
+      })),
+      errors: projectIds.flatMap((projectId) => [
+        { projectId, code: 'STATUS_UNAVAILABLE' as const },
+        { projectId, code: 'SUMMARY_UNAVAILABLE' as const },
+      ]),
+    };
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectIds, yearMonth: '2026-08', client,
+    })).resolves.toBe(data);
+    expect(client.post).toHaveBeenCalledTimes(1);
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weekly-overview', expect.objectContaining({
+      body: { projectIds, yearMonth: '2026-08' }, retries: 0, timeoutMs: 12000,
+    }));
   });
 
   it.each([

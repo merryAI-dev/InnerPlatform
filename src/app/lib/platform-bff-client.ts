@@ -1409,6 +1409,20 @@ export interface CashflowProjectionActualSummaryBatch {
   }>;
 }
 
+export interface CashflowWeeklyOverviewResult {
+  version: string;
+  yearMonth: string;
+  items: Array<{
+    projectId: string;
+    settlementStatuses: CashflowSettlementStatusesResult | null;
+    projectionActualSummary: CashflowProjectionActualSummary | null;
+  }>;
+  errors: Array<{
+    projectId: string;
+    code: 'STATUS_UNAVAILABLE' | 'SUMMARY_UNAVAILABLE';
+  }>;
+}
+
 export interface ProjectCashflowActualSyncResult {
   ok: boolean;
   skipped?: boolean;
@@ -3051,6 +3065,40 @@ export async function fetchCashflowProjectionActualSummariesViaBff(params: {
     || new Set(errorIds).size !== errorIds.length
     || errorIds.some((projectId) => itemIds.includes(projectId))) {
     throw new Error('JVM 누적 Projection-Actual 요약 응답이 올바르지 않습니다.');
+  }
+  return result;
+}
+
+export async function fetchCashflowWeeklyOverviewViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectIds: string[];
+  yearMonth: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeeklyOverviewResult> {
+  const response = await resolveClient(params.client).post<CashflowWeeklyOverviewResult>(
+    '/api/v1/cashflow/weekly-overview',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { projectIds: params.projectIds, yearMonth: params.yearMonth },
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  const result = response.data;
+  const requestedIds = new Set(params.projectIds);
+  const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
+  if (typeof result?.version !== 'string'
+    || result?.yearMonth !== params.yearMonth
+    || !Array.isArray(result?.items)
+    || itemIds.length !== params.projectIds.length
+    || itemIds.some((projectId) => !requestedIds.has(projectId))
+    || new Set(itemIds).size !== itemIds.length
+    || !Array.isArray(result?.errors)
+    || result.errors.some((error) => !requestedIds.has(error?.projectId)
+      || !['STATUS_UNAVAILABLE', 'SUMMARY_UNAVAILABLE'].includes(error?.code))) {
+    throw new Error('현금흐름 현황 응답이 올바르지 않습니다.');
   }
   return result;
 }
