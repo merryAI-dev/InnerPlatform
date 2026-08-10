@@ -282,7 +282,6 @@ function RegistrationEditor({
         initialDraft={editorDraft}
         draftKey={`portal-register-${record.draftId}`}
         members={members}
-        requesterId={actor.uid}
         departmentOptions={departmentOptions}
         settlementSystemOptions={projects.flatMap((project) => project.settlementSystem === 'OTHER' && project.settlementSystemOther && !project.trashedAt ? [project.settlementSystemOther] : [])}
         topSlot={topSlot}

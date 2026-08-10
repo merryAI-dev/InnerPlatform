@@ -6,12 +6,11 @@ public final class CashflowMonthReopenApprovalPolicy {
 
     public static Decision decide(String requestedByUid, String decidedByUid) {
         if (requestedByUid == null || requestedByUid.isBlank()) return Decision.LEGACY_REQUESTER_MISSING;
-        return requestedByUid.equals(decidedByUid) ? Decision.SELF_APPROVAL_FORBIDDEN : Decision.ALLOWED;
+        return Decision.ALLOWED;
     }
 
     public enum Decision {
         ALLOWED,
-        LEGACY_REQUESTER_MISSING,
-        SELF_APPROVAL_FORBIDDEN
+        LEGACY_REQUESTER_MISSING
     }
 }

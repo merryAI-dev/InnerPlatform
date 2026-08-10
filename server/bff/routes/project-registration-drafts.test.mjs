@@ -869,7 +869,7 @@ describe('project registration draft service', () => {
   it.each([
     ['requester', { registeredById: 'actor-b', managerId: 'actor-b', executiveApproverId: 'actor-a' }],
     ['project owner', { registeredById: 'actor-b', managerId: 'actor-b', executiveApproverId: 'actor-b' }],
-  ])('rejects final submit when the designated executive approver is the %s', async (_label, payloadOverrides) => {
+  ])('allows final submit when the designated executive approver is the %s', async (_label, payloadOverrides) => {
     const { db, service, base } = createHarness();
     const created = await service.create({
       ...base,
@@ -878,7 +878,7 @@ describe('project registration draft service', () => {
     });
     addRequiredRegistrationAttachments(db, created.body.draft.draftId);
 
-    await expectHttpError(service.submit({
+    const submitted = await service.submit({
       ...base,
       actorEmail: 'actor-a@example.com',
       idempotencyKey: `idem-self-approval-submit-${_label}`,
@@ -886,11 +886,17 @@ describe('project registration draft service', () => {
       leaseId: created.body.lease.leaseId,
       fence: created.body.lease.fence,
       expectedDraftRevision: 0,
-    }), 422, 'project_registration_invalid');
+    });
 
-    expect(db.documents.has('orgs/tenant-a/projects/project-1')).toBe(false);
-    expect(db.documents.has('orgs/tenant-a/project_requests/project-request-1')).toBe(false);
-    expect(db.documents.has('outbox/outbox-1')).toBe(false);
+    expect(submitted.status).toBe(201);
+    expect(db.documents.get('orgs/tenant-a/projects/project-1')).toMatchObject({
+      executiveApproverId: payloadOverrides.executiveApproverId,
+      executiveReviewStatus: 'PENDING',
+    });
+    expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1')).toMatchObject({
+      payload: { executiveApproverId: payloadOverrides.executiveApproverId },
+    });
+    expect(db.documents.has('outbox/outbox-1')).toBe(true);
   });
 
   it('replays a committed final submit when Firestore reports an invalid-or-closed transaction', async () => {

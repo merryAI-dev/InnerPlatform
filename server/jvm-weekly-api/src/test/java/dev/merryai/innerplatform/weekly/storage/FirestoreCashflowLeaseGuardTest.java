@@ -3794,29 +3794,14 @@ class FirestoreCashflowLeaseGuardTest {
             "APPROVE",
             "증빙 확인 완료"
         );
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
-            ACTOR,
-            "project-a",
-            "stage-data-project",
-            decision
-        )))
-            .isInstanceOf(WeeklyExpenseForbiddenException.class)
-            .satisfies(error -> assertThat(((WeeklyExpenseForbiddenException) error).code())
-                .isEqualTo("cashflow_month_close_self_approval_forbidden"));
-        assertThat(fixture.documents.get(monthClosePath("project-a", "2026-06")))
-            .containsEntry("status", "REOPEN_REQUESTED")
-            .containsEntry("revision", 2L);
-        assertThat(fixture.documents.get(
-            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3"
-        )).containsEntry("status", "LOCKED");
         CashflowMonthCloseResponse approved = fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
-            FINANCE_ACTOR,
+            ACTOR,
             "project-a",
             "stage-data-project",
             decision
         ));
         CashflowMonthCloseResponse replay = fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
-            FINANCE_ACTOR,
+            ACTOR,
             "project-a",
             "stage-data-project",
             decision

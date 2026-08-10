@@ -381,15 +381,12 @@ async function readCashflowRequestPartyNames({ db, tenantId, record }) {
   return Object.fromEntries(entries);
 }
 
-async function readCanonicalCashflowApprover({ db, tenantId, projectId, requesterUid }) {
+async function readCanonicalCashflowApprover({ db, tenantId, projectId }) {
   const projectSnapshot = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
   const project = projectSnapshot.exists ? projectSnapshot.data() || {} : null;
   const approverUid = readOptionalText(project?.executiveApproverId);
   if (!project || !approverUid || approverUid.includes('/')) {
     throw createHttpError(409, '프로젝트 조직장을 먼저 지정해 주세요.', 'cashflow_month_close_approver_required');
-  }
-  if (approverUid === readOptionalText(requesterUid)) {
-    throw createHttpError(409, '월 결산 요청자는 자신의 요청을 승인할 수 없습니다.', 'cashflow_month_close_self_approval_forbidden');
   }
   await readActiveCashflowMember({ db, tenantId, actorId: approverUid });
   return approverUid;
@@ -3546,9 +3543,6 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(403, '같은 조직의 활성 구성원만 조직장으로 지정할 수 있습니다.', 'cashflow_month_close_member_inactive');
       }
-      if ([actorId, project.registeredById, project.managerId].map(readOptionalText).includes(approverUid)) {
-        throw createHttpError(409, '월 결산 요청자는 자신의 요청을 승인할 수 없습니다.', 'cashflow_month_close_self_approval_forbidden');
-      }
       const hasPendingRequest = requestSnapshot.docs.some((doc) => (
         ['PENDING', 'APPROVING', 'UNCERTAIN'].includes(readOptionalText(doc.data()?.status))
       ));
@@ -3636,7 +3630,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     if (record.approverUid === actorId) {
       const canonicalApproverUid = await readCanonicalCashflowApprover({
-        db, tenantId: req.context.tenantId, projectId, requesterUid: record.requestedByUid,
+        db, tenantId: req.context.tenantId, projectId,
       });
       if (canonicalApproverUid !== actorId) {
         throw createHttpError(403, '이 월 결산 요청을 조회할 권한이 없습니다.', 'cashflow_month_close_request_forbidden');
@@ -3674,7 +3668,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     if (record.approverUid === actorId) {
       const canonicalApproverUid = await readCanonicalCashflowApprover({
-        db, tenantId: req.context.tenantId, projectId, requesterUid: record.requestedByUid,
+        db, tenantId: req.context.tenantId, projectId,
       });
       if (canonicalApproverUid !== actorId) {
         throw createHttpError(403, '이 월 결산 요청을 조회할 권한이 없습니다.', 'cashflow_month_close_request_forbidden');
@@ -3722,7 +3716,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     if (record.approverUid === actorId) {
       const canonicalApproverUid = await readCanonicalCashflowApprover({
-        db, tenantId: req.context.tenantId, projectId, requesterUid: record.requestedByUid,
+        db, tenantId: req.context.tenantId, projectId,
       });
       if (canonicalApproverUid !== actorId) {
         throw createHttpError(403, '이 월 결산 요청을 조회할 권한이 없습니다.', 'cashflow_month_close_request_forbidden');
@@ -3782,7 +3776,6 @@ export function mountJvmWeeklyApiRoutes(app, {
       db,
       tenantId: req.context.tenantId,
       projectId: rawProjectId,
-      requesterUid: req.context.actorId,
     });
     if (readOptionalText(req.body?.contractVersion) === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT) {
       const yearMonth = readOptionalText(req.body?.yearMonth);
@@ -4107,7 +4100,6 @@ export function mountJvmWeeklyApiRoutes(app, {
       db,
       tenantId: req.context.tenantId,
       projectId,
-      requesterUid: initialRecord.requestedByUid,
     });
     if (
       readOptionalText(initialRecord.approverUid) !== readOptionalText(req.context.actorId)

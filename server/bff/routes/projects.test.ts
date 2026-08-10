@@ -278,12 +278,12 @@ describe('project route helpers', () => {
     });
   });
 
-  it('rejects a registration whose requester is also the designated organization-head approver', () => {
-    expect(() => registrationV2Canonical(registrationV2Payload({
+  it('allows a registration whose requester is also the designated organization-head approver', () => {
+    expect(registrationV2Canonical(registrationV2Payload({
       executiveApproverId: 'pm-a',
       executiveApproverName: 'PM A',
       executiveApproverEmail: 'pm-a@example.com',
-    }))).toThrow(/designated executive approver must differ from the requester/i);
+    })).project.executiveApproverId).toBe('pm-a');
   });
 
   it('preserves a new registration project name longer than 10 characters', () => {
@@ -316,7 +316,7 @@ describe('project route helpers', () => {
     }))).toThrowError('Project registration settlement support must be 도담 or 써니');
   });
 
-  it('rejects a change request whose submitter is also the designated organization-head approver', () => {
+  it('allows a change request whose submitter is also the designated organization-head approver', () => {
     const payload = registrationV2Payload({
       executiveApproverId: 'pm-a',
       executiveApproverName: 'PM A',
@@ -330,7 +330,7 @@ describe('project route helpers', () => {
       contentType: 'application/pdf',
     }));
 
-    expect(() => buildProjectInfoChangeSubmission({
+    expect(buildProjectInfoChangeSubmission({
       tenantId: 'mysc',
       project: { id: 'project-v2', version: 4, registeredById: 'pm-a', managerId: 'pm-a' },
       previousRequest: null,
@@ -341,7 +341,7 @@ describe('project route helpers', () => {
       actorEmail: 'pm-a@example.com',
       timestamp: '2026-07-14T00:00:00.000Z',
       targetProjectVersion: 5,
-    })).toThrow(/designated executive approver must differ from the requester/i);
+    }).projectRequest.payload.executiveApproverId).toBe('pm-a');
   });
 
   it('forces an organization-head rejection back to the organization-head queue even when a client omits resubmit', () => {
@@ -1730,7 +1730,7 @@ describe('project route helpers', () => {
     expect(idempotencyService.fail).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects executive approval when the requester is stored as the designated approver', async () => {
+  it('allows executive approval when the requester is stored as the designated approver', async () => {
     const project = {
       id: 'p001',
       version: 1,
@@ -1781,6 +1781,7 @@ describe('project route helpers', () => {
         actorId: 'pm-a',
         actorRole: 'pm',
         actorEmail: 'pm-a@example.com',
+        actorName: 'PM A',
         requestId: 'request-a',
         idempotencyKey: 'executive-review-pm-self',
       };
@@ -1800,9 +1801,12 @@ describe('project route helpers', () => {
       reviewStatus: 'APPROVED',
     });
 
-    expect(response.status).toBe(403);
-    expect(response.body.error).toBe('self_approval_forbidden');
-    expect(tx.set).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(tx.set).toHaveBeenNthCalledWith(1, expect.anything(), expect.objectContaining({
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewedById: 'pm-a',
+      executiveReviewedByName: 'PM A',
+    }), { merge: true });
   });
 
   it('allows a designated viewer approver without introducing a separate member role', async () => {

@@ -1405,19 +1405,6 @@ function assertRegistrationPayload(payload) {
   }
 }
 
-function assertDistinctExecutiveApprover(payload, actorId, ownerId) {
-  const executiveApproverId = readOptionalText(payload?.executiveApproverId);
-  const requesterIds = new Set([
-    readOptionalText(actorId),
-    readOptionalText(ownerId),
-    readOptionalText(payload?.registeredById),
-    readOptionalText(payload?.managerId),
-  ].filter(Boolean));
-  if (executiveApproverId && requesterIds.has(executiveApproverId)) {
-    invalidRegistration('Project designated executive approver must differ from the requester');
-  }
-}
-
 export function buildProjectRegistrationCanonicalDocuments({
   tenantId,
   projectId,
@@ -1440,7 +1427,6 @@ export function buildProjectRegistrationCanonicalDocuments({
   }
   assertRegistrationV2Requirements(payload, requirementsAttachmentRefs);
   const ownerId = readOptionalText(payload.registeredById) || readOptionalText(payload.managerId) || actorId;
-  assertDistinctExecutiveApprover(payload, actorId, ownerId);
   const ownerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName) || actorName;
   const ownerEmail = readOptionalText(payload.registeredByEmail) || (ownerId === actorId ? readOptionalText(actorEmail) : '');
   const fundInputMode = normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode));
@@ -2030,7 +2016,6 @@ export function buildProjectInfoChangeSubmission({
     || readOptionalText(project.registeredById)
     || readOptionalText(project.managerId)
     || actorId;
-  assertDistinctExecutiveApprover(payload, actorId, ownerId);
   assertTrustedProjectInfoDocumentReferences(
     project,
     payload,
@@ -3392,17 +3377,6 @@ export function mountProjectRoutes(app, {
         }
         if (designatedApproverId && designatedApproverId !== actorId) {
           throw createHttpError(403, 'Only the designated executive approver can review this project', 'executive_approver_mismatch');
-        }
-        const requesterIds = new Set([
-          readOptionalText(currentProject.createdBy),
-          readOptionalText(currentProject.registeredById),
-          readOptionalText(currentProject.managerId),
-          readOptionalText(reviewRequest?.requestedBy),
-          readOptionalText(requestPayload?.registeredById),
-          readOptionalText(requestPayload?.managerId),
-        ].filter(Boolean));
-        if (designatedApproverId && requesterIds.has(actorId)) {
-          throw createHttpError(403, 'Requester cannot approve their own project registration', 'self_approval_forbidden');
         }
         if (parsed.reviewStatus === 'APPROVED') {
           assertProjectRequestAttachmentsPublished(reviewRequest, tenantId);

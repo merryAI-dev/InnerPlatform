@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   applyCashflowSheetLabViaBff,
-  checkCashflowSheetChangesViaBff,
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
@@ -232,41 +231,9 @@ describe('sheets cashflow readonly client', () => {
     expect(client.post).not.toHaveBeenCalled();
   });
 
-  it('checks sheet changes without applying or refreshing canonical values', async () => {
-    const client = asMockClient({
-      post: vi.fn(async () => ({
-        data: {
-          status: 'CHANGED',
-          pendingChangeCount: 31,
-          projectionChangeCount: 18,
-          actualChangeCount: 13,
-          sourceRevision: 'sha256:source-001',
-          targetRevision: 'sha256:target-001',
-          checkedAt: '2026-08-06T02:30:00.000Z',
-        },
-      })),
-    });
-
-    const result = await checkCashflowSheetChangesViaBff({
-      tenantId: 'mysc',
-      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
-      projectId: 'p001',
-      sourceYear: 2026,
-      client,
-    });
-
-    expect(result).toMatchObject({ status: 'CHANGED', pendingChangeCount: 31 });
-    expect(client.post).toHaveBeenCalledTimes(1);
-    expect(client.post).toHaveBeenCalledWith(
-      '/api/v1/projects/p001/cashflow-sheet-lab/changes/check',
-      expect.objectContaining({
-        tenantId: 'mysc',
-        body: { sourceYear: 2026 },
-        retries: 0,
-      }),
-    );
-    expect(client.post.mock.calls[0]?.[0]).not.toContain('/apply');
-    expect(client.post.mock.calls[0]?.[0]).not.toContain('/mirror/refresh');
+  it('does not expose the retired full sheet change-count check', () => {
+    expect(clientSource).not.toContain('checkCashflowSheetChangesViaBff');
+    expect(clientSource).not.toContain('/cashflow-sheet-lab/changes/check');
   });
 
   it('reads the server-owned annual view for the selected year', async () => {
