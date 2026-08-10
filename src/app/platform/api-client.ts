@@ -80,7 +80,8 @@ function parseJwtClaims(token: string): JwtClaimsSummary | undefined {
 
 function readErrorCode(body: unknown): string | undefined {
   if (!body || typeof body !== 'object') return undefined;
-  return toSafeDiagnosticCode((body as { code?: unknown }).code);
+  const response = body as { code?: unknown; error?: unknown };
+  return toSafeDiagnosticCode(response.code) || toSafeDiagnosticCode(response.error);
 }
 
 function readErrorMessage(body: unknown): string | undefined {
@@ -129,7 +130,8 @@ export class PlatformApiError extends Error {
     this.status = status;
     this.requestId = requestId;
     this.body = body;
-    const responseCode = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
+    const responseCode = readErrorCode(body)
+      || (body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined);
     this.code = typeof responseCode === 'string' ? responseCode : '';
     this.serverMessage = readErrorMessage(body) || '';
   }

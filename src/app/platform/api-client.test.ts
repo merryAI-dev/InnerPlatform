@@ -113,6 +113,23 @@ describe('PlatformApiClient', () => {
     );
   });
 
+  it('reads a safe BFF error identifier from its established error field', async () => {
+    const client = new PlatformApiClient({
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({
+        error: 'cashflow_month_close_reconciliation_pending',
+        message: '월 결산 저장 결과를 확정할 수 없습니다.',
+      }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      })),
+    });
+
+    await expect(client.get('/api/v1/secure', {
+      tenantId: 'mysc',
+      actor: { id: 'u001' },
+    })).rejects.toMatchObject({ code: 'cashflow_month_close_reconciliation_pending' });
+  });
+
   it('keeps empty gateway responses safe and preserves the default message', async () => {
     const client = new PlatformApiClient({
       fetchImpl: vi.fn(async () => new Response('<html>bad gateway</html>', {
@@ -320,10 +337,10 @@ describe('PlatformApiClient', () => {
     }
   });
 
-  it('never copies body.error into the response-code transaction summary', async () => {
+  it('never copies an unsafe body.error into the response-code transaction summary', async () => {
     clearDevtoolsLogs();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      error: 'sk_live_supersecret',
+      error: 'sk_live_1234567890',
       message: 'raw financial payload 2300000',
     }), {
       status: 400,
