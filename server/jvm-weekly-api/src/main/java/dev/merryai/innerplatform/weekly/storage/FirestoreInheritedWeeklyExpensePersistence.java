@@ -2601,6 +2601,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     @Override
+    public Map<String, Integer> findCashflowDeclaredWeeklyYears(String tenantId, List<String> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) return Map.of();
+        Map<String, Integer> yearsByProject = new LinkedHashMap<>();
+        for (DocumentSnapshot mirror : getAll(projectIds.stream()
+            .map(projectId -> db.document("orgs/" + tenantId + "/cashflow_sheet_mirrors/" + projectId))
+            .toArray(DocumentReference[]::new))) {
+            Object value = data(mirror).get("weeklyYear");
+            if (!(value instanceof Number number)) continue;
+            int weeklyYear = number.intValue();
+            if (weeklyYear >= 2000 && weeklyYear <= 2099 && number.doubleValue() == weeklyYear) {
+                yearsByProject.put(mirror.getId(), weeklyYear);
+            }
+        }
+        return Map.copyOf(yearsByProject);
+    }
+
+    @Override
     public CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId, int weeklyYear) {
         CashflowCoordinates.requireWeeklyYear(weeklyYear);
         return cashflowLedgerSource(
@@ -2674,6 +2691,43 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         for (Map.Entry<String, List<DocumentSnapshot>> entry : documentsByProject.entrySet()) {
             result.put(entry.getKey(), cashflowLedgerSource(
                 tenantId, entry.getKey(), entry.getValue(), fromMonth, throughMonth, null
+            ));
+        }
+        return Map.copyOf(result);
+    }
+
+    @Override
+    public Map<String, CashflowLedgerSource> findCashflowLedgerSources(
+        String tenantId,
+        Map<String, Integer> weeklyYearsByProject,
+        String fromMonth,
+        String throughMonth
+    ) {
+        if (weeklyYearsByProject == null || weeklyYearsByProject.isEmpty()) return Map.of();
+        Map<String, List<String>> projectIdsByYear = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : weeklyYearsByProject.entrySet()) {
+            CashflowCoordinates.requireWeeklyYear(entry.getValue());
+            projectIdsByYear.computeIfAbsent(String.valueOf(entry.getValue()), ignored -> new ArrayList<>()).add(entry.getKey());
+        }
+        Map<String, List<DocumentSnapshot>> documentsByProject = new LinkedHashMap<>();
+        for (String projectId : weeklyYearsByProject.keySet()) documentsByProject.put(projectId, new ArrayList<>());
+        for (Map.Entry<String, List<String>> entry : projectIdsByYear.entrySet()) {
+            int weeklyYear = Integer.parseInt(entry.getKey());
+            String scopedFrom = fromMonth.compareTo(weeklyYear + "-01") < 0 ? weeklyYear + "-01" : fromMonth;
+            String scopedThrough = throughMonth.compareTo(weeklyYear + "-12") > 0 ? weeklyYear + "-12" : throughMonth;
+            QuerySnapshot snapshot = query(cashflowWeeks(tenantId)
+                .whereIn("projectId", entry.getValue())
+                .whereGreaterThanOrEqualTo("yearMonth", scopedFrom)
+                .whereLessThanOrEqualTo("yearMonth", scopedThrough));
+            for (DocumentSnapshot document : snapshot.getDocuments()) {
+                List<DocumentSnapshot> documents = documentsByProject.get(text(data(document).get("projectId"), ""));
+                if (documents != null) documents.add(document);
+            }
+        }
+        Map<String, CashflowLedgerSource> result = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : weeklyYearsByProject.entrySet()) {
+            result.put(entry.getKey(), cashflowLedgerSource(
+                tenantId, entry.getKey(), documentsByProject.get(entry.getKey()), fromMonth, throughMonth, entry.getValue()
             ));
         }
         return Map.copyOf(result);
