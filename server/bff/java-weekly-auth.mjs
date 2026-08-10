@@ -185,6 +185,7 @@ export async function buildJavaWeeklyTrustedHeaders({
     'x-actor-id': context.actorId,
     'x-actor-role': actorRole,
   };
+  if (context.requestId) headers['x-request-id'] = context.requestId;
   if (context.actorEmail) headers['x-actor-email'] = context.actorEmail;
   if (context.actorName) headers['x-actor-name'] = encodeURIComponent(context.actorName);
   if (dataProjectId) headers['x-data-project-id'] = dataProjectId;

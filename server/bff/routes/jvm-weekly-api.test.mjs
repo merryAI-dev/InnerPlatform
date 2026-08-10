@@ -847,6 +847,7 @@ describe('JVM weekly API BFF proxy', () => {
     );
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
     expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
+    expect(fetchImpl.mock.calls[0][1].headers).toMatchObject({ 'x-request-id': 'req-1' });
     await new Promise((resolve) => setImmediate(resolve));
     expect(performanceEvents).toEqual(expect.arrayContaining([
       expect.objectContaining({ operation: 'cashflow.month_close.read', phase: 'publication_before' }),
