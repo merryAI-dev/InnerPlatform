@@ -90,8 +90,18 @@ function cumulativeMonths(throughMonth) {
   return months;
 }
 
+// 회차 월(request.yearMonth)은 아직 끝나지 않은 달이라 잠금 범위에서 제외된다 - 실제로
+// 잠기는 마지막 달은 회차 월의 직전 달이다. 이 픽스처는 "잠기는 마지막 달"(throughMonth)
+// 을 받아 그 다음 달을 회차 월로 저장한다. previousYearMonth 의 역함수다.
+function nextYearMonth(yearMonth) {
+  const month = new Date(`${yearMonth}-01T00:00:00Z`);
+  month.setUTCMonth(month.getUTCMonth() + 1);
+  return month.toISOString().slice(0, 7);
+}
+
 function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2026-01' } = {}) {
   const requestId = `project-a-${throughMonth}`;
+  const cycleYearMonth = nextYearMonth(throughMonth);
   const revision = 1;
   const source = { kind: 'PINNED_MIRROR', sourceRevision: 'source-a', targetRevision: 'target-a' };
   const shards = cumulativeMonths(throughMonth).map((yearMonth) => {
@@ -124,7 +134,7 @@ function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2
     requestRevision: revision,
     projectId: 'project-a',
     fromMonth: '2023-01',
-    yearMonth: throughMonth,
+    yearMonth: cycleYearMonth,
     months: shards.map((shard) => ({ yearMonth: shard.yearMonth, shardHash: shard.shardHash })),
   };
   return Object.fromEntries([
@@ -134,7 +144,7 @@ function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2
       tenantId: 'tenant-a',
       projectId: 'project-a',
       fromMonth: '2023-01',
-      yearMonth: throughMonth,
+      yearMonth: cycleYearMonth,
       status,
       revision,
       manifestHash: closeHash(manifest),

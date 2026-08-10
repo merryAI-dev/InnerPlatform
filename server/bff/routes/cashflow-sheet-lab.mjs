@@ -14,7 +14,17 @@ import {
   computeCashflowTargetRevision,
   createCashflowPinnedSnapshot,
 } from '../cashflow-sheet-snapshot.mjs';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
+import {
+  CASHFLOW_ALL_LINES,
+  CASHFLOW_IN_LINES,
+  CASHFLOW_MONTH_CELL_COUNT,
+  CASHFLOW_OUT_LINES,
+} from '../cashflow-policy.mjs';
+import {
+  CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
+  CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+  cumulativeCloseMonthsOrNull,
+} from '../cashflow-close-calendar.mjs';
 import {
   cashflowAnnualTotalDocPath,
   summarizeCashflowAnnualMode,
@@ -49,7 +59,6 @@ const CASHFLOW_SHEET_STAGE_YEARS_COLLECTION_ID = 'cashflow_sheet_stage_years';
 const CASHFLOW_MODES = ['projection', 'actual'];
 const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
 const CASHFLOW_SHEET_APPLY_COMMAND = 'weeklyExpense.cashflowSheetLab.apply';
-const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
 const CASHFLOW_ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'APPROVING', 'UNCERTAIN']);
 const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const FINANCIAL_YEAR_FIELDS = [
@@ -2055,22 +2064,6 @@ function cashflowCloseHash(value) {
   return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
 }
 
-function cumulativeCloseMonths(fromMonth, throughMonth) {
-  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(fromMonth) || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(throughMonth)) return [];
-  const months = [];
-  for (let year = Number(fromMonth.slice(0, 4)), month = Number(fromMonth.slice(5));;) {
-    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    if (yearMonth > throughMonth || months.length >= 1000) break;
-    months.push(yearMonth);
-    month += 1;
-    if (month === 13) {
-      year += 1;
-      month = 1;
-    }
-  }
-  return months;
-}
-
 function pendingApprovalEvidenceError(message = '결재 중인 누적 결산 근거가 변경되었거나 완전하지 않습니다.') {
   return createHttpError(409, message, 'cashflow_pending_approval_evidence_stale');
 }
@@ -2102,20 +2095,25 @@ async function readPendingApprovalDifferences({ db, tenantId, projectId, candida
     const requestId = readOptionalText(request.requestId);
     const revision = Number(request.revision);
     const fromMonth = readOptionalText(request.fromMonth);
+    // request.yearMonth 는 회차 월(예: 2026-08 회차 = 8월 10일 마감)이다. 실제로 잠그는
+    // 범위는 그 직전 달까지(2023-01~2026-07) - 회차 월 자체는 아직 끝나지 않아 대상이
+    // 아니다. 이 파일이 그 범위를 독자적으로(그리고 회차 월을 포함해서, 틀리게) 계산하던
+    // 세 번째 사본이었다. 단일 소스(cashflow-close-calendar)로 대체한다.
     const throughMonth = readOptionalText(request.yearMonth);
-    const months = cumulativeCloseMonths(fromMonth, throughMonth);
+    const months = /^20\d{2}-(0[1-9]|1[0-2])$/.test(throughMonth)
+      ? cumulativeCloseMonthsOrNull(throughMonth)
+      : null;
     if (
-      request.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+      !months
+      || request.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
       || readOptionalText(request.projectId) !== projectId
       || !requestId
       || !Number.isSafeInteger(revision)
       || revision < 1
-      || fromMonth !== '2023-01'
-      || throughMonth > '2099-12'
-      || months.length === 0
+      || fromMonth !== CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
       || Number(request.monthCount) !== months.length
       || Number(request.weekCount) !== months.length * 5
-      || Number(request.cellCount) !== months.length * 160
+      || Number(request.cellCount) !== months.length * CASHFLOW_MONTH_CELL_COUNT
     ) {
       throw pendingApprovalEvidenceError('결재 중인 누적 결산 요청 header가 완전하지 않습니다.');
     }
@@ -2129,7 +2127,7 @@ async function readPendingApprovalDifferences({ db, tenantId, projectId, candida
         CASHFLOW_ALL_LINES.map((lineId) => `${mode}|${weekIndex + 1}|${lineId}`)
       )).flat());
       const actualKeys = cells.map((cell) => `${readOptionalText(cell.mode)}|${Number(cell.weekNo)}|${readOptionalText(cell.cashflowLine)}`);
-      const validCells = cells.length === 160 && actualKeys.every((key, index) => key === expectedKeys[index])
+      const validCells = cells.length === CASHFLOW_MONTH_CELL_COUNT && actualKeys.every((key, index) => key === expectedKeys[index])
         && cells.every((cell) => (
           ['EMPTY', 'ZERO', 'VALUE'].includes(readOptionalText(cell.cellState))
           && (cell.cellState === 'EMPTY'
