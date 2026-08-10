@@ -3000,7 +3000,7 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
     if ((request.reviewWarnings ?? []).length > 0) {
       throw new Error('확인이 필요한 월 결산 항목이 있습니다. 해당 항목을 정리한 뒤 다시 승인해 주세요.');
     }
-    await reviewCashflowMonthCloseRequestViaBff({
+    await approveCashflowMonthCloseUntilLedgerClosed({
       ...params,
       requestId: request.requestId,
       payload: {
@@ -3329,6 +3329,32 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
     throw new Error('월 결산 승인 상태를 확인하지 못했습니다.');
   }
   return response.data;
+}
+
+// 승인 선점(APPROVING)은 즉시 커밋되지만 JVM 장부 확정은 그보다 오래 걸릴 수 있다.
+// BFF 는 그때 pendingLedgerClose 를 실어 200 을 돌려주고, 같은 멱등키의 다음 호출이
+// reconcile 로 이어받아 APPROVED 로 마무리한다. 승인 화면이 여러 개라 이 이어받기
+// 규칙은 여기 한 곳에만 둔다 - 같은 규칙의 사본이 화면마다 생기면 조용히 갈린다.
+const CASHFLOW_LEDGER_CLOSE_POLL_MS = 4_000;
+const CASHFLOW_LEDGER_CLOSE_MAX_POLLS = 30;
+
+export async function approveCashflowMonthCloseUntilLedgerClosed(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  requestId: string;
+  payload: ReviewCashflowMonthCloseRequestPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+  onPending?: (attempt: number) => void;
+}) {
+  let result = await reviewCashflowMonthCloseRequestViaBff(params);
+  for (let attempt = 0; result?.pendingLedgerClose && attempt < CASHFLOW_LEDGER_CLOSE_MAX_POLLS; attempt += 1) {
+    params.onPending?.(attempt);
+    await new Promise((resolve) => { setTimeout(resolve, CASHFLOW_LEDGER_CLOSE_POLL_MS); });
+    result = await reviewCashflowMonthCloseRequestViaBff(params);
+  }
+  return result;
 }
 
 export async function withdrawCashflowMonthCloseRequestViaBff(params: {
