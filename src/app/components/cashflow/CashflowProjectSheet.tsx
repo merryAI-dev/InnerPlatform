@@ -435,7 +435,9 @@ export function CashflowProjectSheet({
     stage: CashflowSheetLabStageResult;
     issues: CashflowFormulaMismatch[];
     closedMonthChangeReason: string;
+    acceptPendingApprovalDifferences: boolean;
   } | null>(null);
+  const [pendingApprovalStage, setPendingApprovalStage] = useState<CashflowSheetLabStageResult | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   const lateSheetDiffRows = useMemo(() => (lateSheetApply?.closedMonthDifferences || []).flatMap((month) =>
     (month.changes || []).map((change) => ({ ...change, yearMonth: month.yearMonth }))), [lateSheetApply]);
@@ -443,6 +445,10 @@ export function CashflowProjectSheet({
     && Number.isSafeInteger(lateSheetApply?.closedMonthDifferenceCount)
     && lateSheetApply?.closedMonthDifferenceCount === lateSheetDiffRows.length
     && (lateSheetApply?.closedMonthDifferences || []).every((month) => !month.truncatedChangeCount);
+  const pendingApprovalChangeRows = (pendingApprovalStage?.pendingApprovalDifferences || []).flatMap((month) => month.changes || []);
+  const pendingApprovalManifestComplete = Boolean(pendingApprovalStage?.pendingApprovalDifferenceManifestHash)
+    && pendingApprovalStage?.pendingApprovalDifferenceCount === pendingApprovalChangeRows.length
+    && (pendingApprovalStage?.pendingApprovalDifferences || []).every((month) => !month.truncatedChangeCount);
   const filteredLateSheetDiffRows = lateSheetDiffRows.filter((change) => {
     const label = CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId;
     const query = lateSheetDiffQuery.trim().toLocaleLowerCase('ko-KR');
@@ -1424,7 +1430,7 @@ export function CashflowProjectSheet({
     }
   }, [canRequestMonthReopen, canReviewReopen, monthCloseRequest, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
-  const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
+  const handleRefreshSheetMirror = useCallback(async (): Promise<CashflowSheetLabMirrorResult | null> => {
     if (!cashflowSheetConfig?.value) {
       logCashflowSettlement({
         phase: 'info',
@@ -1434,7 +1440,7 @@ export function CashflowProjectSheet({
         summary: { reason: 'sheet_config_missing' },
       });
       toast.error('연결된 Google Sheet가 없습니다.');
-      return;
+      return null;
     }
     const startedAt = Date.now();
     const refreshIdempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1484,7 +1490,7 @@ export function CashflowProjectSheet({
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
         toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
-        return;
+        return null;
       }
       const mirror = await refreshMirror(actor);
       rememberMirror(mirror);
@@ -1496,6 +1502,7 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         summary: { mirrorStatus: mirror.status, hasSourceRevision: Boolean(mirror.sourceRevision) },
       });
+      return mirror;
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
@@ -1511,7 +1518,7 @@ export function CashflowProjectSheet({
             durationMs: Date.now() - startedAt,
             summary: { mirrorStatus: mirror.status, hasSourceRevision: Boolean(mirror.sourceRevision), retriedAuth: true },
           });
-          return;
+          return mirror;
         } catch (retryError) {
           logCashflowSettlement({
             phase: 'error',
@@ -1522,7 +1529,7 @@ export function CashflowProjectSheet({
             error: retryError,
           });
           toast.error(resolveApiErrorMessage(retryError, '시트값을 불러오지 못했습니다.'));
-          return;
+          return null;
         }
       }
       logCashflowSettlement({
@@ -1534,6 +1541,7 @@ export function CashflowProjectSheet({
         error,
       });
       toast.error(resolveApiErrorMessage(error, '시트값을 불러오지 못했습니다.'));
+      return null;
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -1586,6 +1594,7 @@ export function CashflowProjectSheet({
     stage: CashflowSheetLabStageResult,
     closedMonthChangeReason = '',
     acceptFormulaMismatches = false,
+    acceptPendingApprovalDifferences = false,
   ): Promise<void> => {
     if (!stage.runId || stage.stagedLineCount <= 0) return;
     const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1599,6 +1608,7 @@ export function CashflowProjectSheet({
         closedMonthChangeReason,
         closedMonthDifferenceCount: stage.closedMonthDifferenceCount,
         closedMonthDifferenceManifestHash: stage.closedMonthDifferenceManifestHash,
+        acceptPendingApprovalDifferences,
         pendingApprovalDifferenceCount: stage.pendingApprovalDifferenceCount,
         pendingApprovalDifferenceManifestHash: stage.pendingApprovalDifferenceManifestHash,
         acceptFormulaMismatches,
@@ -1660,7 +1670,7 @@ export function CashflowProjectSheet({
       if (bffErrorCode(finalError) === 'cashflow_formula_mismatch_confirmation_required') {
         const issues = cashflowFormulaMismatchesFromError(finalError);
         if (issues.length > 0) {
-          setFormulaMismatchPrompt({ stage, issues, closedMonthChangeReason });
+          setFormulaMismatchPrompt({ stage, issues, closedMonthChangeReason, acceptPendingApprovalDifferences });
           return;
         }
       }
@@ -1747,6 +1757,10 @@ export function CashflowProjectSheet({
         toast.info('MYSCube 시트와 다른 값이 없습니다.');
         return;
       }
+      if (result.pendingApprovalDifferences?.length) {
+        setPendingApprovalStage(result);
+        return;
+      }
       if (result.closedMonthDifferences?.length) {
         setLateSheetApply(result);
         setLateSheetChangeReason('');
@@ -1757,13 +1771,31 @@ export function CashflowProjectSheet({
       await handleApplyStagedSheetValues(result);
     };
     setSheetRefreshLoading(true);
+    logCashflowSettlement({
+      phase: 'start',
+      operation: 'cashflow.sheet_stage',
+      projectId,
+      summary: { expectedMirrorRevision: sourceMirror.sourceRevision, replaceAllActualSources },
+    });
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
         toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
         return;
       }
-      await applyStageResult(await stageMirror(actor));
+      const stage = await stageMirror(actor);
+      await applyStageResult(stage);
+      logCashflowSettlement({
+        phase: 'success',
+        operation: 'cashflow.sheet_stage',
+        projectId,
+        summary: {
+          stageRunId: stage.runId,
+          status: stage.status,
+          stagedLineCount: stage.stagedLineCount,
+          nextStep: stage.pendingApprovalDifferences?.length || stage.closedMonthDifferences?.length ? 'confirmation' : 'apply',
+        },
+      });
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
@@ -1781,6 +1813,46 @@ export function CashflowProjectSheet({
       setSheetRefreshLoading(false);
     }
   }, [cashflowSheetMirror, handleApplyStagedSheetValues, orgId, projectId, resolveBffActor]);
+
+  const handleRefreshAndApplySheetValues = useCallback(async (): Promise<void> => {
+    const startedAt = Date.now();
+    logCashflowSettlement({
+      phase: 'start',
+      operation: 'cashflow.sheet_sync.one_click',
+      projectId,
+      yearMonth,
+      summary: { steps: ['refresh', 'stage', 'apply'] },
+    });
+    const mirror = await handleRefreshSheetMirror();
+    if (mirror?.status !== 'FRESH' || !mirror.sourceRevision) {
+      logCashflowSettlement({
+        phase: 'error',
+        operation: 'cashflow.sheet_sync.one_click',
+        projectId,
+        yearMonth,
+        durationMs: Date.now() - startedAt,
+        summary: { completedStep: 'refresh', mirrorStatus: mirror?.status || 'EMPTY' },
+      });
+      return;
+    }
+    logCashflowSettlement({
+      phase: 'info',
+      operation: 'cashflow.sheet_sync.one_click',
+      projectId,
+      yearMonth,
+      durationMs: Date.now() - startedAt,
+      summary: { completedStep: 'refresh', nextStep: 'stage' },
+    });
+    await handleStagePinnedSheetValues(true, mirror);
+    logCashflowSettlement({
+      phase: 'info',
+      operation: 'cashflow.sheet_sync.one_click',
+      projectId,
+      yearMonth,
+      durationMs: Date.now() - startedAt,
+      summary: { completedStep: 'stage', nextStep: 'apply_or_confirmation' },
+    });
+  }, [handleRefreshSheetMirror, handleStagePinnedSheetValues, projectId, yearMonth]);
 
   const handleOpenSheetOnboarding = useCallback(() => {
     setSheetReviewDialogOpen(true);
@@ -2716,8 +2788,6 @@ export function CashflowProjectSheet({
                 </a>
               ) : null}
               {cashflowSheetConfig ? (
-                // 단일 진입점: 평소엔 '시트 불러오기', 변경이 감지되면 상태 배지를 겸한다.
-                // 진입 시 풀 리드를 하지 않으므로 이 버튼을 눌러야 실제 diff·반영이 시작된다.
                 <Button
                   type="button"
                   size="sm"
@@ -2728,10 +2798,10 @@ export function CashflowProjectSheet({
                       : 'border-slate-300 bg-white text-[#17324D] hover:bg-accent'
                   }`}
                   disabled={sheetRefreshLoading}
-                  onClick={() => void handleRefreshSheetMirror()}
+                  onClick={() => void handleRefreshAndApplySheetValues()}
                 >
                   {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  {sheetChangedSinceMirror ? '시트 변경됨 · 불러오기' : '시트 불러오기'}
+                  {sheetChangedSinceMirror ? '시트 변경됨 · 가져와 덮어쓰기' : '시트 값 가져와 덮어쓰기'}
                 </Button>
               ) : null}
               {project && members ? (
@@ -3368,9 +3438,42 @@ export function CashflowProjectSheet({
           if (!formulaMismatchPrompt) return;
           const pending = formulaMismatchPrompt;
           setFormulaMismatchPrompt(null);
-          void handleApplyStagedSheetValues(pending.stage, pending.closedMonthChangeReason, true);
+          void handleApplyStagedSheetValues(
+            pending.stage,
+            pending.closedMonthChangeReason,
+            true,
+            pending.acceptPendingApprovalDifferences,
+          );
         }}
       />
+
+      <AlertDialog open={Boolean(pendingApprovalStage)} onOpenChange={(open) => { if (!open) setPendingApprovalStage(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>결재 중인 누적 결산과 값이 달라요</AlertDialogTitle>
+            <AlertDialogDescription>
+              그대로 반영하면 결재 중인 자료와 차이가 기록됩니다. 확인한 시트 값으로 계속 반영할까요?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div role={pendingApprovalManifestComplete ? 'status' : 'alert'} className={`rounded-md border px-3 py-2 text-[12px] ${pendingApprovalManifestComplete ? 'border-slate-300 bg-slate-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-800'}`}>
+            {pendingApprovalManifestComplete
+              ? `결재 중 변경 후보 전체 ${pendingApprovalChangeRows.length.toLocaleString()}건을 확인했습니다.`
+              : '변경 후보를 완전하게 확인하지 못해 반영할 수 없습니다.'}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingApprovalStage || !pendingApprovalManifestComplete || sheetStageApplyLoading}
+              onClick={(event) => {
+                event.preventDefault();
+                const stage = pendingApprovalStage;
+                setPendingApprovalStage(null);
+                if (stage) void handleApplyStagedSheetValues(stage, '', false, true);
+              }}
+            >반영</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={monthCloseWithdrawOpen}

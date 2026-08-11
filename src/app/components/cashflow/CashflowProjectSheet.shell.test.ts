@@ -292,8 +292,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
     expect(source).toContain('stageCashflowSheetLabViaBff');
     expect(source).not.toContain('handleStagePinnedSheetValues(false, cashflowSheetMirror)');
-    expect(source).toContain('시트값 불러오기');
-    expect(source).toContain('시트 값 불러오기');
+    expect(source).toContain('시트 값 가져와 덮어쓰기');
+    expect(source).toContain('handleRefreshAndApplySheetValues');
     expect(source).toContain('fetchCashflowActivityViaBff');
     expect(source).toContain('MYSCube 시트 덮어쓰기');
     expect(source).toContain('replaceAllActualSources');
@@ -311,8 +311,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('checkCashflowSheetChangesViaBff');
     expect(source).not.toContain('const sheetChangeCount = [');
     expect(source).not.toContain('변경 ${sheetChangeCount.toLocaleString()}건');
-    // 버튼 통일: '변경 N건' 별도 버튼 제거, 단일 '시트 불러오기' 가 배지를 겸한다.
-    expect(source).toContain('시트 변경됨 · 불러오기');
+    // 단일 버튼은 고정된 시트 값을 가져온 뒤 같은 계약으로 덮어쓴다.
+    expect(source).toContain('시트 변경됨 · 가져와 덮어쓰기');
     expect(source).not.toContain('onClick={handleOpenSheetReviewDialog}');
     expect(source).toContain('시트 이동');
     expect(source).toContain('href={configuredSheetUrl}');
@@ -355,7 +355,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('asks before applying a sheet whose displayed formulas differ from the JVM calculation', () => {
     expect(source).toContain("bffErrorCode(finalError) === 'cashflow_formula_mismatch_confirmation_required'");
     expect(source).toContain('cashflowFormulaMismatchesFromError');
-    expect(source).toContain('handleApplyStagedSheetValues(pending.stage, pending.closedMonthChangeReason, true)');
+    expect(source).toContain('pending.acceptPendingApprovalDifferences');
   });
 
   it('keeps an unlinked project usable and guides the user to sheet setup', () => {
@@ -500,6 +500,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(applyFlow).toContain('replaceAllActualSources: true');
     expect(applyFlow).toContain('pendingApprovalDifferenceCount: stage.pendingApprovalDifferenceCount');
     expect(applyFlow).toContain('pendingApprovalDifferenceManifestHash: stage.pendingApprovalDifferenceManifestHash');
+    expect(applyFlow).toContain('acceptPendingApprovalDifferences');
     expect(applyFlow).not.toContain('applyRiskCandidates: true');
     expect(applyFlow).toContain('void Promise.allSettled([');
     expect(applyFlow).not.toContain('await Promise.all([\n        loadCashflowEvents(),\n        loadCashflowMonthClose(),\n      ]);');
@@ -524,6 +525,17 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('closedMonthDifferenceManifestHash');
     expect(source).toContain('closedMonthDifferenceCount');
     expect(source).toContain('lateSheetChangeReason.trim(),');
+  });
+
+  it('runs the same main-page sheet action in refresh, stage, then apply order', () => {
+    const actionStart = source.indexOf('const handleRefreshAndApplySheetValues');
+    const action = source.slice(actionStart, source.indexOf('const handleOpenSheetOnboarding', actionStart));
+    expect(action).toContain('await handleRefreshSheetMirror()');
+    expect(action).toContain('await handleStagePinnedSheetValues(true, mirror)');
+    expect(source).toContain('result.pendingApprovalDifferences?.length');
+    expect(source).toContain('setPendingApprovalStage(result)');
+    expect(source).toContain("handleApplyStagedSheetValues(stage, '', false, true)");
+    expect(source).toContain("operation: 'cashflow.sheet_sync.one_click'");
   });
 
   it('prioritizes local sheet preflight over a failed server refresh and never shows stale reopen actions', () => {
