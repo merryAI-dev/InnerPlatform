@@ -1884,6 +1884,21 @@ async function composeCashflowMonthDashboard({
     }, comparisonBoundary).months[0] || null
     : null;
   const sourceRows = sourceDepositRows(sheetFacts, yearMonth);
+  const sheetCalculationChecks = amendedCurrent
+    ? [
+      ...(Array.isArray(sheetFacts?.weeklyCalculationChecks) ? sheetFacts.weeklyCalculationChecks : [])
+        .filter((check) => readOptionalText(check?.yearMonth) !== yearMonth),
+      ...(Array.isArray(amendmentEvidence.calculationChecks) ? amendmentEvidence.calculationChecks : []),
+    ]
+    : (Array.isArray(sheetFacts?.weeklyCalculationChecks) ? sheetFacts.weeklyCalculationChecks : []);
+  const sheetFormulaValues = {
+    weekly: sheetCalculationChecks.filter((check) => Number(String(check?.yearMonth || '').slice(0, 4)) === selectedYear),
+    annual: Array.isArray(sheetFacts?.annualCashflowTotals) ? sheetFacts.annualCashflowTotals : [],
+    grandTotals: objectValue(sheetFacts?.cashflowGrandTotals) || {},
+    projectionActualDifferences: (Array.isArray(sheetFacts?.projectionActualDifferences)
+      ? sheetFacts.projectionActualDifferences
+      : []).filter((value) => Number(String(value?.yearMonth || '').slice(0, 4)) === selectedYear),
+  };
   const authoritativeOpeningBalances = openingBalanceCandidate
     ? requireJvmOpeningBalances({ openingBalances: openingBalanceCandidate }, yearMonth)
     : null;
@@ -2060,11 +2075,8 @@ async function composeCashflowMonthDashboard({
     project,
     projectMetadata: projectMetadata(project),
     sheetMetadata: sheetFacts?.metadata || {},
-    sheetCalculationChecks: amendedCurrent
-      ? (Array.isArray(amendmentEvidence.calculationChecks) ? amendmentEvidence.calculationChecks : [])
-      : (Array.isArray(sheetFacts?.weeklyCalculationChecks)
-        ? sheetFacts.weeklyCalculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
-        : []),
+    sheetCalculationChecks: sheetFormulaValues.weekly,
+    sheetFormulaValues,
     sheetControlTotals: {
       deposit: objectValue(sheetFacts?.controlTotals?.deposit) || null,
       unpaid: objectValue(sheetFacts?.controlTotals?.unpaid) || null,

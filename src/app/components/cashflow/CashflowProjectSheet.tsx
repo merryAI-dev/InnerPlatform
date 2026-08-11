@@ -78,7 +78,6 @@ import {
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
   buildCashflowMonthCloseDraftInput,
-  carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
   isCashflowWeekLockedByRange,
@@ -88,8 +87,6 @@ import {
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
   annualYearsFor,
-  annualSummaryAmountFor,
-  canonicalCashflowAnnualTotalFor,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
@@ -222,14 +219,6 @@ function mergeCashflowEvents(current: CashflowEvent[], incoming: CashflowActivit
   incoming.forEach((event) => events.set(event.id, event));
   return [...events.values()]
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
-}
-
-function diffColorExplanation(section: '입금' | '출금', diff: number): string {
-  if (diff === 0) return '차이가 없습니다.';
-  const target = section === '입금' ? '입금' : '출금';
-  return diff > 0
-    ? `${target} Projection이 Actual보다 큽니다.`
-    : `${target} Projection이 Actual보다 작습니다.`;
 }
 
 function HoverExplain({
@@ -1884,79 +1873,42 @@ export function CashflowProjectSheet({
   const visibleComparisonAnnualYears = comparisonScope.annualYears;
   const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < Number(weeklyYear));
   const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > Number(weeklyYear));
-  const canonicalAnnualTotals = canonicalReadModel?.annualTotals || [];
+  const sheetFormulaValues = monthCloseResult?.dashboard?.sheetFormulaValues;
   const annualTotalFor = (year: number, mode: 'projection' | 'actual') => (
-    canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)
+    sheetFormulaValues?.annual.find((total) => total.year === year)?.[mode] ?? null
   );
+  const annualSummaryValue = (
+    year: number,
+    mode: 'projection' | 'actual',
+    kind: 'totalIn' | 'totalOut' | 'net',
+  ) => annualTotalFor(year, mode)?.[kind] ?? null;
   const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
-    const rangeTotals = monthCloseResult?.dashboard?.canonical?.range?.[mode] as {
-      rowTotals?: Record<CashflowSheetLineId, number>;
-      lineAmounts?: Record<CashflowSheetLineId, number>;
-    } | null | undefined;
-    const selectedYearTotal = rangeTotals?.rowTotals?.[lineId] ?? rangeTotals?.lineAmounts?.[lineId] ?? 0;
-    if (annualYears.some((year) => !annualTotalFor(year, mode)?.lineStates?.[lineId])) return null;
-    return annualYears.reduce(
-      (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
-      Number(selectedYearTotal),
-    );
+    const total = sheetFormulaValues?.grandTotals?.[mode];
+    const state = total?.lineStates?.[lineId];
+    return state === 'VALUE' || state === 'ZERO' ? Number(total?.lineAmounts?.[lineId] || 0) : null;
   };
 
   const projectionActualComparison = useMemo(() => {
-    const lineDefs = [
-      ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
-      ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
-    ];
-    const rows = lineDefs.map(({ section, lineId }) => {
-      const comparisonWeeks = visibleComparisonWeeks.map((week) => {
-        const projectionCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
-        const actualCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
-        const hasValue = projectionCell.hasValue || actualCell.hasValue;
-        return {
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          weekLabel: week.label,
-          weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
-          projection: projectionCell.amount,
-          actual: actualCell.amount,
-          difference: hasValue ? projectionCell.amount - actualCell.amount : null,
-        };
-      });
-      const comparisonAnnualYears = visibleComparisonAnnualYears.map((year) => {
-        const projectionTotal = annualTotalFor(year, 'projection');
-        const actualTotal = annualTotalFor(year, 'actual');
-        const projectionState = projectionTotal?.lineStates?.[lineId];
-        const actualState = actualTotal?.lineStates?.[lineId];
-        const hasValue = projectionState === 'VALUE' || projectionState === 'ZERO'
-          || actualState === 'VALUE' || actualState === 'ZERO';
-        const projection = Number(projectionTotal?.lineAmounts?.[lineId] || 0);
-        const actual = Number(actualTotal?.lineAmounts?.[lineId] || 0);
-        return { year, projection, actual, difference: hasValue ? projection - actual : null };
-      });
-      const totalProjection = comparisonWeeks.reduce((sum, cell) => sum + cell.projection, 0)
-        + comparisonAnnualYears.reduce((sum, cell) => sum + cell.projection, 0);
-      const totalActual = comparisonWeeks.reduce((sum, cell) => sum + cell.actual, 0)
-        + comparisonAnnualYears.reduce((sum, cell) => sum + cell.actual, 0);
-      const totalHasValue = [...comparisonAnnualYears, ...comparisonWeeks].some((cell) => cell.difference !== null);
-      return {
-        section,
-        lineId,
-        label: getCashflowModeLineLabel(lineId, 'projection'),
-        cells: comparisonWeeks,
-        annualCells: comparisonAnnualYears,
-        totalCell: {
-          projection: totalProjection,
-          actual: totalActual,
-          difference: totalHasValue ? totalProjection - totalActual : null,
-        },
-        changed: [...comparisonWeeks, ...comparisonAnnualYears, { difference: totalHasValue ? totalProjection - totalActual : null }]
-          .some((cell) => cell.difference !== null && cell.difference !== 0),
-      };
-    });
-    return {
-      rows,
-      changedRows: rows.filter((row) => row.changed),
+    const cells = visibleComparisonWeeks.map((week) => ({
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      weekLabel: week.label,
+      weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
+      difference: sheetFormulaValues?.projectionActualDifferences.find((value) => (
+        value.yearMonth === week.yearMonth && value.weekNo === week.weekNo
+      ))?.amount ?? null,
+    }));
+    const row = {
+      section: '입금' as const,
+      lineId: 'sheet-projection-actual-difference',
+      label: 'Projection - Actual 차이',
+      cells,
+      annualCells: [],
+      totalCell: { difference: null },
+      changed: cells.some((cell) => cell.difference !== null && cell.difference !== 0),
     };
-  }, [monthCloseResult, selectedYear, visibleComparisonAnnualYears, visibleComparisonWeeks, yearMonth]);
+    return { rows: [row], changedRows: [row] };
+  }, [sheetFormulaValues, visibleComparisonWeeks]);
 
   const cashflowTotalPeriodLabel = comparisonScope.periodLabel;
   const sheetRangeLabel = cashflowSheetConfig
@@ -2049,23 +2001,6 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
   }): number {
     return getServerReadCell(params).amount;
-  }
-
-  function getCanonicalDerivedAmount(
-    mode: 'projection' | 'actual',
-    targetYearMonth: string,
-    weekNo: number,
-    kind: 'totalIn' | 'totalOut' | 'net',
-  ): number | null {
-    const check = monthCloseResult?.dashboard?.canonical?.months
-      ?.find((month) => month.yearMonth === targetYearMonth)?.[mode]?.weeks
-      ?.find((week) => week.weekNo === weekNo);
-    const value = kind === 'totalIn'
-      ? check?.totalIn
-      : kind === 'totalOut'
-        ? check?.totalOut
-        : check?.net;
-    return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
   }
 
   function renderProjectionCell(input: {
@@ -2205,64 +2140,24 @@ export function CashflowProjectSheet({
       return groups;
     }, []);
     const boardColumnCount = previousAnnualYears.length + visibleWeeks.length + followingAnnualYears.length + 2;
-    const readServerSummary = (mode: 'projection' | 'actual') => {
-      const openingBalance = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
-        ? Number(monthCloseResult.dashboard.openingBalances[mode]?.amount || 0)
-        : 0;
-      const priorServerWeek = (canonicalReadModel?.months || [])
-        .filter((month) => month.yearMonth < `${selectedYear}-01`)
-        .flatMap((month) => (month[mode]?.weeks || []).map((week) => ({ ...week, yearMonth: month.yearMonth })))
-        .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
-        .at(-1);
-      const serverWeeks = visibleWeeks.map((week) => {
-        const dashboardWeek = week.yearMonth === yearMonth
-          ? monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo)
-          : null;
-        const canonicalWeek = canonicalReadModel?.months
-          ?.find((month) => month.yearMonth === week.yearMonth)
-          ?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo);
-        return canonicalWeek || dashboardWeek || null;
-      });
-      const displayedRunningBalances = carryForwardCashflowRunningBalances({
-        priorWeeklyNet: Number(priorServerWeek?.net || 0),
-        annualOpeningBalance: openingBalance,
-        serverRunningNets: serverWeeks.map((week) => week == null ? null : Number(week.net || 0)),
-      });
-      const weekTotals = serverWeeks.map((serverWeek, index) => {
-        const visibleWeek = visibleWeeks[index];
-        return {
-          ...(serverWeek || { weekNo: visibleWeek.weekNo, amounts: {}, totalIn: 0, totalOut: 0, weekIn: 0, weekOut: 0 }),
-          net: displayedRunningBalances[index],
-        };
-      });
-      const rangeTotals = canonicalReadModel?.range?.[mode];
-      const endingBalance = Number(weekTotals.at(-1)?.net ?? openingBalance);
-      return {
-        rowTotals: ((rangeTotals as { rowTotals?: Record<CashflowSheetLineId, number>; lineAmounts?: Record<CashflowSheetLineId, number> } | null)?.rowTotals
-          || (rangeTotals as { lineAmounts?: Record<CashflowSheetLineId, number> } | null)?.lineAmounts
-          || {}) as Record<CashflowSheetLineId, number>,
-        weekTotals,
-        monthTotals: {
-          totalIn: rangeTotals?.totalIn || 0,
-          totalOut: rangeTotals?.totalOut || 0,
-          net: endingBalance,
-        },
-      };
-    };
-    const derived = {
-      projection: readServerSummary('projection'),
-      actual: readServerSummary('actual'),
+    const sheetDerivedAmount = (
+      mode: 'projection' | 'actual',
+      targetYearMonth: string,
+      weekNo: number,
+      kind: 'totalIn' | 'totalOut' | 'net',
+    ) => {
+      const reported = sheetFormulaValues?.weekly.find((check) => (
+        check.mode === mode && check.yearMonth === targetYearMonth && check.weekNo === weekNo
+      ))?.reported;
+      return kind === 'totalIn'
+        ? reported?.depositTotal ?? null
+        : kind === 'totalOut'
+          ? reported?.withdrawalTotal ?? null
+          : reported?.balance ?? null;
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
-      // 연간 열 하나라도 합계를 구할 수 없으면(라인까지 전부 미기입) Total 열도 없는 값으로 둔다.
-      const annualIn = annualYears.map((year) => annualSummaryAmountFor(annualTotalFor(year, mode), 'totalIn'));
-      const annualOut = annualYears.map((year) => annualSummaryAmountFor(annualTotalFor(year, mode), 'totalOut'));
-      if (annualYears.some((year) => !annualTotalFor(year, mode))) {
-        return { totalIn: null, totalOut: null, net: null };
-      }
-      const totalIn = annualIn.reduce<number>((sum, value) => sum + Number(value ?? 0), Number(derived[mode].monthTotals.totalIn || 0));
-      const totalOut = annualOut.reduce<number>((sum, value) => sum + Number(value ?? 0), Number(derived[mode].monthTotals.totalOut || 0));
-      return { totalIn, totalOut, net: totalIn - totalOut };
+      const total = sheetFormulaValues?.grandTotals?.[mode];
+      return { totalIn: total?.totalIn ?? null, totalOut: total?.totalOut ?? null, net: total?.net ?? null };
     };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
@@ -2298,7 +2193,7 @@ export function CashflowProjectSheet({
       rowTone?: 'income' | 'expense',
     ) => renderSummaryCell({
       keyName: `${mode}-${kind}-${year}-annual`,
-      value: annualSummaryAmountFor(annualTotalFor(year, mode), kind),
+      value: annualSummaryValue(year, mode, kind),
       mode,
       emphasis,
       rowTone,
@@ -2351,9 +2246,9 @@ export function CashflowProjectSheet({
             {label}
           </td>
           {previousAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
-          {visibleWeeks.map((week, index) => renderSummaryCell({
+          {visibleWeeks.map((week) => renderSummaryCell({
             keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
-            value: getCanonicalDerivedAmount(mode, week.yearMonth, week.weekNo, kind) ?? (derived[mode].weekTotals[index]?.[kind] || 0),
+            value: sheetDerivedAmount(mode, week.yearMonth, week.weekNo, kind),
             mode,
             isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
             monthCloseStatus: monthCloseStatusByMonth.get(week.yearMonth),
@@ -2525,7 +2420,7 @@ export function CashflowProjectSheet({
 
   function renderProjectionActualDiffTable() {
     const rows = projectionActualComparison.changedRows;
-    const columnCount = visibleComparisonAnnualYears.length + visibleComparisonWeeks.length + 1;
+    const columnCount = visibleComparisonWeeks.length;
     if (monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY') {
       return (
         <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-5 text-[12px] leading-5 text-[#17324D]">
@@ -2561,33 +2456,26 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-[12px] font-semibold text-slate-950">
-                <HoverExplain message="아래 현금흐름 관리시트와 동일한 반영값으로 Projection에서 Actual을 뺍니다.">
+                <HoverExplain message="현금흐름 관리시트의 Projection–Actual 차이 수식 결과를 그대로 표시합니다.">
                   Projection - Actual 차이
                 </HoverExplain>
               </div>
               <div className="text-[12px] text-slate-500">
-                현금흐름 관리시트 기준 · 차이 = Projection - Actual
+                현금흐름 관리시트 A11:BS11 기준
               </div>
             </div>
-            <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">차이 항목만</Badge>
+            <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">시트 수식값</Badge>
           </div>
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
             <table className="border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${220 + columnCount * 96}px` }}>
               <thead className="bg-white text-slate-500">
                 <tr>
                   <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">항목</th>
-                  {previousComparisonAnnualYears.map((year) => (
-                    <th key={`comparison-${year}-before`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
-                  ))}
                   {visibleComparisonWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
                     </th>
                   ))}
-                  {followingComparisonAnnualYears.map((year) => (
-                    <th key={`comparison-${year}-after`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
-                  ))}
-                  <th className="sticky right-0 z-20 min-w-[96px] border-l-[6px] border-l-white bg-white px-2 py-2 text-right font-medium shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -2602,17 +2490,6 @@ export function CashflowProjectSheet({
                     <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                       <div className={`truncate ${row.section === '입금' ? 'text-emerald-700' : 'text-red-700'}`}>{row.label}</div>
                     </td>
-                    {row.annualCells.filter((cell) => previousComparisonAnnualYears.includes(cell.year)).map((cell) => {
-                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
-                      const differenceClass = cell.difference === null || cell.difference === 0
-                        ? `${rowSurface} text-slate-300`
-                        : 'bg-[#EAF0F5] text-sky-700';
-                      return (
-                        <td key={`${row.lineId}-${cell.year}`} className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`} title={cell.difference === null ? `${cell.year}년\n미입력` : `${cell.year}년\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}`}>
-                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
-                        </td>
-                      );
-                    })}
                     {row.cells.map((cell) => {
                       const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
                       const differenceClass = cell.difference === null || cell.difference === 0
@@ -2622,26 +2499,12 @@ export function CashflowProjectSheet({
                         <td
                           key={`${row.lineId}-${cell.yearMonth}-${cell.weekNo}`}
                           className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`}
-                          title={cell.difference === null ? `${cell.weekRange}\nBFF 비교 대상 기간 아님` : `${cell.weekRange}\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}\n${diffColorExplanation(row.section, cell.difference)}`}
+                          title={cell.difference === null ? `${cell.weekRange}\n시트 수식값 없음` : `${cell.weekRange}\n시트 차이 ${fmtSigned(cell.difference)}`}
                         >
                           {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
                         </td>
                       );
                     })}
-                    {row.annualCells.filter((cell) => followingComparisonAnnualYears.includes(cell.year)).map((cell) => {
-                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
-                      const differenceClass = cell.difference === null || cell.difference === 0
-                        ? `${rowSurface} text-slate-300`
-                        : 'bg-[#EAF0F5] text-sky-700';
-                      return (
-                        <td key={`${row.lineId}-${cell.year}`} className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`} title={cell.difference === null ? `${cell.year}년\n미입력` : `${cell.year}년\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}`}>
-                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
-                        </td>
-                      );
-                    })}
-                    <td className={`sticky right-0 z-10 min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums shadow-[-12px_0_24px_rgba(15,23,42,0.08)] ${row.totalCell.difference === null || row.totalCell.difference === 0 ? (rowIndex % 2 === 0 ? 'bg-white text-slate-300' : 'bg-slate-50 text-slate-300') : 'bg-[#EAF0F5] text-sky-700'}`} title={row.totalCell.difference === null ? 'Total\n미입력' : `Total\nProjection ${fmt(row.totalCell.projection)} / Actual ${fmt(row.totalCell.actual)} / 차이 ${fmtSigned(row.totalCell.difference)}`}>
-                      {row.totalCell.difference === null ? '미입력' : fmtSigned(row.totalCell.difference)}
-                    </td>
                   </tr>
                 ))}
               </tbody>

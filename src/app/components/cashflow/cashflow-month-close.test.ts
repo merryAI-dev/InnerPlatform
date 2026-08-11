@@ -2,13 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
 import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-readonly-client';
 import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib/platform-bff-client';
-import type { CanonicalCashflowAnnualModeTotal } from '../../lib/platform-bff-client';
 import {
-  annualSummaryAmountFor,
   buildCashflowMonthCloseDraftInput,
   annualYearsFor,
-  canonicalCashflowAnnualTotalFor,
-  carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
   isCashflowComparisonWeekVisible,
@@ -62,32 +58,6 @@ describe('cashflow month close contract', () => {
     expect(annualYearsFor(2026)).toEqual([2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]);
     expect(annualYearsFor(2027)).toEqual([2025, 2026, 2028, 2029, 2030, 2031, 2032, 2033]);
     expect(annualYearsFor(undefined)).toEqual([]);
-  });
-
-  it('returns the server annual-column value and cell states unchanged', () => {
-    const actual = {
-      lineAmounts: { SALES_IN: 317_449_417, SALES_VAT_IN: 0, TEAM_SUPPORT_IN: 0 },
-      lineStates: { SALES_IN: 'VALUE', SALES_VAT_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY' } as const,
-      totalIn: null,
-      totalOut: 0,
-      net: null,
-    };
-    const annualTotals = [{
-      year: 2025,
-      projection: { ...actual, lineAmounts: { SALES_IN: 7_582_243 } },
-      actual,
-    }];
-    const result = canonicalCashflowAnnualTotalFor(annualTotals, 2025, 'actual');
-
-    expect(result).toBe(actual);
-    expect(result).toEqual({
-      lineAmounts: { SALES_IN: 317_449_417, SALES_VAT_IN: 0, TEAM_SUPPORT_IN: 0 },
-      lineStates: { SALES_IN: 'VALUE', SALES_VAT_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY' },
-      totalIn: null,
-      totalOut: 0,
-      net: null,
-    });
-    expect(canonicalCashflowAnnualTotalFor(annualTotals, 2032, 'actual')).toBeNull();
   });
 
   it('hides values only when canonical loading failed without a retained model', () => {
@@ -253,14 +223,6 @@ describe('cashflow month close contract', () => {
     expect(scope.yearView).toBeNull();
     expect(scope.sheetMetadata).toBeUndefined();
   });
-  it('carries prior weekly net and annual-only opening through empty weeks', () => {
-    expect(carryForwardCashflowRunningBalances({
-      priorWeeklyNet: 3_000_000,
-      annualOpeningBalance: 2_000_000,
-      serverRunningNets: [null, 3_500_000, null, 2_750_000],
-    })).toEqual([5_000_000, 5_500_000, 5_500_000, 4_750_000]);
-  });
-
   it('normalizes exactly 160 pinned cells in Projection then Actual order', () => {
     const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
     expect(cells).toHaveLength(160);
@@ -353,47 +315,5 @@ describe('cashflow month close contract', () => {
     const source = mirror();
     source.cells = source.cells?.slice(0, -1);
     expect(() => normalizeCashflowMonthCloseCells(source, '2026-07')).toThrow('159/160');
-  });
-});
-
-describe('annual summary display fallback', () => {
-  const base: CanonicalCashflowAnnualModeTotal = {
-    lineStates: { SALES_IN: 'VALUE', SALES_VAT_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY', DIRECT_COST_OUT: 'VALUE' },
-    lineAmounts: { SALES_IN: 7_582_243, SALES_VAT_IN: 0, DIRECT_COST_OUT: 1_000_000 },
-    totalIn: null,
-    totalOut: null,
-    net: null,
-  };
-
-  it('falls back to the entered-line sum when the sheet totals row is not stored yet', () => {
-    expect(annualSummaryAmountFor(base, 'totalIn')).toBe(7_582_243);
-    expect(annualSummaryAmountFor(base, 'totalOut')).toBe(1_000_000);
-    expect(annualSummaryAmountFor(base, 'net')).toBe(6_582_243);
-  });
-
-  it('prefers the stored sheet totals over the line sum', () => {
-    const declared: CanonicalCashflowAnnualModeTotal = { ...base, totalIn: 8_340_487 };
-    expect(annualSummaryAmountFor(declared, 'totalIn')).toBe(8_340_487);
-  });
-
-  it('keeps the summary empty only when every line is empty', () => {
-    const empty: CanonicalCashflowAnnualModeTotal = {
-      lineStates: { SALES_IN: 'EMPTY', DIRECT_COST_OUT: 'EMPTY' },
-      lineAmounts: {},
-      totalIn: null, totalOut: null, net: null,
-    };
-    expect(annualSummaryAmountFor(empty, 'totalIn')).toBeNull();
-    expect(annualSummaryAmountFor(empty, 'net')).toBeNull();
-    expect(annualSummaryAmountFor(null, 'totalIn')).toBeNull();
-  });
-
-  it('treats all-zero lines as an entered zero, not as missing', () => {
-    const zero: CanonicalCashflowAnnualModeTotal = {
-      lineStates: { SALES_IN: 'ZERO', DIRECT_COST_OUT: 'ZERO' },
-      lineAmounts: { SALES_IN: 0, DIRECT_COST_OUT: 0 },
-      totalIn: null, totalOut: null, net: null,
-    };
-    expect(annualSummaryAmountFor(zero, 'totalIn')).toBe(0);
-    expect(annualSummaryAmountFor(zero, 'net')).toBe(0);
   });
 });

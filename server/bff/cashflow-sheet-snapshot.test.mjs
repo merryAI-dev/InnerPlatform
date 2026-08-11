@@ -232,6 +232,24 @@ describe('cashflow sheet pinned snapshot', () => {
       });
   });
 
+  it('pins the Sheet Projection–Actual formula row without recalculating it', () => {
+    const matrix = Array.from({ length: 12 }, () => Array.from({ length: 5 }, () => ''));
+    matrix[10][3] = '-4,796,728'; // D11: the sheet formula result, not Projection - Actual in application code.
+    const facts = extractCashflowSheetFacts({
+      matrix,
+      template: {
+        sections: [{
+          mode: 'projection',
+          weekColumns: [{ yearMonth: '2026-01', weekNo: 1, columnIndex: 3 }],
+        }],
+      },
+    });
+
+    expect(facts.projectionActualDifferences).toEqual([{
+      yearMonth: '2026-01', weekNo: 1, amount: -4_796_728, sourceCell: 'D11',
+    }]);
+  });
+
   it('pins normalized cells and keeps source and target revisions separate', () => {
     const mappings = [
       {

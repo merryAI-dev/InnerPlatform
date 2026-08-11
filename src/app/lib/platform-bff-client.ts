@@ -1,6 +1,7 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  CashflowSheetLineId,
   Project,
   ProjectRequest,
   ProjectExecutiveReviewStatus,
@@ -966,6 +967,24 @@ export interface CashflowMonthCloseDashboard {
       balance: number | null;
     };
   }>;
+  sheetFormulaValues: {
+    weekly: CashflowMonthCloseDashboard['sheetCalculationChecks'];
+    annual: Array<{
+      year: number;
+      projection: CashflowSheetFormulaModeTotal;
+      actual: CashflowSheetFormulaModeTotal;
+    }>;
+    grandTotals: {
+      projection?: CashflowSheetFormulaModeTotal;
+      actual?: CashflowSheetFormulaModeTotal;
+    };
+    projectionActualDifferences: Array<{
+      yearMonth: string;
+      weekNo: number;
+      amount: number | null;
+      sourceCell: string;
+    }>;
+  };
   sheetControlTotals: {
     deposit: {
       sourceCell: string;
@@ -1078,6 +1097,14 @@ export interface CashflowMonthCloseDashboard {
     warnings: Array<{ code: string; message: string; details?: unknown }>;
   };
   canonical: CashflowSnapshotResult['readModel'] | null;
+}
+
+export interface CashflowSheetFormulaModeTotal {
+  lineAmounts: Partial<Record<CashflowSheetLineId, number>>;
+  lineStates: Partial<Record<CashflowSheetLineId, 'VALUE' | 'ZERO' | 'EMPTY' | 'INVALID'>>;
+  totalIn: number | null;
+  totalOut: number | null;
+  net: number | null;
 }
 
 export interface CloseCashflowMonthPayload {

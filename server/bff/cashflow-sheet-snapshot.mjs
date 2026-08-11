@@ -559,6 +559,14 @@ export function extractCashflowSheetFacts({
   const projectionControls = modeControls('projection');
   const actualControls = modeControls('actual');
   const weeklyCalculationChecks = buildWeeklyCalculationChecks({ template, matrix });
+  // 표준 관리시트의 Projection–Actual 차이 행(A11:BS11)은 별도 수식 결과다.
+  // 화면에서 Projection과 Actual을 다시 빼지 않고 이 고정값을 그대로 사용한다.
+  const projectionActualDifferences = weekColumns.map((week) => ({
+    yearMonth: week.yearMonth,
+    weekNo: week.weekNo,
+    amount: readComputedWholeWon(matrix, 10, week.columnIndex),
+    sourceCell: toA1(10, week.columnIndex),
+  }));
 
   return {
     metadata: {
@@ -573,6 +581,7 @@ export function extractCashflowSheetFacts({
       ? buildAnnualCashflowTotals({ cells, annualCells, annualDerivedCells, weeklyYear })
       : [],
     ...(weeklyCalculationChecks.length > 0 ? { weeklyCalculationChecks } : {}),
+    ...(projectionActualDifferences.some((value) => value.amount !== null) ? { projectionActualDifferences } : {}),
     cashflowGrandTotals: {
       projection: buildCashflowSheetTotal(totalCells, 'projection'),
       actual: buildCashflowSheetTotal(totalCells, 'actual'),
