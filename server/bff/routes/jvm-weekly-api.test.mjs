@@ -279,7 +279,7 @@ function fullMonthCloseSource({
       id: 'project-a', settlementType: 'TYPE1', basis: '공급가액', accountType: 'DEDICATED',
       fundInputMode: 'BANK_UPLOAD', contractAmount, executiveApproverId: 'finance-1',
     }],
-    ['orgs/tenant-a/members/finance-1', { uid: 'finance-1', name: 'Finance One', role: 'viewer', status: 'ACTIVE', projectIds: ['project-a'] }],
+    ['orgs/tenant-a/members/finance-1', { uid: 'finance-1', name: 'Finance One', slackUserId: 'U0123456789', role: 'viewer', status: 'ACTIVE', projectIds: ['project-a'] }],
     ['orgs/tenant-a/members/finance-2', { uid: 'finance-2', role: 'finance', status: 'ACTIVE', projectIds: ['project-a'] }],
     ['orgs/tenant-a/members/pm-1', { uid: 'pm-1', name: 'Project Manager', role: 'pm', status: 'ACTIVE', projectIds: ['project-a'] }],
     ['orgs/tenant-a/members/viewer-2', { uid: 'viewer-2', role: 'viewer', status: 'ACTIVE', projectIds: [] }],
@@ -4558,7 +4558,7 @@ describe('JVM weekly API BFF proxy', () => {
       blocks: expect.arrayContaining([
         expect.objectContaining({
           type: 'section',
-          text: expect.objectContaining({ text: expect.stringContaining('요청자: Project Manager') }),
+          text: expect.objectContaining({ text: expect.stringContaining('요청자: Project Manager\n조직장: <@U0123456789>\n상태: 조직장 승인 대기') }),
         }),
         expect.objectContaining({
           type: 'actions',
