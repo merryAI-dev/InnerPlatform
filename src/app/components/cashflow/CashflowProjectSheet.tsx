@@ -1466,10 +1466,7 @@ export function CashflowProjectSheet({
             cells: mirror.cells || current.cells,
           }
         : mirror);
-      if (mirror.status === 'FRESH' && mirror.unchanged) {
-        // 시트 변경 없음 - 서버가 풀 리드를 건너뛰고 고정본을 그대로 돌려준 경우.
-        toast.success('시트 변경이 없어 기존 고정값을 그대로 사용합니다.');
-      } else if (mirror.status === 'FRESH' && mirror.sourceRevision) {
+      if (mirror.status === 'FRESH' && mirror.sourceRevision) {
         void loadCashflowEvents();
         toast.success('시트값을 불러왔습니다. MYSCube 시트 반영 전 금액을 확인합니다.');
       } else if (mirror.status === 'STALE') {
@@ -1754,7 +1751,6 @@ export function CashflowProjectSheet({
         return;
       }
       if (result.stagedLineCount <= 0) {
-        toast.info('MYSCube 시트와 다른 값이 없습니다.');
         return;
       }
       if (result.pendingApprovalDifferences?.length) {
