@@ -119,6 +119,8 @@ jobs:
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
       JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
       JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+      SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
+      SLACK_ALERT_CHANNEL_ID: C0BQ6980HR6
       # Use a production-scoped secret name so a stale repository-level
       # VERCEL_TOKEN cannot be confused with the Production environment token.
       VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
@@ -189,6 +191,7 @@ jobs:
           test -n "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}" || { echo "Missing Production variable: JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE" >&2; exit 1; }
           test -n "${JVM_WEEKLY_INTERNAL_API_TOKEN}" || { echo "Missing Production secret: JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE" >&2; exit 1; }
           test -n "${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" || { echo "Missing Production secret: JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE" >&2; exit 1; }
+          test -n "${SLACK_ALERT_BOT_TOKEN}" || { echo "Missing Production secret: SLACK_ALERT_BOT_TOKEN" >&2; exit 1; }
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
 
       - name: Deploy to Vercel production
@@ -218,8 +221,8 @@ jobs:
             --env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             --env JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON="${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" \
             --env SLACK_ALERT_WEBHOOK_URL= \
-            --env SLACK_ALERT_BOT_TOKEN= \
-            --env SLACK_ALERT_CHANNEL_ID= \
+            --env SLACK_ALERT_BOT_TOKEN="${SLACK_ALERT_BOT_TOKEN}" \
+            --env SLACK_ALERT_CHANNEL_ID="${SLACK_ALERT_CHANNEL_ID}" \
             --env PROJECT_REGISTRATION_SLACK_WEBHOOK_URL= \
             --env PROJECT_REGISTRATION_SLACK_BOT_TOKEN= \
             --env PROJECT_REGISTRATION_SLACK_CHANNEL_ID= \

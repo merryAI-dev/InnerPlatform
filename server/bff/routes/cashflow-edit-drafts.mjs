@@ -15,6 +15,7 @@ import {
 } from '../edit-lease.mjs';
 import { parseWithSchema } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
+import { assertCashflowMonthWritable } from '../cashflow-month-state.mjs';
 
 const RESOURCE_TYPE = 'cashflow';
 const CASHFLOW_DRAFT_ROLES = ['pm'];
@@ -178,41 +179,6 @@ function assertMetadataRevision(document, fieldName, expected) {
   return actual;
 }
 
-function assertCashflowMonthOpen(monthCloseSnap, { tenantId, projectId, yearMonth }) {
-  if (!monthCloseSnap.exists) return;
-  const monthClose = monthCloseSnap.data() || {};
-  if (
-    monthClose.contractVersion !== 'cashflow-month-close-v1'
-    || monthClose.tenantId !== tenantId
-    || monthClose.projectId !== projectId
-    || monthClose.yearMonth !== yearMonth
-    || !Number.isSafeInteger(monthClose.revision)
-    || monthClose.revision < 0
-    || !Number.isSafeInteger(monthClose.reopenCount)
-    || monthClose.reopenCount < 0
-  ) {
-    throw createHttpError(
-      409,
-      'Cashflow month close data requires migration before it can be changed',
-      'cashflow_month_close_migration_required',
-    );
-  }
-  const status = monthClose.status;
-  if (status === 'OPEN') return;
-  if (status === 'CLOSED' || status === 'REOPEN_REQUESTED') {
-    throw createHttpError(
-      409,
-      'Cashflow month is closed and cannot be changed',
-      'cashflow_month_closed',
-    );
-  }
-  throw createHttpError(
-    409,
-    'Cashflow month close data requires migration before it can be changed',
-    'cashflow_month_close_migration_required',
-  );
-}
-
 function draftMonthCloseScope(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Object.hasOwn(payload, 'monthClose')) {
     return null;
@@ -227,10 +193,9 @@ function draftMonthCloseScope(payload) {
 async function assertDraftMonthsOpen(tx, db, current, ...payloads) {
   const yearMonths = new Set(payloads.map(draftMonthCloseScope).filter(Boolean));
   for (const yearMonth of yearMonths) {
-    const monthCloseSnap = await tx.get(db.doc(
-      `orgs/${current.tenantId}/monthly_closes/${current.projectId}-${yearMonth}`,
-    ));
-    assertCashflowMonthOpen(monthCloseSnap, {
+    await assertCashflowMonthWritable({
+      db,
+      transaction: tx,
       tenantId: current.tenantId,
       projectId: current.projectId,
       yearMonth,
@@ -693,15 +658,14 @@ export function createCashflowEditDraftService({
         const { actorRole, member } = await accessProject(tx, current);
         const statusRef = db.doc(`orgs/${current.tenantId}/weekly_submission_status/${statusId}`);
         const statusSnap = await tx.get(statusRef);
-        const monthCloseSnap = await tx.get(db.doc(
-          `orgs/${current.tenantId}/monthly_closes/${current.projectId}-${yearMonth}`,
-        ));
         const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
         if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
         const lockError = idempotencyError(lock);
         if (lockError) throw lockError;
         await assertLease(tx, current, nowDate);
-        assertCashflowMonthOpen(monthCloseSnap, {
+        await assertCashflowMonthWritable({
+          db,
+          transaction: tx,
           tenantId: current.tenantId,
           projectId: current.projectId,
           yearMonth,

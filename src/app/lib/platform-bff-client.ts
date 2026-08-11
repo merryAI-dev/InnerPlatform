@@ -1090,7 +1090,7 @@ export interface CloseCashflowMonthPayload {
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REOPEN_REQUESTED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
 
 export interface CashflowMonthCloseStoredSource {
   sourceRevision: string | null;
@@ -1264,12 +1264,14 @@ export interface CashflowMonthCloseApproverResult {
 }
 
 export interface RequestCashflowMonthReopenPayload {
+  requestId: string;
   yearMonth: string;
   expectedRevision: number;
   reason: string;
 }
 
 export interface DecideCashflowMonthReopenPayload {
+  requestId: string;
   yearMonth: string;
   expectedRevision: number;
   decision: CashflowMonthReopenDecision;
@@ -2994,7 +2996,7 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
 }): Promise<CashflowSettlementStatusesResult> {
   if (params.period === 'MONTH' && params.action === 'APPROVE') {
     const request = await fetchCurrentCashflowMonthCloseRequestViaBff(params);
-    if (!request || !['PENDING', 'APPROVING', 'UNCERTAIN'].includes(request.status)) {
+    if (!request || request.status !== 'PENDING') {
       throw new Error('승인할 월 결산 요청을 찾을 수 없습니다.');
     }
     if ((request.reviewWarnings ?? []).length > 0) {
@@ -3300,13 +3302,9 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
   client?: PlatformApiClientLike;
 }): Promise<{
   request: CashflowMonthCloseRequest;
-  monthClose?: CashflowMonthCloseResult;
-  pendingLedgerClose?: boolean;
 }> {
   const response = await resolveClient(params.client).post<{
     request: CashflowMonthCloseRequest;
-    monthClose?: CashflowMonthCloseResult;
-    pendingLedgerClose?: boolean;
   }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/${params.payload.expectedManifestHash ? 'status-review' : 'review'}`,
     {
@@ -3315,28 +3313,17 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
       body: params.payload,
       idempotencyKey: params.idempotencyKey,
       retries: 0,
-      // BFF의 월 결산 확정·재확인 예산(26초)보다 길어야 최종 상태를 받을 수 있다.
-      timeoutMs: 35_000,
+      timeoutMs: 12_000,
     },
   );
-  // 승인 선점은 끝났고 장부 잠금만 진행 중인 상태(pendingLedgerClose)는 실패가 아니다.
-  // 호출자가 같은 멱등키로 다시 호출해 마무리한다.
   if (
     params.payload.decision === 'APPROVE'
-    && !response.data.pendingLedgerClose
     && response.data.request.status !== 'APPROVED'
   ) {
     throw new Error('월 결산 승인 상태를 확인하지 못했습니다.');
   }
   return response.data;
 }
-
-// 승인 선점(APPROVING)은 즉시 커밋되지만 JVM 장부 확정은 그보다 오래 걸릴 수 있다.
-// BFF 는 그때 pendingLedgerClose 를 실어 200 을 돌려주고, 같은 멱등키의 다음 호출이
-// reconcile 로 이어받아 APPROVED 로 마무리한다. 승인 화면이 여러 개라 이 이어받기
-// 규칙은 여기 한 곳에만 둔다 - 같은 규칙의 사본이 화면마다 생기면 조용히 갈린다.
-const CASHFLOW_LEDGER_CLOSE_POLL_MS = 4_000;
-const CASHFLOW_LEDGER_CLOSE_MAX_POLLS = 30;
 
 export async function approveCashflowMonthCloseUntilLedgerClosed(params: {
   tenantId: string;
@@ -3346,15 +3333,8 @@ export async function approveCashflowMonthCloseUntilLedgerClosed(params: {
   payload: ReviewCashflowMonthCloseRequestPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-  onPending?: (attempt: number) => void;
 }) {
-  let result = await reviewCashflowMonthCloseRequestViaBff(params);
-  for (let attempt = 0; result?.pendingLedgerClose && attempt < CASHFLOW_LEDGER_CLOSE_MAX_POLLS; attempt += 1) {
-    params.onPending?.(attempt);
-    await new Promise((resolve) => { setTimeout(resolve, CASHFLOW_LEDGER_CLOSE_POLL_MS); });
-    result = await reviewCashflowMonthCloseRequestViaBff(params);
-  }
-  return result;
+  return reviewCashflowMonthCloseRequestViaBff(params);
 }
 
 export async function withdrawCashflowMonthCloseRequestViaBff(params: {
@@ -3390,8 +3370,8 @@ export async function requestCashflowMonthReopenViaBff(params: {
   payload: RequestCashflowMonthReopenPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseResult> {
-  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+}): Promise<{ request: CashflowMonthCloseRequest }> {
+  const response = await resolveClient(params.client).post<{ request: CashflowMonthCloseRequest }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/reopen-request`,
     {
       tenantId: params.tenantId,
@@ -3412,8 +3392,8 @@ export async function decideCashflowMonthReopenViaBff(params: {
   payload: DecideCashflowMonthReopenPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseResult> {
-  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+}): Promise<{ request: CashflowMonthCloseRequest }> {
+  const response = await resolveClient(params.client).post<{ request: CashflowMonthCloseRequest }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/reopen-decision`,
     {
       tenantId: params.tenantId,

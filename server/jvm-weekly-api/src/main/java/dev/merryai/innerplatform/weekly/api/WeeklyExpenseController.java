@@ -28,7 +28,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.server.ResponseStatusException;
 import dev.merryai.innerplatform.weekly.domain.CashflowWeekTotals;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
-import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 
@@ -693,11 +692,9 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody CloseCashflowMonthRequest request
     ) {
-        return commandService.closeCashflowMonth(
-            actorContext(tenantId, actorId, actorRole, actorEmail),
-            projectId,
-            editSession(httpRequest),
-            request
+        throw new ResponseStatusException(
+            HttpStatus.GONE,
+            "Cashflow month close is committed by the approval request API."
         );
     }
 
@@ -792,14 +789,9 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody RequestCashflowMonthReopenRequest request
     ) {
-        // HTTP 표현은 여기까지다. 서비스에는 런타임 중립 커맨드만 넘긴다.
-        return commandService.requestCashflowMonthReopen(
-            actorContext(tenantId, actorId, actorRole, actorEmail),
-            projectId,
-            httpRequest.getHeader("x-data-project-id"),
-            new CashflowMonthReopenCommands.RequestReopen(
-                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason()
-            )
+        throw new ResponseStatusException(
+            HttpStatus.GONE,
+            "Cashflow month reopen is committed by the approval request API."
         );
     }
 
@@ -813,14 +805,9 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody DecideCashflowMonthReopenRequest request
     ) {
-        return commandService.decideCashflowMonthReopen(
-            actorContext(tenantId, actorId, actorRole, actorEmail),
-            projectId,
-            httpRequest.getHeader("x-data-project-id"),
-            new CashflowMonthReopenCommands.DecideReopen(
-                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(),
-                request.decision(), request.reason()
-            )
+        throw new ResponseStatusException(
+            HttpStatus.GONE,
+            "Cashflow month reopen is committed by the approval request API."
         );
     }
 
