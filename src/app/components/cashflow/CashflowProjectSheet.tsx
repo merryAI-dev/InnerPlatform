@@ -2698,9 +2698,7 @@ export function CashflowProjectSheet({
                 size="sm"
                 variant="outline"
                 className="h-7 shrink-0 rounded-md border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
-                onClick={() => cashflowSheetConfig
-                  ? navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)
-                  : handleOpenSheetOnboarding()}
+                onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
               >
                 {cashflowSheetConfig ? '시트 설정' : '시트 연결'}
               </Button>
@@ -2716,23 +2714,23 @@ export function CashflowProjectSheet({
                 </a>
               ) : null}
               {cashflowSheetConfig ? (
-                // 단일 진입점: 평소엔 '시트 불러오기', 변경이 감지되면 상태 배지를 겸한다.
-                // 진입 시 풀 리드를 하지 않으므로 이 버튼을 눌러야 실제 diff·반영이 시작된다.
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className={`h-7 shrink-0 rounded-md px-2.5 text-[12px] font-semibold ${
-                    sheetChangedSinceMirror
-                      ? 'border-yellow-300 bg-yellow-50 text-yellow-900 hover:bg-yellow-100'
-                      : 'border-slate-300 bg-white text-[#17324D] hover:bg-accent'
-                  }`}
-                  disabled={sheetRefreshLoading}
-                  onClick={() => void handleRefreshSheetMirror()}
+                  className="h-7 shrink-0 rounded-md border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D] hover:bg-accent"
+                  onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
                 >
-                  {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  {sheetChangedSinceMirror ? '시트 변경됨 · 불러오기' : '시트 불러오기'}
+                  <RefreshCw className="mr-1 h-3 w-3" />
+                  시트 값 가져오기
                 </Button>
+              ) : null}
+              {cashflowSheetConfig?.lastAppliedAt ? (
+                <span data-cashflow-sheet-last-apply className="shrink-0 text-[12px] text-slate-500">
+                  최근 시트 반영 · {cashflowSheetConfig.lastAppliedLineCount?.toLocaleString() || 0}건
+                  {' · '}Projection {cashflowSheetConfig.lastProjectionLineCount?.toLocaleString() || 0}건
+                  {' · '}Actual {cashflowSheetConfig.lastActualLineCount?.toLocaleString() || 0}건
+                </span>
               ) : null}
               {project && members ? (
                 <div

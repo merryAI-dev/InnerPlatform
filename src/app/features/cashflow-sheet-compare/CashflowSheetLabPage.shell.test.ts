@@ -20,6 +20,12 @@ const portalCashflowSource = readFileSync(
 );
 
 describe('CashflowSheetLabPage shell', () => {
+  it('renders the persisted apply result until a newly fetched sheet is ready to apply', () => {
+    expect(pageSource).toContain('const displayedReflectResult = reflectResult || (!hasCurrentFreshMirror && savedConfig?.lastAppliedAt');
+    expect(pageSource).toContain('appliedLineCount: savedConfig.lastAppliedLineCount || 0');
+    expect(pageSource).toContain('displayedReflectResult.appliedLineCount');
+  });
+
   it('keeps sheet lab as an explicit route, not auto-mounted inside portal cashflow', () => {
     expect(routesSource).toContain("path: '/portal'");
     expect(routesSource).toContain("path: 'cashflow/sheets-lab'");

@@ -939,6 +939,12 @@ export function CashflowSheetLabPage() {
   const canRefresh = Boolean(projectId && spreadsheetId && isCurrentSheetConfigSaved && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const hasCurrentFreshMirror = Boolean(mirror?.status === 'FRESH' && mirror.sourceRevision && reviewedSourceKey === sourceKey);
+  const displayedReflectResult = reflectResult || (!hasCurrentFreshMirror && savedConfig?.lastAppliedAt ? {
+    appliedLineCount: savedConfig.lastAppliedLineCount || 0,
+    projectionLineCount: savedConfig.lastProjectionLineCount || 0,
+    actualLineCount: savedConfig.lastActualLineCount || 0,
+    lastAppliedAt: savedConfig.lastAppliedAt,
+  } : null);
   const canOverwrite = Boolean(
     projectId
     && spreadsheetId
@@ -1090,14 +1096,14 @@ export function CashflowSheetLabPage() {
                 <h2 className="text-[19px] font-bold text-slate-950">시트 값으로 덮어쓰기</h2>
                 <HelpMemo>고정한 시트의 Projection과 Actual로 MYSCube 값을 덮어씁니다. 별도 운영자 검토는 없으며, 월 결산된 기간만 보호됩니다.</HelpMemo>
               </div>
-              {reflectResult ? (
+              {displayedReflectResult ? (
                 <div className="space-y-3">
                   <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">
-                    {reflectResult.appliedLineCount > 0 ? (
+                    {displayedReflectResult.appliedLineCount > 0 ? (
                       <>
-                        덮어쓰기 완료 · {reflectResult.appliedLineCount.toLocaleString()}건
-                        {' · '}Projection {reflectResult.projectionLineCount.toLocaleString()}건
-                        {' · '}Actual {reflectResult.actualLineCount.toLocaleString()}건
+                        덮어쓰기 완료 · {displayedReflectResult.appliedLineCount.toLocaleString()}건
+                        {' · '}Projection {displayedReflectResult.projectionLineCount.toLocaleString()}건
+                        {' · '}Actual {displayedReflectResult.actualLineCount.toLocaleString()}건
                       </>
                     ) : '이미 시트 최신값과 같습니다.'}
                   </div>

@@ -252,6 +252,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('변경 내용 검토');
   });
 
+  it('uses Sheet Lab as the only manual sheet refresh and overwrite entry', () => {
+    expect(source).toContain("onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}");
+    expect(source).toContain('시트 값 가져오기');
+    expect(source).toContain('data-cashflow-sheet-last-apply');
+    expect(source).toContain('최근 시트 반영');
+  });
+
   it('keeps the dashboard information order from the PPT before the comparison table', () => {
     const metadata = source.indexOf('sheetDashboardMetadata');
     const summary = source.indexOf('{dashboardSummary}');
@@ -311,8 +318,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('checkCashflowSheetChangesViaBff');
     expect(source).not.toContain('const sheetChangeCount = [');
     expect(source).not.toContain('변경 ${sheetChangeCount.toLocaleString()}건');
-    // 버튼 통일: '변경 N건' 별도 버튼 제거, 단일 '시트 불러오기' 가 배지를 겸한다.
-    expect(source).toContain('시트 변경됨 · 불러오기');
+    // 메인은 변경 여부를 판단하거나 자체 반영하지 않고, 동결된 Sheet Lab 진입만 제공한다.
+    expect(source).toContain('시트 값 가져오기');
+    expect(source).toContain('data-cashflow-sheet-last-apply');
     expect(source).not.toContain('onClick={handleOpenSheetReviewDialog}');
     expect(source).toContain('시트 이동');
     expect(source).toContain('href={configuredSheetUrl}');
