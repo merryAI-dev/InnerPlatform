@@ -2955,6 +2955,8 @@ describe('JVM weekly API BFF proxy', () => {
           cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'BANK_INTEREST_IN'
         ))).toMatchObject({ cellState: 'ZERO', amount: 0 });
         expect(response.body.dashboard.sheetCalculationChecks[0].reported.depositTotal).toBe(999);
+        expect(response.body.dashboard.sheetFormulaValues.weekly[0].reported.depositTotal).toBe(999);
+        expect(response.body.dashboard.sheetFormulaValues.projectionActualDifferences).toEqual([]);
         expect(response.body.dashboard.source).toMatchObject({
           sourceRevision: `sha256:${'1'.repeat(64)}`,
           targetRevision: `sha256:${'3'.repeat(64)}`,

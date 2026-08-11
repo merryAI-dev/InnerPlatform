@@ -109,9 +109,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('consumes composed dashboard totals, comparison, summary, sheet metadata, and validation', () => {
-    expect(source).toContain('monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find');
+    expect(source).toContain('sheetFormulaValues?.weekly.find');
     expect(source).toContain('const canonicalReadModel = monthCloseResult?.dashboard?.canonical');
-    expect(source).toContain('canonicalReadModel?.range?.[mode]');
+    expect(source).toContain('sheetFormulaValues?.grandTotals?.[mode]');
     expect(source).not.toContain('fetchCashflowSnapshotViaBff');
     expect(source).not.toContain('loadCashflowComparison');
     expect(source).not.toContain('cashflowSnapshot');
@@ -134,28 +134,20 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('monthSummaries.reduce');
   });
 
-  it('applies the server opening balance without recreating month-close reads during hydration', () => {
+  it('renders the pinned Sheet formula values without recreating balance calculations', () => {
     expect(source).toContain('monthCloseRequestGenerationRef');
     expect(source).toContain('requestGeneration === monthCloseRequestGenerationRef.current');
-    expect(source).toContain('monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear');
-    expect(source).toContain('const canonicalReadModel = monthCloseResult?.dashboard?.canonical');
-    expect(source).toContain('const reviewedOpeningBalances = monthCloseResult?.dashboard?.openingBalances');
-    expect(source).toContain('carryForwardCashflowRunningBalances({');
-    expect(source).toContain('priorWeeklyNet: Number(priorServerWeek?.net || 0)');
-    expect(source).toContain('annualOpeningBalance: openingBalance');
-    expect(source).toContain('serverRunningNets: serverWeeks.map');
-    expect(source).toContain('weekTotals.at(-1)?.net ?? openingBalance');
+    expect(source).toContain('const sheetFormulaValues = monthCloseResult?.dashboard?.sheetFormulaValues');
+    expect(source).toContain('const sheetDerivedAmount');
+    expect(source).toContain('reported?.balance ?? null');
+    expect(source).not.toContain('carryForwardCashflowRunningBalances({');
     expect(source).toMatch(/\}, \[orgId, projectId, resolveBffActor, selectedYear, user\?\.uid, yearMonth\]\);/);
   });
 
-  it('renders JVM canonical formula results instead of the pinned Sheet formulas', () => {
-    expect(source).toContain('function getCanonicalDerivedAmount');
-    expect(source).toContain("monthCloseResult?.dashboard?.canonical?.months");
-    expect(source).toContain('check?.totalIn');
-    expect(source).toContain('check?.totalOut');
-    expect(source).toContain('check?.net');
-    expect(source).toContain('getCanonicalDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
-    expect(source).not.toContain('function getPinnedDerivedAmount');
+  it('renders Sheet formula results instead of recomputing them from canonical cells', () => {
+    expect(source).toContain('sheetFormulaValues?.weekly.find');
+    expect(source).toContain('sheetFormulaValues?.grandTotals?.[mode]');
+    expect(source).not.toContain('function getCanonicalDerivedAmount');
   });
 
   it('drops the inbox card but keeps the issue count badge', () => {
@@ -184,7 +176,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source.indexOf('data-cashflow-block="projection"')).toBeLessThan(source.indexOf('data-cashflow-block="actual"'));
     expect(source).toMatch(/renderModeLineRows\(mode, CASHFLOW_IN_LINES[\s\S]*renderSummaryRow\(mode, 'totalIn'\)[\s\S]*renderModeLineRows\(mode, CASHFLOW_OUT_LINES[\s\S]*renderSummaryRow\(mode, 'totalOut'\)[\s\S]*renderSummaryRow\(mode, 'net'\)/);
     expect(source).toContain('Projection - Actual 차이');
-    expect(source).toContain('차이 항목만');
+    expect(source).toContain('시트 수식값');
     expect(source).not.toContain('setDifferenceViewMode');
     expect(source).toContain("'bg-[#EAF0F5] text-[#17324D]'");
     expect(source).toContain("rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'");
@@ -369,8 +361,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('캐시플로우 시트 연동 시작하기');
     expect(source).toContain('나중에 하기');
     expect(source).toContain('설정 후에도 자동으로 값을 가져오지 않습니다.');
-    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.range?.[mode]');
-    expect(source).toContain('getServerReadCell({ targetYearMonth: week.yearMonth');
+    expect(source).toContain('sheetFormulaValues?.weekly.find');
+    expect(source).toContain('sheetFormulaValues?.grandTotals?.[mode]');
   });
 
   it('shows the server service account immediately in project sheet setup', () => {
@@ -591,7 +583,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('does not globally truncate exact General Activity rows', () => {
-    const mergeSource = source.slice(source.indexOf('function mergeCashflowEvents'), source.indexOf('function diffColorExplanation'));
+    const mergeSource = source.slice(source.indexOf('function mergeCashflowEvents'), source.indexOf('function HoverExplain'));
     expect(mergeSource).not.toContain('.slice(');
   });
 
@@ -621,8 +613,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('uses the server KST comparison week and totals only the visible comparison scope', () => {
     expect(source).toContain('monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek');
     expect(source).toContain('resolveCashflowComparisonScope({');
-    expect(source).toContain('comparisonWeeks.reduce');
-    expect(source).toContain('comparisonAnnualYears.reduce');
+    expect(source).not.toContain('comparisonWeeks.reduce');
+    expect(source).not.toContain('comparisonAnnualYears.reduce');
     expect(source).toContain('const cashflowTotalPeriodLabel = comparisonScope.periodLabel');
     expect(source).not.toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
     expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
@@ -637,19 +629,17 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('const weeklyYear = canonicalReadModel?.weeklyYear');
     expect(source).toContain('annualYearsFor(weeklyYear)');
     expect(source).not.toContain('CASHFLOW_STANDARD_ANNUAL_YEARS');
-    expect(source).toContain('canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)');
-    expect(source).toContain('canonicalReadModel?.annualTotals || []');
+    expect(source).toContain('sheetFormulaValues?.annual.find');
     expect(source).not.toContain('dashboard?.canonical as');
     expect(source).not.toContain('summarizeCanonicalCashflowYear');
     expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < Number(weeklyYear))');
     expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > Number(weeklyYear))');
     expect(source).toContain('const renderAnnualSummaryCell');
-    expect(source).not.toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
-    expect(source).toContain('annualYears.some((year) => !annualTotalFor(year, mode)?.lineStates?.[lineId])');
+    expect(source).toContain('sheetFormulaValues?.grandTotals?.[mode]');
     expect(source).toContain('Total');
     expect(source).toContain('const visibleWeeks = annualWeeks');
-    expect(source).toContain('openingBalances?.selectedYear === selectedYear');
-    expect(source).toContain('annualOpeningBalance: openingBalance');
+    expect(source).toContain('annualSummaryValue(year, mode, kind)');
+    expect(source).toContain('sheetDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
     expect(source).toContain('>미입력</');
@@ -661,26 +651,21 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('현금흐름 데이터를 불러오지 못했습니다.');
   });
 
-  it('aligns the Projection - Actual table to the same annual, weekly, and Total contract as the cashflow board', () => {
+  it('renders the Projection - Actual row from the pinned Sheet formula range', () => {
     expect(source).toContain('resolveCashflowComparisonScope');
     expect(source).toContain('monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek');
     expect(source).toContain('visibleComparisonWeeks');
-    expect(source).toContain('visibleComparisonAnnualYears');
-    expect(source).toContain('comparisonWeeks.reduce');
+    expect(source).toContain('sheetFormulaValues?.projectionActualDifferences.find');
+    expect(source).not.toContain('comparisonWeeks.reduce');
     expect(source).not.toContain('const cashflowTotalPeriodLabel = `${previousAnnualYears[0] || selectedYear}년 ~ ${followingAnnualYears.at(-1) || selectedYear}년`');
     expect(source).not.toContain('const mirroredAnnualTotals = useMemo');
     expect(source).toContain('const annualTotalFor = (year: number');
     expect(source).not.toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
     expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
-    expect(source).toContain('{previousComparisonAnnualYears.map((year) => (');
-    expect(source).toContain('{followingComparisonAnnualYears.map((year) => (');
-    expect(source).toContain('previousComparisonAnnualYears.includes(cell.year)');
-    expect(source).toContain('followingComparisonAnnualYears.includes(cell.year)');
-    expect(source).toContain('row.totalCell.difference');
-    expect(source).toContain('difference: hasValue ? projection - actual : null');
-    expect(source).not.toContain("pinned.state === 'VALUE' || pinned.state === 'ZERO'");
-    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months?.find');
-    expect(source).toContain('const columnCount = visibleComparisonAnnualYears.length + visibleComparisonWeeks.length + 1');
+    expect(source).toContain("label: 'Projection - Actual 차이'");
+    expect(source).toContain('현금흐름 관리시트 A11:BS11 기준');
+    expect(source).toContain('const columnCount = visibleComparisonWeeks.length');
+    expect(source).not.toContain('difference: hasValue ? projection - actual : null');
   });
 
   it('keeps the last good month result during a same-month retry and lists every management finding', () => {
