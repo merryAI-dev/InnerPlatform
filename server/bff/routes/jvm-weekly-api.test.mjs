@@ -4565,7 +4565,7 @@ describe('JVM weekly API BFF proxy', () => {
           elements: expect.arrayContaining([
             expect.objectContaining({
               text: { type: 'plain_text', text: '결재 확인하기' },
-              url: 'https://myscube.myscguard.app/portal/cashflow/project-a?month=2026-08',
+              url: 'https://myscube.myscguard.app/cashflow/weekly',
             }),
           ]),
         }),

@@ -2323,7 +2323,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       const personLabel = event === 'APPROVED' ? '승인자' : '요청자';
       const title = event === 'APPROVED' ? '월 결산 승인 완료' : '월 결산 요청';
       const actionLabel = event === 'APPROVED' ? '결재 결과 보기' : '결재 확인하기';
-      const url = `https://myscube.myscguard.app/portal/cashflow/${encodeURIComponent(record.projectId)}?month=${encodeURIComponent(record.yearMonth)}`;
+      const url = 'https://myscube.myscguard.app/cashflow/weekly';
       const lines = [
         `*[MYSCube] ${title}*`,
         `프로젝트명: ${projectName}`,
