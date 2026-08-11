@@ -138,9 +138,9 @@ function FilterLabel({ label, disabled = false }: { label: string; disabled?: bo
   );
 }
 
-export function CashflowAnalyticsPage({ managementPlanningOnly = false }: { managementPlanningOnly?: boolean }) {
+export function CashflowAnalyticsPage() {
   const { transactions, projects } = useAppStore();
-  const [activeView, setActiveView] = useState<'analytics' | 'projectApproval'>(managementPlanningOnly ? 'projectApproval' : 'analytics');
+  const [activeView, setActiveView] = useState<'analytics' | 'projectApproval'>('analytics');
   const [projectFilter, setProjectFilter] = useState('ALL');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
@@ -278,7 +278,7 @@ export function CashflowAnalyticsPage({ managementPlanningOnly = false }: { mana
               <h1 className="text-[28px] leading-tight text-zinc-950" style={{ fontWeight: 900 }}>프로젝트 등록·승인</h1>
               <p className="mt-2 text-[12px] text-[#6f7478]">등록 문서를 열어 프로젝트 코드를 부여하고 승인 또는 반려 사유를 처리합니다.</p>
             </div>
-            {!managementPlanningOnly && <Button variant="outline" className="rounded-none border-[#c7c7c7]" onClick={() => setActiveView('analytics')}>통합 현황으로</Button>}
+            <Button variant="outline" className="rounded-none border-[#c7c7c7]" onClick={() => setActiveView('analytics')}>통합 현황으로</Button>
           </div>
         </section>
         <ProjectMigrationAuditPage embedded reviewStage="managementPlanning" />
@@ -710,8 +710,4 @@ export function CashflowAnalyticsPage({ managementPlanningOnly = false }: { mana
       </Card>
     </div>
   );
-}
-
-export function CashflowManagementPlanningPage() {
-  return <CashflowAnalyticsPage managementPlanningOnly />;
 }
