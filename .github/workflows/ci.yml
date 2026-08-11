@@ -16,7 +16,12 @@ jobs:
 
       - name: Keep the Sheet Lab one-way pipeline frozen
         run: |
-          changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- server/bff/routes/cashflow-sheet-lab.mjs)"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="HEAD^"
+          fi
+          changed="$(git diff --name-only "${base}...HEAD" -- server/bff/routes/cashflow-sheet-lab.mjs)"
           test -z "$changed" || { echo "Frozen Sheet Lab pipeline changed:"; echo "$changed"; exit 1; }
 
   test-and-build:
