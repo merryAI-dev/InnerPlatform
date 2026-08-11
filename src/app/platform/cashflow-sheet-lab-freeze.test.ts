@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  CASHFLOW_SHEET_LAB_FREEZE_MARKER,
-  evaluateCashflowSheetLabFreeze,
-} from '../../../scripts/check_cashflow_sheet_lab_freeze.mjs';
+// @ts-expect-error The guard is intentionally plain Node ESM and exercised here by Vitest.
+import * as freeze from '../../../scripts/check_cashflow_sheet_lab_freeze.mjs';
+
+const { CASHFLOW_SHEET_LAB_FREEZE_MARKER, evaluateCashflowSheetLabFreeze } = freeze;
 
 const headSha = 'head-123';
 const protectedFile = 'server/bff/routes/cashflow-sheet-lab.mjs';
