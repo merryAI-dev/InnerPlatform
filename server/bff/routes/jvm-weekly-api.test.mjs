@@ -4533,7 +4533,8 @@ describe('JVM weekly API BFF proxy', () => {
       }
       return { ok: true, status: 200, text: async () => JSON.stringify(cashflow) };
     });
-    const appOptions = { env: runtimeEnv, db: source.db, now: () => new Date('2026-09-10T00:00:00.000Z') };
+    const cashflowSlackService = { enabled: true, notifyMessage: vi.fn().mockResolvedValue(undefined) };
+    const appOptions = { env: runtimeEnv, db: source.db, cashflowSlackService, now: () => new Date('2026-09-10T00:00:00.000Z') };
     const requester = createApp(fetchImpl, createIdempotencyService(), { actorId: 'pm-1', actorRole: 'pm' }, appOptions).app;
     const approver = createApp(fetchImpl, createIdempotencyService(), { actorId: 'finance-1', actorRole: 'finance' }, appOptions).app;
 
@@ -4550,6 +4551,10 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'withdraw-create')
       .send(createPayload)
       .expect(202);
+    await Promise.resolve();
+    expect(cashflowSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('월 결산 요청'),
+    }));
     const settlementPath = 'orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08';
     expect(source.documents.get(settlementPath).periods.MONTH).toMatchObject({ status: 'PENDING_APPROVAL' });
     const withdrawPayload = {
