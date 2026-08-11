@@ -4502,6 +4502,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     if (!monthClose) {
       try {
+        prepared.routeDeadlineAtMs = Date.now() + monthCloseRouteTimeoutMs;
         monthClose = await executePreparedCashflowMonthClose(req, prepared);
       } catch (error) {
         if (readOptionalText(error?.code) === 'cashflow_month_close_reconciliation_pending') {
