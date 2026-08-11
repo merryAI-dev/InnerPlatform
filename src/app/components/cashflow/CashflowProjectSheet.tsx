@@ -1874,8 +1874,9 @@ export function CashflowProjectSheet({
   const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < Number(weeklyYear));
   const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > Number(weeklyYear));
   const sheetFormulaValues = monthCloseResult?.dashboard?.sheetFormulaValues;
+  const sheetFormulaValuesAvailable = sheetFormulaValues?.status !== 'UNAVAILABLE';
   const annualTotalFor = (year: number, mode: 'projection' | 'actual') => (
-    sheetFormulaValues?.annual.find((total) => total.year === year)?.[mode] ?? null
+    sheetFormulaValuesAvailable ? sheetFormulaValues?.annual.find((total) => total.year === year)?.[mode] ?? null : null
   );
   const annualSummaryValue = (
     year: number,
@@ -1883,7 +1884,7 @@ export function CashflowProjectSheet({
     kind: 'totalIn' | 'totalOut' | 'net',
   ) => annualTotalFor(year, mode)?.[kind] ?? null;
   const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
-    const total = sheetFormulaValues?.grandTotals?.[mode];
+    const total = sheetFormulaValuesAvailable ? sheetFormulaValues?.grandTotals?.[mode] : undefined;
     const state = total?.lineStates?.[lineId];
     return state === 'VALUE' || state === 'ZERO' ? Number(total?.lineAmounts?.[lineId] || 0) : null;
   };
@@ -1894,9 +1895,9 @@ export function CashflowProjectSheet({
       weekNo: week.weekNo,
       weekLabel: week.label,
       weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
-      difference: sheetFormulaValues?.projectionActualDifferences.find((value) => (
+      difference: sheetFormulaValuesAvailable ? sheetFormulaValues?.projectionActualDifferences.find((value) => (
         value.yearMonth === week.yearMonth && value.weekNo === week.weekNo
-      ))?.amount ?? null,
+      ))?.amount ?? null : null,
     }));
     const row = {
       section: '입금' as const,
@@ -2146,9 +2147,9 @@ export function CashflowProjectSheet({
       weekNo: number,
       kind: 'totalIn' | 'totalOut' | 'net',
     ) => {
-      const reported = sheetFormulaValues?.weekly.find((check) => (
+      const reported = sheetFormulaValuesAvailable ? sheetFormulaValues?.weekly.find((check) => (
         check.mode === mode && check.yearMonth === targetYearMonth && check.weekNo === weekNo
-      ))?.reported;
+      ))?.reported : undefined;
       return kind === 'totalIn'
         ? reported?.depositTotal ?? null
         : kind === 'totalOut'
@@ -2156,7 +2157,7 @@ export function CashflowProjectSheet({
           : reported?.balance ?? null;
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
-      const total = sheetFormulaValues?.grandTotals?.[mode];
+      const total = sheetFormulaValuesAvailable ? sheetFormulaValues?.grandTotals?.[mode] : undefined;
       return { totalIn: total?.totalIn ?? null, totalOut: total?.totalOut ?? null, net: total?.net ?? null };
     };
     const scrollBoard = (direction: -1 | 1) => {
@@ -2383,6 +2384,11 @@ export function CashflowProjectSheet({
               ) : null}
             </div>
           </div>
+          {!sheetFormulaValuesAvailable ? (
+            <div role="alert" className="mx-4 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+              최신 시트 수식값과 반영된 데이터의 revision이 일치하지 않아, 합계·잔액은 표시하지 않습니다. 시트 값을 다시 가져온 뒤 반영해 주세요.
+            </div>
+          ) : null}
           <div className="relative bg-slate-100 px-4 pb-4">
             <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
               <ChevronLeft className="h-4 w-4" />
@@ -2430,6 +2436,13 @@ export function CashflowProjectSheet({
     }
     if (monthCloseLoading) {
       return <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">BFF 차이값을 불러오는 중...</div>;
+    }
+    if (sheetFormulaValues?.status === 'UNAVAILABLE') {
+      return (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-5 text-[12px] leading-5 text-red-700">
+          최신 시트 수식값과 반영된 데이터의 revision이 일치하지 않아 Projection–Actual 차이를 표시하지 않습니다. 시트 값을 다시 가져온 뒤 반영해 주세요.
+        </div>
+      );
     }
     if (monthCloseError || !monthCloseResult?.dashboard?.canonical?.range) {
       return (

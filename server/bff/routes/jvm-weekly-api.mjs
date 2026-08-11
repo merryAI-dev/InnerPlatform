@@ -451,6 +451,27 @@ function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
+function amendedSheetFormulaSnapshot(mirror, amendmentEvidence) {
+  const sourceRevision = readOptionalText(amendmentEvidence?.sourceRevision);
+  const targetRevision = readOptionalText(amendmentEvidence?.resultingTargetRevision);
+  const sheetFacts = objectValue(mirror?.sheetFacts);
+  const available = Boolean(
+    sheetFacts
+    && sourceRevision
+    && targetRevision
+    && readOptionalText(mirror?.sourceRevision) === sourceRevision
+    && readOptionalText(mirror?.appliedSourceRevision) === sourceRevision
+    && readOptionalText(mirror?.appliedTargetRevision) === targetRevision
+  );
+  return {
+    status: available ? 'AVAILABLE' : 'UNAVAILABLE',
+    reason: available ? null : 'AMENDMENT_SHEET_FORMULA_SNAPSHOT_UNAVAILABLE',
+    sourceRevision: sourceRevision || null,
+    targetRevision: targetRevision || null,
+    sheetFacts: available ? sheetFacts : null,
+  };
+}
+
 function readWeeklyExpenseEditSession(req) {
   const sessionId = readOptionalText(req.header('x-edit-session-id'));
   const leaseId = readOptionalText(req.header('x-edit-lease-id'));
@@ -1812,7 +1833,13 @@ async function composeCashflowMonthDashboard({
   const tenantId = readOptionalText(req.context?.tenantId);
   const businessDate = readOptionalText(close?.evaluatedBusinessDate);
   const [monthCloseStatuses, projectDocument, mirror] = closedSnapshot
-    ? await Promise.all([readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate }), Promise.resolve(null), Promise.resolve(null)])
+    ? await Promise.all([
+      readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate }),
+      Promise.resolve(null),
+      amendedCurrent
+        ? readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`)
+        : Promise.resolve(null),
+    ])
     : await Promise.all([
       readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate }),
       readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
@@ -1884,19 +1911,29 @@ async function composeCashflowMonthDashboard({
     }, comparisonBoundary).months[0] || null
     : null;
   const sourceRows = sourceDepositRows(sheetFacts, yearMonth);
-  const sheetCalculationChecks = amendedCurrent
-    ? [
-      ...(Array.isArray(sheetFacts?.weeklyCalculationChecks) ? sheetFacts.weeklyCalculationChecks : [])
-        .filter((check) => readOptionalText(check?.yearMonth) !== yearMonth),
-      ...(Array.isArray(amendmentEvidence.calculationChecks) ? amendmentEvidence.calculationChecks : []),
-    ]
-    : (Array.isArray(sheetFacts?.weeklyCalculationChecks) ? sheetFacts.weeklyCalculationChecks : []);
+  const formulaSnapshot = amendedCurrent
+    ? amendedSheetFormulaSnapshot(mirror, amendmentEvidence)
+    : {
+      status: 'AVAILABLE',
+      reason: null,
+      sourceRevision: readOptionalText(closedSnapshot?.sourceFingerprint) || readOptionalText(mirror?.sourceRevision) || null,
+      targetRevision: readOptionalText(closedSnapshot?.targetRevision) || readOptionalText(mirror?.appliedTargetRevision) || null,
+      sheetFacts,
+    };
+  const formulaSheetFacts = formulaSnapshot.sheetFacts;
+  const sheetCalculationChecks = Array.isArray(formulaSheetFacts?.weeklyCalculationChecks)
+    ? formulaSheetFacts.weeklyCalculationChecks
+    : [];
   const sheetFormulaValues = {
+    status: formulaSnapshot.status,
+    reason: formulaSnapshot.reason,
+    sourceRevision: formulaSnapshot.sourceRevision,
+    targetRevision: formulaSnapshot.targetRevision,
     weekly: sheetCalculationChecks.filter((check) => Number(String(check?.yearMonth || '').slice(0, 4)) === selectedYear),
-    annual: Array.isArray(sheetFacts?.annualCashflowTotals) ? sheetFacts.annualCashflowTotals : [],
-    grandTotals: objectValue(sheetFacts?.cashflowGrandTotals) || {},
-    projectionActualDifferences: (Array.isArray(sheetFacts?.projectionActualDifferences)
-      ? sheetFacts.projectionActualDifferences
+    annual: Array.isArray(formulaSheetFacts?.annualCashflowTotals) ? formulaSheetFacts.annualCashflowTotals : [],
+    grandTotals: objectValue(formulaSheetFacts?.cashflowGrandTotals) || {},
+    projectionActualDifferences: (Array.isArray(formulaSheetFacts?.projectionActualDifferences)
+      ? formulaSheetFacts.projectionActualDifferences
       : []).filter((value) => Number(String(value?.yearMonth || '').slice(0, 4)) === selectedYear),
   };
   const authoritativeOpeningBalances = openingBalanceCandidate

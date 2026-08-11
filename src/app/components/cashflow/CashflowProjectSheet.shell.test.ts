@@ -147,6 +147,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('renders Sheet formula results instead of recomputing them from canonical cells', () => {
     expect(source).toContain('sheetFormulaValues?.weekly.find');
     expect(source).toContain('sheetFormulaValues?.grandTotals?.[mode]');
+    expect(source).toContain("sheetFormulaValues?.status === 'UNAVAILABLE'");
+    expect(source).toContain('합계·잔액은 표시하지 않습니다.');
     expect(source).not.toContain('function getCanonicalDerivedAmount');
   });
 
