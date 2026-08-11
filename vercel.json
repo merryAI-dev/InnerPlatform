@@ -191,6 +191,14 @@
       "destination": "/api/bff?__path=/api/v1/:path*"
     },
     {
+      "source": "/mcp",
+      "destination": "/api/bff?__path=/mcp"
+    },
+    {
+      "source": "/.well-known/:path*",
+      "destination": "/api/bff?__path=/.well-known/:path*"
+    },
+    {
       "source": "/api/internal/workers/work-queue/run",
       "destination": "/api/bff?__path=/api/internal/workers/work-queue/run"
     },
