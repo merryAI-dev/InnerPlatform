@@ -52,6 +52,9 @@ import {
 export { cashflowCumulativeCloseCycle };
 import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
 import { cashflowMonthRequestCovers, isCashflowMonthLockedStatus } from '../cashflow-month-state.mjs';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import * as z from 'zod/v4';
 
 export { cashflowMonthCloseDeadline };
 
@@ -2291,6 +2294,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   performanceLogger,
   performanceNow,
   cashflowSlackService,
+  mcpOAuthService,
   now = () => new Date(),
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
@@ -2906,7 +2910,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json(result);
   }));
 
-  app.post('/api/v1/cashflow/weekly-overview', asyncHandler(async (req, res) => {
+  async function readWeeklyOverview(req) {
     const trace = createCashflowPerformanceTrace({
       requestId: req.context?.requestId || req.requestId,
       operation: 'cashflow.weekly_overview',
@@ -2945,7 +2949,48 @@ export function mountJvmWeeklyApiRoutes(app, {
       itemCount: Array.isArray(result?.items) ? result.items.length : 0,
       issueCount: Array.isArray(result?.errors) ? result.errors.length : 0,
     });
-    res.status(200).json(result);
+    return result;
+  }
+
+  app.post('/api/v1/cashflow/weekly-overview', asyncHandler(async (req, res) => {
+    res.status(200).json(await readWeeklyOverview(req));
+  }));
+
+  app.post('/api/v1/mcp/cashflow/weekly-overview', asyncHandler(async (req, res) => {
+    res.status(200).json(await readWeeklyOverview(req));
+  }));
+
+  function mcpServerFor(context) {
+    const server = new McpServer({ name: 'myscube', version: '0.2.0' });
+    server.registerTool('cashflow_status', {
+      title: 'MYSCube 정산 현황 조회',
+      description: '권한이 있는 프로젝트의 월·주 정산 상태와 P/A 차액을 조회합니다. 읽기 전용입니다.',
+      inputSchema: { yearMonth: z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/), projectIds: z.array(z.string()).min(1).max(100) },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async ({ yearMonth, projectIds }) => {
+      try {
+        const overview = await readWeeklyOverview({ context, body: { yearMonth, projectIds } });
+        return { content: [{ type: 'text', text: JSON.stringify(overview) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: error instanceof Error ? error.message : '현금흐름 조회에 실패했습니다.' }], isError: true };
+      }
+    });
+    return server;
+  }
+
+  app.post('/mcp', asyncHandler(async (req, res) => {
+    if (!mcpOAuthService) throw createHttpError(503, 'MCP OAuth가 설정되지 않았습니다.', 'mcp_oauth_unavailable');
+    let context;
+    try { context = await mcpOAuthService.resolveAccessToken(req.header('authorization')); }
+    catch (error) {
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${new URL('/.well-known/oauth-protected-resource', mcpOAuthService.resource).toString()}"`);
+      throw error;
+    }
+    const server = mcpServerFor(context);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    res.once('close', () => { void transport.close(); void server.close(); });
   }));
 
   app.post('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {

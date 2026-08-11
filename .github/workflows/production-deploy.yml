@@ -211,6 +211,8 @@ jobs:
             --env BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER}" \
             --env BFF_MAINTENANCE_READ_ONLY="${BFF_MAINTENANCE_READ_ONLY}" \
             --env BFF_ALLOWED_ORIGINS="${BFF_ALLOWED_ORIGINS}" \
+            --env MYSCUBE_MCP_OAUTH_ISSUER="https://myscube.myscguard.app" \
+            --env MYSCUBE_MCP_PUBLIC_ORIGIN="https://myscube.myscguard.app" \
             --env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env BFF_LIVE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
@@ -264,6 +266,16 @@ jobs:
             || health.body.authMode !== 'firebase_required'
             || health.body.firestoreEmulator !== false) {
             throw new Error(`unsafe production health: ${health.response.status} ${JSON.stringify(health.body)}`);
+          }
+
+          const metadata = await request('/.well-known/oauth-protected-resource');
+          if (metadata.response.status !== 200 || metadata.body.resource !== 'https://myscube.myscguard.app/mcp') {
+            throw new Error(`MCP OAuth discovery is unavailable: ${metadata.response.status} ${JSON.stringify(metadata.body)}`);
+          }
+
+          const mcp = await request('/mcp', { method: 'POST', body: '{}' });
+          if (mcp.response.status !== 401 || !String(mcp.response.headers.get('www-authenticate') || '').includes('resource_metadata=')) {
+            throw new Error(`MCP bearer challenge is unavailable: ${mcp.response.status}`);
           }
 
           const mutation = await request('/api/v1/__maintenance_probe__', { method: 'POST' });

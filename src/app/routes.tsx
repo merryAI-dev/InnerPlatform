@@ -38,6 +38,7 @@ function lazyRoute<TModule extends Record<string, unknown>>(
 
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazyRoute(() => import('./components/auth/LoginPage'), 'LoginPage');
+const McpAuthorizePage = lazyRoute(() => import('./components/auth/McpAuthorizePage'), 'McpAuthorizePage');
 const WorkspaceSelectPage = lazyRoute(() => import('./components/auth/WorkspaceSelectPage'), 'WorkspaceSelectPage');
 const PwaInstallPage = lazyRoute(() => import('./components/pwa/PwaInstallPage'), 'PwaInstallPage');
 const MobileEntryPage = lazyRoute(() => import('./components/pwa/MobileEntryPage'), 'MobileEntryPage');
@@ -122,6 +123,7 @@ function MobileAwareAdminHome() {
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
+  { path: '/mcp/authorize', element: <S C={McpAuthorizePage} /> },
   { path: '/workspace-select', element: <S C={WorkspaceSelectPage} /> },
   { path: '/install', element: <S C={PwaInstallPage} /> },
   { path: '/install/ios', element: <S C={PwaInstallPage} /> },
