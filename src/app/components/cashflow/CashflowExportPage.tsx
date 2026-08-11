@@ -225,7 +225,7 @@ export function CashflowExportPage() {
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
-        title="현금흐름 내보내기"
+        title="경영기획실 통합 관리"
         description="프로젝트와 기간을 선택해 서버 기준 현금흐름 엑셀을 다운로드합니다."
         badge={scope === 'selected' ? '선택 사업 추출' : '전체 추출'}
         badgeVariant="outline"
