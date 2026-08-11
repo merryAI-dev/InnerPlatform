@@ -99,7 +99,7 @@ export function resolveCashflowComparisonScope<T extends { yearMonth: string; we
 }
 
 export function isCashflowMonthCloseRequestLocked(status?: string): boolean {
-  return status === 'PENDING' || status === 'APPROVING' || status === 'UNCERTAIN';
+  return ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status || '');
 }
 
 export function isCashflowWeekLockedByRange(

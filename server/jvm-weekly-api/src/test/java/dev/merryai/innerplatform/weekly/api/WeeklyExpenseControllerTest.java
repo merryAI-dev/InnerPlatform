@@ -2038,8 +2038,7 @@ class WeeklyExpenseControllerTest {
                     .header("x-edit-finalize", "true")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("cashflow_month_close_backend_unavailable"));
+                .andExpect(status().isGone());
         }
 
     }
@@ -2105,8 +2104,7 @@ class WeeklyExpenseControllerTest {
                 )
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(validDecision))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
+                .andExpect(status().isGone());
         }
     }
 

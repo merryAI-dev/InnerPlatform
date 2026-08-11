@@ -175,6 +175,18 @@ export function resolveProjectRegistrationSlackConfig(options = {}, env = proces
   return { webhookUrl, botToken, channelId };
 }
 
+function resolveCashflowSlackConfig(options = {}, env = process.env) {
+  return {
+    botToken: readOptionalText(options.cashflowSlackBotToken)
+      || readOptionalText(env.CASHFLOW_SLACK_BOT_TOKEN)
+      || readOptionalText(env.SLACK_ALERT_BOT_TOKEN)
+      || undefined,
+    channelId: readOptionalText(options.cashflowSlackChannelId)
+      || readOptionalText(env.CASHFLOW_SLACK_CHANNEL_ID)
+      || 'C0BQ6980HR6',
+  };
+}
+
 function truncateText(value, maxLength = 500) {
   const text = readOptionalText(value);
   if (!text) return '';
@@ -789,6 +801,8 @@ export function createBffApp(options = {}) {
   const slackAlertService = options.slackAlertService || createSlackAlertService();
   const projectRegistrationSlackService = options.projectRegistrationSlackService
     || createSlackAlertService(resolveProjectRegistrationSlackConfig(options));
+  const cashflowSlackService = options.cashflowSlackService
+    || createSlackAlertService(resolveCashflowSlackConfig(options));
   const projectRegistrationOutboxHandler = options.projectRegistrationOutboxHandler
     || createProjectRegistrationSubmittedOutboxHandler({
       db,
@@ -1567,6 +1581,7 @@ export function createBffApp(options = {}) {
     jvmWeeklyApiIdTokenAudience: options.jvmWeeklyApiIdTokenAudience,
     jvmWeeklyAuthMode: options.jvmWeeklyAuthMode,
     jvmWeeklyWorkspaceEmailDomain: options.jvmWeeklyWorkspaceEmailDomain,
+    cashflowSlackService,
   });
   mountAxrMonthCloseQaRoutes(app, { db });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });

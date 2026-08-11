@@ -181,7 +181,7 @@ function weeklySettlementSurface(status?: string): string {
 // 지난 달은 "닫혔나"가, 이번 달은 "이번 주 뭘 해야 하나"가 유일하게 중요한 질문이다.
 // 현재 달은 아직 결산할 수 없으므로(대상월이 끝나야 결산 가능) 주간 정산 상태를 그대로 보여준다.
 function cashflowWeekSurface(monthCloseStatus?: string, weeklyStatus?: string, closeOverdue?: boolean): string {
-  if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';
+  if (['CLOSED', 'PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseStatus || '')) return 'bg-slate-200';
   if (closeOverdue) return 'bg-red-100';
   return weeklySettlementSurface(weeklyStatus);
 }
@@ -475,7 +475,6 @@ export function CashflowProjectSheet({
   const monthCloseSectionErrors = monthCloseResult?.sectionErrors || [];
   const deadlineSummaryUnavailable = monthCloseSectionErrors.some((entry) => entry.section === 'deadlineSummary')
     || (Boolean(monthCloseResult?.dashboard) && monthCloseResult?.dashboard?.deadlineSummary == null);
-  // 조직장이 검토를 시작하면(APPROVING) JVM 확정이 이미 나갔을 수 있어 회수할 수 없다.
   const canWithdrawMonthCloseRequest = Boolean(
     monthCloseRequest
     && monthCloseRequest.status === 'PENDING'
@@ -1366,7 +1365,7 @@ export function CashflowProjectSheet({
 
   const handleMonthReopenAction = useCallback(async (): Promise<void> => {
     const reason = reopenReason.trim();
-    if (!reopenAction || !monthCloseResult || !reason) {
+    if (!reopenAction || !monthCloseRequest || !reason) {
       toast.error('사유를 입력해 주세요.');
       return;
     }
@@ -1383,13 +1382,18 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${yearMonth}:${monthCloseResult.revision}`;
+      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${monthCloseRequest.requestId}:${monthCloseRequest.revision}`;
       const result = reopenAction === 'request'
         ? await requestCashflowMonthReopenViaBff({
             tenantId: orgId,
             actor,
             projectId,
-            payload: { yearMonth, expectedRevision: monthCloseResult.revision, reason },
+            payload: {
+              requestId: monthCloseRequest.requestId,
+              yearMonth: monthCloseRequest.yearMonth,
+              expectedRevision: monthCloseRequest.revision,
+              reason,
+            },
             idempotencyKey,
           })
         : await decideCashflowMonthReopenViaBff({
@@ -1397,14 +1401,15 @@ export function CashflowProjectSheet({
             actor,
             projectId,
             payload: {
-              yearMonth,
-              expectedRevision: monthCloseResult.revision,
+              requestId: monthCloseRequest.requestId,
+              yearMonth: monthCloseRequest.yearMonth,
+              expectedRevision: monthCloseRequest.revision,
               decision: reopenAction === 'approve' ? 'APPROVE' : 'REJECT',
               reason,
             },
             idempotencyKey,
           });
-      setMonthCloseResult(result);
+      setMonthCloseRequest(result.request);
       setReopenAction(null);
       setReopenReason('');
       toast.success(reopenAction === 'request'
@@ -1414,11 +1419,10 @@ export function CashflowProjectSheet({
           : '재오픈을 반려했습니다.');
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, '재오픈 처리를 완료하지 못했습니다.'));
-      await loadCashflowMonthClose();
     } finally {
       setMonthCloseBusy(false);
     }
-  }, [canRequestMonthReopen, canReviewReopen, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
+  }, [canRequestMonthReopen, canReviewReopen, monthCloseRequest, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
   const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
     if (!cashflowSheetConfig?.value) {
@@ -2112,10 +2116,10 @@ export function CashflowProjectSheet({
     if (!monthCloseStatusByMonth.has(yearMonth) && monthCloseResult?.status) {
       monthCloseStatusByMonth.set(yearMonth, monthCloseResult.status);
     }
-    if (monthCloseRequest?.lockRange && ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest.status)) {
+    if (monthCloseRequest?.lockRange) {
       visibleWeeks.forEach((week) => {
         if (isCashflowWeekLockedByRange(monthCloseRequest.lockRange, week.yearMonth, week.weekNo)) {
-          monthCloseStatusByMonth.set(week.yearMonth, monthCloseRequest.status === 'APPROVED' ? 'CLOSED' : monthCloseRequest.status);
+          monthCloseStatusByMonth.set(week.yearMonth, monthCloseRequest.status);
         }
       });
     }
@@ -2743,7 +2747,7 @@ export function CashflowProjectSheet({
                       value={selectedExecutiveApproverId}
                       onChange={setSelectedExecutiveApproverId}
                       placeholder="조직장 선택"
-                      disabled={executiveApproverBusy || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                      disabled={executiveApproverBusy || ['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '')}
                     />
                   </div>
                   <Button
@@ -2751,7 +2755,7 @@ export function CashflowProjectSheet({
                     size="sm"
                     variant="outline"
                     className="h-7 shrink-0 border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
-                    disabled={executiveApproverBusy || !selectedExecutiveApproverId || selectedExecutiveApproverId === savedExecutiveApproverId || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                    disabled={executiveApproverBusy || !selectedExecutiveApproverId || selectedExecutiveApproverId === savedExecutiveApproverId || ['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '')}
                     onClick={() => void handleSaveExecutiveApprover()}
                   >
                     {executiveApproverBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
@@ -2852,8 +2856,10 @@ export function CashflowProjectSheet({
                       <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
                     </div>
                     <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
-                      {monthCloseRequest?.status === 'PENDING' || monthCloseRequest?.status === 'APPROVING' || monthCloseRequest?.status === 'UNCERTAIN'
-                        ? monthCloseRequest.status === 'UNCERTAIN' ? '서버 처리 결과를 다시 확인하고 있습니다.' : '지정 조직장의 검토를 기다리고 있습니다.'
+                      {monthCloseRequest?.status === 'PENDING'
+                        ? '지정 조직장의 검토를 기다리고 있습니다.'
+                        : monthCloseRequest?.status === 'REOPEN_REQUESTED'
+                          ? '재오픈 승인 대기 중입니다.'
                         : monthCloseRequest?.status === 'REJECTED'
                           ? `반려됨${monthCloseRequest.decisionReason ? ` · ${monthCloseRequest.decisionReason}` : ''}`
                         : monthCloseRequest?.status === 'WITHDRAWN'
@@ -2866,7 +2872,7 @@ export function CashflowProjectSheet({
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {canFinalizeMonth && !['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest?.status || '') && (monthCloseError || (monthCloseResult?.status !== 'CLOSED' && monthCloseResult?.status !== 'REOPEN_REQUESTED')) ? (
+                    {canFinalizeMonth && !['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '') && (monthCloseError || (monthCloseResult?.status !== 'CLOSED' && monthCloseResult?.status !== 'REOPEN_REQUESTED')) ? (
                       <Button
                         type="button"
                         size="sm"
@@ -2890,12 +2896,12 @@ export function CashflowProjectSheet({
                         결재 요청 회수
                       </Button>
                     ) : null}
-                    {!monthCloseError && canRequestMonthReopen && monthCloseResult?.status === 'CLOSED' ? (
+                    {!monthCloseError && canRequestMonthReopen && monthCloseRequest?.status === 'APPROVED' ? (
                       <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-[#17324D]" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                         재오픈 요청
                       </Button>
                     ) : null}
-                    {!monthCloseError && canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED' ? (
+                    {!monthCloseError && canReviewReopen && monthCloseRequest?.status === 'REOPEN_REQUESTED' ? (
                       <>
                         <Button type="button" size="sm" className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
                         <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
@@ -3155,31 +3161,25 @@ export function CashflowProjectSheet({
     );
   }
 
-  const monthCloseStatusLabel = monthCloseError
-    ? '상태 재확인 필요'
-    : monthCloseResult?.status === 'CLOSED'
-    ? '월 결산 완료'
-    : monthCloseResult?.status === 'REOPEN_REQUESTED'
-      ? '재오픈 승인 대기'
-      : monthCloseRequest?.status === 'APPROVING'
-        ? '승인 처리 중'
-        : monthCloseRequest?.status === 'UNCERTAIN'
-          ? '서버 결과 확인 필요'
-        : monthCloseRequest?.status === 'PENDING'
-          ? '조직장 승인 대기'
+  const monthCloseStatusLabel = ['PENDING', 'APPROVING', 'UNCERTAIN'].includes(monthCloseRequest?.status || '')
+    ? '조직장 승인 대기'
+    : monthCloseRequest?.status === 'APPROVED'
+      ? '월 결산 완료'
+      : monthCloseRequest?.status === 'REOPEN_REQUESTED'
+        ? '재오픈 승인 대기'
+        : monthCloseRequest?.status === 'REOPENED'
+          ? '재결산 필요'
           : monthCloseRequest?.status === 'REJECTED'
             ? '월 결산 반려'
-            : monthCloseRequest?.status === 'REOPENED'
-              ? '재결산 필요'
-      : '결산 전';
-  const monthCloseStatusClass = monthCloseError
+            : monthCloseError
+              ? '상태 재확인 필요'
+              : monthCloseResult?.status === 'CLOSED'
+                ? '월 결산 완료'
+                : '결산 전';
+  const monthCloseStatusClass = monthCloseRequest?.status === 'REJECTED' || (!monthCloseRequest && monthCloseError)
     ? 'border border-red-200 bg-red-50 text-red-700'
-    : monthCloseResult?.status === 'CLOSED'
-    ? 'border border-border bg-secondary text-secondary-foreground'
-    : monthCloseResult?.status === 'REOPEN_REQUESTED'
-      ? 'border border-border bg-accent text-accent-foreground'
-      : monthCloseRequest?.status === 'REJECTED'
-        ? 'border border-red-200 bg-red-50 text-red-700'
+    : monthCloseRequest?.status === 'APPROVED' || (!monthCloseRequest && monthCloseResult?.status === 'CLOSED')
+      ? 'border border-border bg-secondary text-secondary-foreground'
       : 'border border-border bg-accent text-accent-foreground';
   const sheetDashboardMetadata = cashflowEvidenceScope.sheetMetadata;
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;

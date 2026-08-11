@@ -78,8 +78,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('locks the pending month immediately and ignores stale request reads', () => {
     expect(source).toContain('isCashflowMonthCloseRequestLocked(monthCloseRequest?.status)');
     expect(source).toContain('isCashflowWeekLockedByRange(monthCloseRequest.lockRange');
-    expect(source).toContain("['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest.status)");
-    expect(source).toContain("if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';");
+    expect(source).toContain("['PENDING', 'APPROVING', 'UNCERTAIN'].includes(monthCloseRequest?.status || '')");
+    expect(source).toContain("['CLOSED', 'PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseStatus || '')");
     expect(source).toContain('disabled={monthCloseRequestLocked}');
     expect(source).toContain('monthCloseCurrentRequestGenerationRef');
     expect(source).toContain('shouldApplyCashflowMonthCloseRequestResult({');
@@ -223,7 +223,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('colSpan={month.weeks.length}');
     expect(source).toContain("month.yearMonth.replace('-', '년 ')}월");
     expect(source).toContain('LockKeyhole');
-    expect(source).toContain("if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';");
+    expect(source).toContain("['CLOSED', 'PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseStatus || '')");
     expect(source).toContain('cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus, input.closeOverdue)');
     // 지난 달은 월 결산 상태가, 이번 달은 주간 정산 상태가 앞선다.
     expect(source).toContain("if (closeOverdue) return 'bg-red-100';");
@@ -529,8 +529,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('prioritizes local sheet preflight over a failed server refresh and never shows stale reopen actions', () => {
     const preparation = source.slice(source.indexOf('const monthClosePreparation'), source.indexOf('const handleOpenMonthCloseReview'));
     expect(preparation.indexOf('if (monthCloseCellsState.error)')).toBeLessThan(preparation.indexOf('if (monthCloseError)'));
-    expect(source).toContain("!monthCloseError && canRequestMonthReopen && monthCloseResult?.status === 'CLOSED'");
-    expect(source).toContain("!monthCloseError && canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED'");
+    expect(source).toContain("!monthCloseError && canRequestMonthReopen && monthCloseRequest?.status === 'APPROVED'");
+    expect(source).toContain("!monthCloseError && canReviewReopen && monthCloseRequest?.status === 'REOPEN_REQUESTED'");
   });
 
   it('keeps Projection read-only and accepts values only through sheet import', () => {
