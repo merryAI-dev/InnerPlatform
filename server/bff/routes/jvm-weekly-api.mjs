@@ -2302,9 +2302,43 @@ export function mountJvmWeeklyApiRoutes(app, {
     ? Math.min(Number(cashflowMonthCloseRouteTimeoutMs), CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS)
     : CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS;
 
-  function notifyCashflowSlack(text) {
+  function notifyCashflowSlack(payload) {
     if (!cashflowSlackService?.enabled || typeof cashflowSlackService.notifyMessage !== 'function') return;
-    void Promise.resolve().then(() => cashflowSlackService.notifyMessage({ text })).catch(() => {});
+    const message = typeof payload === 'string' ? { text: payload } : payload;
+    void Promise.resolve().then(() => cashflowSlackService.notifyMessage(message)).catch(() => {});
+  }
+
+  function notifyCashflowMonthCloseSlack({ tenantId, record, event }) {
+    void Promise.resolve().then(async () => {
+      const [projectSnapshot, parties] = await Promise.all([
+        db.doc(`orgs/${tenantId}/projects/${record.projectId}`).get(),
+        readCashflowRequestPartyNames({ db, tenantId, record }),
+      ]);
+      const project = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
+      const projectName = readOptionalText(project.name)
+        || readOptionalText(project.officialContractName)
+        || readOptionalText(project.projectCode)
+        || record.projectId;
+      const person = event === 'APPROVED' ? parties.reviewedByName : parties.requestedByName;
+      const personLabel = event === 'APPROVED' ? '승인자' : '요청자';
+      const title = event === 'APPROVED' ? '월 결산 승인 완료' : '월 결산 요청';
+      const actionLabel = event === 'APPROVED' ? '결재 결과 보기' : '결재 확인하기';
+      const url = `https://myscube.myscguard.app/portal/cashflow/${encodeURIComponent(record.projectId)}?month=${encodeURIComponent(record.yearMonth)}`;
+      const lines = [
+        `*[MYSCube] ${title}*`,
+        `프로젝트명: ${projectName}`,
+        `대상 월: ${record.yearMonth}`,
+        `${personLabel}: ${person || record[event === 'APPROVED' ? 'reviewedByUid' : 'requestedByUid']}`,
+        event === 'APPROVED' ? '월 잠금: 활성화' : '조직장 승인 대기',
+      ];
+      notifyCashflowSlack({
+        text: `[MYSCube] ${title}: ${projectName} · ${record.yearMonth}`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } },
+          { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: actionLabel }, url, action_id: 'cashflow_month_close_open' }] },
+        ],
+      });
+    }).catch(() => {});
   }
 
   async function readWeeklyCompliance(context, projectId, { limit = 100, cursor = '' } = {}) {
@@ -3888,7 +3922,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       const stored = await persistCumulativeMonthCloseRequest({
         req, prepared, approverUid, expectedApproverUid, expectedProjectVersion,
       });
-      notifyCashflowSlack(`*[MYSCube] 월 결산 요청*\n프로젝트: ${prepared.rawProjectId}\n대상 월: ${stored.yearMonth}\n요청자: ${req.context.actorId}\n조직장 승인 대기`);
+      notifyCashflowMonthCloseSlack({ tenantId: req.context.tenantId, record: stored, event: 'REQUESTED' });
       res.status(202).json(cashflowMonthCloseRequestView(stored));
       return;
     }
@@ -4045,7 +4079,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         },
       );
     });
-    notifyCashflowSlack(`*[MYSCube] 월 결산 요청*\n프로젝트: ${prepared.rawProjectId}\n대상 월: ${storedRecord.yearMonth}\n요청자: ${req.context.actorId}\n조직장 승인 대기`);
+    notifyCashflowMonthCloseSlack({ tenantId: req.context.tenantId, record: storedRecord, event: 'REQUESTED' });
     res.status(202).json(cashflowMonthCloseRequestView(storedRecord));
   }));
 
@@ -4267,7 +4301,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       );
     });
     if (terminalStatus === 'APPROVED') {
-      notifyCashflowSlack(`*[MYSCube] 월 결산 승인 완료*\n프로젝트: ${projectId}\n대상 월: ${reviewed.yearMonth}\n승인자: ${req.context.actorId}\n월 잠금: 활성화`);
+      notifyCashflowMonthCloseSlack({ tenantId: req.context.tenantId, record: reviewed, event: 'APPROVED' });
     }
     res.status(200).json({ request: cashflowMonthCloseRequestView(reviewed) });
     return;

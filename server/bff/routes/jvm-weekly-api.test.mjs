@@ -4509,6 +4509,7 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('lets only the requester withdraw a PENDING cumulative close request, and never after review starts', async () => {
     const source = fullMonthCloseSource();
+    source.documents.get('orgs/tenant-a/projects/project-a').name = '테스트 사업';
     source.closeInput.yearMonth = '2026-08';
     const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     mirror.yearMonths = ['2026-08'];
@@ -4551,9 +4552,24 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'withdraw-create')
       .send(createPayload)
       .expect(202);
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(cashflowSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringContaining('월 결산 요청'),
+      text: '[MYSCube] 월 결산 요청: 테스트 사업 · 2026-08',
+      blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'section',
+          text: expect.objectContaining({ text: expect.stringContaining('요청자: Project Manager') }),
+        }),
+        expect.objectContaining({
+          type: 'actions',
+          elements: expect.arrayContaining([
+            expect.objectContaining({
+              text: { type: 'plain_text', text: '결재 확인하기' },
+              url: 'https://myscube.myscguard.app/portal/cashflow/project-a?month=2026-08',
+            }),
+          ]),
+        }),
+      ]),
     }));
     const settlementPath = 'orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08';
     expect(source.documents.get(settlementPath).periods.MONTH).toMatchObject({ status: 'PENDING_APPROVAL' });
