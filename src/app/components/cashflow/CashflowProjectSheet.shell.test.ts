@@ -300,6 +300,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('시트 연동하기');
     expect(source).not.toContain('최신값 다시 가져오기');
     expect(source).not.toContain('setInterval');
+    expect(source).not.toContain('MYSCube 시트와 다른 값이 없습니다.');
+    expect(source).not.toContain('시트 변경이 없어 기존 고정값을 그대로 사용합니다.');
   });
 
   it('probes sheet freshness on entry without a full read', () => {
