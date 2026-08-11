@@ -387,18 +387,23 @@ async function readActiveCashflowMember({ db, tenantId, actorId }) {
 }
 
 async function readCashflowRequestPartyNames({ db, tenantId, record }) {
-  const entries = await Promise.all([
-    ['requestedByName', record.requestedByUid],
-    ['approverName', record.approverUid],
-    ['reviewedByName', record.reviewedByUid],
-  ].map(async ([key, uid]) => {
+  const member = async (uid) => {
     const normalizedUid = readOptionalText(uid);
-    if (!normalizedUid || normalizedUid.includes('/')) return [key, ''];
+    if (!normalizedUid || normalizedUid.includes('/')) return {};
     const snapshot = await db.doc(`orgs/${tenantId}/members/${normalizedUid}`).get();
-    const member = snapshot.exists ? snapshot.data() || {} : {};
-    return [key, readOptionalText(member.status).toUpperCase() === 'ACTIVE' ? readOptionalText(member.name) : ''];
-  }));
-  return Object.fromEntries(entries);
+    const value = snapshot.exists ? snapshot.data() || {} : {};
+    return readOptionalText(value.status).toUpperCase() === 'ACTIVE' ? value : {};
+  };
+  const [requester, approver, reviewer] = await Promise.all([
+    member(record.requestedByUid), member(record.approverUid), member(record.reviewedByUid),
+  ]);
+  const slackUserId = readOptionalText(approver.slackUserId);
+  return {
+    requestedByName: readOptionalText(requester.name),
+    approverName: readOptionalText(approver.name),
+    approverSlackUserId: /^[UW][A-Z0-9]{8,}$/.test(slackUserId) ? slackUserId : '',
+    reviewedByName: readOptionalText(reviewer.name),
+  };
 }
 
 async function readCashflowMonthCloseRequest({ db, tenantId, projectId, yearMonth }) {
@@ -2323,13 +2328,17 @@ export function mountJvmWeeklyApiRoutes(app, {
       const personLabel = event === 'APPROVED' ? '승인자' : '요청자';
       const title = event === 'APPROVED' ? '월 결산 승인 완료' : '월 결산 요청';
       const actionLabel = event === 'APPROVED' ? '결재 결과 보기' : '결재 확인하기';
+      const approver = parties.approverSlackUserId
+        ? `<@${parties.approverSlackUserId}>`
+        : parties.approverName || '미지정';
       const url = 'https://myscube.myscguard.app/cashflow/weekly';
       const lines = [
         `*[MYSCube] ${title}*`,
         `프로젝트명: ${projectName}`,
         `대상 월: ${record.yearMonth}`,
-        `${personLabel}: ${person || record[event === 'APPROVED' ? 'reviewedByUid' : 'requestedByUid']}`,
-        event === 'APPROVED' ? '월 잠금: 활성화' : '조직장 승인 대기',
+        `${personLabel}: ${person || '미확인'}`,
+        `조직장: ${approver}`,
+        `상태: ${event === 'APPROVED' ? '승인 완료 · 월 잠금 활성화' : '조직장 승인 대기'}`,
       ];
       notifyCashflowSlack({
         text: `[MYSCube] ${title}: ${projectName} · ${record.yearMonth}`,
