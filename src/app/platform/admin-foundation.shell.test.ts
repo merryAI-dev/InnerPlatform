@@ -13,11 +13,13 @@ const routesSource = readFileSync(
   'utf8',
 );
 
-describe('admin monitoring foundation shell contract', () => {
-  it('renames the cashflow nav entry to monitoring language and exposes users nav', () => {
+describe('admin navigation shell contract', () => {
+  it('exposes the weekly history and management-planning entry paths', () => {
     expect(navConfigSource).not.toContain("label: '기능 검색'");
     expect(navConfigSource).toContain("to: '/dashboard'");
-    expect(navConfigSource).toContain("label: '캐시플로 모니터링'");
+    expect(navConfigSource).toContain("to: '/cashflow'");
+    expect(navConfigSource).toContain("label: '주간 입력 이력'");
+    expect(navConfigSource).toContain("to: '/cashflow/export'");
     expect(navConfigSource).toContain("label: '프로젝트 등록/승인'");
     expect(navConfigSource).toContain("to: '/management-planning/project-codes'");
     expect(navConfigSource).toContain("label: '프로젝트 코드 부여'");
@@ -39,13 +41,13 @@ describe('admin monitoring foundation shell contract', () => {
     expect(destinations).toEqual([...new Set(destinations)]);
   });
 
-  it('registers a dedicated cashflow export route under the admin shell', () => {
+  it('registers the management-planning route under the admin shell', () => {
     expect(routesSource).toContain("const FeatureSearchPage");
     expect(routesSource).toContain("function MobileAwareAdminHome()");
     expect(routesSource).toContain(": <S C={FeatureSearchPage} />;");
     expect(routesSource).toContain("{ index: true, element: <MobileAwareAdminHome /> }");
     expect(routesSource).toContain("{ path: 'dashboard', element: <S C={DashboardPage} /> }");
-    expect(routesSource).toContain("{ path: 'cashflow/export', element: <S C={CashflowExportPage} /> }");
+    expect(routesSource).toContain("{ path: 'cashflow/export', element: <S C={CashflowManagementPlanningPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> }");
     expect(routesSource).toContain("{ path: 'management-planning/project-codes', element: <S C={ProjectCodeIssuancePage} /> }");

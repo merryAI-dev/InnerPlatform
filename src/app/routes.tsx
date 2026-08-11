@@ -56,7 +56,7 @@ const LedgerDetailPage = lazyRoute(() => import('./components/ledgers/LedgerDeta
 const CashflowPage = lazyRoute(() => import('./components/cashflow/CashflowPage'), 'CashflowPage');
 const CashflowWeeklyPage = lazyRoute(() => import('./components/cashflow/CashflowWeeklyPage'), 'CashflowWeeklyPage');
 const CashflowAnalyticsPage = lazyRoute(() => import('./components/cashflow/CashflowAnalyticsPage'), 'CashflowAnalyticsPage');
-const CashflowExportPage = lazyRoute(() => import('./components/cashflow/CashflowExportPage'), 'CashflowExportPage');
+const CashflowManagementPlanningPage = lazyRoute(() => import('./components/cashflow/CashflowAnalyticsPage'), 'CashflowManagementPlanningPage');
 const ProjectCashflowSheetPage = lazyRoute(() => import('./components/cashflow/ProjectCashflowSheetPage'), 'ProjectCashflowSheetPage');
 const EvidenceQueuePage = lazyRoute(() => import('./components/evidence/EvidenceQueuePage'), 'EvidenceQueuePage');
 const AuditLogPage = lazyRoute(() => import('./components/audit/AuditLogPage'), 'AuditLogPage');
@@ -155,7 +155,7 @@ export const router = createBrowserRouter([
       { path: 'cashflow', element: <S C={CashflowPage} /> },
       { path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> },
       { path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> },
-      { path: 'cashflow/export', element: <S C={CashflowExportPage} /> },
+      { path: 'cashflow/export', element: <S C={CashflowManagementPlanningPage} /> },
       { path: 'cashflow/projects', element: <S C={CashflowPage} /> },
       { path: 'cashflow/projects/:projectId', element: <S C={ProjectCashflowSheetPage} /> },
       { path: 'evidence', element: <S C={EvidenceQueuePage} /> },

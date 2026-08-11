@@ -1,5 +1,5 @@
-import { CashflowMonitorPage } from './CashflowMonitorPage';
+import { CashflowWeeklyPage } from './CashflowWeeklyPage';
 
 export function CashflowPage() {
-  return <CashflowMonitorPage />;
+  return <CashflowWeeklyPage />;
 }
