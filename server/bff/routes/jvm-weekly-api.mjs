@@ -3888,6 +3888,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       const stored = await persistCumulativeMonthCloseRequest({
         req, prepared, approverUid, expectedApproverUid, expectedProjectVersion,
       });
+      notifyCashflowSlack(`*[MYSCube] 월 결산 요청*\n프로젝트: ${prepared.rawProjectId}\n대상 월: ${stored.yearMonth}\n요청자: ${req.context.actorId}\n조직장 승인 대기`);
       res.status(202).json(cashflowMonthCloseRequestView(stored));
       return;
     }
@@ -4044,6 +4045,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         },
       );
     });
+    notifyCashflowSlack(`*[MYSCube] 월 결산 요청*\n프로젝트: ${prepared.rawProjectId}\n대상 월: ${storedRecord.yearMonth}\n요청자: ${req.context.actorId}\n조직장 승인 대기`);
     res.status(202).json(cashflowMonthCloseRequestView(storedRecord));
   }));
 
