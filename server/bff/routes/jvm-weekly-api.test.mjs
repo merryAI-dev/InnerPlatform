@@ -4451,6 +4451,73 @@ describe('JVM weekly API BFF proxy', () => {
     )).toHaveLength(mutationCallsBeforeRetry);
   });
 
+  it('gives a resumed legacy review a new mutation deadline after reconciliation', async () => {
+    const source = fullMonthCloseSource();
+    let resume = false;
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (url.endsWith('/month-close') && init.method === 'POST') {
+        if (!resume) {
+          return {
+            ok: true, status: 200,
+            text: async () => JSON.stringify({
+              ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1, auditId: '',
+            }),
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return {
+          ok: true, status: 200,
+          text: async () => JSON.stringify({
+            ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1, auditId: 'audit-1',
+          }),
+        };
+      }
+      if (resume && url.includes('/dashboard-source')) {
+        await new Promise((resolve) => setTimeout(resolve, 95));
+      }
+      return {
+        ok: true, status: 200,
+        text: async () => JSON.stringify(url.includes('/dashboard-source')
+          ? monthDashboardSource({
+            ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+            reopenCount: 0, projectWarningCount: 0, snapshot: {},
+          })
+          : { projectId: 'project-a', projection: [], actual: [], readModel: { months: [] } }),
+      };
+    });
+    const requester = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1', actorRole: 'pm',
+    }, { env: runtimeEnv, db: source.db, cashflowMonthCloseRouteTimeoutMs: 100 }).app;
+    const read = await request(requester).get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06').expect(200);
+    const created = await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'resume-deadline-request')
+      .send({
+        yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(202);
+    const approver = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1', actorRole: 'finance',
+    }, { env: runtimeEnv, db: source.db, cashflowMonthCloseRouteTimeoutMs: 100 }).app;
+    const reviewPath = `/api/v1/cashflow/project-a/month-close/requests/${created.body.requestId}/review`;
+    await request(approver)
+      .post(reviewPath)
+      .set('idempotency-key', 'resume-deadline-review')
+      .send({ decision: 'APPROVE', expectedRevision: 0 })
+      .expect(503);
+
+    resume = true;
+    await request(approver)
+      .post(reviewPath)
+      .set('idempotency-key', 'resume-deadline-review')
+      .send({ decision: 'APPROVE', expectedRevision: 0 })
+      .expect(200)
+      .expect((response) => expect(response.body.request.status).toBe('APPROVED'));
+  });
+
   it('resumes an APPROVING request with the same JVM idempotency key after finalization fails', async () => {
     const source = fullMonthCloseSource();
     const appliedKeys = new Set();
