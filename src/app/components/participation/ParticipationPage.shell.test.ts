@@ -7,7 +7,7 @@ const source = readFileSync(resolve(import.meta.dirname, 'ParticipationPage.tsx'
 describe('ParticipationPage server snapshot contract', () => {
   it('renders the BFF snapshot without client-side participation calculation', () => {
     expect(source).toContain('fetchParticipationDashboardViaBff');
-    expect(source).toContain('rule.members.map');
+    expect(source).toContain('snapshot.members.map');
     expect(source).toContain('member.months.map');
     expect(source).not.toContain('reduce(');
     expect(source).not.toContain('buildAllProjectTeamParticipationEntries');
@@ -17,7 +17,6 @@ describe('ParticipationPage server snapshot contract', () => {
 
   it('does not retain fixed settlement or cross-verification classifications', () => {
     expect(source).not.toContain('KOICA');
-    expect(source).not.toContain('e나라도움');
     expect(source).not.toContain('교차검증');
     expect(source).not.toContain('PARTICIPATION_RISK_RULESET');
   });

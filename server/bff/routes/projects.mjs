@@ -35,7 +35,6 @@ import {
   projectExecutiveResubmitSchema,
   projectManagementPlanningReviewSchema,
 } from '../schemas.mjs';
-import { buildParticipationRule } from '../participation-dashboard.mjs';
 
 function trimSlackText(value, maxLength = 200) {
   const text = readOptionalText(value);
@@ -2394,12 +2393,6 @@ export async function syncProjectParticipationEntries({
   }
 
   const batch = db.batch();
-  const participationRule = buildParticipationRule(project);
-  batch.set(db.doc(`orgs/${tenantId}/participation_rules/${participationRule.id}`), {
-    ...participationRule,
-    tenantId,
-    updatedAt: now,
-  }, { merge: true });
   for (const [entryId, entry] of desiredEntries.entries()) {
     batch.set(partEntriesRef.doc(entryId), {
       ...entry,

@@ -50,15 +50,8 @@ export interface ParticipationDashboardMember {
 export interface ParticipationDashboardRule {
   id: string;
   alias: string;
-  settlementSystem: string;
-  contractTarget: string;
   projectIds: string[];
   projectCount: number;
-  isSaved: boolean;
-  members: ParticipationDashboardMember[];
-  warnings: Array<{ yearMonth: string; rate: number; memberId: string; memberName: string }>;
-  warningCount: number;
-  hasWarnings: boolean;
 }
 
 export interface ParticipationDashboardSnapshot {
@@ -67,9 +60,13 @@ export interface ParticipationDashboardSnapshot {
   availableYears: string[];
   selectedYear: string;
   months: Array<{ yearMonth: string; label: string }>;
-  rules: ParticipationDashboardRule[];
-  ruleCount: number;
-  hasRules: boolean;
+  selectedRule: ParticipationDashboardRule;
+  ruleOptions: ParticipationDashboardRule[];
+  members: ParticipationDashboardMember[];
+  warnings: Array<{ yearMonth: string; rate: number; memberId: string; memberName: string }>;
+  warningCount: number;
+  hasWarnings: boolean;
+  projects: Array<{ id: string; name: string; clientOrg: string }>;
 }
 
 export interface ProjectParticipationSnapshot {
@@ -1952,11 +1949,14 @@ export async function fetchParticipationDashboardViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   year?: string;
+  ruleId?: string;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationDashboardSnapshot> {
-  const query = /^\d{4}$/.test(params.year || '') ? `?year=${encodeURIComponent(params.year || '')}` : '';
+  const query = new URLSearchParams();
+  if (/^\d{4}$/.test(params.year || '')) query.set('year', params.year || '');
+  if (params.ruleId) query.set('ruleId', params.ruleId);
   const response = await resolveClient(params.client).get<ParticipationDashboardSnapshot>(
-    `/api/v1/participation-dashboard${query}`,
+    `/api/v1/participation-dashboard${query.size ? `?${query}` : ''}`,
     { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 10_000 },
   );
   return response.data;
@@ -1975,17 +1975,18 @@ export async function fetchProjectParticipationViaBff(params: {
   return response.data;
 }
 
-export async function saveParticipationRuleAliasViaBff(params: {
+export async function saveParticipationRuleViaBff(params: {
   tenantId: string;
   actor: ActorLike;
-  ruleId: string;
+  id?: string;
   alias: string;
+  projectIds: string[];
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'isSaved'>> {
-  const response = await resolveClient(params.client).post<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'isSaved'>>(
-    `/api/v1/participation-dashboard/rules/${encodeURIComponent(params.ruleId)}`,
-    { tenantId: params.tenantId, actor: toRequestActor(params.actor), body: { alias: params.alias }, idempotencyKey: params.idempotencyKey, retries: 0, timeoutMs: 10_000 },
+}): Promise<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'projectIds'>> {
+  const response = await resolveClient(params.client).post<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'projectIds'>>(
+    '/api/v1/participation-dashboard/rules',
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), body: { id: params.id, alias: params.alias, projectIds: params.projectIds }, idempotencyKey: params.idempotencyKey, retries: 0, timeoutMs: 10_000 },
   );
   return response.data;
 }
