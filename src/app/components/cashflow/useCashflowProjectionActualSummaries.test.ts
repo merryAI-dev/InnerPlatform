@@ -3,11 +3,11 @@ import { mergeCashflowProjectionActualSummaryBatch } from './useCashflowProjecti
 
 const summary = (projectId: string, amount = 18_371_453) => ({
   projectId,
+  source: 'SHEET_FORMULA' as const,
+  sourceRevision: 'source-revision',
   fromMonth: '2023-01',
   comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
-  projectionAmount: amount,
-  actualAmount: 0,
-  projectionActualDifferenceAmount: amount,
+  differenceAmount: amount,
   settlementDifferenceAmount: amount,
   settlementMatches: amount === 0,
   periods: [],
@@ -19,7 +19,7 @@ describe('mergeCashflowProjectionActualSummaryBatch', () => {
     const result = mergeCashflowProjectionActualSummaryBatch(
       { summaries: {}, errors: {} },
       ids,
-      { version: '1', items: ids.slice(0, 9).map((id) => summary(id)), errors: [{ projectId: 'p10', code: 'SUMMARY_UNAVAILABLE' }] },
+      { version: '2', items: ids.slice(0, 9).map((id) => summary(id)), errors: [{ projectId: 'p10', code: 'SUMMARY_UNAVAILABLE' }] },
     );
     expect(Object.keys(result.summaries)).toHaveLength(9);
     expect(result.errors).toMatchObject({ p1: false, p9: false, p10: true });
@@ -30,7 +30,7 @@ describe('mergeCashflowProjectionActualSummaryBatch', () => {
     const result = mergeCashflowProjectionActualSummaryBatch(
       { summaries: { p1: retained }, errors: { p1: false } },
       ['p1'],
-      { version: '1', items: [], errors: [{ projectId: 'p1', code: 'SUMMARY_UNAVAILABLE' }] },
+      { version: '2', items: [], errors: [{ projectId: 'p1', code: 'SUMMARY_UNAVAILABLE' }] },
     );
     expect(result.summaries.p1).toBe(retained);
     expect(result.errors.p1).toBe(true);
@@ -41,7 +41,7 @@ describe('mergeCashflowProjectionActualSummaryBatch', () => {
     const result = mergeCashflowProjectionActualSummaryBatch(
       { summaries: { p0: retained }, errors: {} },
       ['p1', 'p2'],
-      { version: '1', items: [summary('p1')], errors: [] },
+      { version: '2', items: [summary('p1')], errors: [] },
     );
     expect(result.summaries).toMatchObject({ p0: retained, p1: summary('p1') });
     expect(result.errors).toMatchObject({ p1: false, p2: true });
