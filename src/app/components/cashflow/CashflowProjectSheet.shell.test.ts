@@ -152,6 +152,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('function getCanonicalDerivedAmount');
   });
 
+  it('shows the compact loading ring on main cashflow actions without changing status colors', () => {
+    expect(source).toContain('sheetRefreshLoading ? <span aria-hidden="true"');
+    expect(source).toContain('executiveApproverBusy ? <span aria-hidden="true"');
+    expect(source).toContain('border-t-[#17324D] motion-safe:animate-spin');
+  });
+
   it('drops the inbox card but keeps the issue count badge', () => {
     expect(source).not.toContain("inbox.push({ id: 'all-clear'");
     expect(source).toContain('{opsSummary.status.count}건');

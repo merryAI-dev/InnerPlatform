@@ -2664,7 +2664,7 @@ export function CashflowProjectSheet({
                   type="button"
                   size="sm"
                   variant="outline"
-                  className={`h-7 shrink-0 rounded-md px-2.5 text-[12px] font-semibold ${
+                  className={`relative h-7 shrink-0 overflow-visible rounded-md px-2.5 text-[12px] font-semibold ${
                     sheetChangedSinceMirror
                       ? 'border-yellow-300 bg-yellow-50 text-yellow-900 hover:bg-yellow-100'
                       : 'border-slate-300 bg-white text-[#17324D] hover:bg-accent'
@@ -2672,6 +2672,7 @@ export function CashflowProjectSheet({
                   disabled={sheetRefreshLoading}
                   onClick={() => void handleRefreshAndApplySheetValues()}
                 >
+                  {sheetRefreshLoading ? <span aria-hidden="true" className="pointer-events-none absolute -inset-1 rounded-md border-2 border-transparent border-t-[#17324D] motion-safe:animate-spin" /> : null}
                   {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
                   {sheetChangedSinceMirror ? '시트 변경됨 · 가져와 덮어쓰기' : '시트 값 가져와 덮어쓰기'}
                 </Button>
@@ -2696,10 +2697,11 @@ export function CashflowProjectSheet({
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="h-7 shrink-0 border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
+                    className="relative h-7 shrink-0 overflow-visible border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
                     disabled={executiveApproverBusy || !selectedExecutiveApproverId || selectedExecutiveApproverId === savedExecutiveApproverId || ['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '')}
                     onClick={() => void handleSaveExecutiveApprover()}
                   >
+                    {executiveApproverBusy ? <span aria-hidden="true" className="pointer-events-none absolute -inset-1 rounded-md border-2 border-transparent border-t-[#17324D] motion-safe:animate-spin" /> : null}
                     {executiveApproverBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
                     저장
                   </Button>
