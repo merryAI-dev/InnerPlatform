@@ -34,18 +34,12 @@ function createWeek(input: {
 }
 
 describe('cashflow-export-surface', () => {
-  it('resolves the current week using finance month buckets', () => {
+  it('resolves the current week without deriving financial totals', () => {
     expect(resolveCurrentCashflowWeek('2026-04-09')).toMatchObject({
       yearMonth: '2026-04',
       weekNo: 2,
       weekStart: '2026-04-06',
       weekEnd: '2026-04-12',
-    });
-    expect(resolveCurrentCashflowWeek('2026-07-01')).toMatchObject({
-      yearMonth: '2026-07',
-      weekNo: 1,
-      weekStart: '2026-07-01',
-      weekEnd: '2026-07-05',
     });
   });
 
@@ -54,7 +48,7 @@ describe('cashflow-export-surface', () => {
     expect(resolveLatestThursdayCutoffIso('2026-07-30')).toBe('2026-07-30T00:00:00+09:00');
   });
 
-  it('builds export rows from canonical week updates and current-week projection/actual totals', () => {
+  it('builds export rows from update timestamps without deriving financial totals', () => {
     const rows = buildCashflowExportProjectRows({
       projects: [
         { id: 'p1', name: '프로젝트 1', managerName: '담당 A' },
@@ -82,67 +76,18 @@ describe('cashflow-export-surface', () => {
           actualTotals: { totalIn: 900, totalOut: 200, net: 700 },
         },
       ],
-      targetYearMonths: ['2026-03', '2026-04'],
       todayIso: '2026-04-09',
     });
 
     expect(rows[0]).toMatchObject({
       id: 'p1',
-      currentWeekNo: 2,
-      currentWeekLabel: '2주차',
       updated: true,
       latestUpdatedAt: '2026-04-09T01:00:00.000Z',
-      projectionActualMatches: true,
-      projectionActualInDifference: 0,
-      projectionActualOutDifference: 0,
-      projectionActualDifference: 0,
     });
     expect(rows[1]).toMatchObject({
       id: 'p2',
-      currentWeekNo: 2,
-      currentWeekLabel: '2주차',
       updated: false,
       latestUpdatedAt: '2026-04-01T01:00:00.000Z',
-      projectionActualMatches: false,
-      projectionActualInDifference: 100,
-      projectionActualOutDifference: 0,
-      projectionActualDifference: 100,
-    });
-  });
-
-  it('distinguishes missing Actual data and explains strict mismatches whose net difference is zero', () => {
-    const base = createWeek({
-      projectId: 'p1',
-      yearMonth: '2026-04',
-      weekNo: 2,
-      weekStart: '2026-04-06',
-      weekEnd: '2026-04-12',
-    });
-    const rows = buildCashflowExportProjectRows({
-      projects: [
-        { id: 'p1', name: 'Actual 미작성' },
-        { id: 'p2', name: '순액만 동일' },
-      ],
-      weeks: [
-        { ...base, actual: {} },
-        {
-          ...base,
-          id: 'p2-2026-04-w2',
-          projectId: 'p2',
-          projectionTotals: { totalIn: 1000, totalOut: 200, net: 800 },
-          actualTotals: { totalIn: 900, totalOut: 100, net: 800 },
-        },
-      ],
-      targetYearMonths: ['2026-04'],
-      todayIso: '2026-04-09',
-    });
-
-    expect(rows[0]).toMatchObject({ comparisonMissing: 'actual', projectionActualMatches: undefined });
-    expect(rows[1]).toMatchObject({
-      projectionActualMatches: false,
-      projectionActualInDifference: 100,
-      projectionActualOutDifference: 100,
-      projectionActualDifference: 0,
     });
   });
 });

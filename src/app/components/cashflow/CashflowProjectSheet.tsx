@@ -2390,10 +2390,10 @@ export function CashflowProjectSheet({
             </div>
           ) : null}
           <div className="relative bg-slate-100 px-4 pb-4">
-            <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
+            <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-8 w-8 -translate-y-1/2 border border-slate-200 bg-white/95 p-0 shadow-sm" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
+            <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-8 w-8 -translate-y-1/2 border border-slate-200 bg-white/95 p-0 shadow-sm" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
               <ChevronRight className="h-4 w-4" />
             </Button>
             {/* 스크롤 컨테이너는 하나여야 한다. sticky 는 가장 가까운 스크롤 조상에만 붙으므로

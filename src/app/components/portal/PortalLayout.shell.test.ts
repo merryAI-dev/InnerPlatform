@@ -43,6 +43,13 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain('if (!changed) return;');
   });
 
+  it('makes the header project picker searchable within the permitted project list', () => {
+    expect(portalLayoutSource).toContain('data-testid="portal-header-project-search"');
+    expect(portalLayoutSource).toContain('placeholder="프로젝트명 또는 ID 검색"');
+    expect(portalLayoutSource).toContain('matchesProjectSearch(project, projectSearch)');
+    expect(portalLayoutSource).toContain('switchProjectInPlace(project.id)');
+  });
+
   it('uses the shared LAB visibility policy for portal shell items', () => {
     expect(portalLayoutSource).toContain('shouldShowShellRoute');
     expect(portalLayoutSource).toContain('labEnabled');

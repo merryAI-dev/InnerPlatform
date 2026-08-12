@@ -14,6 +14,7 @@ export function matchesProjectSearch(project: Project, query: string): boolean {
     member.role,
   ]);
   const searchableFields = [
+    project.id,
     project.name,
     project.officialContractName,
     project.groupwareName,

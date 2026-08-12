@@ -54,11 +54,6 @@ function formatDateTime(value?: string): string {
   }).format(date);
 }
 
-function formatDifference(value?: number): string {
-  if (typeof value !== 'number') return '-';
-  return `${value.toLocaleString('ko-KR')}원`;
-}
-
 function SelectionField(props: {
   step: string;
   icon: typeof BarChart3;
@@ -152,9 +147,8 @@ export function CashflowExportPage() {
   const exportRows = useMemo(() => buildCashflowExportProjectRows({
     projects: targetProjects,
     weeks,
-    targetYearMonths: yearMonths,
     todayIso: getSeoulTodayIso(),
-  }), [targetProjects, weeks, yearMonths]);
+  }), [targetProjects, weeks]);
 
   function toggleProject(projectId: string) {
     setSelectedProjectIds((current) => current.includes(projectId)
@@ -543,7 +537,7 @@ export function CashflowExportPage() {
                   <th className="px-4 py-2 text-left font-semibold">사업명</th>
                   <th className="px-3 py-2 text-left font-semibold">담당자</th>
                   <th className="px-3 py-2 text-center font-semibold">상태</th>
-                  <th className="px-3 py-2 text-center font-semibold">누적 Projection-Actual / 현재 주차 상세</th>
+                  <th className="px-3 py-2 text-center font-semibold">누적 Projection-Actual</th>
                   <th className="px-3 py-2 text-left font-semibold">최근 업데이트</th>
                   <th className="px-4 py-2 text-right font-semibold">이동</th>
                 </tr>
@@ -575,21 +569,6 @@ export function CashflowExportPage() {
                         error={canonicalSummaries.errors[row.id]}
                         onRetry={() => void canonicalSummaries.retry(row.id)}
                       />
-                      <div className="mt-2 border-t border-stone-200 pt-2 text-[10px] text-stone-500">현재 주차 상세</div>
-                      {typeof row.projectionActualMatches !== 'boolean' ? (
-                        <span className="text-stone-500">
-                          {row.currentWeekLabel} · {row.comparisonMissing === 'actual' ? 'Actual 미작성' : 'Projection 미작성'}
-                        </span>
-                      ) : (
-                        <div>
-                          <span className={row.projectionActualMatches ? 'font-semibold text-teal-700' : 'font-semibold text-red-700'}>
-                            {row.currentWeekLabel} · {row.projectionActualMatches ? '일치' : '불일치'}
-                          </span>
-                          <div className="mt-0.5 tabular-nums text-stone-500">
-                            입금 {formatDifference(row.projectionActualInDifference)} · 출금 {formatDifference(row.projectionActualOutDifference)} · 순액 {formatDifference(row.projectionActualDifference)}
-                          </div>
-                        </div>
-                      )}
                     </td>
                     <td className="px-3 py-3 text-stone-600">{formatDateTime(row.latestUpdatedAt)}</td>
                     <td className="px-4 py-3 text-right">
