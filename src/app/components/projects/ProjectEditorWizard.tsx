@@ -1003,6 +1003,8 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
+  // 후보 목록의 출처는 계정 원장(members) 이다 - 지금 동작 그대로다.
+  // 인력 명부(persons) 기반 디렉터리는 안정화 후 2단계에서 연결한다.
   const teamMemberOptions = useMemo(() => buildProjectTeamMemberOptions(members), [members]);
   const teamMemberOptionMap = useMemo(() => Object.fromEntries(
     teamMemberOptions.map((option) => [option.value, option]),

@@ -1,4 +1,4 @@
-import { EMPLOYEES } from './participation-data';
+import { buildPersonDirectory, EMPTY_PERSON_DIRECTORY, type PersonDirectory } from '../platform/person-directory';
 import type { OrgMember, Project } from './types';
 
 function memberLabel(name: string, nickname: string): string {
@@ -12,35 +12,29 @@ export interface ProjectTeamMemberOption {
   label: string;
 }
 
-export const PROJECT_TEAM_MEMBER_OPTIONS: ProjectTeamMemberOption[] = EMPLOYEES
-  .map(({ realName, nickname }) => {
-    const name = realName.trim();
-    const displayNickname = nickname.trim();
-    return {
-      value: name,
-      name,
-      nickname: displayNickname,
-      label: memberLabel(name, displayNickname),
-    };
-  });
-
-export const PROJECT_TEAM_MEMBER_OPTION_MAP = Object.fromEntries(
-  PROJECT_TEAM_MEMBER_OPTIONS.map((option) => [option.value, option]),
-) as Record<string, ProjectTeamMemberOption>;
-
-const PROJECT_TEAM_MEMBER_SEARCH_MAP = new Map<string, ProjectTeamMemberOption>();
-
-for (const option of PROJECT_TEAM_MEMBER_OPTIONS) {
-  for (const key of [option.value, option.name, option.nickname, option.label]) {
-    const normalized = key.trim().toLowerCase();
-    if (normalized) PROJECT_TEAM_MEMBER_SEARCH_MAP.set(normalized, option);
-  }
-}
-
-export function findProjectTeamMemberOption(value: string): ProjectTeamMemberOption | undefined {
-  const normalized = String(value || '').trim().toLowerCase();
+/**
+ * 이름만 저장된 계정 문서의 별명을 채우기 위한 조회.
+ *
+ * 예전에는 코드에 박힌 직원 명부에서 가져왔다. 지금은 DB 인력 명부(persons)에서 온
+ * directory 를 받는다. 명부가 아직 안 왔으면 빈 디렉터리로 동작한다 - 별명이 잠깐
+ * 비어 보일 뿐, 후보 목록 자체는 계정(members)에서 나오므로 사람을 못 고르는 일은 없다.
+ */
+export function findProjectTeamMemberOption(
+  value: string,
+  directory: PersonDirectory = EMPTY_PERSON_DIRECTORY,
+): ProjectTeamMemberOption | undefined {
+  const normalized = String(value || '').trim();
   if (!normalized) return undefined;
-  return PROJECT_TEAM_MEMBER_SEARCH_MAP.get(normalized);
+  const parsed = splitMemberDisplayName(normalized);
+  const nickname = directory.resolveNickname(normalized);
+  if (!nickname && !parsed.nickname) return undefined;
+  const resolved = parsed.nickname || nickname;
+  return {
+    value: parsed.name,
+    name: parsed.name,
+    nickname: resolved,
+    label: memberLabel(parsed.name, resolved),
+  };
 }
 
 export function splitMemberDisplayName(value: string): { name: string; nickname: string } {
@@ -50,8 +44,11 @@ export function splitMemberDisplayName(value: string): { name: string; nickname:
   return { name: match[1].trim(), nickname: match[2].trim() };
 }
 
-export function buildProjectTeamMemberOptions(members: OrgMember[]): ProjectTeamMemberOption[] {
-  if (!members.length) return PROJECT_TEAM_MEMBER_OPTIONS;
+export function buildProjectTeamMemberOptions(
+  members: OrgMember[],
+  directory: PersonDirectory = EMPTY_PERSON_DIRECTORY,
+): ProjectTeamMemberOption[] {
+  if (!members.length) return [];
 
   const options = new Map<string, ProjectTeamMemberOption>();
   members.forEach((member) => {
@@ -60,7 +57,7 @@ export function buildProjectTeamMemberOptions(members: OrgMember[]): ProjectTeam
     const parsed = splitMemberDisplayName(member.name || '');
     const displayName = String(member.nameKo || '').trim() || parsed.name;
     if (!String(member.uid || '').trim() || !displayName) return;
-    const canonical = findProjectTeamMemberOption(displayName);
+    const canonical = findProjectTeamMemberOption(displayName, directory);
     const nickname = String(member.nickname || '').trim() || parsed.nickname || canonical?.nickname || '';
     const key = displayName.toLowerCase();
     if (options.has(key)) return;
@@ -72,9 +69,15 @@ export function buildProjectTeamMemberOptions(members: OrgMember[]): ProjectTeam
     });
   });
 
-  const liveOptions = [...options.values()]
+  return [...options.values()]
     .sort((left, right) => left.label.localeCompare(right.label, 'ko'));
-  return liveOptions.length ? liveOptions : PROJECT_TEAM_MEMBER_OPTIONS;
+}
+
+/** 인력 명부 레코드로 디렉터리를 만든다. 호출부가 person-directory 를 직접 몰라도 되게. */
+export function buildTeamMemberDirectory(
+  people: Array<{ personId: string; name: string; nickname: string }>,
+): PersonDirectory {
+  return buildPersonDirectory(people);
 }
 
 export interface OrgMemberPickerOption {

@@ -3,7 +3,7 @@
 - route: `/participation`
 - primary users: 관리자, 인력 배정 운영자
 - status: active
-- last updated: 2026-05-20
+- last updated: 2026-08-12
 
 ## Purpose
 
@@ -28,6 +28,7 @@ KOICA 및 교차검증 대상 프로젝트의 참여율 합산과 위험 신호�
 
 ## Recent Changes
 
+- [2026-08-12] 동일인 판정의 근거를 프론트에 박힌 직원 명단에서 DB 인력 명부(`orgs/{org}/persons`)로 옮겼다. 프로덕션 데이터로 사람 수 80명·합계 13089%가 그대로임을 확인한 뒤 교체했다. 명부를 못 불러오면 이름 기반 대체 키로 떨어질 뿐 화면은 계속 뜬다.
 - [2026-05-20] 참여율 관리 화면을 Salesforce형 운영 뷰로 재정리하고, e나라도움/KOICA/회계사정산/민간·기타 원천 구분 lane을 추가했다. 프로젝트 팀 연동 행은 표시용으로 합산하되 공식 위험 계산과 JSON 내보내기는 formal 참여율만 사용하도록 분리했다.
 - [2026-05-20] 참여율 화면의 주요 표기와 fallback 문구를 `프로젝트명`, `계약 대상`, `프로젝트 수` 기준으로 맞춰 등록/수정/승인 화면의 프로젝트 용어와 충돌하지 않게 정리했다.
 - [2026-04-14] `4단계 프로토콜 가이드` 패널을 제거했다.
@@ -42,6 +43,7 @@ KOICA 및 교차검증 대상 프로젝트의 참여율 합산과 위험 신호�
 - `src/app/components/participation/ParticipationPage.tsx`
 - `src/app/data/participation-data.ts`
 - `src/app/platform/project-team-participation.ts`
+- `src/app/platform/person-directory.ts`
 
 ## Related Tests
 

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-08-12] patch-note | people-directory | 인력 명부를 DB로 이관하고 계약 이력 관리 추가
+- pages: [admin-people-directory](./pages/admin-people-directory.md), [admin-participation](./pages/admin-participation.md)
+- summary: 프론트 코드에 87명 배열로 박혀 있던 직원 명부를 제거하고, 재직자 현황 시트를 원본으로 하는 `orgs/{org}/persons` 를 런타임 근거로 삼는다. 저장되는 진실은 `employments` 배열 하나이고 근로형태·재직상태·퇴사일·근속은 읽을 때 파생시킨다. `/people` 화면에서 계약을 변경(적용일 직전에 기존 계약을 닫고 잇기)하거나 추가할 수 있고, 정규직에서 파트너로의 전환이 이 경로다. 기존 계약은 지우지 않는다. 프로젝트 팀원 드롭다운의 출처는 계정 원장(members)으로 그대로 두었고, 프로덕션 데이터로 드롭다운 79개 옵션과 참여율 그룹핑 80명이 변화 0건임을 확인했다.
+
 ## [2026-08-07] patch-note | cashflow-policy-shared-location | 캐시플로 정책 공유 위치 정리
 - pages: [shared-label-policy](./pages/shared-label-policy.md)
 - summary: 캐시플로 정책 JSON의 내용과 동작은 유지한 채 프론트 전용 경로에서 최상위 공유 정책 경로로 이동했다.

@@ -223,6 +223,8 @@ export const ROUTE_ROLES = {
   writeEvidenceDrive: ALL_INTERNAL_ROUTE_ROLES,
   auditRead: ['admin', 'finance', 'auditor', 'tenant_admin', 'support', 'security'],
   memberWrite: ['admin', 'tenant_admin'],
+  // 인력 명부는 재경팀이 실제로 기입한다. 계정 권한(memberWrite)과는 민감도가 달라 따로 둔다.
+  personWrite: ['admin', 'tenant_admin', 'finance'],
 };
 
 // ── Audit helpers ─────────────────────────────────────────────────────────────

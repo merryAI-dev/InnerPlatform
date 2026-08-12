@@ -5,32 +5,16 @@ import type {
   SettlementSystemCode,
 } from '../data/types';
 import { normalizeSettlementSystemCode } from '../data/types';
-import { EMPLOYEES } from '../data/participation-data';
+import {
+  compactIdentity,
+  EMPTY_PERSON_DIRECTORY,
+  parseDisplayName,
+  type PersonDirectory,
+} from './person-directory';
 import {
   formatProjectTeamMemberLine,
   normalizeProjectTeamMembers,
 } from './project-team-members';
-
-const employeeIdentityMap = new Map<string, string>();
-EMPLOYEES.forEach((employee) => {
-  [
-    employee.realName,
-    employee.nickname,
-    employee.nickname ? `${employee.realName}(${employee.nickname})` : '',
-    employee.nickname ? `${employee.realName} ${employee.nickname}` : '',
-  ].forEach((value) => {
-    const key = compactIdentity(value);
-    if (key) employeeIdentityMap.set(key, employee.id);
-  });
-});
-
-function compactIdentity(value: unknown) {
-  return String(value || '')
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[()\s]/g, '')
-    .trim();
-}
 
 function monthPart(value: unknown) {
   const text = String(value || '').trim();
@@ -40,16 +24,6 @@ function monthPart(value: unknown) {
 function addKey(keys: Set<string>, value: unknown) {
   const key = compactIdentity(value);
   if (key) keys.add(key);
-}
-
-function parseDisplayName(value: unknown) {
-  const text = String(value || '').trim();
-  const match = text.match(/^(.+?)\s*\((.+?)\)\s*$/);
-  return {
-    full: text,
-    name: match?.[1]?.trim() || text,
-    nickname: match?.[2]?.trim() || '',
-  };
 }
 
 function entryIdentityKeys(entry: Pick<ParticipationEntry, 'memberName' | 'memberId'>) {
@@ -86,13 +60,17 @@ function hasAnyIdentityKey(source: Set<string>, candidates: Set<string>) {
   return false;
 }
 
-function resolveCanonicalMemberId(member: ProjectTeamMemberAssignment, fallbackKey: string) {
-  const keys = teamMemberIdentityKeys(member);
-  for (const key of keys) {
-    const employeeId = employeeIdentityMap.get(key);
-    if (employeeId) return employeeId;
-  }
-  return `project-team:${fallbackKey}`;
+function resolveCanonicalMemberId(
+  member: ProjectTeamMemberAssignment,
+  fallbackKey: string,
+  directory: PersonDirectory,
+) {
+  const display = member.memberNickname
+    ? `${member.memberName}(${member.memberNickname})`
+    : member.memberName;
+  // 명부에서 못 찾아도 멈추지 않는다. 이름 기반 대체 키는 프로젝트가 달라도 같은 값이라
+  // 한 사람의 배정이 흩어지지는 않는다 - 다만 표기가 흔들리면 갈라질 수 있다.
+  return directory.resolveId(display) || `project-team:${fallbackKey}`;
 }
 
 export function resolveProjectTeamSettlementSystem(project: Project): SettlementSystemCode {
@@ -104,9 +82,17 @@ export function resolveProjectTeamSettlementSystem(project: Project): Settlement
   return 'NONE';
 }
 
+/**
+ * 한 사업의 배정을 참여율 항목으로 만든다.
+ *
+ * directory 는 이름으로 동일인을 찾는 근거다. 한 사업 안에서는 위의 identityKeys 로 이미
+ * 중복이 걸러져 사람당 한 줄이므로, 단일 사업만 보는 화면은 넘기지 않아도 결과가 같다.
+ * 여러 사업을 가로질러 합산할 때만(참여율 대시보드) 필요하다.
+ */
 export function buildProjectTeamParticipationEntries(
   project: Project,
   entries: ParticipationEntry[],
+  directory: PersonDirectory = EMPTY_PERSON_DIRECTORY,
 ): ParticipationEntry[] {
   const projectEntries = entries.filter((entry) => (
     entry.projectId === project.id
@@ -128,7 +114,7 @@ export function buildProjectTeamParticipationEntries(
       identityKeys.forEach((key) => existingKeys.add(key));
       return {
         id: `project-team-${project.id}-${index}-${identityKey}`,
-        memberId: resolveCanonicalMemberId(member, identityKey),
+        memberId: resolveCanonicalMemberId(member, identityKey, directory),
         memberName: formatProjectTeamMemberLine({
           ...member,
           role: '',
@@ -160,6 +146,7 @@ export function buildProjectTeamParticipationEntries(
 export function buildAllProjectTeamParticipationEntries(
   projects: Project[],
   entries: ParticipationEntry[],
+  directory: PersonDirectory = EMPTY_PERSON_DIRECTORY,
 ): ParticipationEntry[] {
   const projectIds = new Set(projects.map((project) => project.id));
   const outsideProjectEntries = entries.filter((entry) => (
@@ -167,7 +154,7 @@ export function buildAllProjectTeamParticipationEntries(
     && entry.source !== 'PROJECT_TEAM_SYNC'
   ));
   const currentProjectEntries = projects.flatMap((project) => (
-    buildProjectTeamParticipationEntries(project, entries)
+    buildProjectTeamParticipationEntries(project, entries, directory)
   ));
 
   return [...outsideProjectEntries, ...currentProjectEntries];

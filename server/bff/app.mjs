@@ -104,6 +104,7 @@ import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
+import { mountPersonRoutes } from './routes/persons.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { mountAxrMonthCloseQaRoutes } from './routes/axr-month-close-qa.mjs';
@@ -1590,6 +1591,14 @@ export function createBffApp(options = {}) {
     piiProtector,
     rbacPolicy,
     authAdminService,
+  });
+
+  mountPersonRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    auditChainService,
+    piiProtector,
   });
 
   // ── Guide Q&A chatbot ──

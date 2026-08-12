@@ -410,6 +410,57 @@ export const memberRoleUpdateSchema = z.object({
 
 export const memberDeepSyncSchema = memberRoleUpdateSchema;
 
+// ── 인력 명부 (persons) ──
+// 근로형태와 재직상태는 다른 축이다. 파트너도 휴직할 수 있고, 정규직도 퇴사한다
+// (= 계약에 endDate 가 붙는다). 둘을 한 필드로 합치면 표현할 수 없는 조합이 생긴다.
+
+const ISO_DATE_STRING = z.string().trim().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, 'YYYY-MM-DD 형식으로 입력해 주세요');
+const EMPLOYMENT_TYPE = z.enum(['FULL_TIME', 'INTERN', 'PARTNER', 'PLACEHOLDER']);
+const EMPLOYMENT_STATE = z.enum(['WORKING', 'ON_LEAVE', 'PARENTAL_LEAVE']);
+
+export const personEmploymentSchema = z.object({
+  /** change = 기존 계약을 적용일 직전에 닫고 잇는다, add = 겹치지 않는 별도 구간을 끼운다 */
+  mode: z.enum(['change', 'add']),
+  type: EMPLOYMENT_TYPE,
+  state: EMPLOYMENT_STATE,
+  effectiveFrom: ISO_DATE_STRING,
+  endDate: ISO_DATE_STRING.nullish(),
+  note: z.string().trim().max(500).optional(),
+}).strict();
+
+export const personCreateSchema = z.object({
+  personId: z.string().trim().min(1).max(200).regex(/^[^/]+$/).optional(),
+  name: z.string().trim().min(1).max(100),
+  nickname: z.string().trim().max(100).optional(),
+  email: z.string().trim().max(200).optional(),
+  departmentTop: z.string().trim().max(100).optional(),
+  departmentMid: z.string().trim().max(100).optional(),
+  departmentSub: z.string().trim().max(100).optional(),
+  title: z.string().trim().max(100).optional(),
+  grade: z.string().trim().max(100).optional(),
+  workLocation: z.string().trim().max(100).optional(),
+  note: z.string().trim().max(500).optional(),
+  employment: z.object({
+    type: EMPLOYMENT_TYPE,
+    state: EMPLOYMENT_STATE,
+    effectiveFrom: ISO_DATE_STRING,
+    endDate: ISO_DATE_STRING.nullish(),
+    note: z.string().trim().max(500).optional(),
+  }).strict(),
+}).strict();
+
+export const personProfileSchema = z.object({
+  nickname: z.string().trim().max(100).optional(),
+  email: z.string().trim().max(200).optional(),
+  departmentTop: z.string().trim().max(100).optional(),
+  departmentMid: z.string().trim().max(100).optional(),
+  departmentSub: z.string().trim().max(100).optional(),
+  title: z.string().trim().max(100).optional(),
+  grade: z.string().trim().max(100).optional(),
+  workLocation: z.string().trim().max(100).optional(),
+  note: z.string().trim().max(500).optional(),
+}).strict();
+
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),

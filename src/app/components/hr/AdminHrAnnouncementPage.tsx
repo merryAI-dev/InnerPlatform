@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Megaphone, Plus, UserMinus, Clock, ArrowRightLeft,
   CheckCircle2, AlertTriangle, Calendar, Users, Building2,
@@ -24,7 +24,7 @@ import {
   HR_EVENT_LABELS, HR_EVENT_COLORS,
   type HrEventType,
 } from '../../data/hr-announcements-store';
-import { EMPLOYEES, PART_PROJECTS } from '../../data/participation-data';
+import { PART_PROJECTS } from '../../data/participation-data';
 import { fmtKRW } from '../../data/budget-data';
 
 // ═══════════════════════════════════════════════════════════════
@@ -33,7 +33,7 @@ import { fmtKRW } from '../../data/budget-data';
 // ═══════════════════════════════════════════════════════════════
 
 export function AdminHrAnnouncementPage() {
-  const { participationEntries } = useAppStore();
+  const { participationEntries, persons } = useAppStore();
   const {
     announcements, alerts,
     createAnnouncement, resolveAnnouncement,
@@ -50,8 +50,14 @@ export function AdminHrAnnouncementPage() {
     description: '',
   });
 
+  // 대상 직원 목록은 인력 명부(persons)에서 온다. 코드에 박힌 명단을 쓰면 신규 입사자가
+  // 배포 전까지 목록에 없고, 퇴사자는 영원히 남는다.
+  const employeeOptions = useMemo(() => persons
+    .map((person) => ({ id: person.personId, realName: person.name, nickname: person.nickname }))
+    .sort((a, b) => a.realName.localeCompare(b.realName, 'ko')), [persons]);
+
   // 선택된 직원의 참여 사업 미리보기
-  const selectedEmployee = EMPLOYEES.find(e => e.id === form.employeeId);
+  const selectedEmployee = employeeOptions.find(e => e.id === form.employeeId);
   const affectedProjects = selectedEmployee
     ? [...new Set(
         participationEntries
@@ -66,7 +72,7 @@ export function AdminHrAnnouncementPage() {
 
   const handleCreate = () => {
     if (!form.employeeId || !form.effectiveDate) return;
-    const emp = EMPLOYEES.find(e => e.id === form.employeeId);
+    const emp = employeeOptions.find(e => e.id === form.employeeId);
     if (!emp) return;
 
     createAnnouncement({
@@ -309,9 +315,13 @@ export function AdminHrAnnouncementPage() {
               <Select value={form.employeeId} onValueChange={v => setForm(p => ({ ...p, employeeId: v }))}>
                 <SelectTrigger className="h-9 text-[12px] mt-1"><SelectValue placeholder="직원 선택" /></SelectTrigger>
                 <SelectContent className="max-h-[300px]">
-                  {EMPLOYEES.map(e => (
+                  {employeeOptions.length === 0 ? (
+                    <div className="px-3 py-6 text-center text-[12px] text-slate-500">
+                      인력 명부를 불러오는 중입니다.
+                    </div>
+                  ) : employeeOptions.map(e => (
                     <SelectItem key={e.id} value={e.id}>
-                      {e.realName} ({e.nickname})
+                      {e.realName}{e.nickname ? ` (${e.nickname})` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>

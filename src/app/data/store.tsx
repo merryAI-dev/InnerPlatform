@@ -25,6 +25,7 @@ import {
   LEDGER_TEMPLATES,
 } from './mock-data';
 import { PARTICIPATION_ENTRIES } from './participation-data';
+import { buildPersonDirectory, type PersonDirectory } from '../platform/person-directory';
 import { mergeProjectMutationResult } from './project-store-mutation';
 import { resolveAppWriteStrategy } from './store-write-strategy';
 import { useFirebase } from '../lib/firebase-context';
@@ -55,6 +56,8 @@ import {
   upsertProjectViaBff,
   upsertTransactionViaBff,
   type UpsertProjectPayload,
+  fetchPersonsViaBff,
+  type PersonRecord,
 } from '../lib/platform-bff-client';
 import { reportError } from '../platform/observability';
 import { normalizeProjectRevenueFields } from '../platform/project-financials';
@@ -84,6 +87,8 @@ interface AppState {
   evidences: Evidence[];
   auditLogs: AuditLog[];
   participationEntries: ParticipationEntry[];
+  persons: PersonRecord[];
+  personDirectory: PersonDirectory;
   dataSource: 'local' | 'firestore';
 }
 
@@ -171,6 +176,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ORG_MEMBERS as Array<OrgMember & Record<string, unknown>>,
   );
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
+  const [persons, setPersons] = useState<PersonRecord[]>([]);
 
   const currentUser = useMemo<OrgMember>(() => {
     if (!authUser) return CURRENT_USER;
@@ -239,6 +245,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw error;
     }
   }, [reportWriteFailure]);
+
+  // 인력 명부. 이름으로 동일인을 찾을 때의 근거가 되고, 못 불러와도 화면은 계속 뜬다 -
+  // 명부가 비면 이름 기반 대체 키로 떨어질 뿐 참여율 화면이 막히지는 않는다.
+  useEffect(() => {
+    if (!platformApiEnabled || !bffActor.idToken) {
+      setPersons([]);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchPersonsViaBff({ tenantId: orgId, actor: bffActor })
+      .then((response) => {
+        if (!cancelled) setPersons(response.items || []);
+      })
+      .catch((error) => {
+        reportError(error, {
+          message: '[AppStore] persons fetch failed; name matching falls back to display names:',
+          options: {
+            level: 'warning',
+            tags: { surface: 'app_store', action: 'persons_fetch' },
+            extra: { orgId },
+          },
+        });
+      });
+    return () => { cancelled = true; };
+  }, [orgId, platformApiEnabled, bffActor]);
+
+  const personDirectory = useMemo(() => buildPersonDirectory(persons), [persons]);
 
   const members = useMemo<OrgMember[]>(() => {
     const baseMembers = dataSource === 'firestore'
@@ -817,6 +850,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     evidences,
     auditLogs,
     participationEntries,
+    persons,
+    personDirectory,
     dataSource,
     upsertMember,
     removeMember,

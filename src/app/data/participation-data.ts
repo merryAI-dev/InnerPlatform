@@ -48,99 +48,10 @@ export interface MyscEmployee {
   nickname: string;
 }
 
-export const EMPLOYEES: MyscEmployee[] = [
-  { id: 'e01', realName: '김정태', nickname: '에이블' },
-  { id: 'e02', realName: '이예지', nickname: '메씨리' },
-  { id: 'e03', realName: '김세은', nickname: '람쥐' },
-  { id: 'e04', realName: '유자인', nickname: '유자' },
-  { id: 'e05', realName: '나미소', nickname: '쏘' },
-  { id: 'e06', realName: '박정호', nickname: '스템' },
-  { id: 'e07', realName: '김원희', nickname: '청' },
-  { id: 'e08', realName: '김선미', nickname: '해니' },
-  { id: 'e09', realName: '이정선', nickname: '보노' },
-  { id: 'e10', realName: '고인효', nickname: '베리' },
-  { id: 'e11', realName: '하윤지', nickname: '하모니' },
-  { id: 'e12', realName: '송영일', nickname: '우슬' },
-  { id: 'e13', realName: '김영우', nickname: '앵커' },
-  { id: 'e14', realName: '정지윤', nickname: '유니' },
-  { id: 'e15', realName: '강신일', nickname: '봄날' },
-  { id: 'e16', realName: '장란영', nickname: '바닐라' },
-  { id: 'e17', realName: '김다은', nickname: '데이나' },
-  { id: 'e18', realName: '이지현A', nickname: '리사' },
-  { id: 'e19', realName: '윤지수', nickname: '이나' },
-  { id: 'e20', realName: '백지연', nickname: '제리' },
-  { id: 'e21', realName: '송성미', nickname: '도담' },
-  { id: 'e22', realName: '해민영', nickname: '썬' },
-  { id: 'e23', realName: '한형규', nickname: '데일리' },
-  { id: 'e24', realName: '송지효', nickname: '송죠' },
-  { id: 'e25', realName: '장은희', nickname: '나무' },
-  { id: 'e26', realName: '김빛고을', nickname: '브이' },
-  { id: 'e27', realName: '이승연', nickname: '뽀승' },
-  { id: 'e28', realName: '변준재', nickname: '제이' },
-  { id: 'e29', realName: '하누리', nickname: '주디' },
-  { id: 'e30', realName: '최종옥', nickname: '가드너' },
-  { id: 'e31', realName: '김현지', nickname: '데이지' },
-  { id: 'e32', realName: '민가람', nickname: '담마' },
-  { id: 'e33', realName: '곽민주', nickname: '노아' },
-  { id: 'e34', realName: '심지혜', nickname: '쿠키' },
-  { id: 'e35', realName: '권혁준', nickname: '준' },
-  { id: 'e36', realName: '김혜원', nickname: '모토' },
-  { id: 'e37', realName: '최지윤', nickname: '써니' },
-  { id: 'e38', realName: '김민주B', nickname: '만두' },
-  { id: 'e39', realName: '최유진', nickname: '고야' },
-  { id: 'e40', realName: '서민종', nickname: '파커' },
-  { id: 'e41', realName: '김혜령', nickname: '테일러' },
-  { id: 'e42', realName: '김신영', nickname: '가든' },
-  { id: 'e43', realName: '김준성', nickname: '더준' },
-  { id: 'e44', realName: '신예진', nickname: '진신' },
-  { id: 'e45', realName: '정지연', nickname: '모모' },
-  { id: 'e46', realName: '강신혁', nickname: '강케이' },
-  { id: 'e47', realName: '이준철', nickname: '철쭉' },
-  { id: 'e48', realName: '임성준', nickname: '에단' },
-  { id: 'e49', realName: '이한선', nickname: '안소니' },
-  { id: 'e50', realName: '이지현B', nickname: '올리브' },
-  { id: 'e51', realName: '박진영', nickname: '그린' },
-  { id: 'e52', realName: '이현송', nickname: '하모' },
-  { id: 'e53', realName: '김민선', nickname: '포비' },
-  { id: 'e54', realName: '권상준', nickname: '런던' },
-  { id: 'e55', realName: '최상배', nickname: '루크' },
-  { id: 'e56', realName: '임종수', nickname: '스티븐' },
-  { id: 'e57', realName: '박연주', nickname: '연두' },
-  { id: 'e58', realName: '하송희', nickname: '솔' },
-  { id: 'e59', realName: '현우정', nickname: '로에' },
-  { id: 'e60', realName: '이동완', nickname: '허브' },
-  { id: 'e61', realName: '김예빈', nickname: '하얀' },
-  { id: 'e62', realName: '백민혁', nickname: '혜윰' },
-  { id: 'e63', realName: '강민경', nickname: '마고' },
-  { id: 'e64', realName: '강현주', nickname: '헤일리' },
-  { id: 'e65', realName: '변민욱', nickname: '보람' },
-  { id: 'e66', realName: '강혜진', nickname: '트루' },
-  { id: 'e67', realName: '권혜연', nickname: '호두' },
-  { id: 'e68', realName: '양인영', nickname: '엠마' },
-  { id: 'e69', realName: '조이수', nickname: '수' },
-  { id: 'e70', realName: '박준형', nickname: '안톤' },
-  { id: 'e71', realName: '전우철', nickname: '프코' },
-  { id: 'e72', realName: '김민주C', nickname: '코지' },
-  { id: 'e73', realName: '조아름', nickname: '다온' },
-  { id: 'e74', realName: '백수미', nickname: '포용' },
-  { id: 'e75', realName: '정재우', nickname: '피터' },
-  { id: 'e76', realName: '현빈우', nickname: '에리얼' },
-  { id: 'e77', realName: '고혜림', nickname: '멜론' },
-  { id: 'e78', realName: '이시은', nickname: '싱아' },
-  { id: 'e79', realName: '한연지', nickname: '태중' },
-  { id: 'e80', realName: '김혜린', nickname: '니아' },
-  { id: 'e81', realName: '방예원', nickname: '숲' },
-  { id: 'e82', realName: '이지영', nickname: '' },
-  { id: 'e83', realName: '노성진', nickname: '' },
-  { id: 'e84', realName: '김민주', nickname: '' },  // 벤처리움 김민주(별도)
-  { id: 'e85', realName: '박지연', nickname: '느티' },
-  { id: 'e86', realName: '김소영', nickname: '소이' },
-  { id: 'e87', realName: '최새롬', nickname: '노리' },
-];
 
-const empMap = new Map(EMPLOYEES.map(e => [e.realName, e]));
-function eid(name: string) { return empMap.get(name)?.id ?? name; }
-function enick(name: string) { return empMap.get(name)?.nickname ?? ''; }
+// 로컬 시드 전용. 실제 직원 명부는 DB(orgs/{org}/persons)에 있고, 화면은 그쪽을 본다.
+function eid(name: string) { return name; }
+function enick(_name: string) { return ''; }
 
 // ── 사업별 참여자 데이터 (스프레드시트 원본) ──
 
@@ -481,11 +392,13 @@ export function computeMemberSummaries(entries: ParticipationEntry[]): MemberPar
   const summaries: MemberParticipationSummary[] = [];
 
   memberMap.forEach((memberEntries, memberId) => {
-    const first = memberEntries[0];
-    const emp = EMPLOYEES.find(e => e.id === memberId);
+    // 같은 사람이라도 사업에 따라 별명 없이 등록된 줄이 있다. 표시 이름은 별명이 있는
+    // 줄을 우선한다 - 어느 줄이 먼저 오느냐에 따라 이름이 달라 보이면 안 된다.
+    const first = memberEntries.find(e => parseMemberDisplayName(e.memberName).nickname)
+      || memberEntries[0];
     const parsedName = parseMemberDisplayName(first.memberName);
-    const realName = parsedName.realName || emp?.realName || first.memberName;
-    const nickname = parsedName.nickname || emp?.nickname || '';
+    const realName = parsedName.realName || first.memberName;
+    const nickname = parsedName.nickname || '';
 
     // 동일 이름 다중 기간 합산 (같은 사업에 기간별로 다른 참여율인 경우 최대값 사용)
     // → CTS(25~28)의 강민경 10%+15%, 최지윤 20%+80% 같은 경우는 기간이 다르므로 합산
