@@ -1,10 +1,9 @@
 import { useMemo } from 'react';
 import {
   Wifi, WifiOff, Database, Clock, Users, FolderKanban,
-  Activity, CheckCircle2, AlertTriangle, Shield,
+  Activity, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import { useAppStore } from '../../data/store';
-import { computeMemberSummaries } from '../../data/participation-data';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
@@ -31,25 +30,22 @@ function StatusItem({ icon: Icon, label, value, color, tooltip }: {
 }
 
 export function StatusBar() {
-  const { projects, transactions, participationEntries, dataSource } = useAppStore();
+  const { projects, transactions, dataSource } = useAppStore();
   const [labEnabled] = useShellLabEnabled();
 
   const stats = useMemo(() => {
     const activeProjects = projects.filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS').length;
     const pendingApproval = transactions.filter(t => t.state === 'SUBMITTED').length;
     const missingEvidence = transactions.filter(t => t.evidenceStatus !== 'COMPLETE' && t.state !== 'REJECTED').length;
-    const summaries = computeMemberSummaries(participationEntries);
-    const dangerCount = summaries.filter(m => m.riskLevel === 'DANGER').length;
     const approvedToday = transactions.filter(t => t.state === 'APPROVED').length;
 
-    return { activeProjects, pendingApproval, missingEvidence, dangerCount, approvedToday, totalProjects: projects.length };
-  }, [projects, transactions, participationEntries]);
+    return { activeProjects, pendingApproval, missingEvidence, approvedToday, totalProjects: projects.length };
+  }, [projects, transactions]);
 
   const now = new Date();
   const timeStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const showPendingApproval = shouldShowShellRoute('/approvals', 'admin', 'quick-action', { labEnabled });
   const showMissingEvidence = shouldShowShellRoute('/evidence', 'admin', 'quick-action', { labEnabled });
-  const showParticipationRisk = shouldShowShellRoute('/participation', 'admin', 'quick-action', { labEnabled });
   const showApprovalSummary = shouldShowShellRoute('/approvals', 'admin', 'quick-action', { labEnabled });
 
   return (
@@ -100,15 +96,6 @@ export function StatusBar() {
           />
         )}
 
-        {showParticipationRisk && stats.dangerCount > 0 && (
-          <StatusItem
-            icon={Shield}
-            label="참여율위험"
-            value={stats.dangerCount}
-            color="text-rose-600"
-            tooltip={`${stats.dangerCount}명 참여율 100% 초과`}
-          />
-        )}
       </div>
 
       {/* Right section */}

@@ -13,7 +13,6 @@ describe('StatusBar shell contract', () => {
     expect(statusBarSource).toContain('shouldShowShellRoute');
     expect(statusBarSource).toContain('showPendingApproval');
     expect(statusBarSource).toContain('showMissingEvidence');
-    expect(statusBarSource).toContain('showParticipationRisk');
     expect(statusBarSource).toContain("'admin', 'quick-action'");
   });
 });

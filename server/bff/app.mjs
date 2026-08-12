@@ -110,6 +110,7 @@ import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
 import { mountCashflowSheetLabRoutes } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
+import { mountParticipationDashboardRoutes } from './routes/participation-dashboard.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
 import {
@@ -1590,6 +1591,7 @@ export function createBffApp(options = {}) {
     db,
     now,
   });
+  mountParticipationDashboardRoutes(app, { db, now, idempotencyService });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,

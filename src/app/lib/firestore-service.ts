@@ -16,8 +16,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getOrgCollectionPath, getOrgDocumentPath } from './firebase';
-import type { OrgMember, ParticipationEntry, TransactionState } from '../data/types';
-import type { MyscEmployee, ParticipationProject } from '../data/participation-data';
+import type { MyscEmployee, OrgMember, ParticipationEntry, ParticipationProject, TransactionState } from '../data/types';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from '../data/member-documents';
 import { normalizeEmail } from '../data/auth-helpers';
 import {
