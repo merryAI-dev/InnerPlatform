@@ -55,6 +55,7 @@ import {
   type SettlementSystemCode,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS, dedupeProjectDepartmentLabels } from '../../data/project-department-options';
+import type { DirectoryPerson } from '../../platform/person-directory';
 import {
   buildProjectTeamMemberOptions,
   type ProjectTeamMemberOption,
@@ -158,6 +159,8 @@ interface ProjectEditorWizardProps {
   description?: string;
   embeddedInShell?: boolean;
   members?: OrgMember[];
+  /** 인력 명부. 계정 목록을 못 받았을 때 팀원 후보의 안전망이 된다. */
+  roster?: DirectoryPerson[];
   departmentOptions?: string[];
   settlementSystemOptions?: string[];
   topSlot?: ReactNode;
@@ -606,6 +609,7 @@ export function ProjectEditorWizard({
   description,
   embeddedInShell = false,
   members = [],
+  roster = [],
   departmentOptions,
   settlementSystemOptions = [],
   topSlot,
@@ -1003,9 +1007,12 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
-  // 후보 목록의 출처는 계정 원장(members) 이다 - 지금 동작 그대로다.
-  // 인력 명부(persons) 기반 디렉터리는 안정화 후 2단계에서 연결한다.
-  const teamMemberOptions = useMemo(() => buildProjectTeamMemberOptions(members), [members]);
+  // 후보 목록의 출처는 계정 원장(members) 이다. roster 는 계정 목록이 아직/영영 안 왔을 때만
+  // 쓰이는 안전망이고, 별명이 빈 계정 문서의 표시 이름을 채우는 데도 쓴다.
+  const teamMemberOptions = useMemo(
+    () => buildProjectTeamMemberOptions(members, roster),
+    [members, roster],
+  );
   const teamMemberOptionMap = useMemo(() => Object.fromEntries(
     teamMemberOptions.map((option) => [option.value, option]),
   ) as Record<string, ProjectTeamMemberOption>, [teamMemberOptions]);

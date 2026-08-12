@@ -1,4 +1,9 @@
-import { buildPersonDirectory, EMPTY_PERSON_DIRECTORY, type PersonDirectory } from '../platform/person-directory';
+import {
+  buildPersonDirectory,
+  EMPTY_PERSON_DIRECTORY,
+  type DirectoryPerson,
+  type PersonDirectory,
+} from '../platform/person-directory';
 import type { OrgMember, Project } from './types';
 
 function memberLabel(name: string, nickname: string): string {
@@ -44,11 +49,33 @@ export function splitMemberDisplayName(value: string): { name: string; nickname:
   return { name: match[1].trim(), nickname: match[2].trim() };
 }
 
+/** 인력 명부 레코드를 그대로 후보로 만든다. 배정에는 이름·별명만 저장되므로 계정이 없어도 고를 수 있다. */
+function rosterOptions(roster: DirectoryPerson[]): ProjectTeamMemberOption[] {
+  const options = new Map<string, ProjectTeamMemberOption>();
+  roster.forEach((person) => {
+    const name = String(person?.name || '').trim();
+    if (!name) return;
+    const nickname = String(person?.nickname || '').trim();
+    const key = name.toLowerCase();
+    if (options.has(key)) return;
+    options.set(key, { value: name, name, nickname, label: memberLabel(name, nickname) });
+  });
+  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+}
+
+/**
+ * 팀원 후보 목록.
+ *
+ * 출처는 계정 원장(members)이다. 다만 계정 목록이 아직 안 왔거나 못 읽었을 때 빈 목록을
+ * 돌려주면 사람이 팀원을 아예 못 고른다 - 포털 등록 화면은 members 가 [] 로 시작한다.
+ * 그럴 때는 인력 명부(roster)로 후보를 만든다. 화면이 멈추는 것보다 낫다.
+ */
 export function buildProjectTeamMemberOptions(
   members: OrgMember[],
-  directory: PersonDirectory = EMPTY_PERSON_DIRECTORY,
+  roster: DirectoryPerson[] = [],
 ): ProjectTeamMemberOption[] {
-  if (!members.length) return [];
+  const directory = roster.length ? buildPersonDirectory(roster) : EMPTY_PERSON_DIRECTORY;
+  if (!members.length) return rosterOptions(roster);
 
   const options = new Map<string, ProjectTeamMemberOption>();
   members.forEach((member) => {
@@ -69,8 +96,10 @@ export function buildProjectTeamMemberOptions(
     });
   });
 
-  return [...options.values()]
+  const liveOptions = [...options.values()]
     .sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+  // 계정이 전부 비활성이거나 uid 가 없어 한 명도 안 남는 경우도 같은 안전망을 쓴다.
+  return liveOptions.length ? liveOptions : rosterOptions(roster);
 }
 
 /** 인력 명부 레코드로 디렉터리를 만든다. 호출부가 person-directory 를 직접 몰라도 되게. */

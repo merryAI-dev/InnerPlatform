@@ -99,7 +99,7 @@ function createProjectFromDraft(
 
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
-  const { addProject, updateProject, upsertMember, members, projects, currentUser } = useAppStore();
+  const { addProject, updateProject, upsertMember, members, projects, currentUser, persons } = useAppStore();
   const { orgId } = useFirebase();
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -217,6 +217,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       initialDraft={initialDraft}
       draftKey={`admin-${editProject?.id || 'new'}-${editProject?.updatedAt || initialPhase}`}
       members={members}
+      roster={persons}
       departmentOptions={departmentOptions}
       settlementSystemOptions={projects.flatMap((project) => project.settlementSystem === 'OTHER' && project.settlementSystemOther && !project.trashedAt ? [project.settlementSystemOther] : [])}
       actions={editProject ? [

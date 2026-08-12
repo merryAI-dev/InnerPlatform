@@ -127,7 +127,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
   it('uses a searchable team member picker for registration and edit flows', () => {
     expect(source).toContain('function TeamMemberSearchCombobox');
     expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');
-    expect(source).toContain('buildProjectTeamMemberOptions(members)');
+    // 후보의 출처는 계정 원장(members)이고, roster 는 계정 목록이 비었을 때의 안전망이다.
+    // 포털 등록 화면은 members 가 [] 로 시작하므로 roster 가 빠지면 팀원을 아예 못 고른다.
+    expect(source).toContain('buildProjectTeamMemberOptions(members, roster)');
     expect(source).toContain('options.length}명 중 검색');
     expect(source).toContain('options={availableTeamMemberOptions}');
     expect(source).toContain('<TeamMemberSearchCombobox');

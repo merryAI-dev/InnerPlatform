@@ -4,6 +4,7 @@ import { CheckCircle2, Clock3, LockKeyhole, Pencil, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { useProjectDepartmentSettings } from '../../data/project-department-settings';
+import { usePersonRoster } from '../../data/use-person-roster';
 import { usePortalStore } from '../../data/portal-store';
 import type { FileAttachment } from '../../data/types';
 import { getAuthInstance } from '../../lib/firebase';
@@ -79,6 +80,7 @@ function RegistrationEditor({
   const navigate = useNavigate();
   const { orgId } = useFirebase();
   const { members, projects } = usePortalStore();
+  const roster = usePersonRoster();
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const [record, setRecord] = useState(initialRecord);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -282,6 +284,7 @@ function RegistrationEditor({
         initialDraft={editorDraft}
         draftKey={`portal-register-${record.draftId}`}
         members={members}
+        roster={roster}
         departmentOptions={departmentOptions}
         settlementSystemOptions={projects.flatMap((project) => project.settlementSystem === 'OTHER' && project.settlementSystemOther && !project.trashedAt ? [project.settlementSystemOther] : [])}
         topSlot={topSlot}
