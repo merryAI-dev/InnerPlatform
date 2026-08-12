@@ -57,7 +57,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         projectNames: new Set(),
         values: new Map(),
       };
-      row.projectNames.add(readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name));
+      row.projectNames.add(readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId);
       for (const year of yearsForEntry(entry)) {
         for (const yearMonth of monthsForYear(year)) {
           row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + valueForMonth(entry, yearMonth));
