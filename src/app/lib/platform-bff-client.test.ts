@@ -140,16 +140,16 @@ describe('platform-bff-client', () => {
     expect(result).toEqual(data);
   });
 
-  it('posts project IDs and the selected month to the canonical JVM projection-actual summary adapter unchanged', async () => {
+  it('posts project IDs and the selected month to the sheet-formula projection-actual summary adapter', async () => {
     const data = {
-      version: '1',
+      version: '2',
       items: Array.from({ length: 9 }, (_, index) => ({
         projectId: `p00${index + 1}`, fromMonth: '2023-01',
         comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
-        projectionAmount: 30_000_000 + index, actualAmount: 20_000_000 + index,
-        projectionActualDifferenceAmount: 10_000_000,
+        source: 'SHEET_FORMULA' as const, sourceRevision: `source-${index}`,
+        differenceAmount: 10_000_000,
         settlementDifferenceAmount: 18_371_453 + index, settlementMatches: false,
-        periods: [{ period: 'MONTH' as const, projectionAmount: 30_000_000 + index, actualAmount: 20_000_000 + index, projectionActualDifferenceAmount: 10_000_000 }],
+        periods: [{ period: 'MONTH' as const, differenceAmount: 10_000_000 }],
       })),
       errors: [{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' as const }],
     };

@@ -270,6 +270,9 @@ function fullMonthCloseSource({
         ? { depositTotal: false, withdrawalTotal: true, balance: true }
         : { depositTotal: true, withdrawalTotal: true, balance: true },
     })),
+    projectionActualDifferences: Array.from({ length: 5 }, (_, index) => ({
+      yearMonth: '2026-06', weekNo: index + 1, amount: index === 4 ? -43_962_826 : 0, sourceCell: `A${11 + index}`,
+    })),
     issues: [],
   };
   const draftId = `v1_${Buffer.from(JSON.stringify(['cashflow', 'project-a', 'pm-1']), 'utf8').toString('base64url')}`;
@@ -576,39 +579,31 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('forwards the canonical projection-actual batch summary unchanged', async () => {
-    const canonical = {
-      version: '1',
-      items: [{
-        projectId: 'project-a',
-        fromMonth: '2023-01',
-        comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
-        settlementDifferenceAmount: 18_371_453,
-        settlementMatches: false,
-      }],
-      errors: [{ projectId: 'project-b', code: 'SUMMARY_UNAVAILABLE' }],
-    };
-    const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(canonical), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
-    const { app } = createApp(fetchImpl);
+  it('reads the latest synced sheet formula values without calling the JVM summary endpoint', async () => {
+    const { db } = fullMonthCloseSource();
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv, db, now: () => new Date('2026-06-30T00:00:00.000Z'),
+    });
 
     const response = await request(app)
       .post('/api/v1/cashflow/projection-actual-summary/batch')
-      .send({ projectIds: ['project-a', 'project-b'], yearMonth: '2026-11' })
+      .send({ projectIds: ['project-a'], yearMonth: '2026-06' })
       .expect(200);
 
-    expect(response.body).toEqual(canonical);
-    expect(fetchImpl).toHaveBeenCalledOnce();
-    const [url, init] = fetchImpl.mock.calls[0];
-    expect(String(url)).toBe('http://jvm-weekly.local/api/v1/cashflow/projection-actual-summary/batch');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ projectIds: ['project-a', 'project-b'], yearMonth: '2026-11' });
-    expect(new Headers(init.headers).get('x-tenant-id')).toBe('tenant-a');
+    expect(response.body).toMatchObject({
+      version: '2', errors: [], items: [{
+        projectId: 'project-a', source: 'SHEET_FORMULA', differenceAmount: -43_962_826,
+        comparisonAsOfWeek: { yearMonth: '2026-06', weekNo: 5 },
+      }],
+    });
+    expect(response.body.items[0].periods.find((period) => period.period === 'WEEK_5')).toEqual({
+      period: 'WEEK_5', differenceAmount: -43_962_826,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('reads a 61-project weekly overview with one JVM request and no BFF status rewrite', async () => {
+  it('reads a 61-project weekly overview with one JVM status request and sheet summary errors', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `project-${index + 1}`);
     const canonical = {
       version: '1',
@@ -621,10 +616,13 @@ describe('JVM weekly API BFF proxy', () => {
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
 
-    await request(app)
+    const response = await request(app)
       .post('/api/v1/cashflow/weekly-overview')
       .send({ projectIds, yearMonth: '2026-08' })
-      .expect(200, canonical);
+      .expect(200);
+
+    expect(response.body).toMatchObject({ version: '2', yearMonth: '2026-08', items: canonical.items });
+    expect(response.body.errors).toHaveLength(62);
 
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -673,21 +671,6 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.code).toBe('cashflow_projection_actual_summary_request_invalid');
       });
     expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('keeps canonical batch transport failures bounded', async () => {
-    const fetchImpl = vi.fn(async (_url, init) => new Promise((_resolve, reject) => {
-      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
-    }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { jvmWeeklyApiTimeoutMs: 5 });
-
-    await request(app)
-      .post('/api/v1/cashflow/projection-actual-summary/batch')
-      .send({ projectIds: ['project-a'] })
-      .expect(503)
-      .expect((response) => {
-        expect(response.body.code).toBe('jvm_weekly_api_unreachable');
-      });
   });
 
   it('rejects only weekly-expense writers before the JVM when their edit lease is missing', async () => {
@@ -1314,13 +1297,6 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('composes the open-month dashboard from the pinned sheet, project, and JVM state without a private draft', async () => {
     const { db, sourceRevision, targetRevision } = fullMonthCloseSource();
-    const projectionActualSummary = {
-      projectId: 'project-a',
-      fromMonth: '2023-01',
-      comparisonAsOfWeek: { yearMonth: '2026-07', weekNo: 2 },
-      settlementDifferenceAmount: 18_371_453,
-      settlementMatches: false,
-    };
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -1329,7 +1305,6 @@ describe('JVM weekly API BFF proxy', () => {
           ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
           reopenCount: 0, projectWarningCount: 0, snapshot: {},
         }),
-        projectionActualSummary,
       }),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
@@ -1364,13 +1339,16 @@ describe('JVM weekly API BFF proxy', () => {
             actualProgressPercent: 100,
             confirmationProgressPercent: 0,
             settlementProgressPercent: 0,
-            settlementDifferenceAmount: 18_371_453,
+            settlementDifferenceAmount: -43_962_826,
             settlementMatches: false,
             settlementCompletedWeekCount: 0,
             settlementTargetWeekCount: 5,
           },
           validation: { canClose: true, blockers: [] },
-          projectionActualSummary,
+          projectionActualSummary: {
+            projectId: 'project-a', source: 'SHEET_FORMULA', differenceAmount: -43_962_826,
+            settlementDifferenceAmount: -43_962_826, settlementMatches: false,
+          },
         });
         expect(response.body.dashboard.cells).toHaveLength(160);
         expect(response.body.dashboard.depositScheduleRows).toHaveLength(5);
@@ -1379,24 +1357,21 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    undefined,
-    { projectId: 'other-project', fromMonth: '2023-01', comparisonAsOfWeek: { yearMonth: '2026-07', weekNo: 2 }, settlementDifferenceAmount: 18_371_453, settlementMatches: false },
-  ])('fails closed when the JVM dashboard canonical projection-actual summary is unavailable or mismatched', async (projectionActualSummary) => {
+  it('does not use an unavailable JVM projection-actual summary for the month dashboard', async () => {
     const { db } = fullMonthCloseSource();
     const source = monthDashboardSource({
       ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
       reopenCount: 0, projectWarningCount: 0, snapshot: {},
     });
-    source.projectionActualSummary = projectionActualSummary;
+    source.projectionActualSummary = undefined;
     const { app } = createApp(vi.fn(async () => ({
       ok: true, status: 200, text: async () => JSON.stringify(source),
     })), createIdempotencyService(), {}, { env: runtimeEnv, db });
 
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
-      .expect(502)
-      .expect((response) => expect(response.body.code).toBe('jvm_weekly_response_invalid'));
+      .expect(200)
+      .expect((response) => expect(response.body.dashboard.projectionActualSummary).toMatchObject({ source: 'SHEET_FORMULA' }));
   });
 
   it.each([
