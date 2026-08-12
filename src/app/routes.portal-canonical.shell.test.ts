@@ -25,11 +25,11 @@ describe('portal canonical edit resource routes', () => {
     expect(source).toContain("{ path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> }");
   });
 
-  it('lets the route project win and sends ID-less cashflow URLs to project selection', () => {
+  it('lets the route project win and uses the session project for ID-less cashflow URLs', () => {
     expect(cashflowSource).toContain('useParams');
-    expect(cashflowSource).toContain('resolvePortalProjectResourceId(routeProjectId);');
+    expect(cashflowSource).toContain('activeProjectId');
+    expect(cashflowSource).toContain('resolvePortalProjectResourceId(routeProjectId, activeProjectId);');
     expect(cashflowSource).toContain('<Navigate to="/portal/project-select" replace />');
-    expect(cashflowSource).not.toContain('activeProjectId');
     expect(cashflowSource).not.toContain('myProject');
     expect(sheetLabSource).toContain('useParams');
     expect(sheetLabSource).toContain('routeProjectId');
