@@ -108,7 +108,6 @@ import { mountPersonRoutes } from './routes/persons.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
-import { mountAxrMonthCloseQaRoutes } from './routes/axr-month-close-qa.mjs';
 import { mountCashflowSheetLabRoutes } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
@@ -1604,7 +1603,6 @@ export function createBffApp(options = {}) {
     cashflowSlackService,
     mcpOAuthService,
   });
-  mountAxrMonthCloseQaRoutes(app, { db });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });
