@@ -24,7 +24,6 @@ import {
   HR_EVENT_LABELS, HR_EVENT_COLORS,
   type HrEventType,
 } from '../../data/hr-announcements-store';
-import { PART_PROJECTS } from '../../data/participation-data';
 import { fmtKRW } from '../../data/budget-data';
 
 // ═══════════════════════════════════════════════════════════════
@@ -33,7 +32,7 @@ import { fmtKRW } from '../../data/budget-data';
 // ═══════════════════════════════════════════════════════════════
 
 export function AdminHrAnnouncementPage() {
-  const { participationEntries, persons } = useAppStore();
+  const { participationEntries, persons, projects } = useAppStore();
   const {
     announcements, alerts,
     createAnnouncement, resolveAnnouncement,
@@ -63,8 +62,8 @@ export function AdminHrAnnouncementPage() {
         participationEntries
           .filter(e => e.memberId === form.employeeId && e.rate > 0)
           .map(e => {
-            const proj = PART_PROJECTS.find(p => e.projectId === p.id || e.projectShortName === p.shortName);
-            return proj ? { id: proj.id, name: proj.name, shortName: proj.shortName } : null;
+            const proj = projects.find(p => e.projectId === p.id);
+            return proj ? { id: proj.id, name: proj.name, shortName: proj.shortName || proj.name } : null;
           })
           .filter(Boolean)
       )]
@@ -83,7 +82,7 @@ export function AdminHrAnnouncementPage() {
       effectiveDate: form.effectiveDate,
       announcedBy: '관리자',
       description: form.description || `${emp.realName}(${emp.nickname}) ${HR_EVENT_LABELS[form.eventType]} - ${form.effectiveDate}`,
-    }, participationEntries);
+    }, participationEntries, projects);
 
     setShowCreate(false);
     setForm({ employeeId: '', eventType: 'RESIGNATION', effectiveDate: '', description: '' });
@@ -184,7 +183,7 @@ export function AdminHrAnnouncementPage() {
                       <p className="text-[10px] text-muted-foreground line-clamp-2">{ann.description}</p>
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                         {ann.affectedProjectIds.map(pid => {
-                          const proj = PART_PROJECTS.find(p => p.id === pid);
+                          const proj = projects.find(p => p.id === pid);
                           return (
                             <Badge key={pid} variant="outline" className="text-[8px] h-3.5 px-1 bg-muted/30">
                               {proj?.shortName || pid}
@@ -244,7 +243,7 @@ export function AdminHrAnnouncementPage() {
                   </p>
                   <div className="space-y-2">
                     {selAlerts.map(alert => {
-                      const proj = PART_PROJECTS.find(p => p.id === alert.projectId);
+                      const proj = projects.find(p => p.id === alert.projectId);
                       return (
                         <div key={alert.id} className={`p-3 rounded-lg border transition-colors ${
                           alert.changeRequestCreated
