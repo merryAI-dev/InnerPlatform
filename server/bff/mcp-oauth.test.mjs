@@ -42,7 +42,7 @@ describe('MYSCube MCP OAuth', () => {
     await expect(service.exchangeCode({ grant_type: 'authorization_code', client_id: 'myscube-local-launcher', redirect_uri: 'http://127.0.0.1:45678/callback', code, code_verifier: 'b'.repeat(43) })).rejects.toMatchObject({ code: 'invalid_grant' });
     const token = await service.exchangeCode({ grant_type: 'authorization_code', client_id: 'myscube-local-launcher', redirect_uri: 'http://127.0.0.1:45678/callback', code, code_verifier: verifier });
 
-    expect(token.access_token).not.toContain('u1');
+    expect(token.access_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     await expect(service.resolveAccessToken(`Bearer ${token.access_token}`)).resolves.toMatchObject({ tenantId: 'mysc', actorId: 'u1', actorRole: 'pm' });
     await db.doc('orgs/mysc/members/u1').set({ status: 'DISABLED', role: 'pm' });
     await expect(service.resolveAccessToken(`Bearer ${token.access_token}`)).rejects.toMatchObject({ code: 'mcp_member_inactive' });
