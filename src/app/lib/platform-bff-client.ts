@@ -11,6 +11,7 @@ import type {
   ProjectRequestContractAnalysis,
   TransactionState,
 } from '../data/types';
+import type { EmploymentState, EmploymentType } from '../platform/person-employment';
 import { PlatformApiClient } from '../platform/api-client';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 import {
@@ -2292,10 +2293,12 @@ export async function createPersonViaBff(params: {
   return response.data;
 }
 
+// 근로형태·재직상태는 도메인 타입을 그대로 쓴다. 여기서 string 으로 느슨하게 두면
+// 서버가 새 값을 보내도 컴파일이 통과해 화면에서만 조용히 깨진다.
 export interface PersonEmploymentRecord {
   id: string;
-  type: string;
-  state: string;
+  type: EmploymentType;
+  state: EmploymentState;
   startDate: string;
   endDate: string | null;
   note: string;

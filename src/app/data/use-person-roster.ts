@@ -3,6 +3,7 @@ import { featureFlags } from '../config/feature-flags';
 import { useFirebase } from '../lib/firebase-context';
 import { fetchPersonsViaBff, type PersonRecord } from '../lib/platform-bff-client';
 import type { DirectoryPerson } from '../platform/person-directory';
+import { resolveEmploymentTypeAt } from '../platform/person-employment';
 import { useAuth } from './auth-store';
 
 /**
@@ -23,7 +24,12 @@ function toDirectoryPeople(items: PersonRecord[]): DirectoryPerson[] {
     personId: person.personId,
     name: person.name,
     nickname: person.nickname || '',
+    employmentType: resolveEmploymentTypeAt(person.employments, today()),
   }));
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 /** 명부가 바뀌었을 때 다음 조회가 서버를 다시 보게 한다. */

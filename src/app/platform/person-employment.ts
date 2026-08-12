@@ -352,3 +352,37 @@ export function addEmployment(
 export function selectableAt(people: Person[], isoDate: string): Person[] {
   return people.filter((person) => resolveEmploymentAt(person, isoDate) !== null);
 }
+
+/** 오늘 유효한 계약이 없는 상태. 퇴사했거나 아직 시작 전이다. */
+export const NO_CURRENT_EMPLOYMENT = 'NONE';
+
+export type DirectoryEmploymentType = EmploymentType | typeof NO_CURRENT_EMPLOYMENT;
+
+/** 조회 시점에 유효한 계약의 근로형태. 계약이 없으면 NONE. */
+export function resolveEmploymentTypeAt(
+  employments: Array<Pick<PersonEmployment, 'type' | 'startDate' | 'endDate'>> | null | undefined,
+  isoDate: string,
+): DirectoryEmploymentType {
+  const list = Array.isArray(employments) ? employments : [];
+  const matches = list.filter((item) => (
+    item.startDate <= isoDate && (item.endDate === null || item.endDate >= isoDate)
+  ));
+  if (matches.length === 0) return NO_CURRENT_EMPLOYMENT;
+  // 겹치면 늦게 시작한 쪽을 현재로 본다 - resolveEmploymentAt 과 같은 규칙.
+  return [...matches].sort((a, b) => a.startDate.localeCompare(b.startDate)).at(-1)!.type;
+}
+
+/**
+ * 프로젝트 팀에 배정할 수 있는 근로형태인가.
+ *
+ * 인턴은 사업에 배정하지 않는다. 사람에게 붙는 자격 표시가 아니라 근로형태로 가르는
+ * 것이라 명부에는 아무 표시도 남지 않고, 인턴이 정규직이 되면 그냥 따라온다.
+ * 파트너와 미채용 자리는 배정 대상이다 - 실제로 사업에 들어가 있다.
+ *
+ * undefined 는 "근로형태를 모른다"는 뜻이고 거르지 않는다. 명부를 못 읽어 형태 정보가
+ * 없는 상황에서 전원을 걸러버리면 아무도 고를 수 없게 된다.
+ */
+export function isProjectAssignableType(type: DirectoryEmploymentType | undefined): boolean {
+  if (type === undefined) return true;
+  return type !== 'INTERN' && type !== NO_CURRENT_EMPLOYMENT;
+}

@@ -1007,11 +1007,11 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
-  // 후보 목록의 출처는 계정 원장(members) 이다. roster 는 계정 목록이 아직/영영 안 왔을 때만
-  // 쓰이는 안전망이고, 별명이 빈 계정 문서의 표시 이름을 채우는 데도 쓴다.
+  // 팀원 후보의 출처는 인력 명부(roster) 하나다. 배정에는 이름·별명만 저장되므로 계정이
+  // 없어도 되고, 인턴은 근로형태로 걸러진다. members 는 명부를 못 읽었을 때의 안전망.
   const teamMemberOptions = useMemo(
-    () => buildProjectTeamMemberOptions(members, roster),
-    [members, roster],
+    () => buildProjectTeamMemberOptions(roster, members),
+    [roster, members],
   );
   const teamMemberOptionMap = useMemo(() => Object.fromEntries(
     teamMemberOptions.map((option) => [option.value, option]),
@@ -1019,7 +1019,12 @@ export function ProjectEditorWizard({
   // The ledger list decides whether a stored value is still linked, so the "not in the
   // member ledger" warning keeps working. The picker lists carry the stored value on top
   // of it so opening an old project never silently drops its owner or approver.
-  const ledgerMemberOptions = useMemo(() => buildOrgMemberPickerOptions(members), [members]);
+  // PM·최종 결재자는 로그인해서 승인해야 하므로 계정이 필수다. 명부는 문지기로만 쓴다 -
+  // 명부에 없는 사람(퇴사 후 계정이 남은 경우, 서비스 계정)은 후보에서 빠진다.
+  const ledgerMemberOptions = useMemo(
+    () => buildOrgMemberPickerOptions(members, roster),
+    [members, roster],
+  );
   const ownerOptions = useMemo(
     () => withSavedOrgMemberOption(ledgerMemberOptions, {
       uid: draft.registeredById,

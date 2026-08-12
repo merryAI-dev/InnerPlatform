@@ -94,6 +94,7 @@ import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
 import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
 import { MemberPicker } from '../ui/member-picker';
 import { buildOrgMemberPickerOptions } from '../../data/project-team-member-options';
+import { usePersonRoster } from '../../data/use-person-roster';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
 
 function previousYearMonth(yearMonth: string): string {
@@ -445,7 +446,13 @@ export function CashflowProjectSheet({
       && (lateSheetDiffWeek === 'ALL' || String(change.weekNo) === lateSheetDiffWeek)
       && (!query || `${change.yearMonth} ${change.weekNo} ${change.mode} ${label} ${change.lineId}`.toLocaleLowerCase('ko-KR').includes(query));
   });
-  const executiveApproverOptions = useMemo(() => buildOrgMemberPickerOptions(members || []), [members]);
+  // 조직장은 로그인해서 승인해야 하므로 계정이 필수지만, 명부에 없는 사람(퇴사 후 계정이
+  // 남은 경우)은 후보에서 빠져야 한다. 명부는 문지기로만 쓴다.
+  const approverRoster = usePersonRoster();
+  const executiveApproverOptions = useMemo(
+    () => buildOrgMemberPickerOptions(members || [], approverRoster),
+    [members, approverRoster],
+  );
 
   useEffect(() => {
     const approverId = project?.executiveApproverId || '';

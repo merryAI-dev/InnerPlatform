@@ -120,16 +120,19 @@ describe('ProjectEditorWizard dropdown contract', () => {
     );
     expect(optionsSource).toContain("if (status === 'INACTIVE' || status === 'DELETED') return;");
     expect(optionsSource).not.toContain("=== 'ACTIVE'");
-    expect(source).toContain('buildOrgMemberPickerOptions(members)');
+    expect(source).toContain('buildOrgMemberPickerOptions(members, roster)');
     expect(source).toContain('const executiveApproverOptions = useMemo');
   });
 
   it('uses a searchable team member picker for registration and edit flows', () => {
     expect(source).toContain('function TeamMemberSearchCombobox');
     expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');
-    // 후보의 출처는 계정 원장(members)이고, roster 는 계정 목록이 비었을 때의 안전망이다.
-    // 포털 등록 화면은 members 가 [] 로 시작하므로 roster 가 빠지면 팀원을 아예 못 고른다.
-    expect(source).toContain('buildProjectTeamMemberOptions(members, roster)');
+    // 후보의 출처는 인력 명부(roster) 하나다. 계정 원장을 출처로 쓰면 퇴사 후 계정이
+    // 남은 사람이 계속 뜨고, 명부에만 있는 사람은 안 뜬다. members 는 명부를 못 읽었을
+    // 때의 안전망으로만 남는다.
+    expect(source).toContain('buildProjectTeamMemberOptions(roster, members)');
+    // PM·조직장은 계정이 필수라 계정 원장이 출처지만, 명부가 문지기 역할을 한다.
+    expect(source).toContain('buildOrgMemberPickerOptions(members, roster)');
     expect(source).toContain('options.length}명 중 검색');
     expect(source).toContain('options={availableTeamMemberOptions}');
     expect(source).toContain('<TeamMemberSearchCombobox');
