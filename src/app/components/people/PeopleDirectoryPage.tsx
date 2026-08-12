@@ -171,6 +171,80 @@ function EmploymentForm({
   );
 }
 
+interface PersonRow {
+  person: PersonRecord;
+  current: ReturnType<typeof resolveCurrentEmployment>;
+  separatedAt: string | null;
+  tenure: ReturnType<typeof deriveTenure>;
+}
+
+/**
+ * 인력 표. 근로형태 열은 두지 않는다 — 이름 옆에 붙는 신분 표시가 되기 때문이다.
+ * 계약 형태가 필요한 자리는 계약 관리 다이얼로그뿐이고, 거기서는 그대로 보인다.
+ */
+function PeopleTable({ rows, loading, onOpen }: {
+  rows: PersonRow[];
+  loading: boolean;
+  onOpen: (person: PersonRecord) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-muted/30">
+            <TableHead className="min-w-[130px]">이름</TableHead>
+            <TableHead className="min-w-[90px]">재직상태</TableHead>
+            <TableHead className="min-w-[150px]">소속</TableHead>
+            <TableHead className="min-w-[110px]">직급</TableHead>
+            <TableHead className="min-w-[100px]">입사일</TableHead>
+            <TableHead className="min-w-[100px]">근속</TableHead>
+            <TableHead className="w-24" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">
+                {loading ? '불러오는 중…' : '조건에 맞는 인력이 없습니다.'}
+              </TableCell>
+            </TableRow>
+          ) : rows.map(({ person, current, separatedAt, tenure }) => (
+            <TableRow
+              key={person.personId}
+              className="cursor-pointer hover:bg-accent/40"
+              onClick={() => onOpen(person)}
+            >
+              <TableCell>
+                <span className="text-xs font-semibold">{person.name}</span>
+                {person.nickname ? <span className="ml-1 text-[10px] text-muted-foreground">({person.nickname})</span> : null}
+              </TableCell>
+              <TableCell>
+                {current ? (
+                  <Badge variant="outline" className={`text-[10px] ${STATE_TONE[current.state as EmploymentState]}`}>
+                    {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
+                  </Badge>
+                ) : (
+                  <span className="text-[11px] text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
+                )}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {person.departmentTop || '-'}
+                {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
+              </TableCell>
+              <TableCell className="text-xs">{person.grade || person.title || '-'}</TableCell>
+              <TableCell className="text-xs tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
+              <TableCell className="text-xs tabular-nums">{tenure?.label || '-'}</TableCell>
+              <TableCell>
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]">계약 관리</Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export function PeopleDirectoryPage() {
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
@@ -220,7 +294,6 @@ export function PeopleDirectoryPage() {
       })
       .filter((row) => {
         if (typeFilter === 'SEPARATED') return !row.current;
-        if (typeFilter !== 'ALL' && row.current?.type !== typeFilter) return false;
         if (!query) return true;
         return [row.person.name, row.person.nickname, row.person.departmentTop, row.person.grade]
           .some((value) => String(value || '').toLowerCase().includes(query));
@@ -228,12 +301,25 @@ export function PeopleDirectoryPage() {
       .sort((a, b) => a.person.name.localeCompare(b.person.name, 'ko'));
   }, [people, searchText, typeFilter, asOf]);
 
+  // 근로형태는 이름 옆에 붙는 신분 표시라 목록에서 보여주지 않는다. 인턴은 섞지 않고
+  // 아래 별도 표로 뗀다 - 한 표에 두면 근로형태를 가려도 순서와 빈칸으로 드러난다.
+  // 계약을 바꾸는 자리(계약 관리)에서는 그대로 보인다. 거기서는 필요한 정보다.
+  const mainRows = useMemo(
+    () => rows.filter((row) => row.current?.type !== 'INTERN'),
+    [rows],
+  );
+  const internRows = useMemo(
+    () => rows.filter((row) => row.current?.type === 'INTERN'),
+    [rows],
+  );
+
   const counts = useMemo(() => {
-    const base = { FULL_TIME: 0, INTERN: 0, PARTNER: 0, PLACEHOLDER: 0, SEPARATED: 0 };
+    const base = { MAIN: 0, INTERN: 0, SEPARATED: 0 };
     people.forEach((person) => {
       const current = resolveCurrentEmployment(person as unknown as Person, asOf);
       if (!current) base.SEPARATED += 1;
-      else base[current.type] += 1;
+      else if (current.type === 'INTERN') base.INTERN += 1;
+      else base.MAIN += 1;
     });
     return base;
   }, [people, asOf]);
@@ -341,12 +427,9 @@ export function PeopleDirectoryPage() {
             value={searchText} onChange={(event) => setSearchText(event.target.value)}
           />
         </div>
+        {/* 근로형태별 필터를 없앴다. 필터를 누르는 것만으로도 누가 어느 형태인지 드러난다. */}
         {([
-          ['ALL', `전체 ${people.length}`],
-          ['FULL_TIME', `정규직 ${counts.FULL_TIME}`],
-          ['INTERN', `인턴 ${counts.INTERN}`],
-          ['PARTNER', `파트너 ${counts.PARTNER}`],
-          ['PLACEHOLDER', `미채용 ${counts.PLACEHOLDER}`],
+          ['ALL', `전체 ${counts.MAIN + counts.INTERN}`],
           ['SEPARATED', `계약 종료 ${counts.SEPARATED}`],
         ] as const).map(([value, label]) => (
           <Button
@@ -412,70 +495,17 @@ export function PeopleDirectoryPage() {
         </Card>
       ) : null}
 
-      <div className="overflow-x-auto rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="min-w-[130px]">이름</TableHead>
-              <TableHead className="min-w-[110px]">근로형태</TableHead>
-              <TableHead className="min-w-[90px]">재직상태</TableHead>
-              <TableHead className="min-w-[150px]">소속</TableHead>
-              <TableHead className="min-w-[110px]">직급</TableHead>
-              <TableHead className="min-w-[100px]">입사일</TableHead>
-              <TableHead className="min-w-[100px]">근속</TableHead>
-              <TableHead className="w-24" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">
-                  {loading ? '불러오는 중…' : '조건에 맞는 인력이 없습니다.'}
-                </TableCell>
-              </TableRow>
-            ) : rows.map(({ person, current, separatedAt, tenure }) => (
-              <TableRow
-                key={person.personId}
-                className="cursor-pointer hover:bg-accent/40"
-                onClick={() => openPerson(person)}
-              >
-                <TableCell>
-                  <span className="text-xs font-semibold">{person.name}</span>
-                  {person.nickname ? <span className="ml-1 text-[10px] text-muted-foreground">({person.nickname})</span> : null}
-                </TableCell>
-                <TableCell>
-                  {current ? (
-                    <Badge variant="outline" className={`text-[10px] ${TYPE_TONE[current.type as EmploymentType]}`}>
-                      {EMPLOYMENT_TYPE_LABELS[current.type as EmploymentType]}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="border-slate-300 bg-slate-100 text-[10px] text-slate-500">계약 종료</Badge>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {current ? (
-                    <Badge variant="outline" className={`text-[10px] ${STATE_TONE[current.state as EmploymentState]}`}>
-                      {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
-                    </Badge>
-                  ) : (
-                    <span className="text-[11px] text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '-'}</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {person.departmentTop || '-'}
-                  {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
-                </TableCell>
-                <TableCell className="text-xs">{person.grade || person.title || '-'}</TableCell>
-                <TableCell className="text-xs tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
-                <TableCell className="text-xs tabular-nums">{tenure?.label || '-'}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]">계약 관리</Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <PeopleTable rows={mainRows} loading={loading} onOpen={openPerson} />
+
+      {internRows.length > 0 || counts.INTERN > 0 ? (
+        <section className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">인턴</h2>
+            <span className="text-[11px] tabular-nums text-slate-500">{counts.INTERN}명</span>
+          </div>
+          <PeopleTable rows={internRows} loading={loading} onOpen={openPerson} />
+        </section>
+      ) : null}
 
       <p className="text-[11px] text-slate-500">
         근속은 입사일과 오늘({asOf}) 기준으로 매번 다시 계산합니다. 계약 이력은 지우지 않고 쌓습니다 —
