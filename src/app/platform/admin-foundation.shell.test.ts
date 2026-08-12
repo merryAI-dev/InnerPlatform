@@ -14,11 +14,11 @@ const routesSource = readFileSync(
 );
 
 describe('admin navigation shell contract', () => {
-  it('exposes the weekly history and management-planning entry paths', () => {
+  it('exposes the cashflow approval and management-planning entry paths', () => {
     expect(navConfigSource).not.toContain("label: '기능 검색'");
     expect(navConfigSource).toContain("to: '/dashboard'");
     expect(navConfigSource).toContain("to: '/cashflow'");
-    expect(navConfigSource).toContain("label: '주간 입력 이력'");
+    expect(navConfigSource).toContain("label: '현금흐름 승인'");
     expect(navConfigSource).toContain("to: '/cashflow/export'");
     expect(navConfigSource).toContain("label: '프로젝트 등록/승인'");
     expect(navConfigSource).toContain("to: '/management-planning/project-codes'");
