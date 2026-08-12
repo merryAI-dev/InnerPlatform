@@ -290,7 +290,7 @@ const REGISTRATION_DOCUMENT_SLOTS: RegistrationDocumentSlot[] = [
   },
   {
     number: 5,
-    label: '제안서(구글드라이브 링크)',
+    label: '제안서 PPT 링크',
     description: '있을 시',
     kinds: ['proposal_ppt_original'],
   },
@@ -327,27 +327,78 @@ const STEPS: Array<{
   { id: 'review', label: '검토 및 저장', icon: ClipboardList },
 ];
 
+/*
+ * 강조색 #0176D3 은 단 하나의 의미만 갖는다: "여기가 지금 초점" — 필수 마커 · 포커스 링 ·
+ * 활성 단계 칩. 그 밖에는 회색조를 쓴다. 상태(오류)는 red 하나로만 말하고,
+ * 계산된 값은 색이 아니라 형태(입력칸 없음 + 세로선)로 구분한다.
+ * Tailwind 임의값은 리터럴이어야 해서 상수로 빼지 않고 클래스 문자열로 직접 쓴다.
+ */
+
+/**
+ * 글자는 네 역할만 쓴다. 예전에는 text-sm / text-xs / text-[12px] / text-[11px] / text-[10px] 가
+ * 섞여 있었고 그중 text-xs 와 text-[12px] 는 같은 12px 를 두 이름으로 부르던 우연한 중복이었다.
+ * 개별 화면에서 새 크기를 만들지 말고 아래 네 개만 쓴다.
+ */
+const FORM_SECTION_CLASS = 'text-[14px] font-bold leading-tight text-slate-900';
+const FORM_LABEL_CLASS = 'text-[12px] font-semibold leading-5 text-slate-700';
+/** 값은 13px. 숫자는 자릿수가 흔들리지 않도록 고정폭(tabular-nums)만 붙인다. */
+const FORM_VALUE_CLASS = 'text-[13px]';
+const FORM_NUMERIC_VALUE_CLASS = 'text-[13px] tabular-nums';
+const FORM_HINT_CLASS = 'text-[11px] font-normal leading-5 text-slate-500';
+const FORM_ERROR_CLASS = 'text-[11px] font-normal leading-5 text-red-700';
+
+/**
+ * 간격은 세 값만 쓴다: 8(라벨↔입력) / 16(필드↔필드) / 24(섹션↔섹션).
+ * 묶음 안쪽이 바깥쪽보다 항상 좁아야 그룹이 뒤집혀 보이지 않는다.
+ */
+const FORM_FIELD_STACK_CLASS = 'space-y-4';
+const FORM_SECTION_STACK_CLASS = 'space-y-6';
+
 const PROJECT_EDITOR_FORM_SURFACE_CLASS = [
   '[&_[data-slot=input]]:border-slate-300',
   '[&_[data-slot=input]]:bg-white',
   '[&_[data-slot=input]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
-  '[&_[data-slot=input]]:focus-visible:border-slate-400',
-  '[&_[data-slot=input]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=input]]:focus-visible:border-[#0176D3]',
+  '[&_[data-slot=input]]:focus-visible:ring-[#0176D3]/25',
   '[&_[data-slot=select-trigger]]:border',
   '[&_[data-slot=select-trigger]]:border-slate-300',
   '[&_[data-slot=select-trigger]]:bg-white',
   '[&_[data-slot=select-trigger]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
-  '[&_[data-slot=select-trigger]]:focus-visible:border-slate-400',
-  '[&_[data-slot=select-trigger]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=select-trigger]]:focus-visible:border-[#0176D3]',
+  '[&_[data-slot=select-trigger]]:focus-visible:ring-[#0176D3]/25',
   '[&_[data-slot=textarea]]:border-slate-300',
   '[&_[data-slot=textarea]]:bg-white',
   '[&_[data-slot=textarea]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
-  '[&_[data-slot=textarea]]:focus-visible:border-slate-400',
-  '[&_[data-slot=textarea]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=textarea]]:focus-visible:border-[#0176D3]',
+  '[&_[data-slot=textarea]]:focus-visible:ring-[#0176D3]/25',
   '[&_[role=combobox]]:border-slate-300',
   '[&_[role=combobox]]:bg-white',
   '[&_[role=combobox]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
 ].join(' ');
+
+/** 입력 컨트롤의 기본 높이·글자. 값 13px 규칙을 컨트롤에도 그대로 적용한다. */
+const FORM_CONTROL_CLASS = `h-9 ${FORM_VALUE_CLASS}`;
+const FORM_NUMERIC_CONTROL_CLASS = `h-9 text-right ${FORM_NUMERIC_VALUE_CLASS}`;
+
+/** 단계마다 "이 단계에서 준비할 것"을 같은 자리에서 한 번만 알려준다. */
+const STEP_PREPARATION_NOTES: Record<ProjectEditorStep, string[]> = {
+  basic: [
+    '계약서와 고객사 사업자등록증을 옆에 두고 시작해 주세요.',
+    '표기는 문서에 적힌 그대로 옮겨 적습니다. 줄여 쓰거나 띄어쓰기를 바꾸지 않습니다.',
+  ],
+  financial: [
+    '계약서 · 고객사 사업자등록증 · 산출내역서(견적서) 파일을 먼저 준비해 주세요.',
+    '계약금액과 선금 · 중도금 · 잔금 입금 시점을 계약서에서 확인해 두면 한 번에 끝납니다.',
+  ],
+  team: [
+    '사업 담당자와 최종 결재자를 구성원 원장에서 고를 수 있어야 합니다.',
+    '참여인력은 운영매니저 1인 이상이 필요합니다.',
+  ],
+  review: [
+    '저장 전 마지막 확인 단계입니다.',
+    '남은 항목이 있으면 아래 목록에서 해당 단계로 바로 이동할 수 있습니다.',
+  ],
+};
 
 function getProjectEditorAutosaveStorageKey(key: string) {
   return `mysc:project-editor-autosave:${key}`;
@@ -397,6 +448,32 @@ function formatAutosaveTime(value: string) {
 
 function fmtKRW(value: number) {
   return value ? value.toLocaleString('ko-KR') : '0';
+}
+
+const KOREAN_AMOUNT_UNITS: Array<[number, string]> = [
+  [1000000000000, '조'],
+  [100000000, '억'],
+  [10000, '만'],
+];
+
+/**
+ * 금액 옆 한글 단위 보조 표기(예: 270000000 → "2억 7,000만 원").
+ * 읽기 전용 표시일 뿐이고 저장값은 원 단위 숫자 그대로다.
+ */
+function formatKoreanAmountUnit(value: number) {
+  if (!Number.isFinite(value) || value === 0) return '';
+  const negative = value < 0;
+  let rest = Math.floor(Math.abs(value));
+  const parts: string[] = [];
+  KOREAN_AMOUNT_UNITS.forEach(([unit, label]) => {
+    const quotient = Math.floor(rest / unit);
+    if (quotient <= 0) return;
+    parts.push(`${quotient.toLocaleString('ko-KR')}${label}`);
+    rest -= quotient * unit;
+  });
+  if (rest > 0) parts.push(rest.toLocaleString('ko-KR'));
+  if (parts.length === 0) return '';
+  return `${negative ? '-' : ''}${parts.join(' ')} 원`;
 }
 
 function readText(value: unknown) {
@@ -489,6 +566,125 @@ function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> =
   };
 }
 
+/**
+ * 필드 옆에 붙는 오류 문구. 판정은 submitIssues 그대로이고 여기서는 읽기 좋게만 만든다.
+ * 항목 이름만 적힌 문구('PM', '계약금액')는 빨간 글씨로 이름만 되풀이하는 꼴이라,
+ * 마지막 단계 안내와 똑같은 뒷말을 붙인다. 이미 문장인 문구는 그대로 둔다.
+ */
+function describeSubmitIssue(message: string) {
+  return message.endsWith('.') ? message : `${message} · 최종 저장 전 확인이 필요합니다`;
+}
+
+interface ProjectFormSectionProps {
+  title: string;
+  required?: boolean;
+  /** 섹션 제목 밑에 한 줄로 붙는 부연. 필드 도움말과 섞이지 않도록 여기서만 쓴다. */
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}
+
+/** 섹션 제목 + 굵은 밑줄. 단계 안의 묶음은 모두 이 모양 하나로 통일한다. */
+function ProjectFormSection({ title, required, description, action, children }: ProjectFormSectionProps) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-end justify-between gap-4 border-b-2 border-slate-900 pb-2">
+        <div>
+          <h3 className={FORM_SECTION_CLASS}>
+            {title}
+            {required ? <span className="ml-0.5 text-[#0176D3]">*</span> : null}
+          </h3>
+          {description ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{description}</p> : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      <div className={FORM_FIELD_STACK_CLASS}>{children}</div>
+    </section>
+  );
+}
+
+interface ProjectFormRowProps {
+  label: string;
+  required?: boolean;
+  /** 라벨 아래에 붙는 짧은 부연. 항목 이름만으로 부족할 때만. */
+  note?: string;
+  /** 입력 아래 `·` 불릿으로 붙는 도움말. 자리를 여기 하나로 고정한다. */
+  hints?: ReactNode[];
+  /** 도움말과 같은 자리에 색만 바꿔 보여주는 오류. submitIssues 문구를 그대로 받는다. */
+  errors?: string[];
+  /**
+   * 단계 이동 후 이 필드로 스크롤·포커스하기 위한 표식.
+   * submitIssues 의 label 과 같은 값을 넣는다(판정에는 쓰지 않고 위치만 찾는다).
+   */
+  issueLabel?: string;
+  children: ReactNode;
+}
+
+/**
+ * 필드 한 줄의 골격. 라벨 열(고정폭) + 오른쪽 입력 영역이고,
+ * 필수 표시 · 부연 · 도움말 · 오류의 자리를 여기서 한 번만 정한다.
+ *
+ * 라벨 열이 고정폭이라 `*` 는 저절로 세로로 정렬된다. 왼쪽 세로 마커는 따로 두지 않는다.
+ */
+function ProjectFormRow({ label, required, note, hints, errors, issueLabel, children }: ProjectFormRowProps) {
+  const visibleHints = (hints || []).filter(Boolean);
+  const visibleErrors = (errors || []).filter(Boolean);
+  return (
+    <div
+      data-issue-label={issueLabel}
+      className="grid gap-2 lg:grid-cols-[168px_minmax(0,1fr)] lg:gap-x-6"
+    >
+      <div className="lg:pt-2">
+        <Label className={cn('inline-flex', FORM_LABEL_CLASS)}>
+          <span>
+            {label}
+            {required ? <span className="ml-0.5 text-[#0176D3]">*</span> : null}
+          </span>
+        </Label>
+        {note ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{note}</p> : null}
+      </div>
+      <div className="min-w-0">
+        {children}
+        {visibleHints.length > 0 ? (
+          <ul className={cn('mt-2 space-y-1', FORM_HINT_CLASS)}>
+            {visibleHints.map((hint, index) => (
+              <li key={index} className="flex gap-1.5">
+                <span aria-hidden className="shrink-0">·</span>
+                <span className="min-w-0">{hint}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {visibleErrors.length > 0 ? (
+          <ul className={cn('mt-2 space-y-1', FORM_ERROR_CLASS)} role="alert">
+            {visibleErrors.map((message) => (
+              <li key={message} className="flex gap-1.5">
+                <span aria-hidden className="shrink-0">·</span>
+                <span className="min-w-0">{describeSubmitIssue(message)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 계산된 값은 입력칸이 아니다. 테두리와 배경을 걷어내고 얇은 세로선과 `계산됨` 마이크로
+ * 라벨만 남긴다. 색이 아니라 형태로 구분하는 것이라 회색조를 유지한다.
+ */
+function ProjectComputedValue({ value, numeric = true }: { value: string; numeric?: boolean }) {
+  return (
+    <div className="flex h-9 items-center gap-2 border-l-2 border-slate-300 pl-2.5">
+      <span className={cn(numeric ? FORM_NUMERIC_VALUE_CLASS : FORM_VALUE_CLASS, 'font-medium text-slate-900')}>
+        {value}
+      </span>
+      <span className="text-[11px] font-normal leading-5 text-slate-400">계산됨</span>
+    </div>
+  );
+}
+
 interface TeamMemberSearchComboboxProps {
   member: ProjectTeamMemberAssignment;
   options: ProjectTeamMemberOption[];
@@ -536,7 +732,7 @@ function TeamMemberSearchCombobox({
           role="combobox"
           aria-label={selectedLabel ? `팀원 선택: ${selectedLabel}` : '팀원 검색'}
           aria-expanded={open}
-          className="mt-1 h-9 w-full justify-between px-3 text-left text-sm font-normal"
+          className={cn('h-9 w-full justify-between px-3 text-left font-normal', FORM_VALUE_CLASS)}
         >
           <span className={cn('truncate', !selectedLabel && 'text-muted-foreground')}>
             {selectedLabel || '팀원 검색'}
@@ -587,7 +783,7 @@ function TeamMemberSearchCombobox({
                     <Check className={cn('h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />
                     <span className="truncate">{option.label}</span>
                     {disabled ? (
-                      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">이미 추가됨</span>
+                      <span className={cn('ml-auto shrink-0', FORM_HINT_CLASS)}>이미 추가됨</span>
                     ) : null}
                   </CommandItem>
                 );
@@ -1329,7 +1525,7 @@ export function ProjectEditorWizard({
         issues.push({ step: 'financial', label: '계약서를 써니(사업지원팀)에게 제출했습니다.' });
       }
       if (draft.registrationConfirmations.proposalPptOriginal && !isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)) {
-        issues.push({ step: 'financial', label: '제안서 구글드라이브 링크' });
+        issues.push({ step: 'financial', label: '제안서 PPT 링크' });
       }
       if (draft.registrationConfirmations.presentationPptOriginal && !isValidDriveUrl(draft.registrationConfirmations.presentationPptOriginal)) {
         issues.push({ step: 'financial', label: '발표자료 구글드라이브 링크' });
@@ -1429,6 +1625,39 @@ export function ProjectEditorWizard({
 
   const canSubmit = submitIssues.length === 0;
 
+  // 아래 세 가지는 모두 submitIssues 를 그대로 읽기만 한다. 판정 규칙은 손대지 않고
+  // 보여주는 자리(단계 칩 배지 · 필드 옆 문구 · 이동 후 포커스)만 늘린다.
+  const stepIssueCounts = useMemo(() => {
+    const counts: Record<ProjectEditorStep, number> = { basic: 0, financial: 0, team: 0, review: 0 };
+    submitIssues.forEach((issue) => { counts[issue.step] += 1; });
+    return counts;
+  }, [submitIssues]);
+  const issueLabelSet = useMemo(() => new Set(submitIssues.map((issue) => issue.label)), [submitIssues]);
+  /** 마지막 단계 목록과 같은 문구를 필드 바로 아래에서도 쓴다. */
+  const fieldIssues = useCallback(
+    (...labels: string[]) => labels.filter((label) => issueLabelSet.has(label)),
+    [issueLabelSet],
+  );
+  const [pendingIssueFocus, setPendingIssueFocus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingIssueFocus || typeof document === 'undefined') return undefined;
+    const timer = window.setTimeout(() => {
+      const row = Array.from(document.querySelectorAll<HTMLElement>('[data-issue-label]'))
+        .find((node) => node.dataset.issueLabel === pendingIssueFocus);
+      setPendingIssueFocus(null);
+      if (!row) return;
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      row.querySelector<HTMLElement>('input, textarea, select, button, [role=combobox]')?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [pendingIssueFocus, stepIndex]);
+
+  const goToIssue = (issue: { step: ProjectEditorStep; label: string }) => {
+    setStepIndex(Math.max(0, STEPS.findIndex((step) => step.id === issue.step)));
+    setPendingIssueFocus(issue.label);
+  };
+
   const submitBlockedStatusReason = uploadInProgress
     ? '첨부파일을 처리하고 있습니다. 처리가 끝난 뒤 최종 저장해 주세요.'
     : hasPendingRetryFile
@@ -1448,7 +1677,8 @@ export function ProjectEditorWizard({
       <div
         aria-live="polite"
         className={cn(
-          'rounded-lg border bg-white px-4 py-3 text-[12px] text-red-700',
+          'rounded-lg border bg-white px-4 py-3 text-red-700',
+          FORM_VALUE_CLASS,
           submitBlockedNotice ? 'border-red-400' : 'border-slate-200',
         )}
       >
@@ -1462,7 +1692,7 @@ export function ProjectEditorWizard({
               <li key={`${issue.step}-${issue.label}-${index}`}>
                 <button
                   type="button"
-                  onClick={() => setStepIndex(Math.max(0, STEPS.findIndex((step) => step.id === issue.step)))}
+                  onClick={() => goToIssue(issue)}
                   className="text-left underline underline-offset-2 hover:text-red-900"
                 >
                   {issue.label} · {STEPS.find((step) => step.id === issue.step)?.label} 단계로 이동
@@ -1476,134 +1706,146 @@ export function ProjectEditorWizard({
   };
 
   const renderBasicStep = () => (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">담당조직(CIC) *</Label>
-          <Select value={canUseSelectedDepartment ? selectedDepartment : undefined} onValueChange={(value) => update('department', value)}>
-            <SelectTrigger className="mt-1 h-9 text-sm">
-              <SelectValue placeholder="담당조직 선택" />
-            </SelectTrigger>
-            <SelectContent>
-              {normalizedDepartmentOptions.map((department) => (
-                <SelectItem key={department} value={department}>{department}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs">프로젝트 유형 *</Label>
-          <Select value={draft.type} onValueChange={(value) => update('type', value as ProjectType)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {projectTypeOptions.map((type) => (
-                <SelectItem key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+    <ProjectFormSection title="기본 정보">
+      <ProjectFormRow label="담당조직(CIC)" required issueLabel="담당조직(CIC)" errors={fieldIssues('담당조직(CIC)')}>
+        <Select value={canUseSelectedDepartment ? selectedDepartment : undefined} onValueChange={(value) => update('department', value)}>
+          <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}>
+            <SelectValue placeholder="담당조직 선택" />
+          </SelectTrigger>
+          <SelectContent>
+            {normalizedDepartmentOptions.map((department) => (
+              <SelectItem key={department} value={department}>{department}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </ProjectFormRow>
 
-      <div>
-        <Label className="text-xs">공식 계약명{usesRegistrationV2 ? ' *' : ''}</Label>
+      <ProjectFormRow label="프로젝트 유형" required>
+        <Select value={draft.type} onValueChange={(value) => update('type', value as ProjectType)}>
+          <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {projectTypeOptions.map((type) => (
+              <SelectItem key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </ProjectFormRow>
+
+      <ProjectFormRow
+        label="공식 계약명"
+        required={usesRegistrationV2}
+        issueLabel="공식 계약명"
+        errors={fieldIssues('공식 계약명')}
+        hints={['띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.']}
+      >
         <Input
           value={draft.officialContractName}
           onChange={(event) => update('officialContractName', event.target.value)}
           placeholder="계약서에 기재된 계약명 그대로 입력"
-          className="mt-1 h-9 text-sm"
+          className={FORM_CONTROL_CLASS}
         />
-        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-          띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.
-        </p>
-      </div>
+      </ProjectFormRow>
 
-      <div>
-        <Label className="text-xs">프로젝트명 *</Label>
+      <ProjectFormRow
+        label="프로젝트명"
+        required
+        issueLabel="프로젝트명"
+        errors={fieldIssues('프로젝트명')}
+        hints={[
+          '계약연도+프로젝트명 형식으로 입력해 주세요. 다년도 사업은 같은 연도만 변경된 동일 프로젝트명을 사용해주세요.(재경팀이 부여하는 A_, C_와 같은 코드는 기입하지 않습니다)',
+        ]}
+      >
         <Input
           value={draft.name}
           onChange={(event) => update('name', event.target.value)}
           placeholder="예: 26농식품AC"
-          className="mt-1 h-9 text-sm"
+          className={FORM_CONTROL_CLASS}
         />
-        <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted-foreground">
-          계약연도+프로젝트명 형식으로 입력해 주세요. 다년도 사업은 같은 연도만 변경된 동일 프로젝트명을 사용해주세요.(재경팀이 부여하는 A_, C_와 같은 코드는 기입하지 않습니다)
-        </p>
-      </div>
+      </ProjectFormRow>
 
-      <div>
-        <div>
-          <Label className="text-xs">계약 대상{usesRegistrationV2 ? ' *' : ''}</Label>
-          <Input
-            value={draft.clientOrg}
-            onChange={(event) => update('clientOrg', event.target.value)}
-            placeholder="예: 주식회사 ○○"
-            className="mt-1 h-9 text-sm"
-          />
-          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-            사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.
-          </p>
-        </div>
-      </div>
+      <ProjectFormRow
+        label="계약 대상"
+        required={usesRegistrationV2}
+        issueLabel="계약 대상"
+        errors={fieldIssues('계약 대상')}
+        hints={['사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.']}
+      >
+        <Input
+          value={draft.clientOrg}
+          onChange={(event) => update('clientOrg', event.target.value)}
+          placeholder="예: 주식회사 ○○"
+          className={FORM_CONTROL_CLASS}
+        />
+      </ProjectFormRow>
 
-      <div>
-        <Label className="text-xs">사업관리 구글폴더링크</Label>
+      <ProjectFormRow
+        label="사업관리 구글폴더링크"
+        hints={['사업관리용 Google Drive 폴더 링크를 입력해 주세요.']}
+      >
         <Input
           type="url"
           value={draft.businessManagementGoogleFolderLink}
           onChange={(event) => update('businessManagementGoogleFolderLink', event.target.value)}
           placeholder="https://drive.google.com/drive/folders/..."
-          className="mt-1 h-9 text-sm"
+          className={FORM_CONTROL_CLASS}
         />
-        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-          사업관리용 Google Drive 폴더 링크를 입력해 주세요.
-        </p>
-      </div>
+      </ProjectFormRow>
 
-      <div>
-        <Label className="text-xs">프로젝트 목적{usesRegistrationV2 ? ' *' : ''}</Label>
-        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-          어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력
-          <span className="block">예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성</span>
-        </p>
+      <ProjectFormRow
+        label="프로젝트 목적"
+        required={usesRegistrationV2}
+        issueLabel="프로젝트 목적"
+        errors={fieldIssues('프로젝트 목적')}
+        hints={[
+          '어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력',
+          <span key="purpose-example" className="block">예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성</span>,
+        ]}
+      >
         <Textarea
           value={draft.projectPurpose}
           onChange={(event) => update('projectPurpose', event.target.value)}
-          className="mt-1 min-h-[88px] text-sm"
+          className={cn('min-h-[88px]', FORM_VALUE_CLASS)}
         />
-      </div>
-      <div>
-        <Label className="text-xs">프로젝트 주요 내용{usesRegistrationV2 ? ' *' : ''}</Label>
-        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-          프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약
-          <span className="block">예:</span>
-          <span className="block">1. 사업제안서 작성 교육</span>
-          <span className="block">2. 사업제안서 작성 - 25개팀 이상 1:1 코칭</span>
-          <span className="block">3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅</span>
-        </p>
+      </ProjectFormRow>
+
+      <ProjectFormRow
+        label="프로젝트 주요 내용"
+        required={usesRegistrationV2}
+        issueLabel="프로젝트 주요 내용"
+        errors={fieldIssues('프로젝트 주요 내용')}
+        hints={[
+          '프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약',
+          <span key="description-example" className="block">
+            예:
+            <span className="block">1. 사업제안서 작성 교육</span>
+            <span className="block">2. 사업제안서 작성 - 25개팀 이상 1:1 코칭</span>
+            <span className="block">3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅</span>
+          </span>,
+        ]}
+      >
         <Textarea
           value={draft.description}
           onChange={(event) => update('description', event.target.value)}
-          className="mt-1 min-h-[110px] text-sm"
+          className={cn('min-h-[110px]', FORM_VALUE_CLASS)}
         />
-      </div>
-    </div>
+      </ProjectFormRow>
+    </ProjectFormSection>
   );
 
   const renderContractTypeSelect = () => (
-    <div>
-      <Label className="text-xs">계약서 유형</Label>
+    <ProjectFormRow label="계약서 유형">
       <Select
         value={normalizeProjectContractType(draft.contractType)}
         onValueChange={(value) => update('contractType', normalizeProjectContractType(value))}
       >
-        <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+        <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
         <SelectContent>
           {contractTypeOptions.map((contractType) => (
             <SelectItem key={contractType} value={contractType}>{contractType}</SelectItem>
           ))}
         </SelectContent>
       </Select>
-    </div>
+    </ProjectFormRow>
   );
 
   const renderProjectDocumentUpload = (
@@ -1709,7 +1951,7 @@ export function ProjectEditorWizard({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 px-2 text-[11px] text-rose-600"
+              className="h-8 px-2 text-[11px] text-slate-500 hover:text-red-700"
               disabled={uploadState === 'extracting'}
               onClick={remove}
             >
@@ -1738,13 +1980,13 @@ export function ProjectEditorWizard({
                   {options.slotNumber}
                 </span>
               ) : <FileText className="h-4 w-4 text-slate-600" />}
-              <Label className="text-xs font-semibold">{options.label || PROJECT_DOCUMENT_LABELS[kind]}</Label>
+              <Label className={FORM_LABEL_CLASS}>{options.label || PROJECT_DOCUMENT_LABELS[kind]}</Label>
             </div>
-            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            <p className={cn('mt-2', FORM_HINT_CLASS)}>
               {description}
             </p>
             {document ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+              <div className={cn('mt-3 flex flex-wrap items-center gap-2', FORM_VALUE_CLASS)}>
                 <span className="max-w-full truncate font-medium text-slate-900">{document.name}</span>
                 <span className="text-muted-foreground">
                   {(document.size / 1024 / 1024).toFixed(2)} MB
@@ -1771,7 +2013,7 @@ export function ProjectEditorWizard({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 text-[11px] text-rose-600"
+                    className="h-7 px-2 text-[11px] text-slate-500 hover:text-red-700"
                     disabled={uploadState === 'extracting'}
                     onClick={remove}
                   >
@@ -1782,21 +2024,21 @@ export function ProjectEditorWizard({
               </div>
             ) : null}
             {kind === 'contract' && contractDocumentEditPolicy.isExistingContractDocumentLocked ? (
-              <p className="mt-2 text-[11px] text-muted-foreground">
+              <p className={cn('mt-2', FORM_HINT_CLASS)}>
                 기존 계약서는 관리자 화면에서만 제거할 수 있습니다.
               </p>
             ) : null}
             {kind === 'contract' && draft.contractAnalysis ? (
-              <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
+              <div className={cn('mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700', FORM_VALUE_CLASS)}>
                 <span className="font-semibold text-[#001e46]">분석 요약</span>
                 <span className="ml-2">{draft.contractAnalysis.summary}</span>
               </div>
             ) : null}
             {uploadError ? (
-              <p className="mt-2 text-[11px] text-rose-600">{uploadError}</p>
+              <p className={cn('mt-2', FORM_ERROR_CLASS)}>{uploadError}</p>
             ) : null}
             {previewState?.status === 'error' ? (
-              <p className="mt-2 text-[11px] text-rose-600" role="alert">
+              <p className={cn('mt-2', FORM_ERROR_CLASS)} role="alert">
                 {previewState.error || '첨부 파일을 불러오지 못했습니다.'}
               </p>
             ) : null}
@@ -1843,22 +2085,24 @@ export function ProjectEditorWizard({
    * slot-specific control opens underneath it.
    */
   const renderRegistrationDocumentTable = () => {
+    // 필수는 상태가 아니라 성격이다. 오류색(red)이 아니라 강조색을 써서
+    // 필드 라벨의 `*` 와 같은 뜻으로 읽히게 한다.
     const requirementOf = (slotNumber: number) => (
-      slotNumber <= 2 ? { label: '필수', tone: 'text-red-700' }
-        : slotNumber === 3 ? { label: '필수', tone: 'text-red-700' }
-          : { label: '선택', tone: 'text-slate-500' }
+      slotNumber <= 3
+        ? { label: '필수', tone: 'text-[#0176D3]' }
+        : { label: '선택', tone: 'text-slate-500' }
     );
 
     return (
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[640px] text-left text-[12px]">
-          <thead className="border-b border-slate-200 text-[11px] text-muted-foreground">
+      <div className={cn('overflow-x-auto bg-white', FORM_VALUE_CLASS)}>
+        <table className="w-full min-w-[640px] border-collapse text-left">
+          <thead className="border-t-2 border-b border-slate-900 border-b-slate-200">
             <tr>
-              <th scope="col" className="w-10 px-3 py-2 font-medium">#</th>
-              <th scope="col" className="px-3 py-2 font-medium">서류</th>
-              <th scope="col" className="px-3 py-2 font-medium">첨부 상태</th>
-              <th scope="col" className="w-16 px-3 py-2 font-medium">구분</th>
-              <th scope="col" className="w-px px-3 py-2 text-right font-medium">액션</th>
+              <th scope="col" className={cn('w-10 px-3 py-2', FORM_LABEL_CLASS)}>#</th>
+              <th scope="col" className={cn('px-3 py-2', FORM_LABEL_CLASS)}>서류</th>
+              <th scope="col" className={cn('px-3 py-2', FORM_LABEL_CLASS)}>첨부 상태</th>
+              <th scope="col" className={cn('w-16 px-3 py-2', FORM_LABEL_CLASS)}>구분</th>
+              <th scope="col" className={cn('w-px px-3 py-2 text-right', FORM_LABEL_CLASS)}>액션</th>
             </tr>
           </thead>
           <tbody>
@@ -1896,7 +2140,7 @@ export function ProjectEditorWizard({
                     </td>
                     <td className="px-3 py-3">
                       <p className="font-medium text-slate-900">{slot.label}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">{slot.description}</p>
+                      <p className={cn('mt-1', FORM_HINT_CLASS)}>{slot.description}</p>
                     </td>
                     <td className={cn('px-3 py-3', unmet ? 'text-red-700' : 'text-slate-700')}>
                       <span className="break-all">{status}</span>
@@ -1924,7 +2168,7 @@ export function ProjectEditorWizard({
                             [slot.number === 5 ? 'proposalPptOriginal' : 'presentationPptOriginal']: event.target.value,
                           })}
                           placeholder="https://drive.google.com/..."
-                          className="h-9 text-sm"
+                          className={FORM_CONTROL_CLASS}
                         />
                       </td>
                     </tr>
@@ -1933,13 +2177,13 @@ export function ProjectEditorWizard({
                     <tr className="border-b border-slate-100">
                       <td />
                       <td colSpan={4} className="px-3 pb-3">
-                        {uploadError ? <p className="text-[11px] text-red-700" role="alert">{uploadError}</p> : null}
-                        {previewError ? <p className="text-[11px] text-red-700" role="alert">{previewError}</p> : null}
+                        {uploadError ? <p className={FORM_ERROR_CLASS} role="alert">{uploadError}</p> : null}
+                        {previewError ? <p className={FORM_ERROR_CLASS} role="alert">{previewError}</p> : null}
                         {contractLocked ? (
-                          <p className="text-[11px] text-muted-foreground">기존 계약서는 관리자 화면에서만 제거할 수 있습니다.</p>
+                          <p className={FORM_HINT_CLASS}>기존 계약서는 관리자 화면에서만 제거할 수 있습니다.</p>
                         ) : null}
                         {contractSummary ? (
-                          <p className="mt-1 text-[11px] leading-5 text-slate-700">
+                          <p className={cn('mt-1 text-slate-700', FORM_HINT_CLASS)}>
                             <span className="font-semibold text-[#001e46]">분석 요약</span>
                             <span className="ml-2">{contractSummary}</span>
                           </p>
@@ -1951,7 +2195,7 @@ export function ProjectEditorWizard({
                     <tr className="border-b border-slate-100">
                       <td />
                       <td colSpan={4} className="px-3 pb-3">
-                        <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                        <label className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
                           <Checkbox
                             checked={draft.quoteSubmissionDeferred === true}
                             onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)}
@@ -1978,24 +2222,154 @@ export function ProjectEditorWizard({
     });
   };
 
+  /**
+   * 다년도 v2 계약에서는 위쪽 총계 5개가 이미 읽기 전용 자동 합계였다.
+   * 입력칸일 이유가 없으므로 연도별 표의 합계 행이 그 자리를 대신한다.
+   */
+  const annualTotalsOwnAmounts = usesRegistrationV2 && hasMultiYearContract;
+  const annualTotal = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount') => (
+    draft.financialYears.reduce((sum, row) => sum + row[field], 0)
+  );
+
+  /** 금액 입력 아래 보조 표기. 한글 단위는 읽기 전용이고 저장값은 원 단위 그대로다. */
+  const amountHint = (value: number, entered: boolean, prefix = '') => {
+    if (!entered) return '미입력';
+    const base = `${prefix ? `${prefix} ` : ''}${fmtKRW(value)}원`;
+    const korean = draft.currency === 'KRW' ? formatKoreanAmountUnit(value) : '';
+    return korean ? `${base} · ${korean}` : base;
+  };
+
+  /**
+   * 연도별 계약·재무를 표 하나로 읽는다. 연도=행 · 항목=열이라 라벨이 한 번만 나오고,
+   * Tab 은 한 연도를 열 방향(왼쪽→오른쪽)으로 훑는다.
+   * 합계 행이 위쪽 총계 입력칸을 대신하므로 배경색과 강조색을 여기에만 쓴다.
+   */
+  const renderAnnualFinanceTable = () => {
+    const columns = [
+      ['contractAmount', '계약금액'],
+      ['salesVatAmount', '매출 부가세'],
+      ['totalRevenueAmount', '수익'],
+      ['totalActualCost', '실비(원가)'],
+      ['supportAmount', '지원금'],
+    ] as const;
+    const unconfirmedYears = draft.financialYears.filter((row) => !row.confirmed).map((row) => `${row.year}년`);
+    const emptyContractYears = draft.financialYears.filter((row) => row.contractAmount <= 0).map((row) => `${row.year}년`);
+    // 저장된 총계와 연도 합계가 어긋나면 이미 submitIssues 가 잡는다. 여기서는 같은 사실을
+    // 표 밑에서 보여주기만 하고 판정은 하지 않는다.
+    const totalsDrifted = columns.some(([field]) => annualTotal(field) !== draft[field]);
+    const koreanContractTotal = formatKoreanAmountUnit(annualTotal('contractAmount'));
+
+    return (
+      <div className="space-y-2">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse text-left">
+            <thead>
+              <tr className="border-t-2 border-b border-slate-900 border-b-slate-200">
+                <th scope="col" className={cn('py-2 pr-3', FORM_LABEL_CLASS)}>연도</th>
+                {columns.map(([field, label]) => (
+                  <th key={field} scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>{label}</th>
+                ))}
+                <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>수익률</th>
+                <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>계약서 대조</th>
+              </tr>
+            </thead>
+            <tbody>
+              {draft.financialYears.map((row, index) => (
+                <tr key={row.year} className="border-b border-slate-100">
+                  <th scope="row" className={cn('whitespace-nowrap py-2 pr-3 font-semibold text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
+                    {row.year}년
+                  </th>
+                  {columns.map(([field, label]) => (
+                    <td key={field} className="px-3 py-2">
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`${row.year}년 ${label}`}
+                        value={formatProjectAmountInput(row[field], true)}
+                        onChange={(event) => updateFinancialYear(index, field, parseProjectAmountInput(event.target.value))}
+                        className={cn('min-w-[116px]', FORM_NUMERIC_CONTROL_CLASS)}
+                      />
+                    </td>
+                  ))}
+                  <td className={cn('px-3 py-2 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
+                    {`${(row.profitRate * 100).toFixed(2)}%`}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Checkbox
+                      aria-label={`${row.year}년 금액을 계약서와 대조하여 확인했습니다.`}
+                      checked={row.confirmed}
+                      onCheckedChange={(checked) => updateFinancialYear(index, 'confirmed', checked === true)}
+                    />
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-slate-100">
+                <th scope="row" className={cn('py-2.5 pr-3 text-slate-900', FORM_LABEL_CLASS)}>합계</th>
+                {columns.map(([field]) => (
+                  <td key={field} className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
+                    {fmtKRW(annualTotal(field))}
+                  </td>
+                ))}
+                <td className={cn('px-3 py-2.5 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
+                  {profitRateLabel ? `${profitRateLabel}%` : '-'}
+                </td>
+                <td className={cn('px-3 py-2.5 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
+                  {draft.financialYears.length - unconfirmedYears.length}/{draft.financialYears.length}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul className={cn('space-y-1', FORM_HINT_CLASS)}>
+          <li className="flex gap-1.5">
+            <span aria-hidden>·</span>
+            <span>계약금액 합계 {koreanContractTotal || '0 원'}</span>
+          </li>
+        </ul>
+        {emptyContractYears.length > 0 || unconfirmedYears.length > 0 || totalsDrifted ? (
+          <ul className={cn('space-y-1', FORM_ERROR_CLASS)}>
+            {emptyContractYears.length > 0 ? (
+              <li className="flex gap-1.5">
+                <span aria-hidden>·</span>
+                <span>{emptyContractYears.join(', ')} 계약금액이 아직 비어 있습니다.</span>
+              </li>
+            ) : null}
+            {unconfirmedYears.length > 0 ? (
+              <li className="flex gap-1.5">
+                <span aria-hidden>·</span>
+                <span>{unconfirmedYears.join(', ')} 금액을 계약서와 대조하여 확인해 주세요.</span>
+              </li>
+            ) : null}
+            {totalsDrifted ? (
+              <li className="flex gap-1.5">
+                <span aria-hidden>·</span>
+                <span>저장된 총계가 연도 합계와 다릅니다. 금액을 한 번 고쳐 넣으면 합계가 다시 맞춰집니다.</span>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderFinancialStep = () => (
-    <div className="space-y-4">
+    <div className={FORM_SECTION_STACK_CLASS}>
       {onContractFileUpload || onProjectDocumentFileUpload ? (
-        <div className="space-y-3">
+        <div>
           {usesRegistrationV2 ? (
-            <>
-              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                <p className="text-sm font-semibold text-[#001e46]">등록 제출서류 7종</p>
-                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                  1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다.
-                </p>
-              </div>
+            <ProjectFormSection
+              title="등록 제출서류 7종"
+              description="1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다."
+            >
               {renderRegistrationDocumentTable()}
               {/* Contract-specific confirmations stay below the list; they belong to slot 1
                   but are questions about the contract rather than an attachment. */}
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
-                <p className="mb-2 font-medium">모두 싸인으로 진행하셨나요? *</p>
-                <div className="flex gap-4">
+              <ProjectFormRow
+                label="모두 싸인으로 진행하셨나요?"
+                required
+                issueLabel="모두 싸인으로 진행하셨나요?"
+                errors={fieldIssues('모두 싸인으로 진행하셨나요?', '계약서를 써니(사업지원팀)에게 제출했습니다.')}
+              >
+                <div className={cn('flex gap-4 pt-2 text-slate-700', FORM_VALUE_CLASS)}>
                   {[true, false].map((value) => (
                     <label key={String(value)} className="flex items-center gap-2">
                       <input type="radio" checked={draft.registrationConfirmations.modusignContractUsed === value} onChange={() => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value, originalContractSubmitted: value ? null : draft.registrationConfirmations.originalContractSubmitted })} />
@@ -2004,385 +2378,341 @@ export function ProjectEditorWizard({
                   ))}
                 </div>
                 {draft.registrationConfirmations.modusignContractUsed === false ? (
-                  <label className="mt-3 flex items-center gap-2">
+                  <label className={cn('mt-2 flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
                     <Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />
                     계약서를 써니(사업지원팀)에게 제출했습니다.
                   </label>
                 ) : null}
-              </div>
-            </>
-          ) : registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
+              </ProjectFormRow>
+            </ProjectFormSection>
+          ) : (
+            <ProjectFormSection title="첨부 서류">
+              {registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
+            </ProjectFormSection>
+          )}
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">계약 시작일 *</Label>
-          <Input type="date" value={draft.contractStart} onChange={(event) => update('contractStart', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs">계약 종료일 *</Label>
-          <Input type="date" value={draft.contractEnd} onChange={(event) => update('contractEnd', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-      </div>
+      <ProjectFormSection title="계약 기간과 상태">
+        <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
+          <Input type="date" value={draft.contractStart} onChange={(event) => update('contractStart', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+        </ProjectFormRow>
+        <ProjectFormRow
+          label="계약 종료일"
+          required
+          issueLabel="계약 종료일"
+          errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
+        >
+          <Input type="date" value={draft.contractEnd} onChange={(event) => update('contractEnd', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+        </ProjectFormRow>
 
-      {canEditProjectStatus(mode) ? (
-        <div className={`grid gap-4 ${isAdminMode(mode) ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
-          <div>
-            <Label className="text-xs">프로젝트 진행 상태</Label>
+        {canEditProjectStatus(mode) ? (
+          <ProjectFormRow label="프로젝트 진행 상태">
             <Select value={draft.status} onValueChange={(value) => update('status', value as ProjectStatus)}>
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((status) => (
                   <SelectItem key={status} value={status}>{PROJECT_STATUS_LABELS[status]}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          {isAdminMode(mode) ? (
-            <div>
-              <Label className="text-xs">프로젝트 구분</Label>
-              <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
-                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
-                    <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-          {isAdminMode(mode) ? renderContractTypeSelect() : null}
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {renderContractTypeSelect()}
-        </div>
-      )}
+          </ProjectFormRow>
+        ) : null}
+        {canEditProjectStatus(mode) && isAdminMode(mode) ? (
+          <ProjectFormRow label="프로젝트 구분">
+            <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
+                  <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </ProjectFormRow>
+        ) : null}
+        {/* 계약서 유형은 관리자 화면에서만 상태·구분과 나란히 있었고, 포털에서는 단독으로
+            보였다. 행 컴포넌트를 쓰면서 두 경우 모두 같은 자리에 한 번만 놓는다. */}
+        {!canEditProjectStatus(mode) || isAdminMode(mode) ? renderContractTypeSelect() : null}
+      </ProjectFormSection>
 
-      <div className="grid gap-4 lg:grid-cols-[160px_minmax(0,1fr)]">
-        <div>
-          <Label className="text-xs">통화</Label>
+      <ProjectFormSection title="계약 금액">
+        <ProjectFormRow label="통화">
           <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className={cn('max-w-[160px]', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
             <SelectContent>
               {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
                 <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div>
-          <Label className="text-xs">계약금액 *</Label>
-          <Input
-            inputMode="numeric"
-            value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
-            onChange={(event) => updateAmount('contractAmount', event.target.value)}
-            readOnly={usesRegistrationV2 && hasMultiYearContract}
-            placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {hasContractAmountInput ? `${PROJECT_CURRENCY_LABELS[draft.currency]} ${fmtKRW(draft.contractAmount)}` : '미입력'}
-          </p>
-        </div>
-      </div>
+        </ProjectFormRow>
 
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div>
-          <Label className="text-xs">총매출부가세</Label>
-          <Input
-            inputMode="numeric"
-            value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
-            onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
-            readOnly={usesRegistrationV2 && hasMultiYearContract}
-            placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {hasSalesVatAmountInput ? `${fmtKRW(draft.salesVatAmount)}원` : '미입력'}
+        {annualTotalsOwnAmounts ? (
+          <p className={FORM_HINT_CLASS}>
+            다년도 계약이라 계약금액 · 총매출부가세 · 총수익 · 총실비(원가) · 총지원금은
+            아래 연도별 표의 합계 행이 그대로 저장값입니다.
           </p>
-        </div>
-        <div>
-          <Label className="text-xs">총수익</Label>
-          <Input
-            inputMode="numeric"
-            value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
-            onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
-            readOnly={usesRegistrationV2 && hasMultiYearContract}
-            placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {hasTotalRevenueAmountInput ? `${fmtKRW(draft.totalRevenueAmount)}원` : '미입력'}
-          </p>
-        </div>
-        <div>
-          <Label className="text-xs">총실비(원가)</Label>
-          <Input
-            inputMode="numeric"
-            value={formatProjectAmountInput(draft.totalActualCost, hasTotalActualCostInput)}
-            onChange={(event) => updateAmount('totalActualCost', event.target.value)}
-            readOnly={usesRegistrationV2 && hasMultiYearContract}
-            placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {hasTotalActualCostInput ? `${fmtKRW(draft.totalActualCost)}원` : '미입력'}
-          </p>
-        </div>
-        <div>
-          <Label className="text-xs">총지원금</Label>
-          <Input
-            inputMode="numeric"
-            value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
-            onChange={(event) => updateAmount('supportAmount', event.target.value)}
-            readOnly={usesRegistrationV2 && hasMultiYearContract}
-            placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {hasSupportAmountInput ? `${fmtKRW(draft.supportAmount)}원` : '미입력'}
-          </p>
-        </div>
-        <div>
-          <Label className="text-xs">총수익률</Label>
-          <Input value={profitRateLabel ? `${profitRateLabel}%` : '-'} readOnly className="mt-1 h-9 bg-muted/40 text-sm" />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            총수익 / 계약금액 기준 자동 계산
-          </p>
-        </div>
-      </div>
+        ) : (
+          <>
+            <ProjectFormRow
+              label="계약금액"
+              required
+              issueLabel="계약금액"
+              errors={fieldIssues('계약금액')}
+              hints={[amountHint(draft.contractAmount, hasContractAmountInput, PROJECT_CURRENCY_LABELS[draft.currency])]}
+            >
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
+                onChange={(event) => updateAmount('contractAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총매출부가세" hints={[amountHint(draft.salesVatAmount, hasSalesVatAmountInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
+                onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총수익" hints={[amountHint(draft.totalRevenueAmount, hasTotalRevenueAmountInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
+                onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총실비(원가)" hints={[amountHint(draft.totalActualCost, hasTotalActualCostInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.totalActualCost, hasTotalActualCostInput)}
+                onChange={(event) => updateAmount('totalActualCost', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총지원금" hints={[amountHint(draft.supportAmount, hasSupportAmountInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
+                onChange={(event) => updateAmount('supportAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+          </>
+        )}
 
-      {usesRegistrationV2 && hasMultiYearContract ? (
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-          <div>
-            <Label className="text-xs font-semibold">연도별 계약·재무 *</Label>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              다년도 사업은 계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 위 합계는 연도별 입력값으로 자동 계산됩니다.
-            </p>
-          </div>
-          {draft.financialYears.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-[12px] text-muted-foreground">
-              계약 시작일과 종료일을 먼저 입력해 주세요.
-            </p>
-          ) : draft.financialYears.map((row, index) => (
-            <div key={row.year} className="rounded-lg border border-slate-200 bg-white p-3">
-              <div className="mb-3 text-sm font-semibold text-slate-900">{row.year}년</div>
-              <div className="grid gap-3 lg:grid-cols-6">
-                {([
-                  ['contractAmount', '계약금액'],
-                  ['salesVatAmount', '매출 부가세'],
-                  ['totalRevenueAmount', '수익'],
-                  ['totalActualCost', '실비(원가)'],
-                  ['supportAmount', '지원금'],
-                ] as const).map(([field, label]) => (
-                  <div key={field}>
-                    <Label className="text-[11px]">{label}</Label>
-                    <Input
-                      inputMode="numeric"
-                      value={formatProjectAmountInput(row[field], true)}
-                      onChange={(event) => updateFinancialYear(index, field, parseProjectAmountInput(event.target.value))}
-                      className="mt-1 h-9 text-sm"
-                    />
-                  </div>
-                ))}
-                <div>
-                  <Label className="text-[11px]">수익률(%)</Label>
-                  <Input
-                    value={`${(row.profitRate * 100).toFixed(2)}%`}
-                    readOnly
-                    className="mt-1 h-9 bg-muted/40 text-sm"
-                  />
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    연도별 계약금액과 총수익으로 자동 계산
-                  </p>
-                </div>
-              </div>
-              <label className="mt-3 flex items-center gap-2 text-[12px] text-slate-700">
-                <Checkbox
-                  checked={row.confirmed}
-                  onCheckedChange={(checked) => updateFinancialYear(index, 'confirmed', checked === true)}
-                />
-                {row.year}년 금액을 계약서와 대조하여 확인했습니다.
-              </label>
-              <div className="mt-4 border-t border-slate-200 pt-4">
-                {renderPaymentFields(row, index)}
-              </div>
+        {/* 총수익률은 늘 파생값이었다. 입력칸 모양을 벗기고 "계산됨" 형태로만 구분한다. */}
+        <ProjectFormRow label="총수익률" note="총수익 / 계약금액">
+          <ProjectComputedValue value={profitRateLabel ? `${profitRateLabel}%` : '-'} />
+        </ProjectFormRow>
+      </ProjectFormSection>
+
+      {annualTotalsOwnAmounts ? (
+        <>
+          <ProjectFormSection
+            title="연도별 계약·재무"
+            required
+            description="다년도 사업은 계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 합계 행이 저장되는 총계입니다."
+          >
+            <div data-issue-label="계약기간 전체 연도별 재무 확인">
+              {draft.financialYears.length === 0 ? (
+                <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4', FORM_HINT_CLASS)}>
+                  계약 시작일과 종료일을 먼저 입력해 주세요.
+                </p>
+              ) : renderAnnualFinanceTable()}
             </div>
+          </ProjectFormSection>
+          {draft.financialYears.map((row, index) => (
+            <ProjectFormSection key={row.year} title={`${row.year}년 입금 계획`}>
+              {renderPaymentFields(row, index)}
+            </ProjectFormSection>
           ))}
-          <div>
-            <Label className="text-xs">기타 메모</Label>
-            <Textarea value={draft.paymentPlanDesc} onChange={(event) => update('paymentPlanDesc', event.target.value)} className="mt-1 min-h-[92px] bg-white text-sm" />
-          </div>
-        </div>
+          <ProjectFormRow label="기타 메모">
+            <Textarea value={draft.paymentPlanDesc} onChange={(event) => update('paymentPlanDesc', event.target.value)} className={cn('min-h-[92px]', FORM_VALUE_CLASS)} />
+          </ProjectFormRow>
+        </>
       ) : null}
 
       {mode === 'admin' ? (
-        <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:grid-cols-2">
-          <div>
-          <Label className="text-xs">당해연도 예산</Label>
+        <ProjectFormSection title="관리자 입력">
+          <ProjectFormRow label="당해연도 예산" hints={[amountHint(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)]}>
             <Input
               inputMode="numeric"
               value={formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)}
               onChange={(event) => update('budgetCurrentYear', parseProjectAmountInput(event.target.value))}
               placeholder="0"
-              className="mt-1 h-9 bg-white text-sm"
+              className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
             />
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              {draft.budgetCurrentYear > 0 ? `${fmtKRW(draft.budgetCurrentYear)}원` : '미입력'}
-            </p>
-          </div>
-          <div>
-            <Label className="text-xs">세금계산서 발행액</Label>
+          </ProjectFormRow>
+          <ProjectFormRow label="세금계산서 발행액" hints={[amountHint(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)]}>
             <Input
               inputMode="numeric"
               value={formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)}
               onChange={(event) => update('taxInvoiceAmount', parseProjectAmountInput(event.target.value))}
               placeholder="0"
-              className="mt-1 h-9 bg-white text-sm"
+              className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
             />
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              {draft.taxInvoiceAmount > 0 ? `${fmtKRW(draft.taxInvoiceAmount)}원` : '미입력'}
-            </p>
-          </div>
-        </div>
+          </ProjectFormRow>
+        </ProjectFormSection>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-4">
-        <div>
-          <Label className="text-xs">{usesRegistrationV2 ? '사업유형' : '정산 유형'}</Label>
+      <ProjectFormSection title="정산">
+        <ProjectFormRow
+          label={usesRegistrationV2 ? '사업유형' : '정산 유형'}
+          required={usesRegistrationV2}
+          issueLabel="사업유형"
+          errors={fieldIssues('사업유형')}
+        >
           <Select
             value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
             onValueChange={(value) => update('settlementType', value as SettlementType)}
           >
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
+            <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
             <SelectContent>
               {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </ProjectFormRow>
         {usesRegistrationV2 ? (
-          <div>
-            <Label className="text-xs">정산 기준</Label>
+          <ProjectFormRow label="정산 기준">
             <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
                   <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </ProjectFormRow>
         ) : draft.settlementType === 'NONE' ? (
-          <div className="lg:col-span-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-[12px] text-muted-foreground">
+          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
             정산 없음은 정산 기준·통장·정산 시스템 입력이 필요하지 않습니다.
-          </div>
+          </p>
         ) : (
-          <div>
-            <Label className="text-xs">정산 기준</Label>
+          <ProjectFormRow label="정산 기준">
             <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
               <SelectContent>
                 {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
                   <SelectItem key={key} value={key}>{value}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </ProjectFormRow>
         )}
         {settlementDetailsEnabled ? (
           <>
-            <div>
-              <Label className="text-xs">통장 유형</Label>
+            <ProjectFormRow label="통장 유형">
               <Select value={draft.accountType} onValueChange={(value) => update('accountType', value as AccountType)}>
-                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([key, value]) => (
                     <SelectItem key={key} value={key}>{value}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <Label className="text-xs">이자 반납 여부</Label>
+            </ProjectFormRow>
+            <ProjectFormRow label="이자 반납 여부">
               <Select value={draft.interestRefundPolicy || undefined} onValueChange={(value) => update('interestRefundPolicy', value as InterestRefundPolicy)}>
-                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="이자 반납 여부 선택" /></SelectTrigger>
+                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder="이자 반납 여부 선택" /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(INTEREST_REFUND_POLICY_LABELS) as [InterestRefundPolicy, string][]).map(([key, value]) => (
                     <SelectItem key={key} value={key}>{value}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </ProjectFormRow>
+            <ProjectFormRow
+              label="정산 시스템"
+              issueLabel="기타 정산 시스템 이름"
+              errors={fieldIssues('기타 정산 시스템 이름', '기타 정산 시스템 이름은 100자 이하여야 합니다.')}
+            >
+              <Select
+                value={draft.settlementSystem === 'OTHER' && draft.settlementSystemOther.trim() ? `OTHER:${draft.settlementSystemOther.trim()}` : draft.settlementSystem}
+                onValueChange={updateSettlementSystem}
+              >
+                <SelectTrigger className={cn('max-w-sm', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[
+                    ...PROJECT_SETTLEMENT_SYSTEM_CODES,
+                    ...(PROJECT_SETTLEMENT_SYSTEM_CODES.includes(draft.settlementSystem) ? [] : [draft.settlementSystem]),
+                  ].map((key) => (
+                    <SelectItem key={key} value={key}>{SETTLEMENT_SYSTEM_LABELS[key]}</SelectItem>
+                  ))}
+                  {[...settlementSystemOptions, draft.settlementSystemOther]
+                    .map((value) => value.replace(/\s+/g, ' ').trim())
+                    .filter((value, index, values) => value && values.findIndex((candidate) => candidate.toLocaleLowerCase('ko-KR') === value.toLocaleLowerCase('ko-KR')) === index)
+                    .map((value) => (
+                    <SelectItem key={`OTHER:${value}`} value={`OTHER:${value}`}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {draft.settlementSystem === 'OTHER' ? (
+                <Input
+                  value={draft.settlementSystemOther}
+                  onChange={(event) => update('settlementSystemOther', event.target.value)}
+                  placeholder="정산 시스템 이름 직접 입력"
+                  aria-label="기타 정산 시스템 이름"
+                  className={cn('mt-2 max-w-sm', FORM_CONTROL_CLASS)}
+                />
+              ) : null}
+            </ProjectFormRow>
+            <ProjectFormRow label="인건비 정산 기준">
+              <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
+                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
+                    <SelectItem key={key} value={key}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ProjectFormRow>
           </>
         ) : usesRegistrationV2 ? (
-          <div className="lg:col-span-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-[12px] text-muted-foreground">
+          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
             정산 기준이 정산없음이면 통장·정산 시스템 입력이 필요하지 않습니다.
-          </div>
+          </p>
         ) : null}
-      </div>
+      </ProjectFormSection>
 
-      {settlementDetailsEnabled ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div>
-            <Label className="text-xs">정산 시스템</Label>
-            <Select
-              value={draft.settlementSystem === 'OTHER' && draft.settlementSystemOther.trim() ? `OTHER:${draft.settlementSystemOther.trim()}` : draft.settlementSystem}
-              onValueChange={updateSettlementSystem}
-            >
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {[
-                  ...PROJECT_SETTLEMENT_SYSTEM_CODES,
-                  ...(PROJECT_SETTLEMENT_SYSTEM_CODES.includes(draft.settlementSystem) ? [] : [draft.settlementSystem]),
-                ].map((key) => (
-                  <SelectItem key={key} value={key}>{SETTLEMENT_SYSTEM_LABELS[key]}</SelectItem>
-                ))}
-                {[...settlementSystemOptions, draft.settlementSystemOther]
-                  .map((value) => value.replace(/\s+/g, ' ').trim())
-                  .filter((value, index, values) => value && values.findIndex((candidate) => candidate.toLocaleLowerCase('ko-KR') === value.toLocaleLowerCase('ko-KR')) === index)
-                  .map((value) => (
-                  <SelectItem key={`OTHER:${value}`} value={`OTHER:${value}`}>{value}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {draft.settlementSystem === 'OTHER' ? (
-              <Input
-                value={draft.settlementSystemOther}
-                onChange={(event) => update('settlementSystemOther', event.target.value)}
-                placeholder="정산 시스템 이름 직접 입력"
-                aria-label="기타 정산 시스템 이름"
-                className="mt-2 h-9 text-sm"
-              />
-            ) : null}
-          </div>
-          <div>
-            <Label className="text-xs">인건비 정산 기준</Label>
-            <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
-                  <SelectItem key={key} value={key}>{value}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+      {!hasMultiYearContract ? (
+        <ProjectFormSection title="입금 계획">
+          {renderPaymentFields()}
+        </ProjectFormSection>
       ) : null}
-      {!hasMultiYearContract ? renderPaymentFields() : null}
     </div>
   );
 
   const renderTeamStep = () => (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">사업 담당자 *</Label>
+    <div className={FORM_SECTION_STACK_CLASS}>
+      <ProjectFormSection title="담당자와 결재자">
+        <ProjectFormRow
+          label="사업 담당자"
+          required
+          issueLabel="PM"
+          errors={[
+            ...fieldIssues('PM'),
+            ...(hasUnlinkedStoredOwner
+              ? ['현재 저장된 담당자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.']
+              : []),
+          ]}
+          hints={[
+            <span key="owner-uid">
+              구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 실무자 포털 노출은 이 UID 기준으로 연결됩니다.
+            </span>,
+          ]}
+        >
           <MemberPicker
-            className="mt-1 h-9 text-sm"
+            className={cn('max-w-sm', FORM_CONTROL_CLASS)}
             options={ownerOptions}
             value={draft.registeredById}
             placeholder="구성원 원장에서 선택"
@@ -2399,19 +2729,21 @@ export function ProjectEditorWizard({
               }));
             }}
           />
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 실무자 포털 노출은 이 UID 기준으로 연결됩니다.
-          </p>
-          {hasUnlinkedStoredOwner ? (
-            <p className="mt-1 text-[11px] text-red-700">
-              현재 저장된 담당자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.
-            </p>
-          ) : null}
-        </div>
-        <div>
-          <Label className="text-xs">최종 결재자 지정 (사업총괄) *</Label>
+        </ProjectFormRow>
+        <ProjectFormRow
+          label="최종 결재자 지정 (사업총괄)"
+          required
+          issueLabel="최종 결재자 지정 (사업총괄)"
+          errors={[
+            ...fieldIssues('최종 결재자 지정 (사업총괄)'),
+            ...(hasUnlinkedStoredExecutiveApprover
+              ? ['현재 저장된 결재자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.']
+              : []),
+          ]}
+          hints={['선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.']}
+        >
           <MemberPicker
-            className="mt-1 h-9 text-sm"
+            className={cn('max-w-sm', FORM_CONTROL_CLASS)}
             options={executiveApproverOptions}
             value={draft.executiveApproverId}
             placeholder="구성원 원장에서 선택"
@@ -2426,33 +2758,36 @@ export function ProjectEditorWizard({
               }));
             }}
           />
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.
-          </p>
-          {hasUnlinkedStoredExecutiveApprover ? (
-            <p className="mt-1 text-[11px] text-red-700">
-              현재 저장된 결재자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.
-            </p>
-          ) : null}
-        </div>
-      </div>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <Label className="text-xs">참여인력 (서류상·실제)</Label>
-          <p className="mt-1 text-[10px] text-muted-foreground">계약·협약서에 남길 참여인력과 역할을 저장합니다.</p>
-        </div>
-        <Button type="button" onClick={addTeamMember} className="gap-2">
-          <Plus className="h-4 w-4" />
-          팀원 추가
-        </Button>
-      </div>
+        </ProjectFormRow>
+      </ProjectFormSection>
 
-      {draft.teamMembersDetailed.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-5 text-[12px] text-muted-foreground">
-          아직 추가된 팀원이 없습니다.
-        </div>
-      ) : (
-        <div className="space-y-3">
+      <ProjectFormSection
+        title="참여인력 (서류상·실제)"
+        description="계약·협약서에 남길 참여인력과 역할을 저장합니다."
+        action={(
+          <Button type="button" onClick={addTeamMember} className="gap-2">
+            <Plus className="h-4 w-4" />
+            팀원 추가
+          </Button>
+        )}
+      >
+        <div data-issue-label="참여인력 이름·역할" className={FORM_FIELD_STACK_CLASS}>
+          {fieldIssues('참여인력 이름·역할', '운영매니저 1인 이상').length > 0 ? (
+            <ul className={cn('space-y-1', FORM_ERROR_CLASS)} role="alert">
+              {fieldIssues('참여인력 이름·역할', '운영매니저 1인 이상').map((message) => (
+                <li key={message} className="flex gap-1.5">
+                  <span aria-hidden className="shrink-0">·</span>
+                  <span className="min-w-0">{describeSubmitIssue(message)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {draft.teamMembersDetailed.length === 0 ? (
+            <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-4 py-5', FORM_HINT_CLASS)}>
+              아직 추가된 팀원이 없습니다.
+            </p>
+          ) : (
+            <div className={FORM_FIELD_STACK_CLASS}>
           {draft.teamMembersDetailed.map((member, index) => {
             const teamMemberInputMode = member.inputMode === 'manual' ? 'manual' : 'search';
             const selectedNames = new Set(
@@ -2467,16 +2802,25 @@ export function ProjectEditorWizard({
             const currentTeamMemberOptionExists = !member.memberName
               || availableTeamMemberOptions.some((option) => option.value === member.memberName);
             return (
-              <div key={`team-member-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-4">
+              <div key={`team-member-${index}`} className="rounded-lg border border-slate-200 bg-white p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-semibold">팀원 {index + 1}</div>
-                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-rose-600" onClick={() => removeTeamMember(index)}>
+                  <div className={FORM_LABEL_CLASS}>팀원 {index + 1}</div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`팀원 ${index + 1} 삭제`}
+                    className="h-7 px-2 text-slate-500 hover:text-red-700"
+                    onClick={() => removeTeamMember(index)}
+                  >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <div>
-                    <Label className="text-xs">입력 방식</Label>
+                {/* 팀원 한 명이 곧 짧은 값 세 개다. 라벨 열을 다시 쓰면 세로로만 길어지므로
+                    오른쪽 입력 영역과 같은 규칙(라벨 12/600 · 값 13)으로 한 줄에 놓는다. */}
+                <div className="mt-2 grid gap-4 md:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label className={FORM_LABEL_CLASS}>입력 방식</Label>
                     <Select
                       value={teamMemberInputMode}
                       onValueChange={(value) => updateTeamMember(index, {
@@ -2486,7 +2830,7 @@ export function ProjectEditorWizard({
                         memberNickname: '',
                       })}
                     >
-                      <SelectTrigger className="mt-1 h-9 text-sm">
+                      <SelectTrigger className={FORM_CONTROL_CLASS}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -2495,8 +2839,8 @@ export function ProjectEditorWizard({
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label className="text-xs">팀원</Label>
+                  <div className="grid gap-2">
+                    <Label className={FORM_LABEL_CLASS}>팀원</Label>
                     {teamMemberInputMode === 'search' ? (
                       <TeamMemberSearchCombobox
                         member={member}
@@ -2515,34 +2859,38 @@ export function ProjectEditorWizard({
                           ...parseProjectTeamMemberIdentityInput(event.target.value),
                         })}
                         placeholder="이름(별명)"
-                        className="mt-1 h-9 text-sm"
+                        className={FORM_CONTROL_CLASS}
                       />
                     )}
                   </div>
-                  <div>
-                    <Label className="text-xs">역할</Label>
-                    <Select value={member.role || undefined} onValueChange={(value) => updateTeamMember(index, { role: value })}>
-                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="역할 선택" /></SelectTrigger>
-                      <SelectContent>
-                        {PROJECT_TEAM_MEMBER_ROLES.map((role) => <SelectItem key={role} value={role}>{role}</SelectItem>)}
-                        {RETIRED_PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof RETIRED_PROJECT_TEAM_MEMBER_ROLES[number]) ? (
-                          <SelectItem value={member.role} disabled>{member.role} (기존값 · 선택 불가)</SelectItem>
-                        ) : null}
-                      </SelectContent>
-                    </Select>
-                    {member.role === '정산지원' && !isProjectSettlementSupportMember(member) ? (
-                      <p className="mt-1 text-[10px] text-amber-700">
-                        정산지원은 보통 도담 또는 써니가 맡습니다. 다른 분으로 지정하려면 그대로 두셔도 됩니다.
-                      </p>
-                    ) : null}
+                  <div className="grid gap-2">
+                    <Label className={FORM_LABEL_CLASS}>역할</Label>
+                    <div>
+                      <Select value={member.role || undefined} onValueChange={(value) => updateTeamMember(index, { role: value })}>
+                        <SelectTrigger className={FORM_CONTROL_CLASS}><SelectValue placeholder="역할 선택" /></SelectTrigger>
+                        <SelectContent>
+                          {PROJECT_TEAM_MEMBER_ROLES.map((role) => <SelectItem key={role} value={role}>{role}</SelectItem>)}
+                          {RETIRED_PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof RETIRED_PROJECT_TEAM_MEMBER_ROLES[number]) ? (
+                            <SelectItem value={member.role} disabled>{member.role} (기존값 · 선택 불가)</SelectItem>
+                          ) : null}
+                        </SelectContent>
+                      </Select>
+                      {/* 담당 안내일 뿐 저장을 막지 않는다. 오류 색을 쓰지 않는 이유다. */}
+                      {member.role === '정산지원' && !isProjectSettlementSupportMember(member) ? (
+                        <p className={cn('mt-2 text-amber-700', FORM_HINT_CLASS)}>
+                          정산지원은 보통 도담 또는 써니가 맡습니다. 다른 분으로 지정하려면 그대로 두셔도 됩니다.
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </div>
             );
           })}
+            </div>
+          )}
         </div>
-      )}
-
+      </ProjectFormSection>
     </div>
   );
 
@@ -2570,71 +2918,142 @@ export function ProjectEditorWizard({
       && paymentPlan.contract + paymentPlan.interim + paymentPlan.final > 0
       && yearAdvanceInterimRatio !== null
       && yearAdvanceInterimRatio < 0.7;
+    const yearPrefix = financialYear ? `${financialYear.year}년 ` : '';
+    const paymentRows = [
+      ['contract', '선금/계약금', financialYear ? `${financialYear.year}년 선금/계약금 예상 입금 시점` : '선금/계약금 입금 예상월'],
+      ['interim', '중도금', financialYear ? `${financialYear.year}년 중도금 예상 입금 시점` : '중도금 입금 예상월'],
+      ['final', '잔금', financialYear ? `${financialYear.year}년 잔금 예상 입금 시점` : '잔금 입금 예상월'],
+    ] as const;
+    const paymentBase = financialYear?.contractAmount || draft.contractAmount;
+    const paymentSum = paymentPlan.contract + paymentPlan.interim + paymentPlan.final;
+    const koreanPaymentSum = formatKoreanAmountUnit(paymentSum);
+    const advanceRatio = financialYear ? yearAdvanceInterimRatio : advanceInterimRatio;
+    const missingMonths = fieldIssues(...paymentRows.map(([, , issueLabel]) => issueLabel));
     return (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div>
-          <Label className="text-xs">선금/계약금 (원)</Label>
-          <Input value={formatProjectAmountInput(paymentPlan.contract, true)} onChange={(event) => updatePaymentPlan('contract', parseProjectAmountInput(event.target.value))} className="mt-1 h-9 text-sm" />
-          <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.contract, financialYear?.contractAmount || draft.contractAmount)}</p>
-          <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.contract > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}선금/계약금 예상 입금 시점`} aria-required={paymentPlan.contract > 0} value={paymentExpectedMonths.contract} onChange={(event) => updatePaymentExpectedMonth('contract', event.target.value)} className="mt-1 h-9 text-sm" />
+    <div className={FORM_FIELD_STACK_CLASS}>
+      {/* 금액과 예상 입금 시점이 같은 행에 있어야 "얼마를 언제"가 한 눈에 붙는다.
+          라벨은 헤더에 한 번만 나오고, 합계 행이 표의 결론이다. */}
+      <div className="space-y-2">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] border-collapse text-left">
+            <thead>
+              <tr className="border-t-2 border-b border-slate-900 border-b-slate-200">
+                <th scope="col" className={cn('py-2 pr-3', FORM_LABEL_CLASS)}>구분</th>
+                <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>금액 (원)</th>
+                <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>계약금액 대비</th>
+                <th scope="col" className={cn('px-3 py-2', FORM_LABEL_CLASS)}>예상 입금 시점</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paymentRows.map(([field, label, issueLabel]) => (
+                <tr key={field} className="border-b border-slate-100" data-issue-label={issueLabel}>
+                  <th scope="row" className={cn('whitespace-nowrap py-2 pr-3 text-slate-900', FORM_LABEL_CLASS)}>{label}</th>
+                  <td className="px-3 py-2">
+                    <Input
+                      aria-label={`${yearPrefix}${label} 금액`}
+                      value={formatProjectAmountInput(paymentPlan[field], true)}
+                      onChange={(event) => updatePaymentPlan(field, parseProjectAmountInput(event.target.value))}
+                      className={cn('min-w-[130px]', FORM_NUMERIC_CONTROL_CLASS)}
+                    />
+                  </td>
+                  <td className={cn('whitespace-nowrap px-3 py-2 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
+                    {formatPaymentPlanAmount(paymentPlan[field], paymentBase)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="month"
+                        aria-label={`${yearPrefix}${label} 예상 입금 시점`}
+                        aria-required={paymentPlan[field] > 0}
+                        value={paymentExpectedMonths[field]}
+                        onChange={(event) => updatePaymentExpectedMonth(field, event.target.value)}
+                        className={cn('min-w-[150px]', FORM_CONTROL_CLASS)}
+                      />
+                      {paymentPlan[field] > 0 ? <span aria-hidden className="text-[#0176D3]">*</span> : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-slate-100">
+                <th scope="row" className={cn('py-2.5 pr-3 text-slate-900', FORM_LABEL_CLASS)}>합계</th>
+                <td className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
+                  {fmtKRW(paymentSum)}
+                </td>
+                <td className={cn('whitespace-nowrap px-3 py-2.5 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
+                  {advanceRatio === null ? '-' : `선금+중도금 ${(advanceRatio * 100).toFixed(1)}%`}
+                </td>
+                <td />
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div>
-          <Label className="text-xs">중도금 (원)</Label>
-          <Input value={formatProjectAmountInput(paymentPlan.interim, true)} onChange={(event) => updatePaymentPlan('interim', parseProjectAmountInput(event.target.value))} className="mt-1 h-9 text-sm" />
-          <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.interim, financialYear?.contractAmount || draft.contractAmount)}</p>
-          <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.interim > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}중도금 예상 입금 시점`} aria-required={paymentPlan.interim > 0} value={paymentExpectedMonths.interim} onChange={(event) => updatePaymentExpectedMonth('interim', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs">잔금 (원)</Label>
-          <Input value={formatProjectAmountInput(paymentPlan.final, true)} onChange={(event) => updatePaymentPlan('final', parseProjectAmountInput(event.target.value))} className="mt-1 h-9 text-sm" />
-          <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.final, financialYear?.contractAmount || draft.contractAmount)}</p>
-          <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}잔금 예상 입금 시점`} aria-required={paymentPlan.final > 0} value={paymentExpectedMonths.final} onChange={(event) => updatePaymentExpectedMonth('final', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
+        <ul className={cn('space-y-1', FORM_HINT_CLASS)}>
+          <li className="flex gap-1.5">
+            <span aria-hidden>·</span>
+            <span>입금 합계 {koreanPaymentSum || '0 원'}</span>
+          </li>
+        </ul>
+        {missingMonths.length > 0 || requiresYearAdvanceInterimReason || (!financialYear && requiresAdvanceInterimReason) ? (
+          <ul className={cn('space-y-1', FORM_ERROR_CLASS)} role="alert">
+            {missingMonths.map((message) => (
+              <li key={message} className="flex gap-1.5">
+                <span aria-hidden>·</span>
+                <span>{describeSubmitIssue(message)}</span>
+              </li>
+            ))}
+            {requiresYearAdvanceInterimReason || (!financialYear && requiresAdvanceInterimReason) ? (
+              <li className="flex gap-1.5">
+                <span aria-hidden>·</span>
+                <span>선금+중도금이 70% 미만이라 사유가 필요합니다.</span>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
       </div>
       {requiresYearAdvanceInterimReason ? (
-        <div>
-          <Label className="text-xs">{financialYear.year}년 선금·중도금 합계 70% 미만 사유 *</Label>
+        <ProjectFormRow
+          label={`${financialYear.year}년 선금·중도금 합계 70% 미만 사유`}
+          required
+          issueLabel="선금·중도금 70% 미만 사유"
+        >
           <Textarea
             value={financialYear.advanceInterimBelow70Reason || ''}
             onChange={(event) => updateFinancialYear(financialYearIndex!, 'advanceInterimBelow70Reason', event.target.value)}
             placeholder="고객사 지급 조건 등 70% 미만인 이유를 입력"
-            className="mt-1 min-h-[72px] text-sm"
+            className={cn('min-h-[72px]', FORM_VALUE_CLASS)}
           />
-        </div>
-      ) : null}
-      {!financialYear && advanceInterimRatio !== null && paymentPlanTotal > 0 ? (
-        <div className={`rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] ${requiresAdvanceInterimReason ? 'text-red-700' : 'text-slate-700'}`}>
-          선금+중도금 비율 {(advanceInterimRatio * 100).toFixed(1)}%
-          {requiresAdvanceInterimReason ? ' · 70% 미만이라 사유가 필요합니다.' : ''}
-        </div>
+        </ProjectFormRow>
       ) : null}
       {!financialYear && requiresAdvanceInterimReason ? (
-        <div>
-          <Label className="text-xs">선금·중도금 합계 70% 미만 사유 *</Label>
+        <ProjectFormRow
+          label="선금·중도금 합계 70% 미만 사유"
+          required
+          issueLabel="선금·중도금 70% 미만 사유"
+          errors={fieldIssues('선금·중도금 70% 미만 사유')}
+        >
           <Textarea
             value={draft.advanceInterimBelow70Reason}
             onChange={(event) => update('advanceInterimBelow70Reason', event.target.value)}
             placeholder="고객사 지급 조건 등 70% 미만인 이유를 입력"
-            className="mt-1 min-h-[72px] text-sm"
+            className={cn('min-h-[72px]', FORM_VALUE_CLASS)}
           />
-        </div>
+        </ProjectFormRow>
       ) : null}
-      {!financialYear ? <div>
-        <Label className="text-xs">기타 메모</Label>
-        <Textarea
-          value={draft.paymentPlanDesc}
-          onChange={(event) => update('paymentPlanDesc', event.target.value)}
-          placeholder="예: 검수 완료 후 세금계산서 발행, 발행일로부터 14일 이내 입금"
-          className="mt-1 min-h-[92px] text-sm"
-        />
-      </div> : null}
+      {!financialYear ? (
+        <ProjectFormRow label="기타 메모">
+          <Textarea
+            value={draft.paymentPlanDesc}
+            onChange={(event) => update('paymentPlanDesc', event.target.value)}
+            placeholder="예: 검수 완료 후 세금계산서 발행, 발행일로부터 14일 이내 입금"
+            className={cn('min-h-[92px]', FORM_VALUE_CLASS)}
+          />
+        </ProjectFormRow>
+      ) : null}
       {showProjectCheckout ? (
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-          <div>
-            <Label className="text-xs font-semibold">종료사업 체크아웃</Label>
-            <p className="mt-1 text-[11px] text-muted-foreground">완료 프로젝트의 입금·잔액·증빙·USB 인계를 확인합니다.</p>
-          </div>
+        <ProjectFormSection
+          title="종료사업 체크아웃"
+          description="완료 프로젝트의 입금·잔액·증빙·USB 인계를 확인합니다."
+        >
           {([
             ['finalPaymentReceived', '최종 잔금 입금을 확인했습니다.'],
             ['bankBalanceZero', '프로젝트 계좌 잔액을 0원으로 정리했습니다.'],
@@ -2644,7 +3063,7 @@ export function ProjectEditorWizard({
               ? [['finalSettlementReportConfirmed', '회계사 최종 정산보고서가 있어 PDF를 첨부해야 합니다.'] as const]
               : []),
           ] as const).map(([field, label]) => (
-            <label key={field} className="flex items-center gap-2 text-[12px] text-slate-700">
+            <label key={field} className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
               <Checkbox
                 checked={draft.checkout[field]}
                 onCheckedChange={(checked) => update('checkout', { ...draft.checkout, [field]: checked === true })}
@@ -2652,7 +3071,7 @@ export function ProjectEditorWizard({
               {label}
             </label>
           ))}
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+          <label className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
             <Checkbox
               checked={draft.checkout.performanceCertificateDocumentApplicable === true}
               onCheckedChange={(checked) => update('checkout', {
@@ -2669,7 +3088,7 @@ export function ProjectEditorWizard({
           ) : null}
           {requiresSettlementConfirmations ? (
             <>
-              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+              <label className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
                 <Checkbox
                   checked={draft.checkout.usbEvidenceSubmitted}
                   onCheckedChange={(checked) => update('checkout', {
@@ -2680,7 +3099,7 @@ export function ProjectEditorWizard({
                 />
                 정산 종료 후 모든 정산 자료를 USB에 저장해 재무팀에 제출했습니다.
               </label>
-              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+              <label className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
                 <Checkbox
                   checked={draft.checkout.evidenceDeletedAfterUsb}
                   disabled={!draft.checkout.usbEvidenceSubmitted}
@@ -2693,7 +3112,7 @@ export function ProjectEditorWizard({
               </label>
             </>
           ) : null}
-        </div>
+        </ProjectFormSection>
       ) : null}
     </div>
     );
@@ -2710,7 +3129,7 @@ export function ProjectEditorWizard({
     },
     {
       number: 5,
-      label: '제안서(구글드라이브 링크)',
+      label: '제안서 PPT 링크',
       value: draft.registrationConfirmations.proposalPptOriginal || draft.proposalPptOriginalDocument?.name || '미입력',
     },
     {
@@ -2726,9 +3145,10 @@ export function ProjectEditorWizard({
       'border-b border-border/50 last:border-0',
       stacked ? 'py-3' : 'flex items-start justify-between gap-3 py-2',
     )}>
-      <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
+      <span className={cn('shrink-0', FORM_LABEL_CLASS)}>{label}</span>
       <div className={cn(
-        'whitespace-pre-line text-[12px] font-medium text-slate-900',
+        'whitespace-pre-line font-medium text-slate-900',
+        FORM_NUMERIC_VALUE_CLASS,
         stacked ? 'mt-2 w-full text-left' : 'text-right',
       )}>
         {value || '-'}
@@ -2740,7 +3160,7 @@ export function ProjectEditorWizard({
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <Card className="shadow-none lg:col-start-1 lg:row-start-1 lg:self-start">
-          <CardHeader className="pb-2"><CardTitle className="text-sm">기본 정보</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className={FORM_SECTION_CLASS}>기본 정보</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="담당조직(CIC)" value={draft.department} />
             <ReviewRow label="공식 계약명" value={draft.officialContractName} />
@@ -2760,7 +3180,7 @@ export function ProjectEditorWizard({
           </CardContent>
         </Card>
         <Card className="shadow-none lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start">
-          <CardHeader className="pb-2"><CardTitle className="text-sm">계약/재무</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className={FORM_SECTION_CLASS}>계약/재무</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="기간" value={`${draft.contractStart || '-'} ~ ${draft.contractEnd || '-'}`} />
             <ReviewRow label="통화" value={PROJECT_CURRENCY_LABELS[draft.currency]} />
@@ -2802,12 +3222,12 @@ export function ProjectEditorWizard({
                           key={item.number}
                           className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-2 rounded-md bg-slate-50 px-2.5 py-2"
                         >
-                          <span className="flex h-5 w-5 items-center justify-center rounded bg-[#001e46] text-[10px] font-semibold text-white">
+                          <span className="flex h-5 w-5 items-center justify-center rounded bg-[#001e46] text-[11px] font-semibold text-white">
                             {item.number}
                           </span>
                           <div className="min-w-0">
-                            <p className="text-[11px] font-semibold text-slate-700">{item.label}</p>
-                            <p className="mt-0.5 break-words text-[12px] text-slate-950">{item.value}</p>
+                            <p className={FORM_LABEL_CLASS}>{item.label}</p>
+                            <p className={cn('mt-1 break-words text-slate-950', FORM_VALUE_CLASS)}>{item.value}</p>
                           </div>
                         </div>
                       ))}
@@ -2819,7 +3239,7 @@ export function ProjectEditorWizard({
           </CardContent>
         </Card>
         <Card className="shadow-none lg:col-start-1 lg:row-start-2 lg:self-start">
-          <CardHeader className="pb-2"><CardTitle className="text-sm">팀/인력</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className={FORM_SECTION_CLASS}>팀/인력</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
@@ -2828,7 +3248,7 @@ export function ProjectEditorWizard({
           </CardContent>
         </Card>
         <Card className="shadow-none lg:col-start-1 lg:row-start-3 lg:self-start">
-          <CardHeader className="pb-2"><CardTitle className="text-sm">계약/재무 입금 계획</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className={FORM_SECTION_CLASS}>계약/재무 입금 계획</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="선금/계약금" value={formatPaymentPlanAmount(effectivePaymentPlan.contract, draft.contractAmount)} />
             {!hasMultiYearContract ? <ReviewRow label="선금/계약금 예상월" value={draft.paymentExpectedMonths.contract} /> : null}
@@ -2867,7 +3287,7 @@ export function ProjectEditorWizard({
               onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('contract') : undefined}
               title="계약서 원문"
               description="등록하려는 계약서가 맞는지 꼭 확인해주세요!"
-              descriptionClassName="text-rose-600"
+              descriptionClassName="text-red-700"
             />
           </div>
         ) : null}
@@ -2978,7 +3398,7 @@ export function ProjectEditorWizard({
         ) : null}
       </div>
       {usesRegistrationV2 ? (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] text-slate-700">
+        <div className={cn('rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700', FORM_VALUE_CLASS)}>
           최종 저장 후 사업관리 폴더가 자동 생성되며, 프로젝트 상세 화면에서 열 수 있습니다.
         </div>
       ) : null}
@@ -3033,16 +3453,16 @@ export function ProjectEditorWizard({
           onClick={() => setStepIndex(STEPS.findIndex((item) => item.id === 'financial'))}
         >
           <span>Project Check out</span>
-          <span className="text-xs text-slate-500">체크리스트와 증빙 업로드 열기</span>
+          <span className={FORM_HINT_CLASS}>체크리스트와 증빙 업로드 열기</span>
         </Button>
       ) : null}
 
       {preloadWarningVisible ? (
-        <div className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm">
+        <div className={cn('rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-800 shadow-sm', FORM_VALUE_CLASS)}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="font-semibold text-slate-950">새 버전이 배포되었습니다</p>
-              <p className="mt-1 text-[12px] leading-5 text-slate-600">
+              <p className={cn('font-semibold text-slate-950', FORM_VALUE_CLASS)}>새 버전이 배포되었습니다</p>
+              <p className={cn('mt-1', FORM_HINT_CLASS)}>
                 작성 중인 내용 보호를 위해 자동 새로고침은 막았습니다. 임시저장 후 새로고침하면 됩니다.
               </p>
             </div>
@@ -3061,11 +3481,11 @@ export function ProjectEditorWizard({
       ) : null}
 
       {restoreCandidate ? (
-        <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+        <div className={cn('rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-slate-800', FORM_VALUE_CLASS)}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="font-semibold text-slate-950">이전에 작성 중이던 임시저장이 있습니다</p>
-              <p className="mt-1 text-[12px] leading-5 text-slate-600">
+              <p className={cn('font-semibold text-slate-950', FORM_VALUE_CLASS)}>이전에 작성 중이던 임시저장이 있습니다</p>
+              <p className={cn('mt-1', FORM_HINT_CLASS)}>
                 {formatAutosaveTime(restoreCandidate.updatedAt) || '최근'}에 저장된 작성 내용을 불러올 수 있습니다.
               </p>
             </div>
@@ -3084,26 +3504,49 @@ export function ProjectEditorWizard({
       <div className="space-y-4">
       <Card className="border-slate-200/80 shadow-sm">
         <CardContent className="p-3">
-          <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
+          <div className={cn('mb-4 flex items-center justify-between', FORM_HINT_CLASS)}>
             <span>{stepIndex + 1} / {STEPS.length}</span>
             <span>{step.label}</span>
           </div>
           <Progress value={((stepIndex + 1) / STEPS.length) * 100} />
-          <div className="mt-4 grid gap-1.5 lg:grid-cols-5">
+          {/* 원형 번호 인디케이터. 남은 필수 개수는 submitIssues 를 그대로 세어 배지로만
+              얹는다(판정은 그대로). 칩을 누르면 그 단계로 이동한다. */}
+          <div className="mt-4 grid gap-2 lg:grid-cols-4">
             {STEPS.map((item, index) => {
-              const Icon = item.icon;
               const active = index === stepIndex;
+              const remaining = stepIssueCounts[item.id];
               return (
                 <button
                   key={item.id}
                   type="button"
+                  aria-current={active ? 'step' : undefined}
                   onClick={() => setStepIndex(index)}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors lg:justify-center lg:py-3 ${
-                    active ? 'border-[#001e46] bg-slate-50 text-[#001e46]' : 'border-border bg-white text-muted-foreground hover:bg-muted/40'
-                  }`}
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors lg:py-3',
+                    FORM_LABEL_CLASS,
+                    active
+                      ? 'border-[#0176D3] bg-[#0176D3]/5 text-[#0176D3]'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50',
+                  )}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="truncate font-medium">{item.label}</span>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+                      active ? 'border-[#0176D3] bg-[#0176D3] text-white' : 'border-slate-300 text-slate-500',
+                    )}
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="truncate">{item.label}</span>
+                  {remaining > 0 ? (
+                    <span
+                      className="ml-auto shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700"
+                      title={`이 단계에 남은 필수 항목 ${remaining}개`}
+                    >
+                      {remaining}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -3111,14 +3554,21 @@ export function ProjectEditorWizard({
         </CardContent>
       </Card>
 
+      {/* 단계 이름은 위 칩과 진행 표시에 이미 두 번 나온다. 카드 제목까지 두면 같은 말이
+          섹션 제목 바로 위에서 세 번 반복되므로, 카드 안에서는 섹션 제목만 남긴다. */}
       <Card className="border-slate-200/90 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <step.icon className="h-4 w-4" />
-            {step.label}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className={cn('space-y-5', PROJECT_EDITOR_FORM_SURFACE_CLASS)}>
+        <CardContent className={cn('space-y-6 pt-6', PROJECT_EDITOR_FORM_SURFACE_CLASS)}>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className={FORM_LABEL_CLASS}>이 단계에서 준비할 것</p>
+            <ul className={cn('mt-2 space-y-1', FORM_HINT_CLASS)}>
+              {STEP_PREPARATION_NOTES[step.id].map((note) => (
+                <li key={note} className="flex gap-1.5">
+                  <span aria-hidden className="shrink-0">·</span>
+                  <span className="min-w-0">{note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
           <fieldset disabled={readOnly} className="contents">
             {renderStep()}
           </fieldset>
@@ -3131,7 +3581,7 @@ export function ProjectEditorWizard({
           <div className="mb-3 empty:mb-0">{renderSubmitBlockers()}</div>
         ) : null}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <div className={cn('flex items-center gap-2', FORM_HINT_CLASS)}>
             <CalendarRange className="h-4 w-4" />
             <span>{draft.contractStart || '-'} ~ {draft.contractEnd || '-'}</span>
             <span className="hidden lg:inline">·</span>
