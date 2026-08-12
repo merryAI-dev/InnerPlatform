@@ -127,15 +127,6 @@ export function isProjectSettlementSupportMember(
   return name === '송성미' || name === '최지윤' || nickname === '도담' || nickname === '써니';
 }
 
-export function hasInvalidProjectSettlementSupportMember(
-  members: ProjectTeamMemberAssignment[] | null | undefined,
-) {
-  return normalizeProjectTeamMembers(members).some((member) => (
-    member.role === '정산지원'
-    && !isProjectSettlementSupportMember(member)
-  ));
-}
-
 export function hasInvalidProjectTeamMemberLaborPeriod(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ) {

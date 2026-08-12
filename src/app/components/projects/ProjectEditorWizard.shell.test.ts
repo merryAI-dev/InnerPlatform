@@ -387,6 +387,13 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('계약 종료일은 시작일 이후여야 합니다.');
     expect(source).not.toContain('인건비 투입 종료월은 시작월 이후여야 합니다.');
     expect(source).toContain('운영매니저 1인 이상');
+    // 정산지원 담당자는 저장을 막지 않는다. 예전에는 submitIssues 에 들어가 최종 저장을
+    // 막았고, 후보 드롭다운도 두 사람으로 좁혀 다른 사람을 아예 고를 수 없었다. 담당이
+    // 바뀌거나 그 두 분이 자리를 비우면 프로젝트 등록 자체가 멈춘다.
+    expect(source).not.toContain("issues.push({ step: 'team', label: '정산지원은 도담 또는 써니를 선택' })");
+    expect(source).not.toContain('hasInvalidProjectSettlementSupportMember');
+    expect(source).not.toContain('정산지원은 도담 또는 써니를 선택해 주세요.');
+    expect(source).toContain('const availableTeamMemberOptions = teamMemberOptions;');
     expect(source).toContain("const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE'");
     expect(source).not.toContain('정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.');
     expect(source).toContain('md:grid-cols-3');
