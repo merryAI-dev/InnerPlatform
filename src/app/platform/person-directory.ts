@@ -9,10 +9,17 @@
  * 막히면 안 된다 — 못 찾은 사람은 이름 기반 대체 키로 떨어지고, 화면은 계속 뜬다.
  */
 
+import type { DirectoryEmploymentType } from './person-employment';
+
 export interface DirectoryPerson {
   personId: string;
   name: string;
   nickname: string;
+  /**
+   * 조회 시점의 근로형태. 동일인 판정에는 쓰지 않고, 후보 목록을 거를 때만 본다.
+   * 인력 명부를 아직 못 읽었을 때를 위해 선택 항목으로 둔다.
+   */
+  employmentType?: DirectoryEmploymentType;
 }
 
 export interface PersonDirectory {

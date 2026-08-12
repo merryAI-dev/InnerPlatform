@@ -4,6 +4,7 @@ import {
   type DirectoryPerson,
   type PersonDirectory,
 } from '../platform/person-directory';
+import { isProjectAssignableType } from '../platform/person-employment';
 import type { OrgMember, Project } from './types';
 
 function memberLabel(name: string, nickname: string): string {
@@ -49,10 +50,11 @@ export function splitMemberDisplayName(value: string): { name: string; nickname:
   return { name: match[1].trim(), nickname: match[2].trim() };
 }
 
-/** 인력 명부 레코드를 그대로 후보로 만든다. 배정에는 이름·별명만 저장되므로 계정이 없어도 고를 수 있다. */
+/** 인력 명부 레코드를 후보로 만든다. 배정에는 이름·별명만 저장되므로 계정이 없어도 고를 수 있다. */
 function rosterOptions(roster: DirectoryPerson[]): ProjectTeamMemberOption[] {
   const options = new Map<string, ProjectTeamMemberOption>();
   roster.forEach((person) => {
+    if (!isProjectAssignableType(person?.employmentType)) return;
     const name = String(person?.name || '').trim();
     if (!name) return;
     const nickname = String(person?.nickname || '').trim();
@@ -63,20 +65,8 @@ function rosterOptions(roster: DirectoryPerson[]): ProjectTeamMemberOption[] {
   return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
 }
 
-/**
- * 팀원 후보 목록.
- *
- * 출처는 계정 원장(members)이다. 다만 계정 목록이 아직 안 왔거나 못 읽었을 때 빈 목록을
- * 돌려주면 사람이 팀원을 아예 못 고른다 - 포털 등록 화면은 members 가 [] 로 시작한다.
- * 그럴 때는 인력 명부(roster)로 후보를 만든다. 화면이 멈추는 것보다 낫다.
- */
-export function buildProjectTeamMemberOptions(
-  members: OrgMember[],
-  roster: DirectoryPerson[] = [],
-): ProjectTeamMemberOption[] {
-  const directory = roster.length ? buildPersonDirectory(roster) : EMPTY_PERSON_DIRECTORY;
-  if (!members.length) return rosterOptions(roster);
-
+/** 계정 원장으로 후보를 만든다. 인력 명부를 못 읽었을 때만 쓰는 안전망. */
+function memberFallbackOptions(members: OrgMember[]): ProjectTeamMemberOption[] {
   const options = new Map<string, ProjectTeamMemberOption>();
   members.forEach((member) => {
     const status = String(member.status || '').trim().toUpperCase();
@@ -84,8 +74,7 @@ export function buildProjectTeamMemberOptions(
     const parsed = splitMemberDisplayName(member.name || '');
     const displayName = String(member.nameKo || '').trim() || parsed.name;
     if (!String(member.uid || '').trim() || !displayName) return;
-    const canonical = findProjectTeamMemberOption(displayName, directory);
-    const nickname = String(member.nickname || '').trim() || parsed.nickname || canonical?.nickname || '';
+    const nickname = String(member.nickname || '').trim() || parsed.nickname || '';
     const key = displayName.toLowerCase();
     if (options.has(key)) return;
     options.set(key, {
@@ -95,11 +84,25 @@ export function buildProjectTeamMemberOptions(
       label: memberLabel(displayName, nickname),
     });
   });
+  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+}
 
-  const liveOptions = [...options.values()]
-    .sort((left, right) => left.label.localeCompare(right.label, 'ko'));
-  // 계정이 전부 비활성이거나 uid 가 없어 한 명도 안 남는 경우도 같은 안전망을 쓴다.
-  return liveOptions.length ? liveOptions : rosterOptions(roster);
+/**
+ * 팀원 후보 목록.
+ *
+ * 출처는 인력 명부(orgs/{org}/persons) 하나다. HR 담당자가 /people 에서 관리한다.
+ * 계정 원장을 출처로 쓰면 로그인한 적 없는 사람이 후보에서 빠지고, 퇴사해도 계정이
+ * 살아 있으면 계속 남는다. 배정에는 이름과 별명만 저장되므로 계정은 필요하지 않다.
+ *
+ * 명부를 아직/영영 못 읽었을 때만 계정 원장으로 후보를 만든다. 빈 목록을 돌려주면
+ * 사람이 팀원을 아예 못 고른다.
+ */
+export function buildProjectTeamMemberOptions(
+  roster: DirectoryPerson[],
+  members: OrgMember[] = [],
+): ProjectTeamMemberOption[] {
+  const fromRoster = rosterOptions(roster);
+  return fromRoster.length ? fromRoster : memberFallbackOptions(members);
 }
 
 /** 인력 명부 레코드로 디렉터리를 만든다. 호출부가 person-directory 를 직접 몰라도 되게. */
@@ -119,12 +122,23 @@ export interface OrgMemberPickerOption {
 }
 
 /**
- * Options for the pickers that choose a person (PM, 최종 결재자, 월 결산 조직장).
+ * PM · 최종 결재자 · 월 결산 조직장을 고르는 자리.
  *
- * Only an explicit INACTIVE or DELETED status removes someone. Requiring status to equal
- * ACTIVE hid the 15 members whose document carries no status field at all.
+ * 이 사람들은 실제로 로그인해서 승인해야 하므로 계정이 필수다. 그래서 후보는 계정
+ * 원장에서 나오지만, 인력 명부(roster)가 문지기 역할을 한다 - 명부에 없는 사람은
+ * 계정이 살아 있어도 후보가 아니다. 퇴사했는데 계정이 남아 있는 경우와 사람이 아닌
+ * 서비스 계정이 여기서 걸러진다.
+ *
+ * 명부를 못 읽었으면 문지기 없이 계정 원장만 쓴다. 조직장을 못 고르면 결산이 막힌다.
+ *
+ * 상태는 명시적 INACTIVE/DELETED 만 제외한다. ACTIVE 를 요구하면 status 필드가
+ * 아예 없는 구성원 15명이 사라진다.
  */
-export function buildOrgMemberPickerOptions(members: OrgMember[]): OrgMemberPickerOption[] {
+export function buildOrgMemberPickerOptions(
+  members: OrgMember[],
+  roster: DirectoryPerson[] = [],
+): OrgMemberPickerOption[] {
+  const directory = roster.length ? buildPersonDirectory(roster) : EMPTY_PERSON_DIRECTORY;
   const byUid = new Map<string, OrgMemberPickerOption>();
   members.forEach((member) => {
     const uid = String(member.uid || '').trim();
@@ -136,9 +150,10 @@ export function buildOrgMemberPickerOptions(members: OrgMember[]): OrgMemberPick
     // by sign-in paths, so it is only parsed when the structured fields are absent.
     const parsed = splitMemberDisplayName(member.name || '');
     const name = String(member.nameKo || '').trim() || parsed.name || email || uid;
+    if (directory.size > 0 && !directory.resolveId(name)) return;
     const nickname = String(member.nickname || '').trim()
       || parsed.nickname
-      || findProjectTeamMemberOption(name)?.nickname
+      || directory.resolveNickname(name)
       || '';
     byUid.set(uid, {
       uid,

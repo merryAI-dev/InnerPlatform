@@ -24,7 +24,8 @@ import {
   AUDIT_LOGS,
   LEDGER_TEMPLATES,
 } from './mock-data';
-import { buildPersonDirectory, type PersonDirectory } from '../platform/person-directory';
+import { buildPersonDirectory, type DirectoryPerson, type PersonDirectory } from '../platform/person-directory';
+import { resolveEmploymentTypeAt } from '../platform/person-employment';
 import { mergeProjectMutationResult } from './project-store-mutation';
 import { resolveAppWriteStrategy } from './store-write-strategy';
 import { useFirebase } from '../lib/firebase-context';
@@ -87,6 +88,8 @@ interface AppState {
   auditLogs: AuditLog[];
   participationEntries: ParticipationEntry[];
   persons: PersonRecord[];
+  /** 사람 고르는 자리들이 쓰는 형태. 근로형태가 오늘 기준으로 채워져 있다. */
+  personRoster: DirectoryPerson[];
   personDirectory: PersonDirectory;
   dataSource: 'local' | 'firestore';
 }
@@ -270,7 +273,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [orgId, platformApiEnabled, bffActor]);
 
-  const personDirectory = useMemo(() => buildPersonDirectory(persons), [persons]);
+  // 명부를 사람 고르는 자리들이 쓰는 형태로 한 번만 변환한다. 근로형태는 오늘 기준으로
+  // 파생시킨다 - 문서에 저장하면 계약이 끝나도 값이 그대로 남는다.
+  const personRoster = useMemo<DirectoryPerson[]>(() => persons.map((person) => ({
+    personId: person.personId,
+    name: person.name,
+    nickname: person.nickname || '',
+    employmentType: resolveEmploymentTypeAt(person.employments, new Date().toISOString().slice(0, 10)),
+  })), [persons]);
+
+  const personDirectory = useMemo(() => buildPersonDirectory(personRoster), [personRoster]);
 
   const members = useMemo<OrgMember[]>(() => {
     const baseMembers = dataSource === 'firestore'
@@ -850,6 +862,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     auditLogs,
     participationEntries,
     persons,
+    personRoster,
     personDirectory,
     dataSource,
     upsertMember,

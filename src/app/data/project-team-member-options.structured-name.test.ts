@@ -45,8 +45,10 @@ describe('display name comes from the roster fields', () => {
     expect(option.label).toBe('하송희(솔)');
   });
 
-  it('applies the same rule to the team member picker', () => {
-    const options = buildProjectTeamMemberOptions([
+  it('applies the same rule to the team member picker fallback', () => {
+    // 팀원 후보의 출처는 인력 명부지만, 명부를 못 읽었을 때 쓰는 계정 원장 경로에도
+    // 같은 이름 정규화가 적용되어야 한다.
+    const options = buildProjectTeamMemberOptions([], [
       member({ uid: 'u1', name: 'Inhyo Ko (베리)', nameKo: '고인효', nickname: '베리' }),
     ]);
     expect(options[0].label).toBe('고인효(베리)');
@@ -54,7 +56,7 @@ describe('display name comes from the roster fields', () => {
   });
 
   it('keeps one entry per person when both documents disagree on the combined string', () => {
-    const options = buildProjectTeamMemberOptions([
+    const options = buildProjectTeamMemberOptions([], [
       member({ uid: 'u1', name: 'Jeongtae KIM (Able)', nameKo: '김정태', nickname: '에이블' }),
       member({ uid: 'u2', name: '김정태(에이블)', nameKo: '김정태', nickname: '에이블' }),
     ]);
