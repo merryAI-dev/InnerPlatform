@@ -968,6 +968,10 @@ export interface CashflowMonthCloseDashboard {
     };
   }>;
   sheetFormulaValues: {
+    status: 'AVAILABLE' | 'UNAVAILABLE';
+    reason: string | null;
+    sourceRevision: string | null;
+    targetRevision: string | null;
     weekly: CashflowMonthCloseDashboard['sheetCalculationChecks'];
     annual: Array<{
       year: number;

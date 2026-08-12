@@ -9,6 +9,13 @@ const varianceMutation = source.slice(
 );
 
 describe('cashflow week metadata mutation boundary', () => {
+  it('refreshes from the persisted snapshot instead of deriving local financial totals', () => {
+    expect(source).toContain('const reloadWeeks = useCallback');
+    expect(source).toContain('reloadWeeks();');
+    expect(source).not.toContain('applyWeekAmountsToLocalWeeks');
+    expect(source).not.toContain('computeCashflowTotals');
+  });
+
   it('sends variance intent through the BFF and never writes Firestore directly', () => {
     expect(varianceMutation).toContain('applyCashflowVarianceIntentViaBff');
     expect(varianceMutation).toContain('cashflowLease');

@@ -12,7 +12,6 @@ describe('global theme polish', () => {
     expect(themeCss).toContain("[data-slot='table-container']");
     expect(themeCss).toContain("[data-slot='dialog-content']");
     expect(themeCss).toContain('@keyframes cashflow-ready-bob');
-    expect(themeCss).toContain('@keyframes cashflow-tile-float');
     expect(themeCss).toContain('prefers-reduced-motion: reduce');
   });
 

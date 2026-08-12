@@ -97,83 +97,6 @@ function errorDiagnostics(error: unknown) {
   };
 }
 
-function CashflowSheetHeroAnimation() {
-  const tiles = [
-    { kind: 'excel', label: 'XLS', x: -112, y: -104, rotate: -16, size: 82, delay: 0 },
-    { kind: 'cashflow', label: 'Cashflow', x: 80, y: -114, rotate: 14, size: 72, delay: 0.7 },
-    { kind: 'mysc', label: 'MYSC', x: 120, y: -4, rotate: 16, size: 90, delay: 1.2 },
-    { kind: 'plus', label: '입금', x: -120, y: 72, rotate: -20, size: 76, delay: 0.4 },
-    { kind: 'minus', label: '출금', x: 78, y: 100, rotate: 11, size: 68, delay: 1.0 },
-  ];
-
-  return (
-    <div className="select-none text-center">
-      <div className="motion-safe:animate-[cashflow-hero-enter_0.45s_ease-out_both] text-[28px] font-black leading-tight text-slate-950 sm:text-[34px]">
-        사업비 관리시트 연동
-      </div>
-      <div className="mt-2 motion-safe:animate-[cashflow-hero-fade_0.45s_ease-out_0.12s_both] text-[14px] leading-relaxed text-slate-500">
-        사업비 관리시트를<br />필요할 때 가져와 MYSCube에 반영
-      </div>
-      <div className="relative mx-auto mt-12 h-[330px] w-[330px] motion-safe:animate-[cashflow-hero-scale_0.55s_ease-out_0.18s_both]">
-        <div className="absolute left-1/2 top-1/2 flex h-[188px] w-[188px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-[#4f7cff] to-[#00c4a0] shadow-[0_24px_64px_rgba(79,124,255,0.42),0_6px_20px_rgba(15,23,42,0.16)] motion-safe:animate-[spin_6s_linear_infinite]">
-          <svg width="76" height="76" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-            <path d="M14 36C14 23.85 23.85 14 36 14C44.5 14 51.9 18.7 55.6 25.6" stroke="white" strokeWidth="5.5" strokeLinecap="round" />
-            <path d="M55 20L56.5 26.5L50 26" stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M58 36C58 48.15 48.15 58 36 58C27.5 58 20.1 53.3 16.4 46.4" stroke="white" strokeWidth="5.5" strokeLinecap="round" />
-            <path d="M17 52L15.5 45.5L22 46" stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        {tiles.map((tile) => (
-          <div
-            key={tile.label}
-            className="absolute flex items-center justify-center overflow-hidden bg-gradient-to-br from-white to-slate-100 shadow-[0_1px_0_rgba(255,255,255,1)_inset,0_-1px_0_rgba(0,0,0,0.06)_inset,6px_14px_36px_rgba(15,23,42,0.18),0_2px_6px_rgba(15,23,42,0.10)] motion-safe:animate-[cashflow-tile-float_3.2s_ease-in-out_infinite]"
-            style={{
-              left: `calc(50% + ${tile.x}px)`,
-              top: `calc(50% + ${tile.y}px)`,
-              width: tile.size,
-              height: tile.size,
-              borderRadius: tile.size * 0.27,
-              transform: `translate(-50%, -50%) rotate(${tile.rotate}deg)`,
-              animationDelay: `${tile.delay}s`,
-            }}
-          >
-            {tile.kind === 'excel' && (
-              <svg width="52" height="52" viewBox="0 0 52 52" fill="none" aria-hidden="true">
-                <rect width="52" height="52" rx="10" fill="#1D6F42" />
-                <text x="10" y="38" fill="white" fontSize="28" fontWeight="800" fontFamily="Arial, sans-serif">X</text>
-              </svg>
-            )}
-            {tile.kind === 'cashflow' && (
-              <div className="flex flex-col items-center gap-1">
-                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" aria-hidden="true">
-                  <path d="M7 15L7 5M7 5L3 9M7 5L11 9" stroke="#4f7cff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M21 5L21 15M21 15L17 11M21 15L25 11" stroke="#00c4a0" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <span className="bg-gradient-to-r from-[#4f7cff] to-[#00c4a0] bg-clip-text text-[10px] font-extrabold text-transparent">Cashflow</span>
-              </div>
-            )}
-            {tile.kind === 'mysc' && (
-              <span className="text-[18px] font-black lowercase tracking-[-0.02em] text-[#001e46]">mysc</span>
-            )}
-            {tile.kind === 'plus' && (
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-[42px] font-black leading-none text-[#4f7cff]">+</span>
-                <span className="text-[9px] font-bold text-[#4f7cff]">입금</span>
-              </div>
-            )}
-            {tile.kind === 'minus' && (
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-[42px] font-black leading-none text-[#00c4a0]">-</span>
-                <span className="text-[9px] font-bold text-[#00c4a0]">출금</span>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function isBffAuthError(error: unknown): boolean {
   const apiError = error as { status?: number; body?: { code?: unknown; error?: unknown } };
   const status = apiError?.status;
@@ -969,9 +892,12 @@ export function CashflowSheetLabPage() {
   return (
     <>
     <div className="bg-white px-5 py-6 sm:bg-slate-100 sm:px-6" inert={loading || undefined} aria-busy={loading}>
-      <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
-        <header>
-          <CashflowSheetHeroAnimation />
+      <div className="relative mx-auto max-w-[560px]">
+        {loading ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 rounded-md border-2 border-slate-200 border-t-[#17324D] motion-safe:animate-spin" /> : null}
+        <section className="relative bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
+        <header className="border-b border-slate-200 pb-5">
+          <h1 className="text-[22px] font-bold tracking-[-0.02em] text-slate-950">사업비 관리시트 연동</h1>
+          <p className="mt-1 text-[13px] leading-relaxed text-slate-500">필요할 때 시트 최신값을 가져와 MYSCube에 반영합니다.</p>
         </header>
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
@@ -987,7 +913,7 @@ export function CashflowSheetLabPage() {
                 <select
                   value={sourceYear}
                   onChange={(event) => handleSourceYearChange(Number(event.target.value))}
-                  className="mt-1 h-10 w-full rounded-none border border-slate-300 bg-white px-3 text-[13px] text-slate-900"
+                  className="mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900"
                   aria-label="연동 연도"
                 >
                   {projectYears.map((year) => (
@@ -1002,7 +928,7 @@ export function CashflowSheetLabPage() {
                 onChange={(event) => setSheetLink(event.target.value)}
                 placeholder="Google Sheet 링크"
                 aria-label="Google Sheet 링크"
-                className="h-11 rounded-none text-[13px]"
+                className="h-11 text-[13px]"
               />
               <div>
                 <Input
@@ -1010,14 +936,14 @@ export function CashflowSheetLabPage() {
                   onChange={(event) => setSheetName(event.target.value)}
                   placeholder="시트 탭 이름"
                   aria-label="시트 탭 이름"
-                  className="h-10 rounded-none text-[12px]"
+                  className="h-10 text-[12px]"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Button
                   type="button"
                   variant={isCurrentSheetConfigSaved ? 'outline' : 'default'}
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
+                  className="h-9 gap-1.5 px-3 text-[12px]"
                   disabled={!canSaveConfig || isCurrentSheetConfigSaved}
                   onClick={() => void handleSaveSheetConfig()}
                 >
@@ -1031,11 +957,11 @@ export function CashflowSheetLabPage() {
               <div className="mt-2 space-y-2 border-l-2 border-blue-200 pl-3 text-[12px] text-slate-600" aria-label="Google Sheet 편집자 공유 안내">
                   <strong className="block text-slate-800">먼저 아래 서비스 계정을 Google Sheet 편집자로 공유해 주세요.</strong>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="h-8 gap-1.5 rounded-none px-3 text-[12px]" disabled={!projectId || accountLoading} onClick={() => void handleLoadShareAccount()}>
+                    <Button type="button" variant="outline" className="h-8 gap-1.5 px-3 text-[12px]" disabled={!projectId || accountLoading} onClick={() => void handleLoadShareAccount()}>
                       {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                       다시 불러오기
                     </Button>
-                    <Button type="button" variant="outline" className="h-8 gap-1.5 rounded-none px-3 text-[12px]" disabled={!systemAccountEmail} onClick={handleCopyShareAccount}>
+                    <Button type="button" variant="outline" className="h-8 gap-1.5 px-3 text-[12px]" disabled={!systemAccountEmail} onClick={handleCopyShareAccount}>
                       <Copy className="h-3.5 w-3.5" />공유 계정 복사
                     </Button>
                   </div>
@@ -1055,7 +981,7 @@ export function CashflowSheetLabPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                className="h-10 gap-1.5 px-4 text-[13px]"
                 disabled={!canRefresh}
                 onClick={() => void handleRefreshSheetMirror()}
               >
@@ -1101,7 +1027,7 @@ export function CashflowSheetLabPage() {
                       </>
                     ) : '이미 시트 최신값과 같습니다.'}
                   </div>
-                  <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
+                  <Button asChild variant="outline" className="h-9 px-3 text-[12px]">
                     <Link to={resolvePortalProjectResourcePath('/portal/cashflow', projectId)}>캐시플로우로 이동</Link>
                   </Button>
                 </div>
@@ -1109,7 +1035,7 @@ export function CashflowSheetLabPage() {
                 <div className="space-y-2">
                   <Button
                     type="button"
-                    className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                    className="h-10 gap-1.5 px-4 text-[13px]"
                     disabled={applyStatusState === 'error' ? loading : !canOverwrite}
                     onClick={() => {
                       if (applyStatusState === 'error') {
@@ -1141,7 +1067,8 @@ export function CashflowSheetLabPage() {
             <span>{statusMessage}</span>
           </div>
         )}
-      </section>
+        </section>
+      </div>
 
       <CashflowFormulaMismatchDialog
         issues={formulaMismatchPrompt?.issues || []}

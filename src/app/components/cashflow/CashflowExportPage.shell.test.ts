@@ -23,17 +23,18 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain("scope === 'selected' || departmentFilter !== 'ALL'");
   });
 
-  it('shows the selected project status table from canonical cashflow weeks', () => {
+  it('shows the selected project status table without client-side financial differences', () => {
     expect(source).toContain('buildCashflowExportProjectRows');
     expect(source).toContain('weeksLoading');
     expect(source).toContain('weeksLoadError');
     expect(source).toContain('Projection-Actual');
-    expect(source).toContain('projectionActualInDifference');
-    expect(source).toContain('projectionActualOutDifference');
+    expect(source).not.toContain('projectionActualInDifference');
+    expect(source).not.toContain('projectionActualOutDifference');
     expect(source).toContain('최근 업데이트');
     expect(source).toContain('사업 보기');
     expect(source).toContain('CashflowCanonicalSummary');
-    expect(source).toContain('누적 Projection-Actual / 현재 주차 상세');
+    expect(source).toContain('누적 Projection-Actual');
+    expect(source).not.toContain('현재 주차 상세');
     expect(source).toContain('onRetry={() => void canonicalSummaries.retry(row.id)}');
   });
 

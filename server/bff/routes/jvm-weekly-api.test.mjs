@@ -2912,6 +2912,15 @@ describe('JVM weekly API BFF proxy', () => {
       snapshot: {
         project: { contractAmount: 101 },
         sourceFingerprint: `sha256:${'f'.repeat(64)}`,
+        sheetFacts: {
+          weeklyCalculationChecks: [{
+            mode: 'projection', yearMonth: '2026-06', weekNo: 1,
+            reported: { depositTotal: 111, withdrawalTotal: 0, balance: 111 },
+          }],
+          annualCashflowTotals: [{ year: 2026, projection: { totalIn: 111 } }],
+          cashflowGrandTotals: { projection: { totalIn: 111 } },
+          projectionActualDifferences: [{ yearMonth: '2026-06', amount: 111 }],
+        },
         weeklyTotals: frozenWeeklyTotals,
         ledgerWeeks: frozenWeeklyTotals.map((week) => ({
           yearMonth: '2026-06',
@@ -2937,7 +2946,24 @@ describe('JVM weekly API BFF proxy', () => {
         { status: 'LIVE_AMENDED', missingEvidence: [] },
       )),
     }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: createMonthCloseDb() });
+    const db = createMonthCloseDb();
+    const mirror = db.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    mirror.sourceRevision = close.lastAmendmentEvidence.sourceRevision;
+    mirror.appliedSourceRevision = close.lastAmendmentEvidence.sourceRevision;
+    mirror.appliedTargetRevision = close.lastAmendmentEvidence.resultingTargetRevision;
+    mirror.sheetFacts = {
+      weeklyCalculationChecks: Array.from({ length: 10 }, (_, index) => ({
+        mode: index < 5 ? 'projection' : 'actual',
+        yearMonth: '2026-06',
+        weekNo: (index % 5) + 1,
+        reported: { depositTotal: index === 0 ? 321 : 0, withdrawalTotal: 0, balance: index === 0 ? 321 : 0 },
+      })),
+      annualCashflowTotals: [{ year: 2026, projection: { totalIn: 654 }, actual: { totalIn: 321 } }],
+      cashflowGrandTotals: { projection: { totalIn: 987 }, actual: { totalIn: 654 } },
+      projectionActualDifferences: [{ yearMonth: '2026-06', amount: 333 }],
+      issues: [],
+    };
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db });
 
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
@@ -2954,12 +2980,45 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.cells.find((cell) => (
           cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'BANK_INTEREST_IN'
         ))).toMatchObject({ cellState: 'ZERO', amount: 0 });
-        expect(response.body.dashboard.sheetCalculationChecks[0].reported.depositTotal).toBe(999);
-        expect(response.body.dashboard.sheetFormulaValues.weekly[0].reported.depositTotal).toBe(999);
-        expect(response.body.dashboard.sheetFormulaValues.projectionActualDifferences).toEqual([]);
+        expect(response.body.dashboard.sheetCalculationChecks[0].reported.depositTotal).toBe(321);
+        expect(response.body.dashboard.sheetFormulaValues).toMatchObject({
+          status: 'AVAILABLE',
+          reason: null,
+          sourceRevision: close.lastAmendmentEvidence.sourceRevision,
+          targetRevision: close.lastAmendmentEvidence.resultingTargetRevision,
+          annual: [{ year: 2026, projection: { totalIn: 654 }, actual: { totalIn: 321 } }],
+          grandTotals: { projection: { totalIn: 987 }, actual: { totalIn: 654 } },
+          projectionActualDifferences: [{ yearMonth: '2026-06', amount: 333 }],
+        });
+        expect(response.body.dashboard.sheetFormulaValues.weekly[0].reported.depositTotal).toBe(321);
         expect(response.body.dashboard.source).toMatchObject({
           sourceRevision: `sha256:${'1'.repeat(64)}`,
           targetRevision: `sha256:${'3'.repeat(64)}`,
+        });
+      });
+    mirror.appliedTargetRevision = `sha256:${'4'.repeat(64)}`;
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.sheetFormulaValues).toMatchObject({
+          status: 'UNAVAILABLE',
+          reason: 'AMENDMENT_SHEET_FORMULA_SNAPSHOT_UNAVAILABLE',
+          sourceRevision: close.lastAmendmentEvidence.sourceRevision,
+          targetRevision: close.lastAmendmentEvidence.resultingTargetRevision,
+          weekly: [], annual: [], grandTotals: {}, projectionActualDifferences: [],
+        });
+      });
+    mirror.appliedTargetRevision = close.lastAmendmentEvidence.resultingTargetRevision;
+    delete mirror.sheetFacts;
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.sheetFormulaValues).toMatchObject({
+          status: 'UNAVAILABLE',
+          reason: 'AMENDMENT_SHEET_FORMULA_SNAPSHOT_UNAVAILABLE',
+          weekly: [], annual: [], grandTotals: {}, projectionActualDifferences: [],
         });
       });
     currentReadModel.months = [];
@@ -2972,7 +3031,7 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.totals.projection.totalIn).toBe(0);
       });
     expect(close.snapshot.weeklyTotals[0].projection.SALES_IN).toBe(100);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   it('serves a legacy CLOSED snapshot as evidence-only without falling back to live ledger data', async () => {

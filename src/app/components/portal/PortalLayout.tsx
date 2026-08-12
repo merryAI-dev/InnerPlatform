@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import {
   DropdownMenu,
@@ -46,6 +47,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   CommandDialog,
+  Command,
   CommandEmpty,
   CommandGroup,
   CommandInput,
@@ -68,6 +70,7 @@ import {
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
+import { matchesProjectSearch } from '../../platform/project-search';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 import {
@@ -189,6 +192,8 @@ function PortalContent() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState('');
   const [portalBootstrapped, setPortalBootstrapped] = useState(false);
   const [labEnabled, setLabEnabled] = useShellLabEnabled();
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
@@ -245,6 +250,9 @@ function PortalContent() {
       name: project.name,
     }));
   }, [candidateProjects.searchProjects]);
+  const filteredProjectOptions = useMemo(() => (
+    candidateProjects.searchProjects.filter((project) => matchesProjectSearch(project, projectSearch))
+  ), [candidateProjects.searchProjects, projectSearch]);
 
   const routeProjectId = useMemo(
     () => resolvePortalRouteProjectId(location.pathname),
@@ -930,25 +938,49 @@ function PortalContent() {
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   {projectOptions.length > 0 ? (
-                    <Select
-                      value={selectedProjectOptionValue}
-                      onValueChange={(value) => {
-                        if (value && value !== currentProject?.id) {
-                          switchProjectInPlace(value);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="h-10 min-w-[220px] rounded-xl border-slate-300 bg-white text-[12px] font-medium text-slate-900 shadow-sm">
-                        <SelectValue placeholder="프로젝트 선택" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {projectOptions.map((project) => (
-                          <SelectItem key={project.id} value={project.id}>
-                            {project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          data-testid="portal-header-project-search"
+                          aria-expanded={projectPickerOpen}
+                          className="h-10 min-w-[220px] justify-between rounded-xl border-slate-300 bg-white px-3 text-[12px] font-medium text-slate-900 shadow-sm"
+                        >
+                          <span className="truncate">{currentProjectName || '프로젝트 선택'}</span>
+                          <Search className="h-4 w-4 text-slate-400" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-[var(--radix-popover-trigger-width)] p-0">
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            value={projectSearch}
+                            onValueChange={setProjectSearch}
+                            placeholder="프로젝트명 또는 ID 검색"
+                          />
+                          <CommandList>
+                            <CommandEmpty>일치하는 프로젝트가 없습니다.</CommandEmpty>
+                            <CommandGroup heading="프로젝트">
+                              {filteredProjectOptions.map((project) => (
+                                <CommandItem
+                                  key={project.id}
+                                  value={project.id}
+                                  onSelect={() => {
+                                    setProjectPickerOpen(false);
+                                    setProjectSearch('');
+                                    if (project.id !== currentProject?.id) switchProjectInPlace(project.id);
+                                  }}
+                                >
+                                  <span className="truncate">{project.name}</span>
+                                  <span className="ml-auto text-[10px] text-slate-500">{project.id}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   ) : (
                     <div className="flex h-10 items-center rounded-xl border border-slate-300 bg-white px-3 text-[12px] font-medium text-slate-900 shadow-sm">
                       {currentProjectName || '프로젝트 미선택'}
