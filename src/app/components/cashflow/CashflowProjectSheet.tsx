@@ -78,7 +78,6 @@ import {
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
   buildCashflowMonthCloseDraftInput,
-  carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
   isCashflowWeekLockedByRange,
@@ -88,8 +87,6 @@ import {
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
   annualYearsFor,
-  annualSummaryAmountFor,
-  canonicalCashflowAnnualTotalFor,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
@@ -181,7 +178,7 @@ function weeklySettlementSurface(status?: string): string {
 // 지난 달은 "닫혔나"가, 이번 달은 "이번 주 뭘 해야 하나"가 유일하게 중요한 질문이다.
 // 현재 달은 아직 결산할 수 없으므로(대상월이 끝나야 결산 가능) 주간 정산 상태를 그대로 보여준다.
 function cashflowWeekSurface(monthCloseStatus?: string, weeklyStatus?: string, closeOverdue?: boolean): string {
-  if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';
+  if (['CLOSED', 'PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseStatus || '')) return 'bg-slate-200';
   if (closeOverdue) return 'bg-red-100';
   return weeklySettlementSurface(weeklyStatus);
 }
@@ -222,14 +219,6 @@ function mergeCashflowEvents(current: CashflowEvent[], incoming: CashflowActivit
   incoming.forEach((event) => events.set(event.id, event));
   return [...events.values()]
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
-}
-
-function diffColorExplanation(section: '입금' | '출금', diff: number): string {
-  if (diff === 0) return '차이가 없습니다.';
-  const target = section === '입금' ? '입금' : '출금';
-  return diff > 0
-    ? `${target} Projection이 Actual보다 큽니다.`
-    : `${target} Projection이 Actual보다 작습니다.`;
 }
 
 function HoverExplain({
@@ -435,7 +424,9 @@ export function CashflowProjectSheet({
     stage: CashflowSheetLabStageResult;
     issues: CashflowFormulaMismatch[];
     closedMonthChangeReason: string;
+    acceptPendingApprovalDifferences: boolean;
   } | null>(null);
+  const [pendingApprovalStage, setPendingApprovalStage] = useState<CashflowSheetLabStageResult | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   const lateSheetDiffRows = useMemo(() => (lateSheetApply?.closedMonthDifferences || []).flatMap((month) =>
     (month.changes || []).map((change) => ({ ...change, yearMonth: month.yearMonth }))), [lateSheetApply]);
@@ -443,6 +434,10 @@ export function CashflowProjectSheet({
     && Number.isSafeInteger(lateSheetApply?.closedMonthDifferenceCount)
     && lateSheetApply?.closedMonthDifferenceCount === lateSheetDiffRows.length
     && (lateSheetApply?.closedMonthDifferences || []).every((month) => !month.truncatedChangeCount);
+  const pendingApprovalChangeRows = (pendingApprovalStage?.pendingApprovalDifferences || []).flatMap((month) => month.changes || []);
+  const pendingApprovalManifestComplete = Boolean(pendingApprovalStage?.pendingApprovalDifferenceManifestHash)
+    && pendingApprovalStage?.pendingApprovalDifferenceCount === pendingApprovalChangeRows.length
+    && (pendingApprovalStage?.pendingApprovalDifferences || []).every((month) => !month.truncatedChangeCount);
   const filteredLateSheetDiffRows = lateSheetDiffRows.filter((change) => {
     const label = CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId;
     const query = lateSheetDiffQuery.trim().toLocaleLowerCase('ko-KR');
@@ -475,7 +470,6 @@ export function CashflowProjectSheet({
   const monthCloseSectionErrors = monthCloseResult?.sectionErrors || [];
   const deadlineSummaryUnavailable = monthCloseSectionErrors.some((entry) => entry.section === 'deadlineSummary')
     || (Boolean(monthCloseResult?.dashboard) && monthCloseResult?.dashboard?.deadlineSummary == null);
-  // 조직장이 검토를 시작하면(APPROVING) JVM 확정이 이미 나갔을 수 있어 회수할 수 없다.
   const canWithdrawMonthCloseRequest = Boolean(
     monthCloseRequest
     && monthCloseRequest.status === 'PENDING'
@@ -1366,7 +1360,7 @@ export function CashflowProjectSheet({
 
   const handleMonthReopenAction = useCallback(async (): Promise<void> => {
     const reason = reopenReason.trim();
-    if (!reopenAction || !monthCloseResult || !reason) {
+    if (!reopenAction || !monthCloseRequest || !reason) {
       toast.error('사유를 입력해 주세요.');
       return;
     }
@@ -1383,13 +1377,18 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${yearMonth}:${monthCloseResult.revision}`;
+      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${monthCloseRequest.requestId}:${monthCloseRequest.revision}`;
       const result = reopenAction === 'request'
         ? await requestCashflowMonthReopenViaBff({
             tenantId: orgId,
             actor,
             projectId,
-            payload: { yearMonth, expectedRevision: monthCloseResult.revision, reason },
+            payload: {
+              requestId: monthCloseRequest.requestId,
+              yearMonth: monthCloseRequest.yearMonth,
+              expectedRevision: monthCloseRequest.revision,
+              reason,
+            },
             idempotencyKey,
           })
         : await decideCashflowMonthReopenViaBff({
@@ -1397,14 +1396,15 @@ export function CashflowProjectSheet({
             actor,
             projectId,
             payload: {
-              yearMonth,
-              expectedRevision: monthCloseResult.revision,
+              requestId: monthCloseRequest.requestId,
+              yearMonth: monthCloseRequest.yearMonth,
+              expectedRevision: monthCloseRequest.revision,
               decision: reopenAction === 'approve' ? 'APPROVE' : 'REJECT',
               reason,
             },
             idempotencyKey,
           });
-      setMonthCloseResult(result);
+      setMonthCloseRequest(result.request);
       setReopenAction(null);
       setReopenReason('');
       toast.success(reopenAction === 'request'
@@ -1414,13 +1414,12 @@ export function CashflowProjectSheet({
           : '재오픈을 반려했습니다.');
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, '재오픈 처리를 완료하지 못했습니다.'));
-      await loadCashflowMonthClose();
     } finally {
       setMonthCloseBusy(false);
     }
-  }, [canRequestMonthReopen, canReviewReopen, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
+  }, [canRequestMonthReopen, canReviewReopen, monthCloseRequest, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
-  const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
+  const handleRefreshSheetMirror = useCallback(async (): Promise<CashflowSheetLabMirrorResult | null> => {
     if (!cashflowSheetConfig?.value) {
       logCashflowSettlement({
         phase: 'info',
@@ -1430,7 +1429,7 @@ export function CashflowProjectSheet({
         summary: { reason: 'sheet_config_missing' },
       });
       toast.error('연결된 Google Sheet가 없습니다.');
-      return;
+      return null;
     }
     const startedAt = Date.now();
     const refreshIdempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1439,7 +1438,7 @@ export function CashflowProjectSheet({
         tenantId: orgId,
         actor,
         projectId,
-        sourceYear: selectedYear,
+        sourceYear: cashflowSheetConfig.sourceYear,
         value: cashflowSheetConfig.value,
         sheetName: cashflowSheetConfig.sheetName || undefined,
         idempotencyKey: refreshIdempotencyKey,
@@ -1456,10 +1455,7 @@ export function CashflowProjectSheet({
             cells: mirror.cells || current.cells,
           }
         : mirror);
-      if (mirror.status === 'FRESH' && mirror.unchanged) {
-        // 시트 변경 없음 - 서버가 풀 리드를 건너뛰고 고정본을 그대로 돌려준 경우.
-        toast.success('시트 변경이 없어 기존 고정값을 그대로 사용합니다.');
-      } else if (mirror.status === 'FRESH' && mirror.sourceRevision) {
+      if (mirror.status === 'FRESH' && mirror.sourceRevision) {
         void loadCashflowEvents();
         toast.success('시트값을 불러왔습니다. MYSCube 시트 반영 전 금액을 확인합니다.');
       } else if (mirror.status === 'STALE') {
@@ -1474,13 +1470,13 @@ export function CashflowProjectSheet({
       operation: 'cashflow.sheet_refresh',
       projectId,
       yearMonth,
-      summary: { sourceYear: selectedYear, hasSheetConfig: true },
+      summary: { sourceYear: cashflowSheetConfig.sourceYear, hasSheetConfig: true },
     });
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
         toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
-        return;
+        return null;
       }
       const mirror = await refreshMirror(actor);
       rememberMirror(mirror);
@@ -1492,6 +1488,7 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         summary: { mirrorStatus: mirror.status, hasSourceRevision: Boolean(mirror.sourceRevision) },
       });
+      return mirror;
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
@@ -1507,7 +1504,7 @@ export function CashflowProjectSheet({
             durationMs: Date.now() - startedAt,
             summary: { mirrorStatus: mirror.status, hasSourceRevision: Boolean(mirror.sourceRevision), retriedAuth: true },
           });
-          return;
+          return mirror;
         } catch (retryError) {
           logCashflowSettlement({
             phase: 'error',
@@ -1518,7 +1515,7 @@ export function CashflowProjectSheet({
             error: retryError,
           });
           toast.error(resolveApiErrorMessage(retryError, '시트값을 불러오지 못했습니다.'));
-          return;
+          return null;
         }
       }
       logCashflowSettlement({
@@ -1530,6 +1527,7 @@ export function CashflowProjectSheet({
         error,
       });
       toast.error(resolveApiErrorMessage(error, '시트값을 불러오지 못했습니다.'));
+      return null;
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -1582,6 +1580,7 @@ export function CashflowProjectSheet({
     stage: CashflowSheetLabStageResult,
     closedMonthChangeReason = '',
     acceptFormulaMismatches = false,
+    acceptPendingApprovalDifferences = false,
   ): Promise<void> => {
     if (!stage.runId || stage.stagedLineCount <= 0) return;
     const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1591,16 +1590,19 @@ export function CashflowProjectSheet({
         actor,
         projectId,
         stageRunId: stage.runId,
-        applyRiskCandidates: true,
+        replaceAllActualSources: true,
         closedMonthChangeReason,
         closedMonthDifferenceCount: stage.closedMonthDifferenceCount,
         closedMonthDifferenceManifestHash: stage.closedMonthDifferenceManifestHash,
+        acceptPendingApprovalDifferences,
+        pendingApprovalDifferenceCount: stage.pendingApprovalDifferenceCount,
+        pendingApprovalDifferenceManifestHash: stage.pendingApprovalDifferenceManifestHash,
         acceptFormulaMismatches,
         idempotencyKey: applyIdempotencyKey,
       });
     };
     const rememberApplyResult = async (result: Awaited<ReturnType<typeof apply>>) => {
-      await Promise.all([
+      void Promise.allSettled([
         loadCashflowEvents(),
         loadCashflowMonthClose(),
       ]);
@@ -1654,7 +1656,7 @@ export function CashflowProjectSheet({
       if (bffErrorCode(finalError) === 'cashflow_formula_mismatch_confirmation_required') {
         const issues = cashflowFormulaMismatchesFromError(finalError);
         if (issues.length > 0) {
-          setFormulaMismatchPrompt({ stage, issues, closedMonthChangeReason });
+          setFormulaMismatchPrompt({ stage, issues, closedMonthChangeReason, acceptPendingApprovalDifferences });
           return;
         }
       }
@@ -1738,7 +1740,10 @@ export function CashflowProjectSheet({
         return;
       }
       if (result.stagedLineCount <= 0) {
-        toast.info('MYSCube 시트와 다른 값이 없습니다.');
+        return;
+      }
+      if (result.pendingApprovalDifferences?.length) {
+        setPendingApprovalStage(result);
         return;
       }
       if (result.closedMonthDifferences?.length) {
@@ -1751,13 +1756,31 @@ export function CashflowProjectSheet({
       await handleApplyStagedSheetValues(result);
     };
     setSheetRefreshLoading(true);
+    logCashflowSettlement({
+      phase: 'start',
+      operation: 'cashflow.sheet_stage',
+      projectId,
+      summary: { expectedMirrorRevision: sourceMirror.sourceRevision, replaceAllActualSources },
+    });
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
         toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
         return;
       }
-      await applyStageResult(await stageMirror(actor));
+      const stage = await stageMirror(actor);
+      await applyStageResult(stage);
+      logCashflowSettlement({
+        phase: 'success',
+        operation: 'cashflow.sheet_stage',
+        projectId,
+        summary: {
+          stageRunId: stage.runId,
+          status: stage.status,
+          stagedLineCount: stage.stagedLineCount,
+          nextStep: stage.pendingApprovalDifferences?.length || stage.closedMonthDifferences?.length ? 'confirmation' : 'apply',
+        },
+      });
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
@@ -1775,6 +1798,46 @@ export function CashflowProjectSheet({
       setSheetRefreshLoading(false);
     }
   }, [cashflowSheetMirror, handleApplyStagedSheetValues, orgId, projectId, resolveBffActor]);
+
+  const handleRefreshAndApplySheetValues = useCallback(async (): Promise<void> => {
+    const startedAt = Date.now();
+    logCashflowSettlement({
+      phase: 'start',
+      operation: 'cashflow.sheet_sync.one_click',
+      projectId,
+      yearMonth,
+      summary: { steps: ['refresh', 'stage', 'apply'] },
+    });
+    const mirror = await handleRefreshSheetMirror();
+    if (mirror?.status !== 'FRESH' || !mirror.sourceRevision) {
+      logCashflowSettlement({
+        phase: 'error',
+        operation: 'cashflow.sheet_sync.one_click',
+        projectId,
+        yearMonth,
+        durationMs: Date.now() - startedAt,
+        summary: { completedStep: 'refresh', mirrorStatus: mirror?.status || 'EMPTY' },
+      });
+      return;
+    }
+    logCashflowSettlement({
+      phase: 'info',
+      operation: 'cashflow.sheet_sync.one_click',
+      projectId,
+      yearMonth,
+      durationMs: Date.now() - startedAt,
+      summary: { completedStep: 'refresh', nextStep: 'stage' },
+    });
+    await handleStagePinnedSheetValues(true, mirror);
+    logCashflowSettlement({
+      phase: 'info',
+      operation: 'cashflow.sheet_sync.one_click',
+      projectId,
+      yearMonth,
+      durationMs: Date.now() - startedAt,
+      summary: { completedStep: 'stage', nextStep: 'apply_or_confirmation' },
+    });
+  }, [handleRefreshSheetMirror, handleStagePinnedSheetValues, projectId, yearMonth]);
 
   const handleOpenSheetOnboarding = useCallback(() => {
     setSheetReviewDialogOpen(true);
@@ -1810,79 +1873,43 @@ export function CashflowProjectSheet({
   const visibleComparisonAnnualYears = comparisonScope.annualYears;
   const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < Number(weeklyYear));
   const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > Number(weeklyYear));
-  const canonicalAnnualTotals = canonicalReadModel?.annualTotals || [];
+  const sheetFormulaValues = monthCloseResult?.dashboard?.sheetFormulaValues;
+  const sheetFormulaValuesAvailable = sheetFormulaValues?.status !== 'UNAVAILABLE';
   const annualTotalFor = (year: number, mode: 'projection' | 'actual') => (
-    canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)
+    sheetFormulaValuesAvailable ? sheetFormulaValues?.annual.find((total) => total.year === year)?.[mode] ?? null : null
   );
+  const annualSummaryValue = (
+    year: number,
+    mode: 'projection' | 'actual',
+    kind: 'totalIn' | 'totalOut' | 'net',
+  ) => annualTotalFor(year, mode)?.[kind] ?? null;
   const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
-    const rangeTotals = monthCloseResult?.dashboard?.canonical?.range?.[mode] as {
-      rowTotals?: Record<CashflowSheetLineId, number>;
-      lineAmounts?: Record<CashflowSheetLineId, number>;
-    } | null | undefined;
-    const selectedYearTotal = rangeTotals?.rowTotals?.[lineId] ?? rangeTotals?.lineAmounts?.[lineId] ?? 0;
-    if (annualYears.some((year) => !annualTotalFor(year, mode)?.lineStates?.[lineId])) return null;
-    return annualYears.reduce(
-      (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
-      Number(selectedYearTotal),
-    );
+    const total = sheetFormulaValuesAvailable ? sheetFormulaValues?.grandTotals?.[mode] : undefined;
+    const state = total?.lineStates?.[lineId];
+    return state === 'VALUE' || state === 'ZERO' ? Number(total?.lineAmounts?.[lineId] || 0) : null;
   };
 
   const projectionActualComparison = useMemo(() => {
-    const lineDefs = [
-      ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
-      ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
-    ];
-    const rows = lineDefs.map(({ section, lineId }) => {
-      const comparisonWeeks = visibleComparisonWeeks.map((week) => {
-        const projectionCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
-        const actualCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
-        const hasValue = projectionCell.hasValue || actualCell.hasValue;
-        return {
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          weekLabel: week.label,
-          weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
-          projection: projectionCell.amount,
-          actual: actualCell.amount,
-          difference: hasValue ? projectionCell.amount - actualCell.amount : null,
-        };
-      });
-      const comparisonAnnualYears = visibleComparisonAnnualYears.map((year) => {
-        const projectionTotal = annualTotalFor(year, 'projection');
-        const actualTotal = annualTotalFor(year, 'actual');
-        const projectionState = projectionTotal?.lineStates?.[lineId];
-        const actualState = actualTotal?.lineStates?.[lineId];
-        const hasValue = projectionState === 'VALUE' || projectionState === 'ZERO'
-          || actualState === 'VALUE' || actualState === 'ZERO';
-        const projection = Number(projectionTotal?.lineAmounts?.[lineId] || 0);
-        const actual = Number(actualTotal?.lineAmounts?.[lineId] || 0);
-        return { year, projection, actual, difference: hasValue ? projection - actual : null };
-      });
-      const totalProjection = comparisonWeeks.reduce((sum, cell) => sum + cell.projection, 0)
-        + comparisonAnnualYears.reduce((sum, cell) => sum + cell.projection, 0);
-      const totalActual = comparisonWeeks.reduce((sum, cell) => sum + cell.actual, 0)
-        + comparisonAnnualYears.reduce((sum, cell) => sum + cell.actual, 0);
-      const totalHasValue = [...comparisonAnnualYears, ...comparisonWeeks].some((cell) => cell.difference !== null);
-      return {
-        section,
-        lineId,
-        label: getCashflowModeLineLabel(lineId, 'projection'),
-        cells: comparisonWeeks,
-        annualCells: comparisonAnnualYears,
-        totalCell: {
-          projection: totalProjection,
-          actual: totalActual,
-          difference: totalHasValue ? totalProjection - totalActual : null,
-        },
-        changed: [...comparisonWeeks, ...comparisonAnnualYears, { difference: totalHasValue ? totalProjection - totalActual : null }]
-          .some((cell) => cell.difference !== null && cell.difference !== 0),
-      };
-    });
-    return {
-      rows,
-      changedRows: rows.filter((row) => row.changed),
+    const cells = visibleComparisonWeeks.map((week) => ({
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      weekLabel: week.label,
+      weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
+      difference: sheetFormulaValuesAvailable ? sheetFormulaValues?.projectionActualDifferences.find((value) => (
+        value.yearMonth === week.yearMonth && value.weekNo === week.weekNo
+      ))?.amount ?? null : null,
+    }));
+    const row = {
+      section: '입금' as const,
+      lineId: 'sheet-projection-actual-difference',
+      label: 'Projection - Actual 차이',
+      cells,
+      annualCells: [],
+      totalCell: { difference: null },
+      changed: cells.some((cell) => cell.difference !== null && cell.difference !== 0),
     };
-  }, [monthCloseResult, selectedYear, visibleComparisonAnnualYears, visibleComparisonWeeks, yearMonth]);
+    return { rows: [row], changedRows: [row] };
+  }, [sheetFormulaValues, visibleComparisonWeeks]);
 
   const cashflowTotalPeriodLabel = comparisonScope.periodLabel;
   const sheetRangeLabel = cashflowSheetConfig
@@ -1975,23 +2002,6 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
   }): number {
     return getServerReadCell(params).amount;
-  }
-
-  function getCanonicalDerivedAmount(
-    mode: 'projection' | 'actual',
-    targetYearMonth: string,
-    weekNo: number,
-    kind: 'totalIn' | 'totalOut' | 'net',
-  ): number | null {
-    const check = monthCloseResult?.dashboard?.canonical?.months
-      ?.find((month) => month.yearMonth === targetYearMonth)?.[mode]?.weeks
-      ?.find((week) => week.weekNo === weekNo);
-    const value = kind === 'totalIn'
-      ? check?.totalIn
-      : kind === 'totalOut'
-        ? check?.totalOut
-        : check?.net;
-    return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
   }
 
   function renderProjectionCell(input: {
@@ -2110,10 +2120,10 @@ export function CashflowProjectSheet({
     if (!monthCloseStatusByMonth.has(yearMonth) && monthCloseResult?.status) {
       monthCloseStatusByMonth.set(yearMonth, monthCloseResult.status);
     }
-    if (monthCloseRequest?.lockRange && ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest.status)) {
+    if (monthCloseRequest?.lockRange) {
       visibleWeeks.forEach((week) => {
         if (isCashflowWeekLockedByRange(monthCloseRequest.lockRange, week.yearMonth, week.weekNo)) {
-          monthCloseStatusByMonth.set(week.yearMonth, monthCloseRequest.status === 'APPROVED' ? 'CLOSED' : monthCloseRequest.status);
+          monthCloseStatusByMonth.set(week.yearMonth, monthCloseRequest.status);
         }
       });
     }
@@ -2131,64 +2141,24 @@ export function CashflowProjectSheet({
       return groups;
     }, []);
     const boardColumnCount = previousAnnualYears.length + visibleWeeks.length + followingAnnualYears.length + 2;
-    const readServerSummary = (mode: 'projection' | 'actual') => {
-      const openingBalance = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
-        ? Number(monthCloseResult.dashboard.openingBalances[mode]?.amount || 0)
-        : 0;
-      const priorServerWeek = (canonicalReadModel?.months || [])
-        .filter((month) => month.yearMonth < `${selectedYear}-01`)
-        .flatMap((month) => (month[mode]?.weeks || []).map((week) => ({ ...week, yearMonth: month.yearMonth })))
-        .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
-        .at(-1);
-      const serverWeeks = visibleWeeks.map((week) => {
-        const dashboardWeek = week.yearMonth === yearMonth
-          ? monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo)
-          : null;
-        const canonicalWeek = canonicalReadModel?.months
-          ?.find((month) => month.yearMonth === week.yearMonth)
-          ?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo);
-        return canonicalWeek || dashboardWeek || null;
-      });
-      const displayedRunningBalances = carryForwardCashflowRunningBalances({
-        priorWeeklyNet: Number(priorServerWeek?.net || 0),
-        annualOpeningBalance: openingBalance,
-        serverRunningNets: serverWeeks.map((week) => week == null ? null : Number(week.net || 0)),
-      });
-      const weekTotals = serverWeeks.map((serverWeek, index) => {
-        const visibleWeek = visibleWeeks[index];
-        return {
-          ...(serverWeek || { weekNo: visibleWeek.weekNo, amounts: {}, totalIn: 0, totalOut: 0, weekIn: 0, weekOut: 0 }),
-          net: displayedRunningBalances[index],
-        };
-      });
-      const rangeTotals = canonicalReadModel?.range?.[mode];
-      const endingBalance = Number(weekTotals.at(-1)?.net ?? openingBalance);
-      return {
-        rowTotals: ((rangeTotals as { rowTotals?: Record<CashflowSheetLineId, number>; lineAmounts?: Record<CashflowSheetLineId, number> } | null)?.rowTotals
-          || (rangeTotals as { lineAmounts?: Record<CashflowSheetLineId, number> } | null)?.lineAmounts
-          || {}) as Record<CashflowSheetLineId, number>,
-        weekTotals,
-        monthTotals: {
-          totalIn: rangeTotals?.totalIn || 0,
-          totalOut: rangeTotals?.totalOut || 0,
-          net: endingBalance,
-        },
-      };
-    };
-    const derived = {
-      projection: readServerSummary('projection'),
-      actual: readServerSummary('actual'),
+    const sheetDerivedAmount = (
+      mode: 'projection' | 'actual',
+      targetYearMonth: string,
+      weekNo: number,
+      kind: 'totalIn' | 'totalOut' | 'net',
+    ) => {
+      const reported = sheetFormulaValuesAvailable ? sheetFormulaValues?.weekly.find((check) => (
+        check.mode === mode && check.yearMonth === targetYearMonth && check.weekNo === weekNo
+      ))?.reported : undefined;
+      return kind === 'totalIn'
+        ? reported?.depositTotal ?? null
+        : kind === 'totalOut'
+          ? reported?.withdrawalTotal ?? null
+          : reported?.balance ?? null;
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
-      // 연간 열 하나라도 합계를 구할 수 없으면(라인까지 전부 미기입) Total 열도 없는 값으로 둔다.
-      const annualIn = annualYears.map((year) => annualSummaryAmountFor(annualTotalFor(year, mode), 'totalIn'));
-      const annualOut = annualYears.map((year) => annualSummaryAmountFor(annualTotalFor(year, mode), 'totalOut'));
-      if (annualYears.some((year) => !annualTotalFor(year, mode))) {
-        return { totalIn: null, totalOut: null, net: null };
-      }
-      const totalIn = annualIn.reduce<number>((sum, value) => sum + Number(value ?? 0), Number(derived[mode].monthTotals.totalIn || 0));
-      const totalOut = annualOut.reduce<number>((sum, value) => sum + Number(value ?? 0), Number(derived[mode].monthTotals.totalOut || 0));
-      return { totalIn, totalOut, net: totalIn - totalOut };
+      const total = sheetFormulaValuesAvailable ? sheetFormulaValues?.grandTotals?.[mode] : undefined;
+      return { totalIn: total?.totalIn ?? null, totalOut: total?.totalOut ?? null, net: total?.net ?? null };
     };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
@@ -2224,7 +2194,7 @@ export function CashflowProjectSheet({
       rowTone?: 'income' | 'expense',
     ) => renderSummaryCell({
       keyName: `${mode}-${kind}-${year}-annual`,
-      value: annualSummaryAmountFor(annualTotalFor(year, mode), kind),
+      value: annualSummaryValue(year, mode, kind),
       mode,
       emphasis,
       rowTone,
@@ -2277,9 +2247,9 @@ export function CashflowProjectSheet({
             {label}
           </td>
           {previousAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
-          {visibleWeeks.map((week, index) => renderSummaryCell({
+          {visibleWeeks.map((week) => renderSummaryCell({
             keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
-            value: getCanonicalDerivedAmount(mode, week.yearMonth, week.weekNo, kind) ?? (derived[mode].weekTotals[index]?.[kind] || 0),
+            value: sheetDerivedAmount(mode, week.yearMonth, week.weekNo, kind),
             mode,
             isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
             monthCloseStatus: monthCloseStatusByMonth.get(week.yearMonth),
@@ -2414,11 +2384,16 @@ export function CashflowProjectSheet({
               ) : null}
             </div>
           </div>
+          {!sheetFormulaValuesAvailable ? (
+            <div role="alert" className="mx-4 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+              최신 시트 수식값과 반영된 데이터의 revision이 일치하지 않아, 합계·잔액은 표시하지 않습니다. 시트 값을 다시 가져온 뒤 반영해 주세요.
+            </div>
+          ) : null}
           <div className="relative bg-slate-100 px-4 pb-4">
-            <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
+            <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-8 w-8 -translate-y-1/2 border border-slate-200 bg-white/95 p-0 shadow-sm" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
+            <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-8 w-8 -translate-y-1/2 border border-slate-200 bg-white/95 p-0 shadow-sm" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
               <ChevronRight className="h-4 w-4" />
             </Button>
             {/* 스크롤 컨테이너는 하나여야 한다. sticky 는 가장 가까운 스크롤 조상에만 붙으므로
@@ -2451,7 +2426,7 @@ export function CashflowProjectSheet({
 
   function renderProjectionActualDiffTable() {
     const rows = projectionActualComparison.changedRows;
-    const columnCount = visibleComparisonAnnualYears.length + visibleComparisonWeeks.length + 1;
+    const columnCount = visibleComparisonWeeks.length;
     if (monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY') {
       return (
         <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-5 text-[12px] leading-5 text-[#17324D]">
@@ -2461,6 +2436,13 @@ export function CashflowProjectSheet({
     }
     if (monthCloseLoading) {
       return <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">BFF 차이값을 불러오는 중...</div>;
+    }
+    if (sheetFormulaValues?.status === 'UNAVAILABLE') {
+      return (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-5 text-[12px] leading-5 text-red-700">
+          최신 시트 수식값과 반영된 데이터의 revision이 일치하지 않아 Projection–Actual 차이를 표시하지 않습니다. 시트 값을 다시 가져온 뒤 반영해 주세요.
+        </div>
+      );
     }
     if (monthCloseError || !monthCloseResult?.dashboard?.canonical?.range) {
       return (
@@ -2487,33 +2469,26 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-[12px] font-semibold text-slate-950">
-                <HoverExplain message="아래 현금흐름 관리시트와 동일한 반영값으로 Projection에서 Actual을 뺍니다.">
+                <HoverExplain message="현금흐름 관리시트의 Projection–Actual 차이 수식 결과를 그대로 표시합니다.">
                   Projection - Actual 차이
                 </HoverExplain>
               </div>
               <div className="text-[12px] text-slate-500">
-                현금흐름 관리시트 기준 · 차이 = Projection - Actual
+                현금흐름 관리시트 A11:BS11 기준
               </div>
             </div>
-            <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">차이 항목만</Badge>
+            <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">시트 수식값</Badge>
           </div>
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
             <table className="border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${220 + columnCount * 96}px` }}>
               <thead className="bg-white text-slate-500">
                 <tr>
                   <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">항목</th>
-                  {previousComparisonAnnualYears.map((year) => (
-                    <th key={`comparison-${year}-before`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
-                  ))}
                   {visibleComparisonWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
                     </th>
                   ))}
-                  {followingComparisonAnnualYears.map((year) => (
-                    <th key={`comparison-${year}-after`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
-                  ))}
-                  <th className="sticky right-0 z-20 min-w-[96px] border-l-[6px] border-l-white bg-white px-2 py-2 text-right font-medium shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -2528,17 +2503,6 @@ export function CashflowProjectSheet({
                     <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                       <div className={`truncate ${row.section === '입금' ? 'text-emerald-700' : 'text-red-700'}`}>{row.label}</div>
                     </td>
-                    {row.annualCells.filter((cell) => previousComparisonAnnualYears.includes(cell.year)).map((cell) => {
-                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
-                      const differenceClass = cell.difference === null || cell.difference === 0
-                        ? `${rowSurface} text-slate-300`
-                        : 'bg-[#EAF0F5] text-sky-700';
-                      return (
-                        <td key={`${row.lineId}-${cell.year}`} className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`} title={cell.difference === null ? `${cell.year}년\n미입력` : `${cell.year}년\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}`}>
-                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
-                        </td>
-                      );
-                    })}
                     {row.cells.map((cell) => {
                       const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
                       const differenceClass = cell.difference === null || cell.difference === 0
@@ -2548,26 +2512,12 @@ export function CashflowProjectSheet({
                         <td
                           key={`${row.lineId}-${cell.yearMonth}-${cell.weekNo}`}
                           className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`}
-                          title={cell.difference === null ? `${cell.weekRange}\nBFF 비교 대상 기간 아님` : `${cell.weekRange}\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}\n${diffColorExplanation(row.section, cell.difference)}`}
+                          title={cell.difference === null ? `${cell.weekRange}\n시트 수식값 없음` : `${cell.weekRange}\n시트 차이 ${fmtSigned(cell.difference)}`}
                         >
                           {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
                         </td>
                       );
                     })}
-                    {row.annualCells.filter((cell) => followingComparisonAnnualYears.includes(cell.year)).map((cell) => {
-                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
-                      const differenceClass = cell.difference === null || cell.difference === 0
-                        ? `${rowSurface} text-slate-300`
-                        : 'bg-[#EAF0F5] text-sky-700';
-                      return (
-                        <td key={`${row.lineId}-${cell.year}`} className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`} title={cell.difference === null ? `${cell.year}년\n미입력` : `${cell.year}년\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}`}>
-                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
-                        </td>
-                      );
-                    })}
-                    <td className={`sticky right-0 z-10 min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums shadow-[-12px_0_24px_rgba(15,23,42,0.08)] ${row.totalCell.difference === null || row.totalCell.difference === 0 ? (rowIndex % 2 === 0 ? 'bg-white text-slate-300' : 'bg-slate-50 text-slate-300') : 'bg-[#EAF0F5] text-sky-700'}`} title={row.totalCell.difference === null ? 'Total\n미입력' : `Total\nProjection ${fmt(row.totalCell.projection)} / Actual ${fmt(row.totalCell.actual)} / 차이 ${fmtSigned(row.totalCell.difference)}`}>
-                      {row.totalCell.difference === null ? '미입력' : fmtSigned(row.totalCell.difference)}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2710,22 +2660,21 @@ export function CashflowProjectSheet({
                 </a>
               ) : null}
               {cashflowSheetConfig ? (
-                // 단일 진입점: 평소엔 '시트 불러오기', 변경이 감지되면 상태 배지를 겸한다.
-                // 진입 시 풀 리드를 하지 않으므로 이 버튼을 눌러야 실제 diff·반영이 시작된다.
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className={`h-7 shrink-0 rounded-md px-2.5 text-[12px] font-semibold ${
+                  className={`relative h-7 shrink-0 overflow-visible rounded-md px-2.5 text-[12px] font-semibold ${
                     sheetChangedSinceMirror
                       ? 'border-yellow-300 bg-yellow-50 text-yellow-900 hover:bg-yellow-100'
                       : 'border-slate-300 bg-white text-[#17324D] hover:bg-accent'
                   }`}
                   disabled={sheetRefreshLoading}
-                  onClick={() => void handleRefreshSheetMirror()}
+                  onClick={() => void handleRefreshAndApplySheetValues()}
                 >
+                  {sheetRefreshLoading ? <span aria-hidden="true" className="pointer-events-none absolute -inset-1 rounded-md border-2 border-transparent border-t-[#17324D] motion-safe:animate-spin" /> : null}
                   {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  {sheetChangedSinceMirror ? '시트 변경됨 · 불러오기' : '시트 불러오기'}
+                  {sheetChangedSinceMirror ? '시트 변경됨 · 가져와 덮어쓰기' : '시트 값 가져와 덮어쓰기'}
                 </Button>
               ) : null}
               {project && members ? (
@@ -2741,17 +2690,18 @@ export function CashflowProjectSheet({
                       value={selectedExecutiveApproverId}
                       onChange={setSelectedExecutiveApproverId}
                       placeholder="조직장 선택"
-                      disabled={executiveApproverBusy || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                      disabled={executiveApproverBusy || ['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '')}
                     />
                   </div>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="h-7 shrink-0 border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
-                    disabled={executiveApproverBusy || !selectedExecutiveApproverId || selectedExecutiveApproverId === savedExecutiveApproverId || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                    className="relative h-7 shrink-0 overflow-visible border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
+                    disabled={executiveApproverBusy || !selectedExecutiveApproverId || selectedExecutiveApproverId === savedExecutiveApproverId || ['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '')}
                     onClick={() => void handleSaveExecutiveApprover()}
                   >
+                    {executiveApproverBusy ? <span aria-hidden="true" className="pointer-events-none absolute -inset-1 rounded-md border-2 border-transparent border-t-[#17324D] motion-safe:animate-spin" /> : null}
                     {executiveApproverBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
                     저장
                   </Button>
@@ -2850,8 +2800,10 @@ export function CashflowProjectSheet({
                       <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
                     </div>
                     <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
-                      {monthCloseRequest?.status === 'PENDING' || monthCloseRequest?.status === 'APPROVING' || monthCloseRequest?.status === 'UNCERTAIN'
-                        ? monthCloseRequest.status === 'UNCERTAIN' ? '서버 처리 결과를 다시 확인하고 있습니다.' : '지정 조직장의 검토를 기다리고 있습니다.'
+                      {monthCloseRequest?.status === 'PENDING'
+                        ? '지정 조직장의 검토를 기다리고 있습니다.'
+                        : monthCloseRequest?.status === 'REOPEN_REQUESTED'
+                          ? '재오픈 승인 대기 중입니다.'
                         : monthCloseRequest?.status === 'REJECTED'
                           ? `반려됨${monthCloseRequest.decisionReason ? ` · ${monthCloseRequest.decisionReason}` : ''}`
                         : monthCloseRequest?.status === 'WITHDRAWN'
@@ -2864,7 +2816,7 @@ export function CashflowProjectSheet({
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {canFinalizeMonth && !['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest?.status || '') && (monthCloseError || (monthCloseResult?.status !== 'CLOSED' && monthCloseResult?.status !== 'REOPEN_REQUESTED')) ? (
+                    {canFinalizeMonth && !['PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseRequest?.status || '') && (monthCloseError || (monthCloseResult?.status !== 'CLOSED' && monthCloseResult?.status !== 'REOPEN_REQUESTED')) ? (
                       <Button
                         type="button"
                         size="sm"
@@ -2888,12 +2840,12 @@ export function CashflowProjectSheet({
                         결재 요청 회수
                       </Button>
                     ) : null}
-                    {!monthCloseError && canRequestMonthReopen && monthCloseResult?.status === 'CLOSED' ? (
+                    {!monthCloseError && canRequestMonthReopen && monthCloseRequest?.status === 'APPROVED' ? (
                       <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-[#17324D]" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                         재오픈 요청
                       </Button>
                     ) : null}
-                    {!monthCloseError && canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED' ? (
+                    {!monthCloseError && canReviewReopen && monthCloseRequest?.status === 'REOPEN_REQUESTED' ? (
                       <>
                         <Button type="button" size="sm" className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
                         <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
@@ -3153,31 +3105,25 @@ export function CashflowProjectSheet({
     );
   }
 
-  const monthCloseStatusLabel = monthCloseError
-    ? '상태 재확인 필요'
-    : monthCloseResult?.status === 'CLOSED'
-    ? '월 결산 완료'
-    : monthCloseResult?.status === 'REOPEN_REQUESTED'
-      ? '재오픈 승인 대기'
-      : monthCloseRequest?.status === 'APPROVING'
-        ? '승인 처리 중'
-        : monthCloseRequest?.status === 'UNCERTAIN'
-          ? '서버 결과 확인 필요'
-        : monthCloseRequest?.status === 'PENDING'
-          ? '조직장 승인 대기'
+  const monthCloseStatusLabel = ['PENDING', 'APPROVING', 'UNCERTAIN'].includes(monthCloseRequest?.status || '')
+    ? '조직장 승인 대기'
+    : monthCloseRequest?.status === 'APPROVED'
+      ? '월 결산 완료'
+      : monthCloseRequest?.status === 'REOPEN_REQUESTED'
+        ? '재오픈 승인 대기'
+        : monthCloseRequest?.status === 'REOPENED'
+          ? '재결산 필요'
           : monthCloseRequest?.status === 'REJECTED'
             ? '월 결산 반려'
-            : monthCloseRequest?.status === 'REOPENED'
-              ? '재결산 필요'
-      : '결산 전';
-  const monthCloseStatusClass = monthCloseError
+            : monthCloseError
+              ? '상태 재확인 필요'
+              : monthCloseResult?.status === 'CLOSED'
+                ? '월 결산 완료'
+                : '결산 전';
+  const monthCloseStatusClass = monthCloseRequest?.status === 'REJECTED' || (!monthCloseRequest && monthCloseError)
     ? 'border border-red-200 bg-red-50 text-red-700'
-    : monthCloseResult?.status === 'CLOSED'
-    ? 'border border-border bg-secondary text-secondary-foreground'
-    : monthCloseResult?.status === 'REOPEN_REQUESTED'
-      ? 'border border-border bg-accent text-accent-foreground'
-      : monthCloseRequest?.status === 'REJECTED'
-        ? 'border border-red-200 bg-red-50 text-red-700'
+    : monthCloseRequest?.status === 'APPROVED' || (!monthCloseRequest && monthCloseResult?.status === 'CLOSED')
+      ? 'border border-border bg-secondary text-secondary-foreground'
       : 'border border-border bg-accent text-accent-foreground';
   const sheetDashboardMetadata = cashflowEvidenceScope.sheetMetadata;
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
@@ -3366,9 +3312,42 @@ export function CashflowProjectSheet({
           if (!formulaMismatchPrompt) return;
           const pending = formulaMismatchPrompt;
           setFormulaMismatchPrompt(null);
-          void handleApplyStagedSheetValues(pending.stage, pending.closedMonthChangeReason, true);
+          void handleApplyStagedSheetValues(
+            pending.stage,
+            pending.closedMonthChangeReason,
+            true,
+            pending.acceptPendingApprovalDifferences,
+          );
         }}
       />
+
+      <AlertDialog open={Boolean(pendingApprovalStage)} onOpenChange={(open) => { if (!open) setPendingApprovalStage(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>결재 중인 누적 결산과 값이 달라요</AlertDialogTitle>
+            <AlertDialogDescription>
+              그대로 반영하면 결재 중인 자료와 차이가 기록됩니다. 확인한 시트 값으로 계속 반영할까요?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div role={pendingApprovalManifestComplete ? 'status' : 'alert'} className={`rounded-md border px-3 py-2 text-[12px] ${pendingApprovalManifestComplete ? 'border-slate-300 bg-slate-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-800'}`}>
+            {pendingApprovalManifestComplete
+              ? `결재 중 변경 후보 전체 ${pendingApprovalChangeRows.length.toLocaleString()}건을 확인했습니다.`
+              : '변경 후보를 완전하게 확인하지 못해 반영할 수 없습니다.'}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingApprovalStage || !pendingApprovalManifestComplete || sheetStageApplyLoading}
+              onClick={(event) => {
+                event.preventDefault();
+                const stage = pendingApprovalStage;
+                setPendingApprovalStage(null);
+                if (stage) void handleApplyStagedSheetValues(stage, '', false, true);
+              }}
+            >반영</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={monthCloseWithdrawOpen}

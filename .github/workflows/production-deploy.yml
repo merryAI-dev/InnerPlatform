@@ -119,6 +119,8 @@ jobs:
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
       JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
       JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+      SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
+      SLACK_ALERT_CHANNEL_ID: C0BQ6980HR6
       # Use a production-scoped secret name so a stale repository-level
       # VERCEL_TOKEN cannot be confused with the Production environment token.
       VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
@@ -189,6 +191,7 @@ jobs:
           test -n "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}" || { echo "Missing Production variable: JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE" >&2; exit 1; }
           test -n "${JVM_WEEKLY_INTERNAL_API_TOKEN}" || { echo "Missing Production secret: JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE" >&2; exit 1; }
           test -n "${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" || { echo "Missing Production secret: JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE" >&2; exit 1; }
+          test -n "${SLACK_ALERT_BOT_TOKEN}" || { echo "Missing Production secret: SLACK_ALERT_BOT_TOKEN" >&2; exit 1; }
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
 
       - name: Deploy to Vercel production
@@ -208,6 +211,8 @@ jobs:
             --env BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER}" \
             --env BFF_MAINTENANCE_READ_ONLY="${BFF_MAINTENANCE_READ_ONLY}" \
             --env BFF_ALLOWED_ORIGINS="${BFF_ALLOWED_ORIGINS}" \
+            --env MYSCUBE_MCP_OAUTH_ISSUER="https://myscube.myscguard.app" \
+            --env MYSCUBE_MCP_PUBLIC_ORIGIN="https://myscube.myscguard.app" \
             --env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env BFF_LIVE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
@@ -218,8 +223,8 @@ jobs:
             --env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             --env JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON="${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" \
             --env SLACK_ALERT_WEBHOOK_URL= \
-            --env SLACK_ALERT_BOT_TOKEN= \
-            --env SLACK_ALERT_CHANNEL_ID= \
+            --env SLACK_ALERT_BOT_TOKEN="${SLACK_ALERT_BOT_TOKEN}" \
+            --env SLACK_ALERT_CHANNEL_ID="${SLACK_ALERT_CHANNEL_ID}" \
             --env PROJECT_REGISTRATION_SLACK_WEBHOOK_URL= \
             --env PROJECT_REGISTRATION_SLACK_BOT_TOKEN= \
             --env PROJECT_REGISTRATION_SLACK_CHANNEL_ID= \
@@ -261,6 +266,16 @@ jobs:
             || health.body.authMode !== 'firebase_required'
             || health.body.firestoreEmulator !== false) {
             throw new Error(`unsafe production health: ${health.response.status} ${JSON.stringify(health.body)}`);
+          }
+
+          const metadata = await request('/.well-known/oauth-protected-resource');
+          if (metadata.response.status !== 200 || metadata.body.resource !== 'https://myscube.myscguard.app/mcp') {
+            throw new Error(`MCP OAuth discovery is unavailable: ${metadata.response.status} ${JSON.stringify(metadata.body)}`);
+          }
+
+          const mcp = await request('/mcp', { method: 'POST', body: '{}' });
+          if (mcp.response.status !== 401 || !String(mcp.response.headers.get('www-authenticate') || '').includes('resource_metadata=')) {
+            throw new Error(`MCP bearer challenge is unavailable: ${mcp.response.status}`);
           }
 
           const mutation = await request('/api/v1/__maintenance_probe__', { method: 'POST' });

@@ -21,7 +21,6 @@ import {
   filterCashflowWeeksThroughSelectedYear,
   isCashflowWeeklySettlementCompleted,
 } from './cashflow-weeks.helpers';
-import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath } from '../lib/firebase';
 import {
@@ -122,6 +121,11 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const [weeklySettlementCompletedKeys, setWeeklySettlementCompletedKeys] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
+
+  const reloadWeeks = useCallback(() => {
+    setReloadVersion((current) => current + 1);
+  }, []);
 
   const setYearMonth = useCallback((value: string) => {
     const next = typeof value === 'string' ? value.trim() : '';
@@ -141,31 +145,10 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     projectId: string;
     result: Pick<ProjectCashflowActualSyncResult, 'weeks' | 'cleared' | 'updatedAt' | 'skipped'>;
   }) => {
-    const actor = user;
     const projectId = input.projectId.trim();
-    if (!actor || !projectId || input.result.skipped) return;
-
-    const weeksToApply = [...input.result.weeks, ...input.result.cleared];
-    if (weeksToApply.length === 0) return;
-
-    setWeeks((prev) => weeksToApply.reduce((nextWeeks, week) => {
-      const fallback = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
-      return applyWeekAmountsToLocalWeeks({
-        weeks: nextWeeks,
-        orgId,
-        actorUid: actor.uid,
-        actorName: actor.name,
-        projectId,
-        yearMonth: week.yearMonth,
-        weekNo: week.weekNo,
-        weekStart: week.weekStart || fallback?.weekStart || '',
-        weekEnd: week.weekEnd || fallback?.weekEnd || '',
-        mode: 'actual',
-        amounts: (week.amounts || {}) as Partial<Record<CashflowSheetLineId, number>>,
-        now: input.result.updatedAt || new Date().toISOString(),
-      });
-    }, prev));
-  }, [orgId, user]);
+    if (!projectId || input.result.skipped) return;
+    reloadWeeks();
+  }, [reloadWeeks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -242,7 +225,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAuthenticated, user?.uid, db, firestoreEnabled, orgId, yearMonth]);
+  }, [authLoading, isAuthenticated, user?.uid, db, firestoreEnabled, orgId, yearMonth, reloadVersion]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
@@ -269,24 +252,6 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
     const normalizedAmounts = input.amounts || {};
     const amountSummary = summarizeAmountMap(normalizedAmounts);
-    const applyLocally = () => {
-      const now = new Date().toISOString();
-      setWeeks((prev) => applyWeekAmountsToLocalWeeks({
-        weeks: prev,
-        orgId,
-        actorUid: actor.uid,
-        actorName: actor.name,
-        projectId,
-        yearMonth: ym,
-        weekNo,
-        weekStart: def.weekStart,
-        weekEnd: def.weekEnd,
-        mode: input.mode,
-        amounts: normalizedAmounts,
-        now,
-      }));
-    };
-
     if (actor.source === 'dev_harness') {
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
@@ -301,7 +266,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         mode: input.mode,
         summary: amountSummary,
       });
-      applyLocally();
+      reloadWeeks();
       return;
     }
 
@@ -352,7 +317,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           ),
         },
       });
-      applyLocally();
+      reloadWeeks();
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'success',
@@ -383,7 +348,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       });
       throw error;
     }
-  }, [orgId, user]);
+  }, [orgId, reloadWeeks, user]);
   const upsertLineAmount = useCallback(async (input: {
     projectId: string;
     yearMonth: string;

@@ -63,28 +63,28 @@ describe('AXR month-close QA containment', () => {
     }));
   });
 
-  it('uses only the existing reopen APIs with the close revision', async () => {
+  it('uses only the authoritative request for reopen APIs', async () => {
     const api = clients();
-    const closed = control({ request: null, close: { status: 'CLOSED', revision: 7, snapshotHash: 'sha256:closed', latestVersionId: 'v7' }, allowedActions: ['REQUEST_REOPEN', 'REFRESH'] });
+    const closed = control({ request: { requestId: `${AXR_MONTH_CLOSE_QA_PROJECT_ID}-2026-08`, status: 'APPROVED', revision: 7, manifestHash: 'sha256:closed', approverUid: 'actor-a' }, allowedActions: ['REQUEST_REOPEN', 'REFRESH'] });
     await executeAxrMonthCloseQaAction({
       action: 'REQUEST_REOPEN', control: closed, projectId: AXR_MONTH_CLOSE_QA_PROJECT_ID,
       yearMonth: '2026-08', tenantId: 'tenant-a', actor, reason: 'reopen',
       confirmation: closed.confirmationToken, backupConfirmed: true, clients: api as never,
     });
     expect(api.requestReopen).toHaveBeenCalledWith(expect.objectContaining({
-      payload: { yearMonth: '2026-08', expectedRevision: 7, reason: 'reopen' },
-      idempotencyKey: `axr-month-close-qa:REQUEST_REOPEN:${AXR_MONTH_CLOSE_QA_PROJECT_ID}:2026-08:r7`,
+      payload: { requestId: `${AXR_MONTH_CLOSE_QA_PROJECT_ID}-2026-08`, yearMonth: '2026-08', expectedRevision: 7, reason: 'reopen' },
+      idempotencyKey: `axr-month-close-qa:REQUEST_REOPEN:${AXR_MONTH_CLOSE_QA_PROJECT_ID}-2026-08:r7`,
     }));
 
-    const requested = control({ request: null, close: { status: 'REOPEN_REQUESTED', revision: 8, snapshotHash: 'sha256:closed', latestVersionId: 'v7' }, allowedActions: ['APPROVE_REOPEN', 'REJECT_REOPEN', 'REFRESH'] });
+    const requested = control({ request: { requestId: `${AXR_MONTH_CLOSE_QA_PROJECT_ID}-2026-08`, status: 'REOPEN_REQUESTED', revision: 8, manifestHash: 'sha256:closed', approverUid: 'actor-a' }, allowedActions: ['APPROVE_REOPEN', 'REJECT_REOPEN', 'REFRESH'] });
     await executeAxrMonthCloseQaAction({
       action: 'APPROVE_REOPEN', control: requested, projectId: AXR_MONTH_CLOSE_QA_PROJECT_ID,
       yearMonth: '2026-08', tenantId: 'tenant-a', actor, reason: 'restore',
       confirmation: requested.confirmationToken, backupConfirmed: true, clients: api as never,
     });
     expect(api.decideReopen).toHaveBeenCalledWith(expect.objectContaining({
-      payload: { yearMonth: '2026-08', expectedRevision: 8, decision: 'APPROVE', reason: 'restore' },
-      idempotencyKey: `axr-month-close-qa:APPROVE_REOPEN:${AXR_MONTH_CLOSE_QA_PROJECT_ID}:2026-08:r8`,
+      payload: { requestId: `${AXR_MONTH_CLOSE_QA_PROJECT_ID}-2026-08`, yearMonth: '2026-08', expectedRevision: 8, decision: 'APPROVE', reason: 'restore' },
+      idempotencyKey: `axr-month-close-qa:APPROVE_REOPEN:${AXR_MONTH_CLOSE_QA_PROJECT_ID}-2026-08:r8`,
     }));
   });
 

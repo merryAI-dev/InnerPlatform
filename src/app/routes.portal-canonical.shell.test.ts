@@ -25,10 +25,12 @@ describe('portal canonical edit resource routes', () => {
     expect(source).toContain("{ path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> }");
   });
 
-  it('lets the route project win and replaces ID-less cashflow URLs in the SPA', () => {
+  it('lets the route project win and uses the session project for ID-less cashflow URLs', () => {
     expect(cashflowSource).toContain('useParams');
-    expect(cashflowSource).toContain('resolvePortalProjectResourceId(routeProjectId');
-    expect(cashflowSource).toContain('<Navigate to={resolvePortalProjectResourcePath(currentPath, projectId)} replace />');
+    expect(cashflowSource).toContain('activeProjectId');
+    expect(cashflowSource).toContain('resolvePortalProjectResourceId(routeProjectId, activeProjectId);');
+    expect(cashflowSource).toContain('<Navigate to="/portal/project-select" replace />');
+    expect(cashflowSource).not.toContain('myProject');
     expect(sheetLabSource).toContain('useParams');
     expect(sheetLabSource).toContain('routeProjectId');
     // 시트 연동 화면은 route projectId와 상단 선택 프로젝트를 한 프로젝트로 맞춘 뒤 URL을 정규화한다.

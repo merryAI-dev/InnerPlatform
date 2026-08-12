@@ -3,6 +3,7 @@ import type { Project } from '../data/types';
 import { matchesProjectSearch } from './project-search';
 
 const project = {
+  id: 'p1773817948751',
   name: '26농식품AC',
   officialContractName: '농식품 창업기업 액셀러레이팅 계약',
   groupwareName: '2026 농식품 AC',
@@ -29,6 +30,7 @@ describe('matchesProjectSearch', () => {
     '김메리',
     '동료',
     '운영진',
+    'p1773817948751',
   ])('matches partial text across project identity fields: %s', (query) => {
     expect(matchesProjectSearch(project, query)).toBe(true);
   });

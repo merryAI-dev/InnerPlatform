@@ -29,14 +29,14 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/projects', icon: FolderKanban, label: '통합 관리' },
       { to: '/projects/migration-audit', icon: ArrowLeftRight, label: '프로젝트 등록/승인' },
-      { to: '/cashflow', icon: BarChart3, label: '캐시플로 모니터링' },
+      { to: '/cashflow', icon: BarChart3, label: '주간 입력 이력' },
       { to: '/participation', icon: Shield, label: '참여율 대시보드' },
     ],
   },
   {
     label: '경영기획실',
     items: [
-      { to: '/cashflow/analytics', icon: BarChart3, label: '통합 관리' },
+      { to: '/cashflow/export', icon: BarChart3, label: '통합 관리' },
       { to: '/approvals', icon: ListChecks, label: '등록/승인', accent: true },
       { to: '/management-planning/project-codes', icon: Hash, label: '프로젝트 코드 부여', accent: true },
     ],

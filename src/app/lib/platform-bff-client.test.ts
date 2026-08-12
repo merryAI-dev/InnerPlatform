@@ -140,16 +140,16 @@ describe('platform-bff-client', () => {
     expect(result).toEqual(data);
   });
 
-  it('posts project IDs and the selected month to the canonical JVM projection-actual summary adapter unchanged', async () => {
+  it('posts project IDs and the selected month to the sheet-formula projection-actual summary adapter', async () => {
     const data = {
-      version: '1',
+      version: '2',
       items: Array.from({ length: 9 }, (_, index) => ({
         projectId: `p00${index + 1}`, fromMonth: '2023-01',
         comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
-        projectionAmount: 30_000_000 + index, actualAmount: 20_000_000 + index,
-        projectionActualDifferenceAmount: 10_000_000,
+        source: 'SHEET_FORMULA' as const, sourceRevision: `source-${index}`,
+        differenceAmount: 10_000_000,
         settlementDifferenceAmount: 18_371_453 + index, settlementMatches: false,
-        periods: [{ period: 'MONTH' as const, projectionAmount: 30_000_000 + index, actualAmount: 20_000_000 + index, projectionActualDifferenceAmount: 10_000_000 }],
+        periods: [{ period: 'MONTH' as const, differenceAmount: 10_000_000 }],
       })),
       errors: [{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' as const }],
     };
@@ -361,13 +361,13 @@ describe('platform-bff-client', () => {
     });
     await requestCashflowMonthReopenViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'reopen-request-1',
-      payload: { yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
+      payload: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
       client,
     });
     await decideCashflowMonthReopenViaBff({
       tenantId: 'mysc', actor: { uid: 'finance-1', role: 'finance' }, projectId: 'p001',
       idempotencyKey: 'reopen-decision-1',
-      payload: { yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
+      payload: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
       client,
     });
 
@@ -400,14 +400,14 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/status-review', expect.objectContaining({
       idempotencyKey: 'month-close-review-1',
       body: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' },
-      timeoutMs: 35_000,
+      timeoutMs: 12_000,
     }));
     expect(client.post).toHaveBeenNthCalledWith(
       3,
       '/api/v1/cashflow/p001/month-close/reopen-request',
       expect.objectContaining({
         idempotencyKey: 'reopen-request-1',
-        body: { yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
+        body: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
       }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
@@ -420,7 +420,7 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.objectContaining({
         idempotencyKey: 'reopen-decision-1',
-        body: { yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
+        body: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
       }),
     );
     expect(client.post).toHaveBeenNthCalledWith(

@@ -1,6 +1,7 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  CashflowSheetLineId,
   Project,
   ProjectRequest,
   ProjectExecutiveReviewStatus,
@@ -966,6 +967,28 @@ export interface CashflowMonthCloseDashboard {
       balance: number | null;
     };
   }>;
+  sheetFormulaValues: {
+    status: 'AVAILABLE' | 'UNAVAILABLE';
+    reason: string | null;
+    sourceRevision: string | null;
+    targetRevision: string | null;
+    weekly: CashflowMonthCloseDashboard['sheetCalculationChecks'];
+    annual: Array<{
+      year: number;
+      projection: CashflowSheetFormulaModeTotal;
+      actual: CashflowSheetFormulaModeTotal;
+    }>;
+    grandTotals: {
+      projection?: CashflowSheetFormulaModeTotal;
+      actual?: CashflowSheetFormulaModeTotal;
+    };
+    projectionActualDifferences: Array<{
+      yearMonth: string;
+      weekNo: number;
+      amount: number | null;
+      sourceCell: string;
+    }>;
+  };
   sheetControlTotals: {
     deposit: {
       sourceCell: string;
@@ -1080,6 +1103,14 @@ export interface CashflowMonthCloseDashboard {
   canonical: CashflowSnapshotResult['readModel'] | null;
 }
 
+export interface CashflowSheetFormulaModeTotal {
+  lineAmounts: Partial<Record<CashflowSheetLineId, number>>;
+  lineStates: Partial<Record<CashflowSheetLineId, 'VALUE' | 'ZERO' | 'EMPTY' | 'INVALID'>>;
+  totalIn: number | null;
+  totalOut: number | null;
+  net: number | null;
+}
+
 export interface CloseCashflowMonthPayload {
   contractVersion?: 'cashflow-cumulative-close-v2';
   yearMonth: string;
@@ -1090,7 +1121,7 @@ export interface CloseCashflowMonthPayload {
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REOPEN_REQUESTED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
 
 export interface CashflowMonthCloseStoredSource {
   sourceRevision: string | null;
@@ -1264,12 +1295,14 @@ export interface CashflowMonthCloseApproverResult {
 }
 
 export interface RequestCashflowMonthReopenPayload {
+  requestId: string;
   yearMonth: string;
   expectedRevision: number;
   reason: string;
 }
 
 export interface DecideCashflowMonthReopenPayload {
+  requestId: string;
   yearMonth: string;
   expectedRevision: number;
   decision: CashflowMonthReopenDecision;
@@ -1385,18 +1418,16 @@ export interface CashflowSettlementStatusesBatchResult {
 
 export interface CashflowProjectionActualSummary {
   projectId: string;
+  source: 'SHEET_FORMULA';
+  sourceRevision: string;
   fromMonth: string;
   comparisonAsOfWeek: { yearMonth: string; weekNo: number };
-  projectionAmount: number;
-  actualAmount: number;
-  projectionActualDifferenceAmount: number;
+  differenceAmount: number;
   settlementDifferenceAmount: number;
   settlementMatches: boolean;
   periods: Array<{
     period: CashflowSettlementPeriod;
-    projectionAmount: number;
-    actualAmount: number;
-    projectionActualDifferenceAmount: number;
+    differenceAmount: number | null;
   }>;
 }
 
@@ -3101,7 +3132,7 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
 }): Promise<CashflowSettlementStatusesResult> {
   if (params.period === 'MONTH' && params.action === 'APPROVE') {
     const request = await fetchCurrentCashflowMonthCloseRequestViaBff(params);
-    if (!request || !['PENDING', 'APPROVING', 'UNCERTAIN'].includes(request.status)) {
+    if (!request || request.status !== 'PENDING') {
       throw new Error('승인할 월 결산 요청을 찾을 수 없습니다.');
     }
     if ((request.reviewWarnings ?? []).length > 0) {
@@ -3153,19 +3184,19 @@ export async function fetchCashflowProjectionActualSummariesViaBff(params: {
   const requestedIds = new Set(params.projectIds);
   const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
   const errorIds = Array.isArray(result?.errors) ? result.errors.map((error) => error?.projectId) : [];
-  if (typeof result?.version !== 'string'
+  if (result?.version !== '2'
     || !Array.isArray(result?.items)
     || result.items.length > params.projectIds.length
     || itemIds.some((projectId) => !requestedIds.has(projectId))
     || new Set(itemIds).size !== itemIds.length
-    || result.items.some((item) => !Number.isFinite(item?.projectionAmount)
-      || !Number.isFinite(item?.actualAmount)
-      || !Number.isFinite(item?.projectionActualDifferenceAmount)
+    || result.items.some((item) => item?.source !== 'SHEET_FORMULA'
+      || typeof item?.sourceRevision !== 'string'
+      || !Number.isFinite(item?.differenceAmount)
+      || !Number.isFinite(item?.settlementDifferenceAmount)
+      || typeof item?.settlementMatches !== 'boolean'
       || !Array.isArray(item?.periods)
       || item.periods.some((period) => !['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].includes(period?.period)
-        || !Number.isFinite(period?.projectionAmount)
-        || !Number.isFinite(period?.actualAmount)
-        || !Number.isFinite(period?.projectionActualDifferenceAmount)))
+        || (period?.differenceAmount !== null && !Number.isFinite(period?.differenceAmount))))
     || !Array.isArray(result?.errors)
     || result.errors.length > params.projectIds.length
     || result.errors.some((error) => error?.code !== 'SUMMARY_UNAVAILABLE' || !requestedIds.has(error?.projectId))
@@ -3407,13 +3438,9 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
   client?: PlatformApiClientLike;
 }): Promise<{
   request: CashflowMonthCloseRequest;
-  monthClose?: CashflowMonthCloseResult;
-  pendingLedgerClose?: boolean;
 }> {
   const response = await resolveClient(params.client).post<{
     request: CashflowMonthCloseRequest;
-    monthClose?: CashflowMonthCloseResult;
-    pendingLedgerClose?: boolean;
   }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/${params.payload.expectedManifestHash ? 'status-review' : 'review'}`,
     {
@@ -3422,28 +3449,17 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
       body: params.payload,
       idempotencyKey: params.idempotencyKey,
       retries: 0,
-      // BFF의 월 결산 확정·재확인 예산(26초)보다 길어야 최종 상태를 받을 수 있다.
-      timeoutMs: 35_000,
+      timeoutMs: 12_000,
     },
   );
-  // 승인 선점은 끝났고 장부 잠금만 진행 중인 상태(pendingLedgerClose)는 실패가 아니다.
-  // 호출자가 같은 멱등키로 다시 호출해 마무리한다.
   if (
     params.payload.decision === 'APPROVE'
-    && !response.data.pendingLedgerClose
     && response.data.request.status !== 'APPROVED'
   ) {
     throw new Error('월 결산 승인 상태를 확인하지 못했습니다.');
   }
   return response.data;
 }
-
-// 승인 선점(APPROVING)은 즉시 커밋되지만 JVM 장부 확정은 그보다 오래 걸릴 수 있다.
-// BFF 는 그때 pendingLedgerClose 를 실어 200 을 돌려주고, 같은 멱등키의 다음 호출이
-// reconcile 로 이어받아 APPROVED 로 마무리한다. 승인 화면이 여러 개라 이 이어받기
-// 규칙은 여기 한 곳에만 둔다 - 같은 규칙의 사본이 화면마다 생기면 조용히 갈린다.
-const CASHFLOW_LEDGER_CLOSE_POLL_MS = 4_000;
-const CASHFLOW_LEDGER_CLOSE_MAX_POLLS = 30;
 
 export async function approveCashflowMonthCloseUntilLedgerClosed(params: {
   tenantId: string;
@@ -3453,15 +3469,8 @@ export async function approveCashflowMonthCloseUntilLedgerClosed(params: {
   payload: ReviewCashflowMonthCloseRequestPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-  onPending?: (attempt: number) => void;
 }) {
-  let result = await reviewCashflowMonthCloseRequestViaBff(params);
-  for (let attempt = 0; result?.pendingLedgerClose && attempt < CASHFLOW_LEDGER_CLOSE_MAX_POLLS; attempt += 1) {
-    params.onPending?.(attempt);
-    await new Promise((resolve) => { setTimeout(resolve, CASHFLOW_LEDGER_CLOSE_POLL_MS); });
-    result = await reviewCashflowMonthCloseRequestViaBff(params);
-  }
-  return result;
+  return reviewCashflowMonthCloseRequestViaBff(params);
 }
 
 export async function withdrawCashflowMonthCloseRequestViaBff(params: {
@@ -3497,8 +3506,8 @@ export async function requestCashflowMonthReopenViaBff(params: {
   payload: RequestCashflowMonthReopenPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseResult> {
-  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+}): Promise<{ request: CashflowMonthCloseRequest }> {
+  const response = await resolveClient(params.client).post<{ request: CashflowMonthCloseRequest }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/reopen-request`,
     {
       tenantId: params.tenantId,
@@ -3519,8 +3528,8 @@ export async function decideCashflowMonthReopenViaBff(params: {
   payload: DecideCashflowMonthReopenPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseResult> {
-  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+}): Promise<{ request: CashflowMonthCloseRequest }> {
+  const response = await resolveClient(params.client).post<{ request: CashflowMonthCloseRequest }>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/reopen-decision`,
     {
       tenantId: params.tenantId,

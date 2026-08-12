@@ -107,6 +107,7 @@ import { mountMemberRoutes } from './routes/members.mjs';
 import { mountPersonRoutes } from './routes/persons.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
+import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
 import { mountAxrMonthCloseQaRoutes } from './routes/axr-month-close-qa.mjs';
 import { mountCashflowSheetLabRoutes } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
@@ -174,6 +175,18 @@ export function resolveProjectRegistrationSlackConfig(options = {}, env = proces
     || 'C09BJ767XCM';
 
   return { webhookUrl, botToken, channelId };
+}
+
+function resolveCashflowSlackConfig(options = {}, env = process.env) {
+  return {
+    botToken: readOptionalText(options.cashflowSlackBotToken)
+      || readOptionalText(env.CASHFLOW_SLACK_BOT_TOKEN)
+      || readOptionalText(env.SLACK_ALERT_BOT_TOKEN)
+      || undefined,
+    channelId: readOptionalText(options.cashflowSlackChannelId)
+      || readOptionalText(env.CASHFLOW_SLACK_CHANNEL_ID)
+      || 'C0BQ6980HR6',
+  };
 }
 
 function truncateText(value, maxLength = 500) {
@@ -561,20 +574,20 @@ export async function resolveApiRequestContext(req, {
   authMode,
   verifyToken,
   resolveMemberIdentity,
+  resolveMcpAccessToken,
 } = {}) {
   const requestId = req.header('x-request-id') || createRequestId();
-  const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
+  const mcpReadPath = req.path === '/mcp/cashflow/weekly-overview';
+  const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase()) && !mcpReadPath;
   const idempotencyKey = req.header('idempotency-key') || '';
 
   if (isMutating && !idempotencyKey.trim()) {
     throw createHttpError(400, 'idempotency-key header is required for mutating requests');
   }
 
-  const identity = await resolveRequestIdentity({
-    authMode,
-    verifyToken,
-    readHeaderValue: (name) => req.header(name),
-  });
+  const identity = mcpReadPath && typeof resolveMcpAccessToken === 'function'
+    ? await resolveMcpAccessToken(req.header('authorization'))
+    : await resolveRequestIdentity({ authMode, verifyToken, readHeaderValue: (name) => req.header(name) });
 
   let actorRole = identity.actorRole;
   let actorEmail = identity.actorEmail;
@@ -602,12 +615,13 @@ export async function resolveApiRequestContext(req, {
   };
 }
 
-function createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }) {
+function createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity, resolveMcpAccessToken }) {
   return asyncHandler(async (req, res, next) => {
     req.context = await resolveApiRequestContext(req, {
       authMode,
       verifyToken,
       resolveMemberIdentity,
+      resolveMcpAccessToken,
     });
     res.setHeader('x-request-id', req.context.requestId);
     next();
@@ -790,6 +804,8 @@ export function createBffApp(options = {}) {
   const slackAlertService = options.slackAlertService || createSlackAlertService();
   const projectRegistrationSlackService = options.projectRegistrationSlackService
     || createSlackAlertService(resolveProjectRegistrationSlackConfig(options));
+  const cashflowSlackService = options.cashflowSlackService
+    || createSlackAlertService(resolveCashflowSlackConfig(options));
   const projectRegistrationOutboxHandler = options.projectRegistrationOutboxHandler
     || createProjectRegistrationSubmittedOutboxHandler({
       db,
@@ -827,6 +843,7 @@ export function createBffApp(options = {}) {
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: process.env.BFF_JSON_LIMIT || '25mb' }));
+  app.use(express.urlencoded({ extended: false }));
 
   app.use((req, res, next) => {
     const requestOrigin = req.header('origin') || '';
@@ -1246,7 +1263,23 @@ export function createBffApp(options = {}) {
     });
   }));
 
-  app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }));
+  const mcpOAuthService = options.mcpOAuthService || createMcpOAuthService({
+    db,
+    issuer: options.mcpOAuthIssuer || process.env.MYSCUBE_MCP_OAUTH_ISSUER || 'https://myscube.myscguard.app',
+    publicOrigin: options.mcpPublicOrigin || process.env.MYSCUBE_MCP_PUBLIC_ORIGIN || 'https://myscube.myscguard.app',
+    now,
+  });
+  mountMcpOAuthRoutes(app, {
+    service: mcpOAuthService,
+    resolveFirebaseContext: async (req) => resolveRequestIdentity({
+      authMode: 'firebase_required', verifyToken, readHeaderValue: (name) => req.header(name),
+    }),
+  });
+
+  app.use('/api/v1', createApiContextMiddleware({
+    authMode, verifyToken, resolveMemberIdentity,
+    resolveMcpAccessToken: (authorization) => mcpOAuthService.resolveAccessToken(authorization),
+  }));
 
   app.post('/api/v1/write', createMutatingRoute(idempotencyService, async (req) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write data');
@@ -1568,6 +1601,8 @@ export function createBffApp(options = {}) {
     jvmWeeklyApiIdTokenAudience: options.jvmWeeklyApiIdTokenAudience,
     jvmWeeklyAuthMode: options.jvmWeeklyAuthMode,
     jvmWeeklyWorkspaceEmailDomain: options.jvmWeeklyWorkspaceEmailDomain,
+    cashflowSlackService,
+    mcpOAuthService,
   });
   mountAxrMonthCloseQaRoutes(app, { db });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });

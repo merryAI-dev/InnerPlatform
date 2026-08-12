@@ -145,11 +145,13 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource.indexOf('const refreshIdempotencyKey =')).toBeLessThan(pageSource.indexOf("runWithBffAuthRetry('mirror.refresh'"));
     expect(pageSource.indexOf('const stageIdempotencyKey =')).toBeLessThan(pageSource.indexOf("runWithBffAuthRetry('stage.sheet_values'"));
     expect(pageSource.indexOf('const applyIdempotencyKey =')).toBeLessThan(pageSource.indexOf("runWithBffAuthRetry('apply.sheet_values'"));
-    expect(pageSource).toContain('CashflowSheetHeroAnimation');
     expect(pageSource).toContain('CashflowSheetSyncOverlay');
     expect(pageSource).toContain('inert={loading || undefined}');
     expect(pageSource).toContain('operation={loadingOperation}');
-    expect(pageSource).toContain('cashflow-tile-float');
+    expect(pageSource).toContain('border-t-[#17324D]');
+    expect(pageSource).not.toContain('CashflowSheetHeroAnimation');
+    expect(pageSource).not.toContain('cashflow-tile-float');
+    expect(pageSource).not.toContain('rounded-none');
     expect(pageSource).not.toContain('motion/react');
     expect(pageSource).toContain('사업비 관리시트 연동');
     expect(pageSource).not.toContain('연동·동기화');

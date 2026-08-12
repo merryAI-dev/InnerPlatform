@@ -137,25 +137,33 @@ export async function executeAxrMonthCloseQaAction({
     return approveCashflowMonthCloseUntilLedgerClosed(reviewInput);
   }
   if (action === 'REQUEST_REOPEN') {
+    if (!control.request) throw new Error('재오픈할 월 결산 요청이 없습니다.');
     return clients.requestReopen({
       tenantId,
       actor,
       projectId,
-      payload: { yearMonth, expectedRevision: control.close.revision, reason: reason.trim() },
-      idempotencyKey: `axr-month-close-qa:${action}:${projectId}:${yearMonth}:r${control.close.revision}`,
+      payload: {
+        requestId: control.request.requestId,
+        yearMonth,
+        expectedRevision: control.request.revision,
+        reason: reason.trim(),
+      },
+      idempotencyKey: `axr-month-close-qa:${action}:${control.request.requestId}:r${control.request.revision}`,
     });
   }
+  if (!control.request) throw new Error('재오픈 결재 요청이 없습니다.');
   return clients.decideReopen({
     tenantId,
     actor,
     projectId,
     payload: {
+      requestId: control.request.requestId,
       yearMonth,
-      expectedRevision: control.close.revision,
+      expectedRevision: control.request.revision,
       decision: action === 'APPROVE_REOPEN' ? 'APPROVE' : 'REJECT',
       reason: reason.trim(),
     },
-    idempotencyKey: `axr-month-close-qa:${action}:${projectId}:${yearMonth}:r${control.close.revision}`,
+    idempotencyKey: `axr-month-close-qa:${action}:${control.request.requestId}:r${control.request.revision}`,
   });
 }
 
