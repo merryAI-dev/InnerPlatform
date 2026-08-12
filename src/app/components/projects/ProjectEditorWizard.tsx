@@ -98,7 +98,6 @@ import {
 } from '../ui/alert-dialog';
 import {
   formatProjectTeamMembersSummary,
-  hasInvalidProjectSettlementSupportMember,
   hasIncompleteProjectTeamMembers,
   hasProjectOperatingManager,
   isProjectSettlementSupportMember,
@@ -1423,9 +1422,8 @@ export function ProjectEditorWizard({
     if (usesRegistrationV2 && !hasProjectOperatingManager(draft.teamMembersDetailed)) {
       issues.push({ step: 'team', label: '운영매니저 1인 이상' });
     }
-    if (usesRegistrationV2 && hasInvalidProjectSettlementSupportMember(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '정산지원은 도담 또는 써니를 선택' });
-    }
+    // 정산지원 담당자는 저장을 막지 않는다. 담당이 정해져 있다는 안내일 뿐이고,
+    // 담당자가 바뀌거나 자리를 비운 사이에 프로젝트 등록 자체가 막히면 안 된다.
     return issues;
   }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
 
@@ -2462,15 +2460,10 @@ export function ProjectEditorWizard({
                 .map((item, itemIndex) => (itemIndex === index ? '' : item.memberName))
                 .filter(Boolean),
             );
-            const availableTeamMemberOptions = member.role === '정산지원'
-              ? teamMemberOptions.filter((option) => isProjectSettlementSupportMember({
-                memberName: option.name,
-                memberNickname: option.nickname,
-              }))
-              : teamMemberOptions;
-            const availableTeamMemberOptionMap = member.role === '정산지원'
-              ? Object.fromEntries(availableTeamMemberOptions.map((option) => [option.value, option])) as Record<string, ProjectTeamMemberOption>
-              : teamMemberOptionMap;
+            // 정산지원이라고 후보를 두 사람으로 좁히지 않는다. 담당이 바뀌거나 그 두 분이
+            // 자리를 비우면 아무도 고를 수 없게 된다. 담당자 안내는 아래 문구로 남긴다.
+            const availableTeamMemberOptions = teamMemberOptions;
+            const availableTeamMemberOptionMap = teamMemberOptionMap;
             const currentTeamMemberOptionExists = !member.memberName
               || availableTeamMemberOptions.some((option) => option.value === member.memberName);
             return (
@@ -2538,7 +2531,9 @@ export function ProjectEditorWizard({
                       </SelectContent>
                     </Select>
                     {member.role === '정산지원' && !isProjectSettlementSupportMember(member) ? (
-                      <p className="mt-1 text-[10px] text-red-700">정산지원은 도담 또는 써니를 선택해 주세요.</p>
+                      <p className="mt-1 text-[10px] text-amber-700">
+                        정산지원은 보통 도담 또는 써니가 맡습니다. 다른 분으로 지정하려면 그대로 두셔도 됩니다.
+                      </p>
                     ) : null}
                   </div>
                 </div>

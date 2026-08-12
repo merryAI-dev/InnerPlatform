@@ -3,7 +3,6 @@ import {
   formatProjectTeamMembersSummary,
   hasInvalidProjectTeamMemberLaborPeriod,
   hasIncompleteProjectTeamMembers,
-  hasInvalidProjectSettlementSupportMember,
   hasProjectOperatingManager,
   normalizeProjectTeamMemberDraftRows,
   normalizeProjectTeamMembers,
@@ -169,15 +168,6 @@ describe('project-team-members', () => {
     ]);
   });
 
-  it('allows only 도담 or 써니 as settlement support', () => {
-    expect(hasInvalidProjectSettlementSupportMember([
-      { memberName: '송성미', memberNickname: '도담', role: '정산지원', participationRate: 0, isDocumentOnly: false },
-      { memberName: '최지윤', memberNickname: '써니', role: '정산지원', participationRate: 0, isDocumentOnly: false },
-    ])).toBe(false);
-    expect(hasInvalidProjectSettlementSupportMember([
-      { memberName: '다른 구성원', memberNickname: '', role: '정산지원', participationRate: 0, isDocumentOnly: false },
-    ])).toBe(true);
-  });
 
   it('parses manual identity input in 이름(별명) format', () => {
     expect(parseProjectTeamMemberIdentityInput('박지연(느티)')).toEqual({
