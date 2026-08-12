@@ -1558,8 +1558,9 @@ describe('JVM weekly API BFF proxy', () => {
         nextCursor: '', onTimeCount: completion ? 1 : 0, missedCount: 0,
       };
     };
+    const cashflowSlackService = { enabled: true, notifyMessage: vi.fn().mockResolvedValue(undefined) };
     const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, {
-      env: runtimeEnv, db: source.db, weeklyComplianceResponse,
+      env: runtimeEnv, db: source.db, weeklyComplianceResponse, cashflowSlackService,
       now: () => new Date('2026-07-16T09:00:00.000Z'),
     });
 
@@ -1570,6 +1571,14 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body).toMatchObject({
         projectId: 'project-a', yearMonth: '2026-07', weekNo: 3, alreadyCompleted: false,
       }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(cashflowSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('처리자: Project Manager'),
+    }));
+    expect(cashflowSlackService.notifyMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('처리자: pm-1'),
+    }));
 
     const saved = source.documents.get('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3');
     expect(saved).toMatchObject({ projectId: 'project-a', yearMonth: '2026-07', weekNo: 3 });

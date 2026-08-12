@@ -3170,7 +3170,14 @@ export function mountJvmWeeklyApiRoutes(app, {
       },
       { cashflowWrite: true },
     );
-    notifyCashflowSlack(`*[MYSCube] 주정산 완료*\n프로젝트: ${projectId}\n대상: ${hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth} ${hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo}주차\n처리자: ${req.context.actorId}`);
+    void Promise.resolve().then(async () => {
+      const { requestedByName } = await readCashflowRequestPartyNames({
+        db,
+        tenantId: req.context.tenantId,
+        record: { requestedByUid: req.context.actorId },
+      });
+      notifyCashflowSlack(`*[MYSCube] 주정산 완료*\n프로젝트: ${projectId}\n대상: ${hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth} ${hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo}주차\n처리자: ${requestedByName || '미확인'}`);
+    }).catch(() => {});
     res.status(200).json(result);
   }));
 
