@@ -30,6 +30,8 @@ describe('participation dashboard', () => {
     expect(result.selectedRule).toMatchObject({ id: 'all', alias: '전체 인력' });
     const filtered = selectParticipationDashboardYear(snapshot, '2026', 'participation-rule-agri');
     expect(filtered.selectedRule).toMatchObject({ alias: '농식품 + 회계사 정산', projectCount: 2 });
+    expect(filtered.userRuleOptions).toEqual([{ id: 'participation-rule-agri', alias: '농식품 + 회계사 정산', projectCount: 2 }]);
+    expect(filtered.members[0].projectLabel).toBe('agri-2026 · hongsi-2026');
     expect(filtered.members[0].months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
     expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'm-1', memberName: '보람', yearMonth: '2026-03', rate: 120 }]));
   });

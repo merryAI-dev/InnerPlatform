@@ -148,7 +148,7 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
       return { yearMonth, label: `${Number(yearMonth.slice(5, 7))}월`, rate, isWarning: rate > 100 };
     });
     const warnings = monthsWithStatus.filter((month) => month.isWarning).map(({ yearMonth, rate }) => ({ yearMonth, rate }));
-    return { memberId: member.memberId, memberName: member.memberName, projectNames: member.projectNames || [], months: monthsWithStatus, warnings };
+    return { memberId: member.memberId, memberName: member.memberName, projectLabel: (member.projectNames || []).join(' · '), months: monthsWithStatus, warnings };
   });
   const warnings = members.flatMap((member) => member.warnings.map((warning) => ({ ...warning, memberId: member.memberId, memberName: member.memberName })));
   return {
@@ -159,6 +159,7 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
     months,
     selectedRule: { id: selectedRule.id, alias: selectedRule.alias, projectIds: selectedRule.projectIds || [], projectCount: selectedRule.projectCount || 0 },
     ruleOptions,
+    userRuleOptions: ruleOptions.filter((rule) => rule.id !== 'all'),
     members,
     warnings,
     warningCount: warnings.length,

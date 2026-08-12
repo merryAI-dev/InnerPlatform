@@ -42,7 +42,7 @@ export interface UpsertProjectPayload {
 export interface ParticipationDashboardMember {
   memberId: string;
   memberName: string;
-  projectNames: string[];
+  projectLabel: string;
   months: Array<{ yearMonth: string; label: string; rate: number; isWarning: boolean }>;
   warnings: Array<{ yearMonth: string; rate: number }>;
 }
@@ -62,6 +62,7 @@ export interface ParticipationDashboardSnapshot {
   months: Array<{ yearMonth: string; label: string }>;
   selectedRule: ParticipationDashboardRule;
   ruleOptions: ParticipationDashboardRule[];
+  userRuleOptions: ParticipationDashboardRule[];
   members: ParticipationDashboardMember[];
   warnings: Array<{ yearMonth: string; rate: number; memberId: string; memberName: string }>;
   warningCount: number;
