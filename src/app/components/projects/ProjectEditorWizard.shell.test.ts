@@ -10,7 +10,9 @@ const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '
 
 describe('ProjectEditorWizard dropdown contract', () => {
   it('lists the seven registration documents as one table and keeps every per-slot detail', () => {
-    expect(source).toContain('<th scope="col" className="w-10 px-3 py-2 font-medium">#</th>');
+    // 표 머리글은 이제 FORM_LABEL_CLASS(12/600) 토큰을 쓴다. 흩어진 font-medium/text-[11px]
+    // 대신 라벨 역할 하나만 남기려고 바꿨고, 열 구성과 의미는 그대로다.
+    expect(source).toContain('<th scope="col" className={cn(\'w-10 px-3 py-2\', FORM_LABEL_CLASS)}>#</th>');
     expect(source).toContain('첨부 상태');
     // Stacked cards hid whether a slot was still missing; each row now states it.
     expect(source).toContain("deferred ? '이후 제출(예외 처리)' : '미첨부'");
@@ -32,7 +34,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('requires documents 1-2, allows document 3 to be deferred, and keeps documents 4-7 optional', () => {
     expect(source).toContain("label: '계약서 *'");
-    expect(source).toContain('모두 싸인으로 진행하셨나요? *');
+    // 필수 표시는 라벨 문자열에 붙이던 ' *' 대신 ProjectFormRow 의 required 프로퍼티가 맡는다.
+    // 마커를 한 군데(강조색 `*`)에서만 그리기 위한 변경이고, 어떤 항목이 필수인지는 그대로다.
+    expect(source).toContain('label="모두 싸인으로 진행하셨나요?"');
     expect(source).toContain('계약서를 써니(사업지원팀)에게 제출했습니다.');
     expect(source).toContain("label: '고객사 사업자등록증 *'");
     expect(source).toContain("label: '산출내역서(견적서) *'");
@@ -101,7 +105,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('lets project registration and edit choose a designated executive approver from the member directory', () => {
-    expect(source).toContain('최종 결재자 지정 (사업총괄) *');
+    expect(source).toContain('label="최종 결재자 지정 (사업총괄)"');
     expect(source).toContain('const selectedExecutiveApprover = useMemo');
     expect(source).toContain('const executiveApproverOptions = useMemo');
     expect(source).not.toContain('requesterId?: string');
@@ -151,14 +155,15 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('참여인력 (서류상·실제)');
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
     expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
-    expect(source).toContain('<Label className="text-xs">통화</Label>');
+    // 라벨은 이제 ProjectFormRow 의 라벨 열이 그린다. 개별 <Label className="text-xs"> 는 사라졌다.
+    expect(source).toContain('<ProjectFormRow label="통화">');
     expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
   });
 
   it('receives department options instead of mapping hardcoded options directly in the wizard UI', () => {
     expect(source).toContain('departmentOptions?: string[]');
     expect(source).toContain('dedupeProjectDepartmentLabels(departmentOptions ? departmentOptions');
-    expect(source).toContain('<Label className="text-xs">담당조직(CIC) *</Label>');
+    expect(source).toContain('<ProjectFormRow label="담당조직(CIC)" required');
     expect(source).toContain('<SelectValue placeholder="담당조직 선택" />');
     expect(source).not.toContain('PROJECT_DEPARTMENT_OPTIONS.map((department)');
     expect(adminWizardSource).toContain('useProjectDepartmentSettings');
@@ -208,14 +213,19 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)');
     expect(source).toContain('formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)');
     expect(source).toContain('formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)');
-    expect(source).toContain('formatProjectAmountInput(paymentPlan.contract, true)');
-    expect(source).toContain('formatProjectAmountInput(paymentPlan.interim, true)');
-    expect(source).toContain('formatProjectAmountInput(paymentPlan.final, true)');
+    // 선금·중도금·잔금은 표의 세 행이 되어 같은 셀 코드를 돈다. 세 필드 모두 0원을 명시값으로
+    // 다룬다는 계약(두 번째 인자 true)은 그대로다.
+    expect(source).toContain("['contract', '선금/계약금'");
+    expect(source).toContain("['interim', '중도금'");
+    expect(source).toContain("['final', '잔금'");
+    expect(source).toContain('formatProjectAmountInput(paymentPlan[field], true)');
   });
 
   it('shows annual profit rates as derived values and keys v2 settlement details to the basis', () => {
-    expect(source).toContain('연도별 계약금액과 총수익으로 자동 계산');
-    expect(source).toContain('value={`${(row.profitRate * 100).toFixed(2)}%`}');
+    // 연도별 수익률은 입력칸 모양을 벗고 표의 파생값 칸으로 바뀌었다. "자동 계산" 도움말을
+    // 연도마다 반복하던 줄은 형태(입력칸 없음)가 대신하므로 지웠다.
+    expect(source).toContain('{`${(row.profitRate * 100).toFixed(2)}%`}');
+    expect(source).not.toContain('연도별 계약금액과 총수익으로 자동 계산');
     expect(source).not.toContain("updateFinancialYear(\n                      index,\n                      'profitRate'");
     expect(source).toContain("const settlementDetailsEnabled = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE'");
     expect(source).toContain("requiresSettlementConfirmations ? (");
@@ -265,7 +275,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('uses the project name as the single PPT registration name', () => {
-    expect(source).toContain('프로젝트명 *');
+    expect(source).toContain('label="프로젝트명"');
     expect(source).not.toContain('그룹웨어 등록명');
     expect(source).toContain('계약서에 기재된 계약명 그대로 입력');
     expect(source).toContain('띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.');
@@ -288,25 +298,30 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('const updateProjectName = (value: string)');
   });
 
-  it('shows persistent guidance below the purpose and main-content labels', () => {
+  /**
+   * 도움말 자리가 라벨 아래에서 "입력 아래 `·` 불릿"으로 옮겨졌다.
+   * 예전에는 필드마다 도움말이 위/아래로 흩어져 있었고, 이제 ProjectFormRow 의 hints 한 곳만
+   * 쓴다. 문구는 한 글자도 지우지 않았고 순서(설명 → 예시)도 그대로다.
+   */
+  it('keeps the purpose and main-content guidance in the one shared hint slot', () => {
     const purposeField = source.slice(
-      source.indexOf('<Label className="text-xs">프로젝트 목적'),
-      source.indexOf('<Label className="text-xs">프로젝트 주요 내용'),
+      source.indexOf('label="프로젝트 목적"'),
+      source.indexOf('label="프로젝트 주요 내용"'),
     );
     const mainContentField = source.slice(
-      source.indexOf('<Label className="text-xs">프로젝트 주요 내용'),
+      source.indexOf('label="프로젝트 주요 내용"'),
       source.indexOf('const renderContractTypeSelect'),
     );
 
     expect(purposeField.indexOf('어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력')).toBeLessThan(
-      purposeField.indexOf('<Textarea'),
+      purposeField.indexOf('예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성'),
     );
-    expect(purposeField).toContain('<p className="mt-1 text-[11px] leading-5 text-muted-foreground">');
+    expect(purposeField).toContain('hints={[');
     expect(purposeField).toContain('예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성');
     expect(mainContentField.indexOf('프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약')).toBeLessThan(
-      mainContentField.indexOf('<Textarea'),
+      mainContentField.indexOf('1. 사업제안서 작성 교육'),
     );
-    expect(mainContentField).toContain('<p className="mt-1 text-[11px] leading-5 text-muted-foreground">');
+    expect(mainContentField).toContain('hints={[');
     expect(mainContentField).toContain('<span className="block">1. 사업제안서 작성 교육</span>');
     expect(mainContentField).toContain('<span className="block">2. 사업제안서 작성 - 25개팀 이상 1:1 코칭</span>');
     expect(mainContentField).toContain('<span className="block">3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅</span>');
@@ -325,15 +340,20 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('label="수익률"');
   });
 
-  it('keeps the PPT five-step navigation horizontal on desktop and stacked on mobile', () => {
-    expect(source).toContain('lg:grid-cols-5');
-    expect(source).toContain('grid gap-1.5 lg:grid-cols-5');
+  it('keeps the step navigation horizontal on desktop and stacked on mobile', () => {
+    // 단계는 4개인데 칸이 5개라 마지막 한 칸이 늘 비어 있었다. 칸 수를 단계 수에 맞추고
+    // 간격도 세 값 규칙(8px)으로 통일했다.
+    expect(source).toContain('grid gap-2 lg:grid-cols-4');
+    expect(source).not.toContain('grid gap-1.5 lg:grid-cols-5');
     expect(source).not.toContain('lg:grid-cols-[220px_minmax(0,1fr)]');
   });
 
   it('warns users to verify the uploaded contract before saving', () => {
     expect(source).toContain('등록하려는 계약서가 맞는지 꼭 확인해주세요!');
-    expect(source).toContain('descriptionClassName="text-rose-600"');
+    // rose 와 red 가 같은 "주의" 뜻으로 섞여 쓰이고 있었다. 색 하나에 뜻 하나만 두려고
+    // 오류·주의는 red 로 모았다.
+    expect(source).toContain('descriptionClassName="text-red-700"');
+    expect(source).not.toContain('rose-');
     expect(source).not.toContain('업로드된 PDF를 마지막 확인 단계에서 바로 봅니다.');
     expect(source).toContain('documentPreviewUrls?: Partial<Record<ProjectRequestDocumentKind, string>>');
     expect(source).toContain('documentPreviewStates?: Partial<Record<ProjectRequestDocumentKind');
@@ -401,7 +421,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('{slot.description}');
     expect(source).toContain('isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)');
     expect(source).toMatch(/number: 7,\s+label: 'RFP'/);
-    expect(source).toContain('연도별 계약·재무 *');
+    expect(source).toContain('title="연도별 계약·재무"');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
     expect(source).not.toContain('4대보험 포함 확인');
     expect(source).not.toContain('퇴직급여 포함 확인');
@@ -415,7 +435,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('LABOR_SETTLEMENT_BASIS_LABELS');
     expect(source).toContain('PROJECT_TEAM_MEMBER_ROLES');
     expect(source).toContain('paymentExpectedMonths');
-    expect(source).toContain('선금·중도금 합계 70% 미만 사유 *');
+    expect(source).toContain('label="선금·중도금 합계 70% 미만 사유"');
     expect(source).toContain('최종 저장 후 사업관리 폴더가 자동 생성');
   });
 
@@ -423,7 +443,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain("{ id: 'payment', label: '입금/정산'");
     expect(source).not.toContain("if (step.id === 'payment')");
     expect(source).toContain('renderPaymentFields(row, index)');
-    expect(source).toContain('!hasMultiYearContract ? renderPaymentFields() : null');
+    // 단년 계약의 입금 계획도 다른 묶음과 같은 섹션 껍데기를 쓴다. 렌더 조건은 그대로다.
+    expect(source).toContain('{!hasMultiYearContract ? (');
+    expect(source).toContain('<ProjectFormSection title="입금 계획">');
     expect(source).not.toContain('최종 입금 메모');
     expect(source).not.toContain('기타 참고사항');
     expect(source).not.toContain('등록 전 확인사항');
@@ -436,7 +458,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('placeholder="예: 26-8-1"');
     expect(source).toContain('const effectivePaymentPlan = hasMultiYearContract');
     expect(source).toContain('total.contract + (row.paymentPlan?.contract || 0)');
-    expect(source).toContain('년 선금·중도금 합계 70% 미만 사유 *');
+    expect(source).toContain('년 선금·중도금 합계 70% 미만 사유`}');
     expect(source).toContain("updateFinancialYear(financialYearIndex!, 'advanceInterimBelow70Reason'");
     expect(source).not.toContain('년 계약/재무 정산 완료');
     expect(source).toContain('(기존값 · 선택 불가)');
@@ -536,6 +558,100 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(portalRegisterSource).toContain('onRemoveProjectDocument={removeDocument}');
     expect(portalRegisterSource).toContain('draftClient.removeAttachment(record.draftId, ownership');
     expect(source).toContain('privateDraftAttachment={Boolean(documentPreviewStates?.contract)');
+  });
+});
+
+/**
+ * 화면 골격 계약. 이 블록은 "저장되는 값"이 아니라 "보여주는 방식"만 고정한다.
+ * 45개 필드가 각자 크기·간격·색을 정하던 상태로 돌아가지 않게 막는 것이 목적이다.
+ */
+describe('ProjectEditorWizard form skeleton contract', () => {
+  // 토큰 정의부(주석 포함)를 빼고 실제 렌더 코드만 검사한다.
+  const renderBody = source.slice(source.indexOf('function getProjectEditorAutosaveStorageKey'));
+
+  it('routes every field through one row component instead of per-field markup', () => {
+    expect(source).toContain('function ProjectFormRow(');
+    expect(source).toContain('function ProjectFormSection(');
+    // 라벨·필수·부연·도움말·오류의 자리를 한 번만 정한다.
+    expect(source).toContain('hints?: ReactNode[];');
+    expect(source).toContain('errors?: string[];');
+    expect(source).toContain('lg:grid-cols-[168px_minmax(0,1fr)]');
+    // 라벨 열이 고정폭이라 `*` 가 저절로 세로 정렬된다. 왼쪽 세로 마커는 두지 않는다.
+    expect(source).not.toContain('border-l-4');
+  });
+
+  it('keeps type to four roles and spacing to three values', () => {
+    expect(source).toContain("const FORM_SECTION_CLASS = 'text-[14px] font-bold");
+    expect(source).toContain("const FORM_LABEL_CLASS = 'text-[12px] font-semibold");
+    expect(source).toContain("const FORM_VALUE_CLASS = 'text-[13px]'");
+    expect(source).toContain("const FORM_NUMERIC_VALUE_CLASS = 'text-[13px] tabular-nums'");
+    expect(source).toContain("const FORM_HINT_CLASS = 'text-[11px] font-normal");
+    // text-xs 와 text-[12px] 는 같은 12px 를 두 이름으로 부르던 중복이었다. 이름을 하나로 모았다.
+    expect(renderBody).not.toContain('text-xs');
+    expect(renderBody).not.toContain('text-[10px]');
+    expect(renderBody).not.toContain("'text-[12px]");
+    expect(source).toContain("const FORM_FIELD_STACK_CLASS = 'space-y-4'");
+    expect(source).toContain("const FORM_SECTION_STACK_CLASS = 'space-y-6'");
+  });
+
+  it('gives the accent colour exactly one meaning and keeps errors red', () => {
+    // 필수 마커 · 포커스 링 · 활성 단계 칩. 그 밖에는 회색조를 쓴다.
+    expect(source).toContain("'[&_[data-slot=input]]:focus-visible:ring-[#0176D3]/25'");
+    expect(source).toContain("required ? <span className=\"ml-0.5 text-[#0176D3]\">*</span> : null");
+    expect(source).toContain("active\n                      ? 'border-[#0176D3] bg-[#0176D3]/5 text-[#0176D3]'");
+    expect(source).not.toContain('rose-');
+  });
+
+  it('strips the input shell from every calculated value', () => {
+    expect(source).toContain('function ProjectComputedValue(');
+    expect(source).toContain('계산됨');
+    // readOnly 입력칸을 흐린 배경으로 위장하던 처리를 없앴다.
+    expect(source).not.toContain('bg-muted/40');
+    expect(source).not.toContain('총수익 / 계약금액 기준 자동 계산');
+    expect(source).toContain('<ProjectComputedValue value={profitRateLabel');
+  });
+
+  it('adds a remaining-count badge to the step chips without touching the verdict', () => {
+    expect(source).toContain('const canSubmit = submitIssues.length === 0;');
+    expect(source).toContain('const stepIssueCounts = useMemo(');
+    expect(source).toContain('submitIssues.forEach((issue) => { counts[issue.step] += 1; });');
+    expect(source).toContain('이 단계에 남은 필수 항목');
+    expect(source).toContain('onClick={() => setStepIndex(index)}');
+  });
+
+  it('repeats the submit-issue wording beside the field and scrolls to it', () => {
+    expect(source).toContain('const issueLabelSet = useMemo(');
+    expect(source).toContain('const fieldIssues = useCallback(');
+    expect(source).toContain('errors={fieldIssues(\'프로젝트명\')}');
+    expect(source).toContain('data-issue-label');
+    expect(source).toContain("row.scrollIntoView({ block: 'center', behavior: 'smooth' })");
+    expect(source).toContain('const goToIssue = (issue: { step: ProjectEditorStep; label: string }) =>');
+    expect(source).toContain('onClick={() => goToIssue(issue)}');
+  });
+
+  it('reads the multi-year finance as one table whose total row replaces the top inputs', () => {
+    expect(source).toContain('const renderAnnualFinanceTable = ');
+    expect(source).toContain('const annualTotalsOwnAmounts = usesRegistrationV2 && hasMultiYearContract');
+    expect(source).toContain('>연도</th>');
+    expect(source).toContain('>합계</th>');
+    expect(source).toContain("'px-3 py-2.5 text-right font-semibold text-[#0176D3]'");
+    // 다년 계약에서 총계 입력칸은 사라졌지만 단년 계약에서는 그대로 입력한다.
+    expect(source).toContain('formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)');
+    expect(source).toContain('금액을 계약서와 대조하여 확인했습니다.');
+  });
+
+  it('shows a read-only Korean unit beside amounts without touching the stored value', () => {
+    expect(source).toContain('function formatKoreanAmountUnit(');
+    expect(source).toContain("[100000000, '억']");
+    expect(source).toContain('const amountHint = (value: number, entered: boolean, prefix = \'\')');
+    // 저장은 여전히 parseProjectAmountInput 이 만든 원 단위 숫자다.
+    expect(source).toContain('parseProjectAmountInput(rawValue)');
+  });
+
+  it('opens each step with a single "prepare this" note', () => {
+    expect(source).toContain('const STEP_PREPARATION_NOTES');
+    expect(source).toContain('이 단계에서 준비할 것');
+    expect(source).toContain('STEP_PREPARATION_NOTES[step.id].map((note)');
   });
 });
 
