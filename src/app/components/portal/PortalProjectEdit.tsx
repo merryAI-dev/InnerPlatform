@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { useProjectDepartmentSettings } from '../../data/project-department-settings';
+import { usePersonRoster } from '../../data/use-person-roster';
 import { usePortalStore } from '../../data/portal-store';
 import type { FileAttachment, Project, ProjectRequest } from '../../data/types';
 import { getAuthInstance } from '../../lib/firebase';
@@ -235,6 +236,7 @@ function ProjectInfoEditor({
   departmentOptions,
   draftClient,
   members,
+  roster,
   project,
   requestDoc,
   settlementSystemOptions,
@@ -245,6 +247,7 @@ function ProjectInfoEditor({
   departmentOptions: string[];
   draftClient: DraftClient;
   members: ReturnType<typeof usePortalStore>['members'];
+  roster: ReturnType<typeof usePersonRoster>;
   project: Project;
   requestDoc: ProjectRequest | null;
   settlementSystemOptions: string[];
@@ -652,6 +655,7 @@ function ProjectInfoEditor({
         initialDraft={initialDraft}
         draftKey={autosaveKey}
         members={members}
+        roster={roster}
         departmentOptions={departmentOptions}
         settlementSystemOptions={settlementSystemOptions}
         topSlot={topSlot}
@@ -756,6 +760,7 @@ export function PortalProjectEdit() {
   const { user } = useAuth();
   const { orgId } = useFirebase();
   const { activeProjectId, isLoading: portalLoading, members, myProject: sessionProject, projects } = usePortalStore();
+  const roster = usePersonRoster();
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const routeProject = routeProjectId ? projects.find((project) => project.id === routeProjectId) || null : null;
   const fallbackProject = projects.find((project) => project.id === activeProjectId) || sessionProject;
@@ -881,6 +886,7 @@ export function PortalProjectEdit() {
       departmentOptions={departmentOptions}
       draftClient={bootstrap.draftClient}
       members={members}
+      roster={roster}
       project={project}
       requestDoc={requestDoc}
       settlementSystemOptions={projects.flatMap((item) => item.settlementSystem === 'OTHER' && item.settlementSystemOther && !item.trashedAt ? [item.settlementSystemOther] : [])}
