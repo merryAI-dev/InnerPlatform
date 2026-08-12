@@ -1651,6 +1651,62 @@ async function readDocument(db, path) {
   return snapshot.exists ? snapshot.data() || {} : null;
 }
 
+function sheetFormulaProjectionActualSummary({ projectId, mirror, comparisonBoundary, yearMonth = '' }) {
+  if (readOptionalText(mirror?.status) !== 'FRESH'
+    || !readOptionalText(mirror?.sourceRevision)
+    || readOptionalText(mirror?.sourceRevision) !== readOptionalText(mirror?.appliedSourceRevision)) return null;
+  const rows = (Array.isArray(mirror?.sheetFacts?.projectionActualDifferences)
+    ? mirror.sheetFacts.projectionActualDifferences
+    : [])
+    .map((row) => ({
+      yearMonth: readOptionalText(row?.yearMonth),
+      weekNo: Number(row?.weekNo),
+      amount: Number(row?.amount),
+    }))
+    .filter((row) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(row.yearMonth)
+      && Number.isInteger(row.weekNo) && row.weekNo >= 1 && row.weekNo <= 5
+      && Number.isSafeInteger(row.amount));
+  const asOf = comparisonBoundary?.asOfWeek;
+  const latest = rows
+    .filter((row) => row.yearMonth < asOf?.yearMonth
+      || (row.yearMonth === asOf?.yearMonth && row.weekNo <= asOf?.weekNo))
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
+    .at(-1);
+  if (!latest) return null;
+  const requestedMonth = yearMonth || latest.yearMonth;
+  const periods = ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].map((period) => {
+    if (period === 'MONTH') return { period, differenceAmount: latest.amount };
+    const weekNo = Number(period.slice(-1));
+    const value = rows.find((row) => row.yearMonth === requestedMonth && row.weekNo === weekNo);
+    return { period, differenceAmount: value?.amount ?? null };
+  });
+  return {
+    projectId,
+    source: 'SHEET_FORMULA',
+    sourceRevision: readOptionalText(mirror.sourceRevision),
+    fromMonth: `${readWeeklyYear(mirror.weeklyYear) ?? Number(latest.yearMonth.slice(0, 4))}-01`,
+    comparisonAsOfWeek: { yearMonth: latest.yearMonth, weekNo: latest.weekNo },
+    differenceAmount: latest.amount,
+    settlementDifferenceAmount: latest.amount,
+    settlementMatches: latest.amount === 0,
+    periods,
+  };
+}
+
+async function readSheetFormulaProjectionActualSummaries({ db, req, projectIds, comparisonBoundary, yearMonth, authMode, workspaceEmailDomain }) {
+  const tenantId = readOptionalText(req.context?.tenantId);
+  const results = await Promise.all(projectIds.map(async (projectId) => {
+    await assertCashflowProjectInScope({ db, req, projectId, authMode, workspaceEmailDomain });
+    const mirror = await readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`);
+    return sheetFormulaProjectionActualSummary({ projectId, mirror, comparisonBoundary, yearMonth });
+  }));
+  return {
+    version: '2',
+    items: results.filter(Boolean),
+    errors: projectIds.filter((_projectId, index) => !results[index]).map((projectId) => ({ projectId, code: 'SUMMARY_UNAVAILABLE' })),
+  };
+}
+
 function annualModeFromStoredDocument(document, mode) {
   const lineAmounts = objectValue(document?.[mode]);
   const lineStates = objectValue(document?.[`${mode}States`]);
@@ -1936,6 +1992,18 @@ async function composeCashflowMonthDashboard({
       ? formulaSheetFacts.projectionActualDifferences
       : []).filter((value) => Number(String(value?.yearMonth || '').slice(0, 4)) === selectedYear),
   };
+  const directProjectionActualSummary = sheetFormulaProjectionActualSummary({
+    projectId,
+    mirror: {
+      status: closedSnapshot ? 'FRESH' : mirror?.status,
+      sourceRevision: closedSnapshot ? (formulaSnapshot.sourceRevision || 'snapshot') : mirror?.sourceRevision,
+      appliedSourceRevision: closedSnapshot ? (formulaSnapshot.sourceRevision || 'snapshot') : mirror?.appliedSourceRevision,
+      weeklyYear,
+      sheetFacts: formulaSheetFacts,
+    },
+    comparisonBoundary,
+    yearMonth,
+  });
   const authoritativeOpeningBalances = openingBalanceCandidate
     ? requireJvmOpeningBalances({ openingBalances: openingBalanceCandidate }, yearMonth)
     : null;
@@ -2127,7 +2195,7 @@ async function composeCashflowMonthDashboard({
     openingBalances: authoritativeOpeningBalances,
     snapshotCompatibility,
     deadlineSummary,
-    projectionActualSummary,
+    projectionActualSummary: directProjectionActualSummary,
     monthCloseStatuses,
     postCloseAdjustment: closedSnapshot ? postCloseAdjustment(close, closedSnapshot) : null,
     draftRevision: null,
@@ -2144,8 +2212,8 @@ async function composeCashflowMonthDashboard({
       actualProgressPercent: actualWrittenProgressPercent(cells, yearMonth, comparisonBoundary),
       confirmationProgressPercent,
       settlementProgressPercent: settlement.percent,
-      settlementDifferenceAmount: projectionActualSummary.settlementDifferenceAmount,
-      settlementMatches: projectionActualSummary.settlementMatches,
+      settlementDifferenceAmount: directProjectionActualSummary?.settlementDifferenceAmount ?? null,
+      settlementMatches: directProjectionActualSummary?.settlementMatches ?? null,
       settlementCompletedWeekCount: settlement.completed,
       settlementTargetWeekCount: settlement.total,
       settlementIncompleteWeeks: settlement.incompleteWeeks,
@@ -2742,17 +2810,6 @@ export function mountJvmWeeklyApiRoutes(app, {
         if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
           throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
         }
-        const projectionActualSummary = objectValue(source?.projectionActualSummary);
-        if (readOptionalText(projectionActualSummary?.projectId) !== rawProjectId
-          || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(readOptionalText(projectionActualSummary?.fromMonth))
-          || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(readOptionalText(projectionActualSummary?.comparisonAsOfWeek?.yearMonth))
-          || !Number.isSafeInteger(Number(projectionActualSummary?.comparisonAsOfWeek?.weekNo))
-          || Number(projectionActualSummary?.comparisonAsOfWeek?.weekNo) < 1
-          || Number(projectionActualSummary?.comparisonAsOfWeek?.weekNo) > 5
-          || !Number.isFinite(Number(projectionActualSummary?.settlementDifferenceAmount))
-          || typeof projectionActualSummary?.settlementMatches !== 'boolean') {
-          throw createHttpError(502, 'JVM 누적 Projection-Actual 요약을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
-        }
         const cycleBusinessDate = readOptionalText(result?.evaluatedBusinessDate) || comparisonBoundary.asOfDate;
         const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
         if (!cumulativeCycle) {
@@ -2782,7 +2839,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             openingBalances,
             comparisonBoundary,
             weeklyCompliance,
-            projectionActualSummary,
+            projectionActualSummary: null,
             weeklyComplianceBoundary,
           }),
           { attempt: traceAttempt },
@@ -2948,15 +3005,15 @@ export function mountJvmWeeklyApiRoutes(app, {
       || (yearMonth && !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth))) {
       throw createHttpError(400, '현금흐름 요약 조회 범위가 올바르지 않습니다.', 'cashflow_projection_actual_summary_request_invalid');
     }
-    const result = await proxyJavaWeeklyRequest({
-      context: req.context,
-      method: 'POST',
-      path: '/api/v1/cashflow/projection-actual-summary/batch',
-      command: 'read_cashflow_projection_actual_summaries',
-      body: { projectIds, ...(yearMonth ? { yearMonth } : {}) },
-      mutation: false,
-    });
-    res.status(200).json(result);
+    res.status(200).json(await readSheetFormulaProjectionActualSummaries({
+      db,
+      req,
+      projectIds,
+      yearMonth,
+      comparisonBoundary: resolveCashflowComparisonAsOf('', now()),
+      authMode,
+      workspaceEmailDomain,
+    }));
   }));
 
   async function readWeeklyOverview(req) {
@@ -2992,13 +3049,33 @@ export function mountJvmWeeklyApiRoutes(app, {
       body: { projectIds, yearMonth },
       mutation: false,
     }), { projectCount: projectIds.length });
+    const sheetSummary = await trace.measure('sheet_formula_summary', () => readSheetFormulaProjectionActualSummaries({
+      db,
+      req,
+      projectIds,
+      yearMonth,
+      comparisonBoundary: resolveCashflowComparisonAsOf('', now()),
+      authMode,
+      workspaceEmailDomain,
+    }), { projectCount: projectIds.length });
+    const summaryByProjectId = new Map(sheetSummary.items.map((item) => [item.projectId, item]));
+    const resultErrors = Array.isArray(result?.errors) ? result.errors.filter((error) => error?.code !== 'SUMMARY_UNAVAILABLE') : [];
+    const combined = {
+      ...result,
+      version: '2',
+      items: (Array.isArray(result?.items) ? result.items : []).map((item) => ({
+        ...item,
+        projectionActualSummary: summaryByProjectId.get(item?.projectId) || null,
+      })),
+      errors: [...resultErrors, ...sheetSummary.errors],
+    };
     trace.emit('response', {
       outcome: 'ok',
       projectCount: projectIds.length,
-      itemCount: Array.isArray(result?.items) ? result.items.length : 0,
-      issueCount: Array.isArray(result?.errors) ? result.errors.length : 0,
+      itemCount: Array.isArray(combined.items) ? combined.items.length : 0,
+      issueCount: combined.errors.length,
     });
-    return result;
+    return combined;
   }
 
   app.post('/api/v1/cashflow/weekly-overview', asyncHandler(async (req, res) => {

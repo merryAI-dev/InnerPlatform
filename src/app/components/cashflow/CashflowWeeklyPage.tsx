@@ -141,10 +141,10 @@ function PeriodAmounts({
   if (loading) return <div className="mt-1 text-[9px] text-slate-400">금액 확인 중…</div>;
   const amounts = summary?.periods.find((item) => item.period === period);
   if (!amounts) return null;
+  if (amounts.differenceAmount === null) return <div className="mt-1 text-[9px] text-slate-400">시트값 없음</div>;
   return (
-    <div className="mt-1 space-y-0.5 text-[9px] leading-tight text-slate-500 tabular-nums">
-      <div>P {amounts.projectionAmount.toLocaleString('ko-KR')}원 · A {amounts.actualAmount.toLocaleString('ko-KR')}원</div>
-      <div className="font-semibold text-slate-700">P-A {amounts.projectionActualDifferenceAmount.toLocaleString('ko-KR')}원</div>
+    <div className="mt-1 text-[9px] leading-tight text-slate-500 tabular-nums">
+      <div className="font-semibold text-slate-700">P-A {amounts.differenceAmount.toLocaleString('ko-KR')}원</div>
     </div>
   );
 }

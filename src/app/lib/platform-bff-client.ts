@@ -1418,18 +1418,16 @@ export interface CashflowSettlementStatusesBatchResult {
 
 export interface CashflowProjectionActualSummary {
   projectId: string;
+  source: 'SHEET_FORMULA';
+  sourceRevision: string;
   fromMonth: string;
   comparisonAsOfWeek: { yearMonth: string; weekNo: number };
-  projectionAmount: number;
-  actualAmount: number;
-  projectionActualDifferenceAmount: number;
+  differenceAmount: number;
   settlementDifferenceAmount: number;
   settlementMatches: boolean;
   periods: Array<{
     period: CashflowSettlementPeriod;
-    projectionAmount: number;
-    actualAmount: number;
-    projectionActualDifferenceAmount: number;
+    differenceAmount: number | null;
   }>;
 }
 
@@ -3079,19 +3077,19 @@ export async function fetchCashflowProjectionActualSummariesViaBff(params: {
   const requestedIds = new Set(params.projectIds);
   const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
   const errorIds = Array.isArray(result?.errors) ? result.errors.map((error) => error?.projectId) : [];
-  if (typeof result?.version !== 'string'
+  if (result?.version !== '2'
     || !Array.isArray(result?.items)
     || result.items.length > params.projectIds.length
     || itemIds.some((projectId) => !requestedIds.has(projectId))
     || new Set(itemIds).size !== itemIds.length
-    || result.items.some((item) => !Number.isFinite(item?.projectionAmount)
-      || !Number.isFinite(item?.actualAmount)
-      || !Number.isFinite(item?.projectionActualDifferenceAmount)
+    || result.items.some((item) => item?.source !== 'SHEET_FORMULA'
+      || typeof item?.sourceRevision !== 'string'
+      || !Number.isFinite(item?.differenceAmount)
+      || !Number.isFinite(item?.settlementDifferenceAmount)
+      || typeof item?.settlementMatches !== 'boolean'
       || !Array.isArray(item?.periods)
       || item.periods.some((period) => !['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].includes(period?.period)
-        || !Number.isFinite(period?.projectionAmount)
-        || !Number.isFinite(period?.actualAmount)
-        || !Number.isFinite(period?.projectionActualDifferenceAmount)))
+        || (period?.differenceAmount !== null && !Number.isFinite(period?.differenceAmount))))
     || !Array.isArray(result?.errors)
     || result.errors.length > params.projectIds.length
     || result.errors.some((error) => error?.code !== 'SUMMARY_UNAVAILABLE' || !requestedIds.has(error?.projectId))
