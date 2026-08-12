@@ -1,6 +1,12 @@
 import type { ParticipationEntry } from './types';
-import type { ParticipationProject } from './participation-data';
 import type { HrAnnouncement, ProjectChangeAlert } from './hr-announcements-store';
+
+/** 알림에 이름을 붙이는 데 필요한 최소 정보. 실제 Project 를 그대로 넘길 수 있다. */
+export interface AlertProjectRef {
+  id: string;
+  name: string;
+  shortName?: string;
+}
 
 export function deriveAffectedProjectIds(
   employeeId: string,
@@ -15,7 +21,7 @@ export function deriveAffectedProjectIds(
 
 export function buildProjectAlerts(
   announcement: HrAnnouncement,
-  projects: ParticipationProject[],
+  projects: AlertProjectRef[],
   nowIso: string,
 ): ProjectChangeAlert[] {
   return announcement.affectedProjectIds.map((projectId, index) => {

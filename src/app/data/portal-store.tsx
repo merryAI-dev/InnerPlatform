@@ -54,7 +54,6 @@ import {
   type ChangeRequest,
   type ChangeRequestState,
 } from './personnel-change-data';
-import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import { SETTLEMENT_COLUMNS } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
@@ -711,7 +710,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
-  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
+  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
@@ -1198,7 +1197,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setLedgers(LEDGERS.filter((ledger) => scopedIds.includes(ledger.projectId)));
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
-      setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => scopedIds.includes(entry.projectId)));
+      setParticipationEntries([]);
       setTransactions(TRANSACTIONS.filter((tx) => scopedIds.includes(tx.projectId)));
       setComments([]);
       setEvidenceRequiredMap((prev) => prev || {});
@@ -1364,7 +1363,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         toast.error('인력 데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.');
       }
       ifActive(() => {
-        setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => entry.projectId === currentProjectId));
+        setParticipationEntries([]);
         partReady = true;
         markReady();
       });

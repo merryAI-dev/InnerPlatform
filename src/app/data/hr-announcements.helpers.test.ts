@@ -72,7 +72,7 @@ describe('hr-announcements helpers', () => {
 
     const alerts = buildProjectAlerts(
       announcement,
-      [{ id: 'p001', name: '프로젝트A', shortName: 'A', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '', phase: '계약완료', periodDesc: '' }],
+      [{ id: 'p001', name: '프로젝트A', shortName: 'A' }],
       '2026-01-01T00:00:00Z',
     );
 

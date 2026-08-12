@@ -24,7 +24,6 @@ import {
   AUDIT_LOGS,
   LEDGER_TEMPLATES,
 } from './mock-data';
-import { PARTICIPATION_ENTRIES } from './participation-data';
 import { buildPersonDirectory, type PersonDirectory } from '../platform/person-directory';
 import { mergeProjectMutationResult } from './project-store-mutation';
 import { resolveAppWriteStrategy } from './store-write-strategy';
@@ -171,7 +170,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [comments, setComments] = useState<Comment[]>(() => (usesLocalSeedData ? COMMENTS : []));
   const [evidences, setEvidences] = useState<Evidence[]>(() => (usesLocalSeedData ? EVIDENCES : []));
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => (usesLocalSeedData ? AUDIT_LOGS : []));
-  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(() => (usesLocalSeedData ? PARTICIPATION_ENTRIES : []));
+  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>([]);
   const [localMembers, setLocalMembers] = useState<Array<OrgMember & Record<string, unknown>>>(
     ORG_MEMBERS as Array<OrgMember & Record<string, unknown>>,
   );
@@ -293,7 +292,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setComments(usesLocalSeedData ? COMMENTS : []);
       setEvidences(usesLocalSeedData ? EVIDENCES : []);
       setAuditLogs(usesLocalSeedData ? AUDIT_LOGS : []);
-      setParticipationEntries(usesLocalSeedData ? PARTICIPATION_ENTRIES : []);
+      setParticipationEntries([]);
       setLocalMembers(usesLocalSeedData ? ORG_MEMBERS as Array<OrgMember & Record<string, unknown>> : []);
 
       if (platformApiEnabled && bffActor.idToken) {

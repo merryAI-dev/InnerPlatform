@@ -25,23 +25,10 @@ export interface ParticipationProject {
   periodDesc: string;                // e.g. "2월-11월, 10개월"
 }
 
-export const PART_PROJECTS: ParticipationProject[] = [
-  { id: 'eco26', name: '2026 에코스타트업', shortName: '에코스타트업', clientOrg: '기후에너지환경부/한국환경산업기술원', settlement: 'E_NARA_DOUM', settlementNote: 'e나라도움', phase: '계약전', periodDesc: '2월-11월, 10개월' },
-  { id: 'agri26', name: '2026 농식품AC', shortName: '농식품AC', clientOrg: '농림식품부/한국농업기술진흥원', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '3월-10월, 8개월' },
-  { id: 'art26', name: '2026 예술기업 지원 사업 AC', shortName: '예술기업AC', clientOrg: '문체부/예술경영지원센터', settlement: 'E_NARA_DOUM', settlementNote: 'e나라도움', phase: '계약전', periodDesc: '3월-11월' },
-  { id: 'lips', name: 'LIPS', shortName: 'LIPS', clientOrg: '중소벤처기업부/소상공인진흥원', settlement: 'E_NARA_DOUM', settlementNote: 'e나라도움', phase: '계약전', periodDesc: '1월-12월' },
-  { id: 'cts1', name: 'CTS 참여기업 역량강화 (2023~2026)', shortName: 'CTS(~26)', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '1월-5월' },
-  { id: 'yk_ibs', name: 'YK IBS 동남아 기후환경 ESG투자', shortName: 'YK IBS', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '연중' },
-  { id: 'jlin_ibs', name: 'JLIN IBS 혼합금융 동남아 임팩트', shortName: 'JLIN IBS', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '연중' },
-  { id: 'seed0', name: 'CTS Seed 0 ODA 혁신기술 액셀러레이팅', shortName: 'Seed 0', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '1월-12월' },
-  { id: 'ap_ibs', name: 'AP IBS 인도네시아·인도 임팩트 펀드', shortName: 'AP IBS', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '1월-12월' },
-  { id: 'cts2', name: 'CTS 참여기업 역량강화 (2025~2028)', shortName: 'CTS(25~28)', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료(변경진행중)', periodDesc: '1월-12월' },
-  { id: 'nepal', name: '네팔 귀환노동자 창업 역량강화', shortName: '네팔', clientOrg: 'KOICA', settlement: 'ACCOUNTANT', settlementNote: '회계사정산', phase: '계약완료', periodDesc: '1월-12월' },
-  { id: 'venture', name: '벤처리움', shortName: '벤처리움', clientOrg: '한국통신사연합회', settlement: 'PRIVATE', settlementNote: '민간사업', phase: '계약완료', periodDesc: '단기' },
-];
 
-// ── 직원 데이터 (본명 + 별명) ──
+// ── 멤버별 요약 통계 ──
 
+/** 인력 명부의 최소 형태. DB(orgs/{org}/persons)에서 온 값을 담는다. */
 export interface MyscEmployee {
   id: string;
   realName: string;
@@ -54,187 +41,6 @@ function eid(name: string) { return name; }
 function enick(_name: string) { return ''; }
 
 // ── 사업별 참여자 데이터 (스프레드시트 원본) ──
-
-interface RawAssignment {
-  realName: string;
-  rate: number;
-  period: string;  // e.g. "2~11월", "1~12월", "1월~5월"
-}
-
-const PROJECT_ASSIGNMENTS: Record<string, RawAssignment[]> = {
-  // ── 에코스타트업 (e나라도움) ──
-  eco26: [
-    { realName: '김정태', rate: 10, period: '2~11월' },
-    { realName: '김세은', rate: 70, period: '2~11월' },
-    { realName: '유자인', rate: 50, period: '2~11월' },
-    { realName: '나미소', rate: 50, period: '2~11월' },
-    { realName: '박정호', rate: 25, period: '2~11월' },
-    { realName: '이정선', rate: 65, period: '2~11월' },
-    { realName: '김영우', rate: 20, period: '2~11월' },
-    { realName: '송성미', rate: 100, period: '2~11월' },
-    { realName: '해민영', rate: 30, period: '2~11월' },
-    { realName: '하누리', rate: 100, period: '2~11월' },
-    { realName: '최유진', rate: 65, period: '2~11월' },
-    { realName: '서민종', rate: 50, period: '2~11월' },
-    { realName: '정지연', rate: 40, period: '2~11월' },
-    { realName: '강신혁', rate: 60, period: '2~11월' },
-    { realName: '임종수', rate: 10, period: '2~11월' },
-    { realName: '하송희', rate: 70, period: '2~11월' },
-    { realName: '현우정', rate: 70, period: '2~11월' },
-    { realName: '강현주', rate: 40, period: '2~11월' },
-    { realName: '변민욱', rate: 30, period: '2~11월' },
-    { realName: '강혜진', rate: 70, period: '2~11월' },
-    { realName: '정재우', rate: 50, period: '2~11월' },
-    { realName: '김혜린', rate: 60, period: '2~11월' },
-  ],
-
-  // ── 농식품AC (회계사정산) ──
-  agri26: [
-    { realName: '김정태', rate: 10, period: '3~10월' },
-    { realName: '이예지', rate: 10, period: '3~10월' },
-    { realName: '김세은', rate: 10, period: '3~10월' },
-    { realName: '유자인', rate: 10, period: '3~10월' },
-    { realName: '박정호', rate: 10, period: '3~10월' },
-    { realName: '김선미', rate: 30, period: '3~10월' },
-    { realName: '이정선', rate: 35, period: '3~10월' },
-    { realName: '김영우', rate: 30, period: '3~10월' },
-    { realName: '강신일', rate: 10, period: '3~10월' },
-    { realName: '이지현A', rate: 30, period: '3~10월' },
-    { realName: '하누리', rate: 20, period: '3~10월' },
-    { realName: '강신혁', rate: 30, period: '3~10월' },
-    { realName: '하송희', rate: 20, period: '3~10월' },
-    { realName: '김예빈', rate: 30, period: '3~10월' },
-    { realName: '김혜린', rate: 30, period: '3~10월' },
-  ],
-
-  // ── 예술기업 지원 사업 AC (e나라도움) ──
-  art26: [
-    { realName: '박정호', rate: 30, period: '3~11월' },
-    { realName: '김영우', rate: 20, period: '3~11월' },
-    { realName: '김다은', rate: 10, period: '3~11월' },
-    { realName: '윤지수', rate: 30, period: '3~11월' },
-    { realName: '백지연', rate: 20, period: '3~11월' },
-    { realName: '이승연', rate: 40, period: '3~11월' },
-    { realName: '최유진', rate: 100, period: '3~11월' },
-    { realName: '백민혁', rate: 20, period: '3~11월' },
-    { realName: '김혜린', rate: 20, period: '3~11월' },
-  ],
-
-  // ── LIPS (e나라도움) ──
-  lips: [
-    { realName: '변준재', rate: 5, period: '1~12월' },
-    { realName: '강신혁', rate: 100, period: '1~12월' },
-    { realName: '김준성', rate: 100, period: '1~12월' },
-    { realName: '이한선', rate: 5, period: '1~12월' },
-    { realName: '신예진', rate: 5, period: '1~12월' },
-  ],
-
-  // ── CTS (2023~2026) (KOICA 회계사정산) ──
-  cts1: [
-    { realName: '김정태', rate: 10, period: '1~5월' },
-    { realName: '박정호', rate: 15, period: '1~5월' },
-    { realName: '김원희', rate: 90, period: '1~5월' },
-    { realName: '고인효', rate: 30, period: '1~5월' },
-    { realName: '하윤지', rate: 20, period: '1~5월' },
-    { realName: '김영우', rate: 80, period: '1~5월' },
-    { realName: '김다은', rate: 20, period: '1~5월' },
-    { realName: '김현지', rate: 30, period: '1~5월' },
-    { realName: '민가람', rate: 50, period: '1~5월' },
-    { realName: '김혜령', rate: 20, period: '1~5월' },
-    { realName: '최지윤', rate: 80, period: '1~5월' },
-    { realName: '이준철', rate: 80, period: '1~5월' },
-    { realName: '임종수', rate: 90, period: '1~5월' },
-    { realName: '강민경', rate: 90, period: '1~5월' },
-  ],
-
-  // ── YK IBS ESG (KOICA 회계사정산) ──
-  yk_ibs: [
-    { realName: '김정태', rate: 30, period: '연중' },
-    { realName: '이예지', rate: 25, period: '연중' },
-    { realName: '박정호', rate: 30, period: '연중' },
-    { realName: '김선미', rate: 30, period: '연중' },
-    { realName: '고인효', rate: 20, period: '연중' },
-    { realName: '김다은', rate: 30, period: '연중' },
-    { realName: '윤지수', rate: 50, period: '연중' },
-    { realName: '김혜령', rate: 20, period: '연중' },
-  ],
-
-  // ── JLIN IBS 혼합금융 (KOICA 회계사정산) ──
-  jlin_ibs: [
-    { realName: '김정태', rate: 10, period: '연중' },
-    { realName: '이예지', rate: 20, period: '연중' },
-    { realName: '박정호', rate: 10, period: '연중' },
-    { realName: '고인효', rate: 35, period: '연중' },
-    { realName: '김다은', rate: 30, period: '연중' },
-    { realName: '김현지', rate: 40, period: '연중' },
-    { realName: '김민주B', rate: 80, period: '연중' },
-    { realName: '김혜령', rate: 40, period: '연중' },
-    { realName: '신예진', rate: 50, period: '연중' },
-    { realName: '고혜림', rate: 10, period: '연중' },
-  ],
-
-  // ── CTS Seed 0 (KOICA 회계사정산) ──
-  seed0: [
-    { realName: '김선미', rate: 70, period: '1~8월' },
-    { realName: '강신일', rate: 70, period: '1~10월' },
-    { realName: '이지현A', rate: 75, period: '1~10월' },
-    { realName: '최종옥', rate: 75, period: '1~10월' },
-    { realName: '김신영', rate: 70, period: '1~10월' },
-    { realName: '김준성', rate: 75, period: '1~10월' },
-    { realName: '변민욱', rate: 70, period: '1~8월' },
-    { realName: '박연주', rate: 55, period: '1~12월' },
-    { realName: '강혜진', rate: 20, period: '1~12월' },
-    { realName: '조아름', rate: 10, period: '1~12월' },
-  ],
-
-  // ── AP IBS (KOICA 회계사정산) ──
-  ap_ibs: [
-    { realName: '김정태', rate: 10, period: '1~12월' },
-    { realName: '박정호', rate: 20, period: '1~12월' },
-    { realName: '이정선', rate: 25, period: '1~12월' },
-    { realName: '윤지수', rate: 30, period: '1~12월' },
-    { realName: '최유진', rate: 35, period: '1~12월' },
-    { realName: '정지연', rate: 25, period: '1~12월' },
-    { realName: '이승연', rate: 35, period: '1~12월' },
-  ],
-
-  // ── CTS (2025~2028) (KOICA 회계사정산) ──
-  cts2: [
-    { realName: '김정태', rate: 20, period: '1~12월' },
-    { realName: '노성진', rate: 80, period: '1~12월' },
-    { realName: '김원희', rate: 80, period: '1월' },
-    { realName: '고인효', rate: 5, period: '6~12월' },
-    { realName: '김현지', rate: 30, period: '2~12월' },
-    { realName: '최지윤', rate: 20, period: '2~5월' },
-    { realName: '최지윤', rate: 80, period: '6~12월' },  // 기간별 변경
-    { realName: '이현송', rate: 80, period: '1~12월' },
-    { realName: '최상배', rate: 80, period: '1~12월' },
-    { realName: '임종수', rate: 90, period: '6~12월' },
-    { realName: '김예빈', rate: 80, period: '1~12월' },
-    { realName: '강민경', rate: 10, period: '2~5월' },
-    { realName: '강민경', rate: 15, period: '6~12월' },  // 기간별 변경
-    { realName: '양인영', rate: 90, period: '1~12월' },
-    { realName: '이시은', rate: 90, period: '1~12월' },
-  ],
-
-  // ── 네팔 귀환노동자 (KOICA 회계사정산) ──
-  nepal: [
-    { realName: '장은희', rate: 34, period: '1~12월' },
-    { realName: '변준재', rate: 20, period: '1~12월' },
-  ],
-
-  // ── 벤처리움 (민간사업) ──
-  venture: [
-    { realName: '강신일', rate: 10, period: '12월' },
-    { realName: '권혁준', rate: 50, period: '12월' },
-    { realName: '김민주', rate: 100, period: '12월' },
-    { realName: '전우철', rate: 100, period: '12월' },
-    { realName: '변준재', rate: 10, period: '4월' },
-    { realName: '김원희', rate: 5, period: '3월' },
-    { realName: '정지연', rate: 5, period: '3월' },
-    { realName: '이정선', rate: 10, period: '12월' },
-  ],
-};
 
 // ── 교차검증 규칙 ──
 
@@ -270,43 +76,6 @@ export function getCrossVerifyRisk(a: SettlementSystemCode, b: SettlementSystemC
     r => (r.systemA === a && r.systemB === b) || (r.systemA === b && r.systemB === a)
   ) || null;
 }
-
-// ── ParticipationEntry 생성 ──
-
-let entryCounter = 0;
-function makeEntries(): ParticipationEntry[] {
-  const entries: ParticipationEntry[] = [];
-
-  for (const proj of PART_PROJECTS) {
-    const assignments = PROJECT_ASSIGNMENTS[proj.id] || [];
-    for (const a of assignments) {
-      entryCounter++;
-      const empId = eid(a.realName);
-      const nick = enick(a.realName);
-      entries.push({
-        id: `pe${String(entryCounter).padStart(4, '0')}`,
-        memberId: empId,
-        memberName: nick ? `${a.realName}(${nick})` : a.realName,
-        projectId: proj.id,
-        projectName: proj.shortName,
-        rate: a.rate,
-        settlementSystem: proj.settlement,
-        clientOrg: proj.clientOrg,
-        periodStart: a.period,
-        periodEnd: '',
-        isDocumentOnly: false,
-        note: proj.settlementNote,
-        updatedAt: '2026-02-13T09:00:00Z',
-      });
-    }
-  }
-
-  return entries;
-}
-
-export const PARTICIPATION_ENTRIES: ParticipationEntry[] = makeEntries();
-
-// ── 멤버별 요약 통계 ──
 
 export interface MemberParticipationSummary {
   memberId: string;
@@ -592,12 +361,3 @@ export function computeCrossVerifyGroups(entries: ParticipationEntry[]): CrossVe
   return groups;
 }
 
-// ── 사업별 매핑 헬퍼 ──
-
-export const PROJECT_SETTLEMENT_MAP: Record<string, {
-  system: SettlementSystemCode;
-  clientOrg: string;
-  projectName: string;
-}> = Object.fromEntries(
-  PART_PROJECTS.map(p => [p.id, { system: p.settlement, clientOrg: p.clientOrg, projectName: p.shortName }])
-);

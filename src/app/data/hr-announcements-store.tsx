@@ -11,13 +11,14 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { PART_PROJECTS } from './participation-data';
 import type { ParticipationEntry } from './types';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
-import { buildProjectAlerts, deriveAffectedProjectIds } from './hr-announcements.helpers';
+import { buildProjectAlerts, deriveAffectedProjectIds,
+  type AlertProjectRef,
+} from './hr-announcements.helpers';
 import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 export type HrEventType = 'RESIGNATION' | 'LEAVE' | 'TRANSFER' | 'ROLE_CHANGE' | 'RETURN';
@@ -75,6 +76,7 @@ interface HrAnnouncementActions {
   createAnnouncement: (
     data: Omit<HrAnnouncement, 'id' | 'announcedAt' | 'affectedProjectIds' | 'resolved'>,
     participationEntries: ParticipationEntry[],
+    projects: AlertProjectRef[],
   ) => void;
   acknowledgeAlert: (alertId: string) => void;
   markAlertResolved: (alertId: string) => void;
@@ -90,115 +92,10 @@ if (!_g.__MYSC_HR_CTX__) {
 }
 const HrContext: React.Context<(HrAnnouncementState & HrAnnouncementActions) | null> = _g.__MYSC_HR_CTX__;
 
-const INITIAL_ANNOUNCEMENTS: HrAnnouncement[] = [
-  {
-    id: 'hra-001',
-    employeeId: 'e65',
-    employeeName: '변민욱',
-    employeeNickname: '보람',
-    eventType: 'RESIGNATION',
-    effectiveDate: '2026-06-30',
-    announcedAt: '2026-02-10T09:00:00Z',
-    announcedBy: '관리자',
-    description: '변민욱(보람) 6월 말 퇴사 예정. 참여 사업 인력변경 필요.',
-    affectedProjectIds: ['cts2', 'seed0', 'p001', 'p003'],
-    resolved: false,
-  },
-  {
-    id: 'hra-002',
-    employeeId: 'e11',
-    employeeName: '하윤지',
-    employeeNickname: '하모니',
-    eventType: 'TRANSFER',
-    effectiveDate: '2026-03-01',
-    announcedAt: '2026-02-05T14:00:00Z',
-    announcedBy: '관리자',
-    description: '하윤지(하모니) Seed 0 사업으로 전배. AP IBS 인력변경 필요.',
-    affectedProjectIds: ['ap_ibs', 'p002'],
-    resolved: false,
-  },
-];
-
-const INITIAL_ALERTS: ProjectChangeAlert[] = [
-  {
-    id: 'pca-001',
-    announcementId: 'hra-001',
-    projectId: 'cts2',
-    projectName: 'CTS 참여기업 역량강화 (2025~2028)',
-    employeeId: 'e65',
-    employeeName: '변민욱',
-    eventType: 'RESIGNATION',
-    effectiveDate: '2026-06-30',
-    acknowledged: false,
-    changeRequestCreated: false,
-    createdAt: '2026-02-10T09:00:00Z',
-  },
-  {
-    id: 'pca-002',
-    announcementId: 'hra-001',
-    projectId: 'seed0',
-    projectName: 'CTS Seed 0 ODA 혁신기술 액셀러레이팅',
-    employeeId: 'e65',
-    employeeName: '변민욱',
-    eventType: 'RESIGNATION',
-    effectiveDate: '2026-06-30',
-    acknowledged: false,
-    changeRequestCreated: false,
-    createdAt: '2026-02-10T09:00:00Z',
-  },
-  {
-    id: 'pca-004',
-    announcementId: 'hra-001',
-    projectId: 'p001',
-    projectName: 'KOICA 이노포트 2023',
-    employeeId: 'e65',
-    employeeName: '변민욱',
-    eventType: 'RESIGNATION',
-    effectiveDate: '2026-06-30',
-    acknowledged: false,
-    changeRequestCreated: false,
-    createdAt: '2026-02-10T09:00:00Z',
-  },
-  {
-    id: 'pca-005',
-    announcementId: 'hra-001',
-    projectId: 'p003',
-    projectName: 'CTS 참여기업 역량강화 2023',
-    employeeId: 'e65',
-    employeeName: '변민욱',
-    eventType: 'RESIGNATION',
-    effectiveDate: '2026-06-30',
-    acknowledged: false,
-    changeRequestCreated: false,
-    createdAt: '2026-02-10T09:00:00Z',
-  },
-  {
-    id: 'pca-003',
-    announcementId: 'hra-002',
-    projectId: 'ap_ibs',
-    projectName: 'AP IBS 인도네시아·인도 임팩트 펀드',
-    employeeId: 'e11',
-    employeeName: '하윤지',
-    eventType: 'TRANSFER',
-    effectiveDate: '2026-03-01',
-    acknowledged: false,
-    changeRequestCreated: false,
-    createdAt: '2026-02-05T14:00:00Z',
-  },
-  {
-    id: 'pca-006',
-    announcementId: 'hra-002',
-    projectId: 'p002',
-    projectName: 'IBS2 ESG 투자',
-    employeeId: 'e11',
-    employeeName: '하윤지',
-    eventType: 'TRANSFER',
-    effectiveDate: '2026-03-01',
-    acknowledged: false,
-    changeRequestCreated: false,
-    createdAt: '2026-02-05T14:00:00Z',
-  },
-];
+// 인사 공지는 서버에서만 온다. 예전에는 실존 인물의 가짜 퇴사·전배 공지가 기본값으로
+// 들어 있어서, 인증이 끝나기 전 화면에 없는 일이 사실처럼 떴다.
+const INITIAL_ANNOUNCEMENTS: HrAnnouncement[] = [];
+const INITIAL_ALERTS: ProjectChangeAlert[] = [];
 
 export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -276,6 +173,7 @@ export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
   const createAnnouncement = useCallback((
     data: Omit<HrAnnouncement, 'id' | 'announcedAt' | 'affectedProjectIds' | 'resolved'>,
     participationEntries: ParticipationEntry[],
+    projects: AlertProjectRef[],
   ) => {
     const now = new Date().toISOString();
     const annId = `hra-${Date.now()}`;
@@ -290,7 +188,7 @@ export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
       resolved: false,
     };
 
-    const newAlerts = buildProjectAlerts(announcement, PART_PROJECTS, now).map((alert, index) => ({
+    const newAlerts = buildProjectAlerts(announcement, projects, now).map((alert, index) => ({
       ...alert,
       id: `pca-${Date.now()}-${index}`,
     }));

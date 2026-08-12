@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-08-12] patch-note | strip-mock-employee-names | 참여율 목데이터와 가짜 인사 공지 제거
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md), [admin-participation](./pages/admin-participation.md)
+- summary: 프론트 번들에 직원 실명 75명이 실려 나가고 있었다. `PART_PROJECTS`/`PROJECT_ASSIGNMENTS`/`PARTICIPATION_ENTRIES` 목데이터는 목 프로젝트 id(`eco26` 등)를 쓰고 실제 프로젝트는 `p177…` 형태라 프로덕션에서 아무 역할도 하지 않으면서 이름만 싣고 있었다. 인력변경 알림은 이제 목 프로젝트가 아니라 실제 프로젝트를 받는다. 기본값으로 들어 있던 실존 인물의 가짜 퇴사·전배 공지도 제거했다. 번들 실명 75명 → 33명, 남은 33명은 KOICA·인력변경 화면이 실제로 쓰는 기능 데이터라 별도 슬라이스로 남긴다.
+
 ## [2026-08-12] patch-note | people-directory | 인력 명부를 DB로 이관하고 계약 이력 관리 추가
 - pages: [admin-people-directory](./pages/admin-people-directory.md), [admin-participation](./pages/admin-participation.md)
 - summary: 프론트 코드에 87명 배열로 박혀 있던 직원 명부를 제거하고, 재직자 현황 시트를 원본으로 하는 `orgs/{org}/persons` 를 런타임 근거로 삼는다. 저장되는 진실은 `employments` 배열 하나이고 근로형태·재직상태·퇴사일·근속은 읽을 때 파생시킨다. `/people` 화면에서 계약을 변경(적용일 직전에 기존 계약을 닫고 잇기)하거나 추가할 수 있고, 정규직에서 파트너로의 전환이 이 경로다. 기존 계약은 지우지 않는다. 프로젝트 팀원 드롭다운의 출처는 계정 원장(members)으로 그대로 두었고, 프로덕션 데이터로 드롭다운 79개 옵션과 참여율 그룹핑 80명이 변화 0건임을 확인했다.

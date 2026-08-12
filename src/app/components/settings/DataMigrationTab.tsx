@@ -116,8 +116,8 @@ const SECTION_META: Record<MigrationSection, {
       '특이사항',
     ],
     templateSample: [
-      '김정태',
-      '에이블',
+      '홍길동',
+      '길동',
       '2026 에코스타트업',
       '기후에너지환경부/한국환경산업기술원',
       '스템CIC',
