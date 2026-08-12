@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, FolderKanban, BarChart3,
   Building2, Shield, UserCog,
-  ListChecks, ArrowLeftRight, Hash,
+  ListChecks, ArrowLeftRight, Hash, Users,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -46,6 +46,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/users', icon: UserCog, label: '권한 관리' },
       { to: '/settings?tab=members', icon: UserCog, label: '멤버DB' },
+      { to: '/people', icon: Users, label: '인력 명부' },
       { to: '/settings?tab=tenants', icon: Building2, label: '조직DB' },
     ],
   },

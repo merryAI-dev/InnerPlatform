@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { ORG_COLLECTIONS, getOrgCollectionPath } from './firebase';
 
-import { EMPLOYEES, PART_PROJECTS, PARTICIPATION_ENTRIES } from '../data/participation-data';
+import { PART_PROJECTS, PARTICIPATION_ENTRIES } from '../data/participation-data';
 import { KOICA_PROJECTS } from '../data/koica-data';
 import {
   ORG_MEMBERS,
@@ -50,10 +50,6 @@ async function batchWrite<T extends Record<string, any>>(
   }
 
   return written;
-}
-
-export async function seedEmployees(db: Firestore, orgId: string): Promise<number> {
-  return batchWrite(db, getOrgCollectionPath(orgId, 'employees'), EMPLOYEES, (e) => e.id, orgId);
 }
 
 export async function seedPartProjects(db: Firestore, orgId: string): Promise<number> {
@@ -144,7 +140,8 @@ export async function seedAll(
 ): Promise<{ success: boolean; totalDocs: number; error?: string }> {
   let totalDocs = 0;
   const steps = [
-    { name: '직원 데이터', fn: () => seedEmployees(db, orgId) },
+    // 직원 명부는 더 이상 코드에서 시드하지 않는다. 원본은 재직자 현황 시트이고,
+    // 그걸 읽어 orgs/{org}/persons 로 넣는다.
     { name: '참여율 사업 정의', fn: () => seedPartProjects(db, orgId) },
     { name: '참여율 배정 데이터', fn: () => seedPartEntries(db, orgId) },
     { name: 'KOICA 프로젝트 & 인력', fn: () => seedKoicaProjects(db, orgId) },

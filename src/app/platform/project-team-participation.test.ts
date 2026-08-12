@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { ParticipationEntry, Project } from '../data/types';
+import { buildPersonDirectory } from './person-directory';
 import {
   buildAllProjectTeamParticipationEntries,
   buildProjectTeamParticipationEntries,
   resolveProjectTeamSettlementSystem,
 } from './project-team-participation';
+
+// 동일인 판정의 근거는 이제 DB 인력 명부다. 예전 하드코딩 명단(e65/e82)을 대신한다.
+const directory = buildPersonDirectory([
+  { personId: 'psn-mwbyun1220', name: '변민욱', nickname: '보람' },
+  { personId: 'psn-jylee', name: '이지영', nickname: '이지' },
+]);
 
 const project: Project = {
   id: 'p-1',
@@ -68,11 +75,11 @@ function makeEntry(overrides: Partial<ParticipationEntry> = {}): ParticipationEn
 
 describe('project-team-participation', () => {
   it('adds project team members as display participation entries when no formal entries exist', () => {
-    const entries = buildProjectTeamParticipationEntries(project, []);
+    const entries = buildProjectTeamParticipationEntries(project, [], directory);
 
     expect(entries).toHaveLength(2);
     expect(entries[0]).toMatchObject({
-      memberId: 'e65',
+      memberId: 'psn-mwbyun1220',
       memberName: '변민욱 (보람)',
       rate: 80,
       source: 'PROJECT_TEAM_SYNC',
@@ -123,10 +130,27 @@ describe('project-team-participation', () => {
     expect(resolveProjectTeamSettlementSystem(project)).toBe('NONE');
   });
 
-  it('uses the canonical employee id for project-team rows when possible', () => {
+  it('명부에서 찾은 personId 로 배정을 묶는다', () => {
+    const entries = buildProjectTeamParticipationEntries(project, [], directory);
+
+    expect(entries.map((entry) => entry.memberId)).toEqual(['psn-mwbyun1220', 'psn-jylee']);
+  });
+
+  it('명부를 못 받아도 항목은 만들어진다 — 이름 기반 대체 키로 떨어질 뿐 화면이 막히지 않는다', () => {
     const entries = buildProjectTeamParticipationEntries(project, []);
 
-    expect(entries.map((entry) => entry.memberId)).toEqual(['e65', 'e82']);
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.memberId.startsWith('project-team:'))).toBe(true);
+  });
+
+  it('명부에 없는 사람은 대체 키를 쓰되, 사업이 달라도 같은 키라 한 사람으로 묶인다', () => {
+    const only변민욱 = buildPersonDirectory([{ personId: 'psn-mwbyun1220', name: '변민욱', nickname: '보람' }]);
+    const first = buildProjectTeamParticipationEntries(project, [], only변민욱);
+    const second = buildProjectTeamParticipationEntries({ ...project, id: 'p-2' }, [], only변민욱);
+
+    const 이지영 = (list: typeof first) => list.find((entry) => entry.memberName.startsWith('이지영'));
+    expect(이지영(first)?.memberId).toBe('project-team:이지영이지');
+    expect(이지영(second)?.memberId).toBe(이지영(first)?.memberId);
   });
 
   it('can build admin-wide display entries from formal rows plus current project teams', () => {

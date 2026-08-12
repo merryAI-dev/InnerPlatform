@@ -501,15 +501,15 @@ function CrossVerificationInfo({ projects }: { projects: ProjectParticipationVie
 // ── Main Page ──
 
 export function ParticipationPage() {
-  const { participationEntries, projects, members } = useAppStore();
+  const { participationEntries, projects, members, personDirectory } = useAppStore();
   const [searchText, setSearchText] = useState('');
   const [selectedMember, setSelectedMember] = useState<MemberParticipationSummary | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [riskFilter, setRiskFilter] = useState<'ALL' | 'DANGER' | 'WARNING' | 'SAFE'>('ALL');
 
   const displayParticipationEntries = useMemo(
-    () => buildAllProjectTeamParticipationEntries(projects, participationEntries),
-    [participationEntries, projects]
+    () => buildAllProjectTeamParticipationEntries(projects, participationEntries, personDirectory),
+    [participationEntries, projects, personDirectory]
   );
 
   const formalParticipationEntries = useMemo(

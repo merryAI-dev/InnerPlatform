@@ -2211,6 +2211,113 @@ export async function deepSyncAuthGovernanceUserViaBff(params: {
   return response.data;
 }
 
+// ── 인력 명부 (persons) ──
+// 명부는 BFF 를 통해서만 읽고 쓴다. 화면이 Firestore 를 직접 만지면 감사 기록이 남지 않고,
+// 명부는 참여율·정산 서류의 근거라 누가 언제 계약을 바꿨는지가 반드시 남아야 한다.
+
+export async function fetchPersonsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<{ items: PersonRecord[]; total: number }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<{ items: PersonRecord[]; total: number }>(
+    '/api/v1/persons',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 10000,
+    },
+  );
+  return response.data;
+}
+
+export async function changePersonEmploymentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  personId: string;
+  mode: 'change' | 'add';
+  type: string;
+  state: string;
+  effectiveFrom: string;
+  endDate?: string | null;
+  note?: string;
+  client?: PlatformApiClientLike;
+}): Promise<{ personId: string; employments: PersonEmploymentRecord[]; updatedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{ personId: string; employments: PersonEmploymentRecord[]; updatedAt: string }>(
+    `/api/v1/persons/${encodeURIComponent(params.personId)}/employments`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        mode: params.mode,
+        type: params.type,
+        state: params.state,
+        effectiveFrom: params.effectiveFrom,
+        ...(params.endDate ? { endDate: params.endDate } : {}),
+        ...(params.note ? { note: params.note } : {}),
+      },
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export async function createPersonViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  person: {
+    name: string;
+    nickname?: string;
+    email?: string;
+    departmentTop?: string;
+    title?: string;
+    grade?: string;
+    note?: string;
+    employment: { type: string; state: string; effectiveFrom: string; endDate?: string | null; note?: string };
+  };
+  client?: PlatformApiClientLike;
+}): Promise<{ person: PersonRecord }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{ person: PersonRecord }>(
+    '/api/v1/persons',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.person,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export interface PersonEmploymentRecord {
+  id: string;
+  type: string;
+  state: string;
+  startDate: string;
+  endDate: string | null;
+  note: string;
+}
+
+export interface PersonRecord {
+  personId: string;
+  name: string;
+  nickname: string;
+  email: string;
+  departmentTop: string;
+  departmentMid: string;
+  departmentSub: string;
+  title: string;
+  grade: string;
+  workLocation: string;
+  joinedAt: string | null;
+  employments: PersonEmploymentRecord[];
+  uid: string | null;
+  note?: string;
+}
+
 export async function provisionProjectEvidenceDriveRootViaBff(params: {
   tenantId: string;
   actor: ActorLike;

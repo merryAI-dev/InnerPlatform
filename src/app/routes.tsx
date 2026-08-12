@@ -62,6 +62,7 @@ const EvidenceQueuePage = lazyRoute(() => import('./components/evidence/Evidence
 const AuditLogPage = lazyRoute(() => import('./components/audit/AuditLogPage'), 'AuditLogPage');
 const SettingsPage = lazyRoute(() => import('./components/settings/SettingsPage'), 'SettingsPage');
 const ParticipationPage = lazyRoute(() => import('./components/participation/ParticipationPage'), 'ParticipationPage');
+const PeopleDirectoryPage = lazyRoute(() => import('./components/people/PeopleDirectoryPage'), 'PeopleDirectoryPage');
 const KoicaPersonnelPage = lazyRoute(() => import('./components/koica/KoicaPersonnelPage'), 'KoicaPersonnelPage');
 const PersonnelChangePage = lazyRoute(() => import('./components/koica/PersonnelChangePage'), 'PersonnelChangePage');
 const BudgetSummaryPage = lazyRoute(() => import('./components/budget/BudgetSummaryPage'), 'BudgetSummaryPage');
@@ -160,6 +161,7 @@ export const router = createBrowserRouter([
       { path: 'cashflow/projects/:projectId', element: <S C={ProjectCashflowSheetPage} /> },
       { path: 'evidence', element: <S C={EvidenceQueuePage} /> },
       { path: 'participation', element: <S C={ParticipationPage} /> },
+      { path: 'people', element: <S C={PeopleDirectoryPage} /> },
       { path: 'koica-personnel', element: <S C={KoicaPersonnelPage} /> },
       { path: 'personnel-changes', element: <S C={PersonnelChangePage} /> },
       { path: 'budget-summary', element: <S C={BudgetSummaryPage} /> },

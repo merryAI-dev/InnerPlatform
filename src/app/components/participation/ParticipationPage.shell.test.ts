@@ -6,7 +6,7 @@ const source = readFileSync(resolve(import.meta.dirname, 'ParticipationPage.tsx'
 
 describe('ParticipationPage shell contract', () => {
   it('uses the current project-team rollup helper for every admin participation view', () => {
-    expect(source).toContain('buildAllProjectTeamParticipationEntries(projects, participationEntries)');
+    expect(source).toContain('buildAllProjectTeamParticipationEntries(projects, participationEntries, personDirectory)');
     expect(source).toContain('displayParticipationEntries');
     expect(source).toContain('formalParticipationEntries');
     expect(source).toContain('buildParticipationRiskReport(formalParticipationEntries)');

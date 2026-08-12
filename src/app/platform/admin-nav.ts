@@ -61,6 +61,7 @@ function canonicalizeAdminPath(pathname: string): string | undefined {
     '/settings',
     '/claude-sdk-help',
     '/participation',
+    '/people',
     '/koica-personnel',
     '/personnel-changes',
     '/hr-announcements',
