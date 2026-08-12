@@ -29,7 +29,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/projects', icon: FolderKanban, label: '통합 관리' },
       { to: '/projects/migration-audit', icon: ArrowLeftRight, label: '프로젝트 등록/승인' },
-      { to: '/cashflow', icon: BarChart3, label: '주간 입력 이력' },
+      { to: '/cashflow', icon: BarChart3, label: '현금흐름 승인' },
       { to: '/participation', icon: Shield, label: '참여율 대시보드' },
     ],
   },
