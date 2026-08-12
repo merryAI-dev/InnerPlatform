@@ -10,7 +10,6 @@ import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
-import { computeMemberSummaries } from '../../data/participation-data';
 import { useOptionalCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
@@ -30,7 +29,7 @@ interface NotifItem {
 
 export function NotificationPanel() {
   const navigate = useNavigate();
-  const { transactions, projects, participationEntries } = useAppStore();
+  const { transactions, projects } = useAppStore();
   const cashflowWeeks = useOptionalCashflowWeeks()?.weeks ?? [];
   const [open, setOpen] = useState(false);
   const [labEnabled] = useShellLabEnabled();
@@ -73,23 +72,6 @@ export function NotificationPanel() {
         timestamp: t.dateTime,
         link: '/evidence',
         policyRoute: '/evidence',
-        read: false,
-      });
-    });
-
-    // Participation risks
-    const summaries = computeMemberSummaries(participationEntries);
-    const dangers = summaries.filter(m => m.riskLevel === 'DANGER');
-    dangers.forEach(m => {
-      items.push({
-        id: `risk-${m.memberId}`,
-        type: 'risk',
-        severity: 'critical',
-        title: '참여율 초과 위험',
-        description: `${m.realName}(${m.nickname}) — 전체 ${m.totalRate}%`,
-        timestamp: new Date().toISOString(),
-        link: '/participation',
-        policyRoute: '/participation',
         read: false,
       });
     });
@@ -186,7 +168,7 @@ export function NotificationPanel() {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
       return severityOrder[a.severity] - severityOrder[b.severity];
     });
-  }, [transactions, projects, participationEntries, cashflowWeeks, today, dayOfWeek]);
+  }, [transactions, projects, cashflowWeeks, today, dayOfWeek]);
 
   const typeIcons = {
     approval: Clock,

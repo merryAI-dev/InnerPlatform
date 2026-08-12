@@ -18,7 +18,6 @@ describe('admin monitoring helper', () => {
       payrollMissingCandidateCount: 2,
       payrollReviewPendingCount: 4,
       payrollFinalUnconfirmedCount: 1,
-      participationRiskCount: 4,
       missingPmCount: 6,
       cashflowVarianceCount: 0,
       staleProjectCount: 0,
@@ -33,7 +32,6 @@ describe('admin monitoring helper', () => {
       'payroll_pm_amount_missing',
       'payroll_pm_shortfall',
       'payroll_missing_candidate',
-      'participation_risk',
       'data_source',
       'payroll_review_pending',
       'missing_pm',
@@ -95,20 +93,17 @@ describe('admin monitoring helper', () => {
       payrollMissingCandidateCount: 0,
       payrollReviewPendingCount: 0,
       payrollFinalUnconfirmedCount: 0,
-      participationRiskCount: 4,
       missingPmCount: 2,
       cashflowVarianceCount: 3,
       staleProjectCount: 1,
     });
 
     expect(issues.map((issue) => issue.key)).toEqual([
-      'participation_risk',
       'cashflow_variance',
       'missing_pm',
       'stale_projects',
     ]);
     expect(issues.map((issue) => issue.to)).toEqual([
-      '/participation',
       '/cashflow/analytics',
       '/cashflow/weekly',
       '/projects',

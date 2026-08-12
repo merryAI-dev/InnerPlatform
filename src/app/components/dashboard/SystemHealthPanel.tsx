@@ -7,7 +7,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { useAppStore } from '../../data/store';
-import { computeMemberSummaries } from '../../data/participation-data';
 import { compareSafeLocaleDesc, toSafeString } from './dashboard-rollups';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
@@ -23,7 +22,7 @@ interface HealthMetric {
 }
 
 export function SystemHealthPanel() {
-  const { projects, transactions, ledgers, participationEntries, dataSource } = useAppStore();
+  const { projects, transactions, ledgers, dataSource } = useAppStore();
   const navigate = useNavigate();
   const [labEnabled] = useShellLabEnabled();
 
@@ -38,10 +37,6 @@ export function SystemHealthPanel() {
 
     const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
     const rejectedCount = transactions.filter(t => t.state === 'REJECTED').length;
-
-    const summaries = computeMemberSummaries(participationEntries);
-    const dangerCount = summaries.filter(m => m.riskLevel === 'DANGER').length;
-    const warningCount = summaries.filter(m => m.riskLevel === 'WARNING').length;
 
     return [
       {
@@ -83,15 +78,6 @@ export function SystemHealthPanel() {
         to: '/approvals',
       },
       {
-        id: 'participation-risk',
-        label: '참여율 위험',
-        icon: AlertTriangle,
-        status: dangerCount === 0 ? (warningCount === 0 ? 'healthy' : 'warning') : 'critical',
-        value: dangerCount > 0 ? `${dangerCount}명 위험` : warningCount > 0 ? `${warningCount}명 주의` : '정상',
-        detail: dangerCount > 0 ? `${dangerCount}명 100% 초과` : '위험 인원 없음',
-        to: '/participation',
-      },
-      {
         id: 'rejected-tx',
         label: '반려 거래',
         icon: XCircle,
@@ -101,7 +87,7 @@ export function SystemHealthPanel() {
         to: '/audit',
       },
     ];
-  }, [projects, transactions, ledgers, participationEntries, dataSource]);
+  }, [projects, transactions, ledgers, dataSource]);
 
   const visibleMetrics = useMemo(
     () => metrics.filter((metric) => shouldShowShellRoute(metric.to, 'admin', 'welcome', { labEnabled })),

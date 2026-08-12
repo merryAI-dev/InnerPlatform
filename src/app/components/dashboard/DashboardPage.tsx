@@ -13,7 +13,6 @@ import { Button } from '../ui/button';
 import { PageHeader } from '../layout/PageHeader';
 import { SystemHealthPanel, ActivityFeed } from './SystemHealthPanel';
 import { AdminMonitoringQueue } from './AdminMonitoringQueue';
-import { computeMemberSummaries } from '../../data/participation-data';
 import { useAppStore } from '../../data/store';
 import { useHrAnnouncements } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -71,7 +70,7 @@ function MonitoringToolCard(props: {
 }
 
 export function DashboardPage() {
-  const { projects, transactions, participationEntries, dataSource } = useAppStore();
+  const { projects, transactions, dataSource } = useAppStore();
   const { announcements } = useHrAnnouncements();
   const { runs } = usePayroll();
   const { weeks: cashflowWeeks } = useCashflowWeeks();
@@ -85,11 +84,6 @@ export function DashboardPage() {
     () => announcements.filter((announcement) => !announcement.resolved).length,
     [announcements],
   );
-
-  const participationRiskCount = useMemo(() => {
-    const summaries = computeMemberSummaries(participationEntries);
-    return summaries.filter((member) => member.riskLevel === 'DANGER').length;
-  }, [participationEntries]);
 
   const missingEvidenceCount = useMemo(
     () => transactions.filter((tx) => tx.evidenceStatus !== 'COMPLETE' && tx.state !== 'REJECTED').length,
@@ -233,7 +227,6 @@ export function DashboardPage() {
     payrollReviewPendingCount,
     payrollMissingCandidateCount,
     payrollFinalUnconfirmedCount,
-    participationRiskCount,
     pendingApprovalCount,
     rejectedTransactionCount,
     hrAlertCount: unresolvedHrCount,
@@ -245,7 +238,6 @@ export function DashboardPage() {
     dataSource,
     missingEvidenceCount,
     missingPmCount,
-    participationRiskCount,
     payrollAmountMismatchCount,
     payrollPmAmountMissingCount,
     payrollPmShortfallCount,
