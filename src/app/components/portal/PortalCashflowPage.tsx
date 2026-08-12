@@ -8,6 +8,7 @@ import {
 export function PortalCashflowPage() {
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const {
+    activeProjectId,
     members,
     portalUser,
     projects,
@@ -15,7 +16,8 @@ export function PortalCashflowPage() {
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
 
-  const projectId = resolvePortalProjectResourceId(routeProjectId);
+  // `/portal/cashflow` is the session-entry URL; an explicit route ID always wins.
+  const projectId = resolvePortalProjectResourceId(routeProjectId, activeProjectId);
   const project = projects.find((candidate) => candidate.id === projectId);
 
   if (!projectId) {
