@@ -35,6 +35,9 @@ describe('participation dashboard', () => {
     expect(filtered.members[0].projectCount).toBe(2);
     expect(filtered.members[0].months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
     expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'm-1', memberName: '보람', yearMonth: '2026-03', rate: 120 }]));
+    expect(selectParticipationDashboardYear(snapshot).selectedYear).toBe('2026');
+    expect(snapshot.availableYears).toContain('2026');
+    expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용' }]));
   });
 });
 
