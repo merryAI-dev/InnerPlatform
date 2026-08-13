@@ -43,6 +43,7 @@ export interface ParticipationDashboardMember {
   memberId: string;
   memberName: string;
   projectLabel: string;
+  projectCount: number;
   months: Array<{ yearMonth: string; label: string; rate: number; isWarning: boolean }>;
   warnings: Array<{ yearMonth: string; rate: number }>;
 }

@@ -32,6 +32,7 @@ describe('participation dashboard', () => {
     expect(filtered.selectedRule).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg] });
     expect(filtered.userRuleOptions).toEqual([{ id: 'participation-rule-agri', alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg], settlementSystems: [project.settlementSystem, secondProject.settlementSystem] }]);
     expect(filtered.members[0].projectLabel).toBe('agri-2026 · hongsi-2026');
+    expect(filtered.members[0].projectCount).toBe(2);
     expect(filtered.members[0].months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
     expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'm-1', memberName: '보람', yearMonth: '2026-03', rate: 120 }]));
   });

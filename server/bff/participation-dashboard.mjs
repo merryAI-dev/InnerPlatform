@@ -69,14 +69,16 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     if (!project) continue;
     for (const bucket of buckets.values()) {
       if (!matchesRule(project, bucket)) continue;
-      const memberId = readOptionalText(entry?.memberId) || `unresolved:${readOptionalText(entry?.id)}`;
+      const memberId = readOptionalText(entry?.memberId) || `name:${displayMemberName(entry)}`;
       const row = bucket.rows.get(memberId) || {
         memberId,
         memberName: displayMemberName(entry),
         projectNames: new Set(),
+        projectIds: new Set(),
         values: new Map(),
       };
       row.projectNames.add(readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId);
+      row.projectIds.add(projectId);
       for (const year of yearsForEntry(entry)) {
         for (const yearMonth of monthsForYear(year)) {
           row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + valueForMonth(entry, yearMonth));
@@ -97,6 +99,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         memberId: row.memberId,
         memberName: row.memberName,
         projectNames: [...row.projectNames].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko')),
+        projectCount: row.projectIds.size,
         monthlyRates,
       };
     }).sort((left, right) => left.memberName.localeCompare(right.memberName, 'ko'));
@@ -172,7 +175,14 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
       return { yearMonth, label: `${Number(yearMonth.slice(5, 7))}월`, rate, isWarning: rate > 100 };
     });
     const warnings = monthsWithStatus.filter((month) => month.isWarning).map(({ yearMonth, rate }) => ({ yearMonth, rate }));
-    return { memberId: member.memberId, memberName: member.memberName, projectLabel: (member.projectNames || []).join(' · '), months: monthsWithStatus, warnings };
+    return {
+      memberId: member.memberId,
+      memberName: member.memberName,
+      projectLabel: (member.projectNames || []).join(' · '),
+      projectCount: Number(member.projectCount) || 0,
+      months: monthsWithStatus,
+      warnings,
+    };
   });
   const warnings = members.flatMap((member) => member.warnings.map((warning) => ({ ...warning, memberId: member.memberId, memberName: member.memberName })));
   return {
