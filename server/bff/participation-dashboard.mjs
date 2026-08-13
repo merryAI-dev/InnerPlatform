@@ -47,8 +47,10 @@ function matchesRule(project, rule) {
     && (!settlementSystems.length || settlementSystems.includes(readOptionalText(project.settlementSystem) || 'NONE'));
 }
 
-export function buildParticipationDashboardSnapshot({ projects = [], entries = [], rules: savedRules = [], generatedAt = '' } = {}) {
+export function buildParticipationDashboardSnapshot({ projects = [], entries = [], people = [], rules: savedRules = [], generatedAt = '' } = {}) {
   const projectById = new Map(projects.map((project) => [readOptionalText(project?.id), project]));
+  const peopleById = new Map(people.map((person) => [readOptionalText(person?.personId) || readOptionalText(person?.id), person]));
+  let unlinkedEntryCount = 0;
   const rules = savedRules
     .filter((rule) => readOptionalText(rule?.kind) === 'USER_DEFINED' && readOptionalText(rule?.id) && readOptionalText(rule?.alias)
       && (Array.isArray(rule?.clientOrgs) || Array.isArray(rule?.settlementSystems)))
@@ -67,12 +69,18 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     const projectId = readOptionalText(entry?.projectId);
     const project = projectById.get(projectId);
     if (!project) continue;
+    const personId = readOptionalText(entry?.personId);
+    const person = peopleById.get(personId);
+    if (!person) {
+      unlinkedEntryCount += 1;
+      continue;
+    }
     for (const bucket of buckets.values()) {
       if (!matchesRule(project, bucket)) continue;
-      const memberId = readOptionalText(entry?.memberId) || `name:${displayMemberName(entry)}`;
-      const row = bucket.rows.get(memberId) || {
-        memberId,
-        memberName: displayMemberName(entry),
+      const row = bucket.rows.get(personId) || {
+        memberId: personId,
+        memberName: readOptionalText(person?.name) || personId,
+        joinedAt: readOptionalText(person?.joinedAt),
         projectNames: new Set(),
         projectIds: new Set(),
         values: new Map(),
@@ -84,7 +92,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
           row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + valueForMonth(entry, yearMonth));
         }
       }
-      bucket.rows.set(memberId, row);
+      bucket.rows.set(personId, row);
     }
   }
 
@@ -98,11 +106,15 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
       return {
         memberId: row.memberId,
         memberName: row.memberName,
+        joinedAt: row.joinedAt,
         projectNames: [...row.projectNames].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko')),
         projectCount: row.projectIds.size,
         monthlyRates,
       };
-    }).sort((left, right) => left.memberName.localeCompare(right.memberName, 'ko'));
+    }).sort((left, right) => (
+      (left.joinedAt || '9999-12-31').localeCompare(right.joinedAt || '9999-12-31')
+      || left.memberName.localeCompare(right.memberName, 'ko')
+    ));
     return {
       id: rule.id,
       alias: rule.alias,
@@ -122,6 +134,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
       settlementSystems: [...new Set(['NONE', ...projects.map((project) => readOptionalText(project?.settlementSystem) || 'NONE')])]
         .sort().map((value) => ({ value, label: SETTLEMENT_SYSTEM_LABELS[value] || value })),
     },
+    unlinkedEntryCount,
   };
 }
 
@@ -199,5 +212,6 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
     warningCount: warnings.length,
     hasWarnings: warnings.length > 0,
     filterOptions: snapshot.filterOptions || { clientOrgs: [], settlementSystems: [] },
+    unlinkedEntryCount: Number(snapshot.unlinkedEntryCount) || 0,
   };
 }

@@ -2251,11 +2251,13 @@ function normalizeProjectTeamMembersDetailed(value) {
   return (Array.isArray(value) ? value : [])
     .map((member) => {
       const normalized = {
+        personId: readOptionalText(member?.personId),
         memberName: readOptionalText(member?.memberName),
         memberNickname: readOptionalText(member?.memberNickname),
         role: readOptionalText(member?.role),
         participationRate: normalizeParticipationRate(member?.participationRate),
       };
+      if (!normalized.personId) delete normalized.personId;
       if (typeof member?.isDocumentOnly === 'boolean') normalized.isDocumentOnly = member.isDocumentOnly;
       const laborAllocationStartMonth = normalizeMonth(member?.laborAllocationStartMonth);
       const laborAllocationEndMonth = normalizeMonth(member?.laborAllocationEndMonth);
@@ -2381,34 +2383,22 @@ export async function syncProjectParticipationEntries({
   const existingSnap = await partEntriesRef.where('projectId', '==', project.id).get();
   const existingSyncEntries = existingSnap.docs.filter((doc) => doc.data()?.source === 'PROJECT_TEAM_SYNC');
 
-  const memberSnap = await db.collection(`orgs/${tenantId}/members`).get();
-  const members = memberSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
-  const memberByIdentity = new Map();
-  for (const member of members) {
-    for (const key of [
-      readOptionalText(member?.nickname),
-      readOptionalText(member?.name),
-    ]) {
-      if (!key) continue;
-      memberByIdentity.set(key.toLowerCase(), member);
-    }
-  }
-
   const desiredEntries = new Map();
+  const legacySyncKeys = new Set();
   for (const member of teamMembers) {
-    if (!member.role || (!member.memberName && !member.memberNickname)) continue;
-    const matchedMember = resolveProjectTeamMemberLookupKeys(member)
-      .map((lookupKey) => memberByIdentity.get(lookupKey))
-      .find(Boolean);
-    const memberId = readOptionalText(matchedMember?.uid || matchedMember?.id)
-      || `project-team:${buildProjectTeamMemberSyncKey(member)}`;
-    const displayName = readOptionalText(matchedMember?.name) || member.memberNickname || member.memberName;
+    const personId = readOptionalText(member?.personId);
+    if (!member.role) continue;
     const key = buildProjectTeamMemberSyncKey(member);
+    // Keep pre-People rows intact until the one-time identity migration assigns personId.
+    // Deleting them during an unrelated project edit would lose the only historical record.
+    if (!personId) {
+      legacySyncKeys.add(key);
+      continue;
+    }
     const entryId = `pte-${project.id}-${key}`;
     desiredEntries.set(entryId, {
       id: entryId,
-      memberId,
-      memberName: displayName,
+      personId,
       projectId: project.id,
       projectName: project.name,
       projectShortName: readOptionalText(project.shortName) || undefined,
@@ -2434,6 +2424,7 @@ export async function syncProjectParticipationEntries({
   }
   for (const doc of existingSyncEntries) {
     if (desiredEntries.has(doc.id)) continue;
+    if (legacySyncKeys.has(readOptionalText(doc.data()?.projectTeamMemberKey))) continue;
     batch.delete(doc.ref);
   }
   await batch.commit();

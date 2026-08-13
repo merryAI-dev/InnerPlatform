@@ -17,11 +17,17 @@ describe('participation dashboard', () => {
   it('uses client-org and settlement-system conditions to return server-calculated 12-month warning rows', () => {
     const snapshot = buildParticipationDashboardSnapshot({
       projects: [project, secondProject],
+      people: [
+        { personId: 'psn-boram', name: '변민욱A', joinedAt: '2020-01-01' },
+        { personId: 'psn-new', name: '가나다', joinedAt: '2025-01-01' },
+      ],
       rules: [{ id: 'participation-rule-agri', kind: 'USER_DEFINED', alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg], settlementSystems: [project.settlementSystem, secondProject.settlementSystem] }],
       entries: [
-        { id: 'a', projectId: project.id, memberId: 'm-1', memberName: '보람', rate: 60, periodStart: '2026-01', periodEnd: '2026-12' },
-        { id: 'b', projectId: project.id, memberId: 'm-1', memberName: '보람', rate: 50, periodStart: '2026-03', periodEnd: '2026-04' },
-        { id: 'c', projectId: secondProject.id, memberId: 'm-1', memberName: '보람', rate: 10, periodStart: '2026-03', periodEnd: '2026-03' },
+        { id: 'a', projectId: project.id, personId: 'psn-boram', rate: 60, periodStart: '2026-01', periodEnd: '2026-12' },
+        { id: 'b', projectId: project.id, personId: 'psn-boram', rate: 50, periodStart: '2026-03', periodEnd: '2026-04' },
+        { id: 'c', projectId: secondProject.id, personId: 'psn-boram', rate: 10, periodStart: '2026-03', periodEnd: '2026-03' },
+        { id: 'd', projectId: project.id, personId: 'psn-new', rate: 10, periodStart: '2026-03', periodEnd: '2026-03' },
+        { id: 'legacy', projectId: project.id, memberId: 'legacy-row', memberName: '보람', rate: 30, periodStart: '2026-03', periodEnd: '2026-03' },
       ],
       generatedAt: '2026-08-12T00:00:00.000Z',
     });
@@ -31,12 +37,15 @@ describe('participation dashboard', () => {
     const filtered = selectParticipationDashboardYear(snapshot, '2026', 'participation-rule-agri');
     expect(filtered.selectedRule).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg] });
     expect(filtered.userRuleOptions).toEqual([{ id: 'participation-rule-agri', alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg], settlementSystems: [project.settlementSystem, secondProject.settlementSystem] }]);
-    expect(filtered.members[0].projectLabel).toBe('agri-2026 · hongsi-2026');
-    expect(filtered.members[0].projectCount).toBe(2);
-    expect(filtered.members[0].months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
-    expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'm-1', memberName: '보람', yearMonth: '2026-03', rate: 120 }]));
+    const boram = filtered.members.find((member) => member.memberId === 'psn-boram');
+    expect(filtered.members[0].memberName).toBe('변민욱A');
+    expect(boram.projectLabel).toBe('agri-2026 · hongsi-2026');
+    expect(boram.projectCount).toBe(2);
+    expect(boram.months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
+    expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'psn-boram', memberName: '변민욱A', yearMonth: '2026-03', rate: 120 }]));
     expect(selectParticipationDashboardYear(snapshot).selectedYear).toBe('2026');
     expect(snapshot.availableYears).toContain('2026');
+    expect(result.unlinkedEntryCount).toBe(1);
     expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용' }]));
   });
 });
@@ -47,7 +56,7 @@ describe('participation dashboard routes', () => {
     const docs = (items) => items.map((data) => ({ id: data.id, data: () => data }));
     const db = {
       collection(path) {
-        const items = path.endsWith('/projects') ? [project, secondProject] : path.endsWith('/partEntries') ? [{ id: 'entry-1', projectId: project.id, memberId: 'm-1', memberName: '보람', rate: 75 }] : [];
+        const items = path.endsWith('/projects') ? [project, secondProject] : path.endsWith('/partEntries') ? [{ id: 'entry-1', projectId: project.id, personId: 'psn-boram', rate: 75 }] : path.endsWith('/persons') ? [{ personId: 'psn-boram', name: '변민욱A' }] : [];
         return { get: async () => ({ docs: docs(items) }) };
       },
       doc(path) {

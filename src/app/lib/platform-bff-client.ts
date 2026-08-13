@@ -68,6 +68,7 @@ export interface ParticipationDashboardSnapshot {
   warnings: Array<{ yearMonth: string; rate: number; memberId: string; memberName: string }>;
   warningCount: number;
   hasWarnings: boolean;
+  unlinkedEntryCount: number;
   filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string }> };
 }
 
