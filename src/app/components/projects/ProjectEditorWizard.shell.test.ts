@@ -345,12 +345,14 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('label="수익률"');
   });
 
-  it('keeps the step navigation horizontal on desktop and stacked on mobile', () => {
-    // 단계는 4개인데 칸이 5개라 마지막 한 칸이 늘 비어 있었다. 칸 수를 단계 수에 맞추고
-    // 간격도 세 값 규칙(8px)으로 통일했다.
-    expect(source).toContain('grid gap-2 lg:grid-cols-4');
+  it('draws the step navigation as numbered circles joined by a line', () => {
+    // 레퍼런스(RCS Biz Center 가입 흐름)와 같은 형태 - 원형 번호를 선으로 잇고 라벨은
+    // 아래에 둔다. 박스 칩 4개를 늘어놓던 이전 형태를 대체한다.
+    expect(source).toContain("{done ? '✓' : index + 1}");
+    expect(source).toContain("'mt-[13px] h-px flex-1'");
+    expect(source).toContain('ring-4 ring-[#0176D3]/15');
+    expect(source).not.toContain('grid gap-2 lg:grid-cols-4');
     expect(source).not.toContain('grid gap-1.5 lg:grid-cols-5');
-    expect(source).not.toContain('lg:grid-cols-[220px_minmax(0,1fr)]');
   });
 
   it('warns users to verify the uploaded contract before saving', () => {
@@ -458,7 +460,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('renderPaymentFields(row, index)');
     // 단년 계약의 입금 계획도 다른 묶음과 같은 섹션 껍데기를 쓴다. 렌더 조건은 그대로다.
     expect(source).toContain('{!hasMultiYearContract ? (');
-    expect(source).toContain('<ProjectFormSection title="입금 계획">');
+    // 바로 아래가 표라 섹션 제목의 밑선을 그리지 않는다(flushBelow). 굵은 검은 선 두 줄이
+    // 겹쳐 보이던 문제를 고친 것이고, 섹션 구성 자체는 그대로다.
+    expect(source).toContain('<ProjectFormSection title="입금 계획" flushBelow>');
     expect(source).not.toContain('최종 입금 메모');
     expect(source).not.toContain('기타 참고사항');
     expect(source).not.toContain('등록 전 확인사항');
@@ -610,8 +614,9 @@ describe('ProjectEditorWizard form skeleton contract', () => {
   it('gives the accent colour exactly one meaning and keeps errors red', () => {
     // 필수 마커 · 포커스 링 · 활성 단계 칩. 그 밖에는 회색조를 쓴다.
     expect(source).toContain("'[&_[data-slot=input]]:focus-visible:ring-[#0176D3]/25'");
-    expect(source).toContain("required ? <span className=\"ml-0.5 text-[#0176D3]\">*</span> : null");
-    expect(source).toContain("active\n                      ? 'border-[#0176D3] bg-[#0176D3]/5 text-[#0176D3]'");
+    // 필수 마커는 레퍼런스대로 빨강이다. 강조색은 활성 단계와 포커스 링에만 남는다.
+    expect(source).toContain('required ? <span className="ml-0.5 text-red-600">*</span> : null');
+    expect(source).toContain("active && 'border-[#0176D3] bg-[#0176D3] text-white ring-4 ring-[#0176D3]/15'");
     expect(source).not.toContain('rose-');
   });
 
@@ -628,7 +633,7 @@ describe('ProjectEditorWizard form skeleton contract', () => {
     expect(source).toContain('const canSubmit = submitIssues.length === 0;');
     expect(source).toContain('const stepIssueCounts = useMemo(');
     expect(source).toContain('submitIssues.forEach((issue) => { counts[issue.step] += 1; });');
-    expect(source).toContain('이 단계에 남은 필수 항목');
+    expect(source).toContain('남은 필수 항목 ${remaining}개');
     expect(source).toContain('onClick={() => setStepIndex(index)}');
   });
 
