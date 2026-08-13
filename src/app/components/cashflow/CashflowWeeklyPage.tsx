@@ -31,11 +31,13 @@ export function filterCashflowProjectsByDepartment<T extends { department?: unkn
 
 type SettlementStatusFilter = 'ALL' | CashflowSettlementStatus;
 
-export function formatCashflowProjectOwner(project: Pick<Project, 'executiveApproverId' | 'executiveApproverName' | 'managerName'>, members: Array<Pick<OrgMember, 'uid' | 'name' | 'nameKo'>>) {
+export function formatCashflowExecutiveApprover(project: Pick<Project, 'executiveApproverId' | 'executiveApproverName'>, members: Array<Pick<OrgMember, 'uid' | 'name' | 'nameKo'>>) {
   const rosterOwner = members.find((member) => member.uid === project.executiveApproverId);
-  const ownerName = String(rosterOwner?.nameKo || rosterOwner?.name || project.executiveApproverName || '').trim();
-  const managerName = String(project.managerName || '').trim();
-  return [...new Set([ownerName, managerName].filter(Boolean))].join(' · ') || '-';
+  return String(rosterOwner?.nameKo || rosterOwner?.name || project.executiveApproverName || '').trim() || '-';
+}
+
+export function formatCashflowManager(project: Pick<Project, 'managerName'>) {
+  return String(project.managerName || '').trim() || '-';
 }
 
 export function filterCashflowProjectsBySettlementStatus<T extends { id: string; department?: unknown }>(
@@ -316,13 +318,14 @@ export function CashflowWeeklyPage() {
         <CardContent className="p-0">
           {overviewError ? <div role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-[11px] text-amber-900">{overviewError}</div> : null}
           <div className="max-h-[calc(100vh-190px)] overflow-auto">
-            <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-[11px]">
+            <table className="w-full min-w-[1440px] border-separate border-spacing-0 text-[11px]">
               <thead>
                 <tr className="bg-muted/30">
                   <th className="sticky left-0 top-0 z-40 min-w-[220px] border-b bg-slate-50 px-4 py-2 text-left font-bold">프로젝트</th>
-                  <th className="sticky left-[220px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">담당자</th>
-                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{overview?.monthCloseTargetYearMonth || '직전 월'} 결산</th>
-                  <th className="sticky top-0 z-30 min-w-[140px] border-b bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
+                  <th className="sticky left-[220px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">조직장</th>
+                  <th className="sticky left-[340px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">책임자</th>
+                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{overview?.monthCloseTargetLabel || '직전 월'} 결산</th>
+                  <th className="sticky top-0 z-30 min-w-[140px] border-b border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
                   {monthWeeks.map((week) => (
                     <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
                       <div>{week.label}</div>
@@ -341,7 +344,8 @@ export function CashflowWeeklyPage() {
                         <p className="truncate font-semibold">{project.name}</p>
                         <p className="truncate text-[10px] text-muted-foreground">{project.department} · {project.clientOrg}</p>
                       </td>
-                      <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{formatCashflowProjectOwner(project, members)}</td>
+                      <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{formatCashflowExecutiveApprover(project, members)}</td>
+                      <td className="sticky left-[340px] z-20 bg-white px-3 py-3 font-medium">{formatCashflowManager(project)}</td>
                       <td className="px-3 py-3 text-center">
                         {statusErrors[project.id] ? <span className="text-amber-700">정보 확인 필요</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
@@ -354,7 +358,7 @@ export function CashflowWeeklyPage() {
                         )}
                         <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="border-l-2 border-slate-300 px-3 py-3 text-center">
                         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-[11px]" onClick={() => openProject(project.id)}>
                           <ExternalLink className="h-3.5 w-3.5" /> 현금흐름 보기
                         </Button>
@@ -380,7 +384,7 @@ export function CashflowWeeklyPage() {
                   );
                 })}
                 {filteredProjects.length === 0 ? (
-                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={4 + monthWeeks.length}>프로젝트가 없습니다.</td></tr>
+                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={5 + monthWeeks.length}>프로젝트가 없습니다.</td></tr>
                 ) : null}
               </tbody>
             </table>

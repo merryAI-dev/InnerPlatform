@@ -9,6 +9,8 @@ describe('ParticipationPage server snapshot contract', () => {
     expect(source).toContain('fetchParticipationDashboardViaBff');
     expect(source).toContain('snapshot.members.map');
     expect(source).toContain('member.months.map');
+    expect(source).toContain("useState('2026')");
+    expect(source).toContain('프로젝트 {member.projectCount}개');
     expect(source).not.toContain('reduce(');
     expect(source).not.toContain('buildAllProjectTeamParticipationEntries');
     expect(source).not.toContain('getMonthlyParticipationRate');

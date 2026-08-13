@@ -3072,6 +3072,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       version: '3',
       yearMonth,
       monthCloseTargetYearMonth,
+      monthCloseTargetLabel: `${Number(monthCloseTargetYearMonth.slice(5, 7))}월`,
       items: (Array.isArray(weeklyResult?.items) ? weeklyResult.items : []).map((item) => ({
         ...item,
         settlementStatuses: item?.settlementStatuses ? {

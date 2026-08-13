@@ -621,7 +621,7 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ projectIds, yearMonth: '2026-08' })
       .expect(200);
 
-    expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', items: canonical.items });
+    expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월', items: canonical.items });
     expect(response.body.errors).toHaveLength(2);
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);

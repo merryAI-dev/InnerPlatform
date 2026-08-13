@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import {
   filterCashflowProjectsByDepartment,
   filterCashflowProjectsBySettlementStatus,
-  formatCashflowProjectOwner,
+  formatCashflowExecutiveApprover,
+  formatCashflowManager,
 } from './CashflowWeeklyPage';
 
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
@@ -12,7 +13,10 @@ const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx
 describe('CashflowWeeklyPage settlement status surface', () => {
   it('shows the prior-month close and weekly status columns without cashflow amounts', () => {
     expect(source).toContain('title="전사 현금흐름 현황"');
-    expect(source).toContain("monthCloseTargetYearMonth || '직전 월'");
+    expect(source).toContain("monthCloseTargetLabel || '직전 월'");
+    expect(source).toContain('조직장</th>');
+    expect(source).toContain('책임자</th>');
+    expect(source).toContain("border-l-2 border-slate-300");
     expect(source).toContain('>현금흐름(링크)</th>');
     expect(source).toContain('<div>{week.label}</div>');
     expect(source).not.toContain('>요약<');
@@ -70,11 +74,12 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(filterCashflowProjectsByDepartment(projects, '없는 조직')).toEqual([]);
   });
 
-  it('resolves the executive owner from the roster before the saved manager without duplicates', () => {
-    expect(formatCashflowProjectOwner({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자', managerName: '기존 담당자' }, [
+  it('keeps the executive approver and manager in separate columns', () => {
+    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자', managerName: '기존 담당자' }, [
       { uid: 'owner-1', name: '원장 책임자', nameKo: '원장 책임자' },
-    ])).toBe('원장 책임자 · 기존 담당자');
-    expect(formatCashflowProjectOwner({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자', managerName: '스냅샷 책임자' }, [])).toBe('스냅샷 책임자');
+    ])).toBe('원장 책임자');
+    expect(formatCashflowManager({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자', managerName: '기존 담당자' })).toBe('기존 담당자');
+    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자', managerName: '스냅샷 책임자' }, [])).toBe('스냅샷 책임자');
   });
 
   it('ANDs department and month status filters while accepting any matching selected-month week', () => {

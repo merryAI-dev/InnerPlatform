@@ -1494,6 +1494,7 @@ export interface CashflowWeeklyOverviewResult {
   version: string;
   yearMonth: string;
   monthCloseTargetYearMonth: string;
+  monthCloseTargetLabel: string;
   items: Array<{
     projectId: string;
     settlementStatuses: CashflowSettlementStatusesResult | null;

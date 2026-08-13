@@ -88,7 +88,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     }
   }
 
-  const availableYears = new Set();
+  const availableYears = new Set(['2026']);
   const serializedRules = [...buckets.values()].map((rule) => {
     const members = [...rule.rows.values()].map((row) => {
       const monthlyRates = Object.fromEntries([...row.values.entries()].map(([yearMonth, rate]) => {
@@ -119,7 +119,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     rules: serializedRules,
     filterOptions: {
       clientOrgs: [...new Set(projects.map((project) => readOptionalText(project?.clientOrg)).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ko')),
-      settlementSystems: [...new Set(projects.map((project) => readOptionalText(project?.settlementSystem) || 'NONE'))]
+      settlementSystems: [...new Set(['NONE', ...projects.map((project) => readOptionalText(project?.settlementSystem) || 'NONE')])]
         .sort().map((value) => ({ value, label: SETTLEMENT_SYSTEM_LABELS[value] || value })),
     },
   };
@@ -164,7 +164,7 @@ export function buildProjectParticipationSnapshot({ project, entries = [] } = {}
 export function selectParticipationDashboardYear(snapshot, year, selectedRuleId = 'all') {
   const selectedYear = /^\d{4}$/.test(readOptionalText(year))
     ? readOptionalText(year)
-    : snapshot.availableYears.at(-1) || new Date().getFullYear().toString();
+    : '2026';
   const monthKeys = monthsForYear(selectedYear);
   const months = monthKeys.map((yearMonth) => ({ yearMonth, label: `${Number(yearMonth.slice(5, 7))}월` }));
   const ruleOptions = (snapshot.rules || []).map((rule) => ({ id: rule.id, alias: rule.alias, clientOrgs: rule.clientOrgs || [], settlementSystems: rule.settlementSystems || [] }));
