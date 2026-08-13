@@ -2383,22 +2383,34 @@ export async function syncProjectParticipationEntries({
   const existingSnap = await partEntriesRef.where('projectId', '==', project.id).get();
   const existingSyncEntries = existingSnap.docs.filter((doc) => doc.data()?.source === 'PROJECT_TEAM_SYNC');
 
+  const memberSnap = await db.collection(`orgs/${tenantId}/members`).get();
+  const members = memberSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const memberByIdentity = new Map();
+  for (const member of members) {
+    for (const key of [readOptionalText(member?.nickname), readOptionalText(member?.name)]) {
+      if (key) memberByIdentity.set(key.toLowerCase(), member);
+    }
+  }
+
   const desiredEntries = new Map();
-  const legacySyncKeys = new Set();
   for (const member of teamMembers) {
     const personId = readOptionalText(member?.personId);
-    if (!member.role) continue;
+    if (!member.role || (!personId && !member.memberName && !member.memberNickname)) continue;
     const key = buildProjectTeamMemberSyncKey(member);
-    // Keep pre-People rows intact until the one-time identity migration assigns personId.
-    // Deleting them during an unrelated project edit would lose the only historical record.
-    if (!personId) {
-      legacySyncKeys.add(key);
-      continue;
-    }
+    const matchedMember = resolveProjectTeamMemberLookupKeys(member)
+      .map((lookupKey) => memberByIdentity.get(lookupKey))
+      .find(Boolean);
+    const memberId = readOptionalText(matchedMember?.uid || matchedMember?.id)
+      || `project-team:${key}`;
+    const memberName = readOptionalText(matchedMember?.name)
+      || member.memberNickname
+      || member.memberName;
     const entryId = `pte-${project.id}-${key}`;
     desiredEntries.set(entryId, {
       id: entryId,
-      personId,
+      ...(personId ? { personId } : {}),
+      memberId,
+      memberName,
       projectId: project.id,
       projectName: project.name,
       projectShortName: readOptionalText(project.shortName) || undefined,
@@ -2424,7 +2436,6 @@ export async function syncProjectParticipationEntries({
   }
   for (const doc of existingSyncEntries) {
     if (desiredEntries.has(doc.id)) continue;
-    if (legacySyncKeys.has(readOptionalText(doc.data()?.projectTeamMemberKey))) continue;
     batch.delete(doc.ref);
   }
   await batch.commit();
