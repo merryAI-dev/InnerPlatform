@@ -10,9 +10,9 @@ import {
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
 
 describe('CashflowWeeklyPage settlement status surface', () => {
-  it('shows the requested month and weekly status columns without the old summary', () => {
+  it('shows the prior-month close and weekly status columns without cashflow amounts', () => {
     expect(source).toContain('title="전사 현금흐름 현황"');
-    expect(source).toContain('>월 결산</th>');
+    expect(source).toContain("monthCloseTargetYearMonth || '직전 월'");
     expect(source).toContain('>현금흐름(링크)</th>');
     expect(source).toContain('<div>{week.label}</div>');
     expect(source).not.toContain('>요약<');
@@ -22,6 +22,10 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).not.toContain("['P - A'");
     expect(source).not.toContain('금액 조회 오류');
     expect(source).not.toContain('>조회 오류</span>');
+    expect(source).toContain('monthCloseTargetYearMonth');
+    expect(source).toContain('실무자 결재:');
+    expect(source).toContain('조직장 승인:');
+    expect(source).not.toContain('PeriodAmounts');
   });
 
   it('uses one overview snapshot and refreshes it after a status transition', () => {
@@ -29,7 +33,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action)}");
+    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}");
     expect(source).toContain('주정산 이전');
     expect(source).toContain('결산 전');
     expect(source).toContain('조직장 승인 필요');

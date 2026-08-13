@@ -21,7 +21,7 @@ export function AdminApprovalPage() {
       <PageHeader
         icon={CheckCircle2}
         iconGradient="linear-gradient(135deg, #0f766e, #14b8a6)"
-        title="승인 대기열"
+        title="프로젝트 등록/승인"
         description="프로젝트 등록 요청을 최종 결재자 (사업총괄)가 확인하고 승인하거나 반려합니다"
         badge={`대기 ${totalPending}건`}
       />

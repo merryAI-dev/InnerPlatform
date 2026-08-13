@@ -213,7 +213,7 @@ export function PortalSubmissionsPage() {
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-950">
               <BarChart3 className="w-4 h-4 text-[#1f4a7d]" />
-              주간 입력 기록 (조회용)
+              현금흐름 승인
             </CardTitle>
             <div className="flex items-center gap-1.5">
               <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={goPrevMonth}>
@@ -227,7 +227,7 @@ export function PortalSubmissionsPage() {
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
           <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-600">
-            주차별 입력 이력은 조회만 가능하며, 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리합니다.
+            주차별 입력 현황은 조회만 가능하며, 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리합니다.
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3">
             <span className="text-[11px] font-semibold text-slate-600">{yearMonth}</span>

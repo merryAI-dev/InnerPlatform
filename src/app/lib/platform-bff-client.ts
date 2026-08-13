@@ -1493,6 +1493,7 @@ export interface CashflowProjectionActualSummaryBatch {
 export interface CashflowWeeklyOverviewResult {
   version: string;
   yearMonth: string;
+  monthCloseTargetYearMonth: string;
   items: Array<{
     projectId: string;
     settlementStatuses: CashflowSettlementStatusesResult | null;
