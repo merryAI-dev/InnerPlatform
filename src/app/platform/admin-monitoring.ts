@@ -11,7 +11,6 @@ export type AdminMonitoringIssueKey =
   | 'payroll_review_pending'
   | 'payroll_missing_candidate'
   | 'payroll_final_unconfirmed'
-  | 'participation_risk'
   | 'data_source'
   | 'cashflow_variance'
   | 'hr_alerts'
@@ -41,7 +40,6 @@ export interface AdminMonitoringCounts {
   payrollReviewPendingCount: number;
   payrollMissingCandidateCount: number;
   payrollFinalUnconfirmedCount: number;
-  participationRiskCount: number;
   pendingApprovalCount: number;
   rejectedTransactionCount: number;
   hrAlertCount: number;
@@ -74,16 +72,15 @@ const ISSUE_PRIORITY: Record<AdminMonitoringIssueKey, number> = {
   payroll_pm_amount_missing: 5,
   payroll_pm_shortfall: 6,
   payroll_missing_candidate: 7,
-  participation_risk: 8,
-  data_source: 9,
-  payroll_review_pending: 10,
-  cashflow_variance: 11,
-  missing_pm: 12,
-  hr_alerts: 13,
-  pending_approvals: 14,
-  payroll_final_unconfirmed: 15,
-  rejected_transactions: 16,
-  stale_projects: 17,
+  data_source: 8,
+  payroll_review_pending: 9,
+  cashflow_variance: 10,
+  missing_pm: 11,
+  hr_alerts: 12,
+  pending_approvals: 13,
+  payroll_final_unconfirmed: 14,
+  rejected_transactions: 15,
+  stale_projects: 16,
 };
 
 function normalizeCount(value: unknown): number {
@@ -175,14 +172,6 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       severity: 'critical',
       to: '/payroll',
       detail: `${normalizeCount(input.payrollMissingCandidateCount)}건에서 PM이 확인할 지급 후보를 찾지 못했습니다.`,
-    } : null,
-    normalizeCount(input.participationRiskCount) > 0 ? {
-      key: 'participation_risk',
-      label: '참여율 위험',
-      count: normalizeCount(input.participationRiskCount),
-      severity: 'critical',
-      to: '/participation',
-      detail: `${normalizeCount(input.participationRiskCount)}명 환수 위험이 있습니다.`,
     } : null,
     normalizeCount(input.cashflowVarianceCount) > 0 ? {
       key: 'cashflow_variance',

@@ -39,6 +39,54 @@ export interface UpsertProjectPayload {
   [key: string]: unknown;
 }
 
+export interface ParticipationDashboardMember {
+  memberId: string;
+  memberName: string;
+  projectLabel: string;
+  months: Array<{ yearMonth: string; label: string; rate: number; isWarning: boolean }>;
+  warnings: Array<{ yearMonth: string; rate: number }>;
+}
+
+export interface ParticipationDashboardRule {
+  id: string;
+  alias: string;
+  clientOrgs: string[];
+  settlementSystems: string[];
+}
+
+export interface ParticipationDashboardSnapshot {
+  version: number;
+  generatedAt: string;
+  availableYears: string[];
+  selectedYear: string;
+  months: Array<{ yearMonth: string; label: string }>;
+  selectedRule: ParticipationDashboardRule;
+  ruleOptions: ParticipationDashboardRule[];
+  userRuleOptions: ParticipationDashboardRule[];
+  members: ParticipationDashboardMember[];
+  warnings: Array<{ yearMonth: string; rate: number; memberId: string; memberName: string }>;
+  warningCount: number;
+  hasWarnings: boolean;
+  filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string }> };
+}
+
+export interface ProjectParticipationSnapshot {
+  projectId: string;
+  projectName: string;
+  headcount: number;
+  totalRate: number;
+  averageRate: number;
+  hasMembers: boolean;
+  members: Array<{
+    memberId: string;
+    memberName: string;
+    totalRate: number;
+    entryCount: number;
+    isWarning: boolean;
+    entries: Array<{ id: string; rate: number; settlementSystem: string; clientOrg: string; periodStart: string; periodEnd: string; source: string; note: string }>;
+  }>;
+}
+
 export interface TrashProjectPayload {
   expectedVersion: number;
   reason?: string;
@@ -1896,6 +1944,53 @@ export async function fetchProjectsViaBff(params: {
     seenCursors.add(nextCursor);
     cursor = nextCursor;
   }
+}
+
+export async function fetchParticipationDashboardViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  year?: string;
+  ruleId?: string;
+  client?: PlatformApiClientLike;
+}): Promise<ParticipationDashboardSnapshot> {
+  const query = new URLSearchParams();
+  if (/^\d{4}$/.test(params.year || '')) query.set('year', params.year || '');
+  if (params.ruleId) query.set('ruleId', params.ruleId);
+  const response = await resolveClient(params.client).get<ParticipationDashboardSnapshot>(
+    `/api/v1/participation-dashboard${query.size ? `?${query}` : ''}`,
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 10_000 },
+  );
+  return response.data;
+}
+
+export async function fetchProjectParticipationViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectParticipationSnapshot> {
+  const response = await resolveClient(params.client).get<ProjectParticipationSnapshot>(
+    `/api/v1/participation-dashboard/projects/${encodeURIComponent(params.projectId)}`,
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 10_000 },
+  );
+  return response.data;
+}
+
+export async function saveParticipationRuleViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  id?: string;
+  alias: string;
+  clientOrgs: string[];
+  settlementSystems: string[];
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'clientOrgs' | 'settlementSystems'>> {
+  const response = await resolveClient(params.client).post<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'clientOrgs' | 'settlementSystems'>>(
+    '/api/v1/participation-dashboard/rules',
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), body: { id: params.id, alias: params.alias, clientOrgs: params.clientOrgs, settlementSystems: params.settlementSystems }, idempotencyKey: params.idempotencyKey, retries: 0, timeoutMs: 10_000 },
+  );
+  return response.data;
 }
 
 export async function fetchAssignedProjectRequestsViaBff(params: {

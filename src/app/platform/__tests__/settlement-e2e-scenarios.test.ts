@@ -8,8 +8,6 @@ import { describe, expect, it } from 'vitest';
 import type {
   Transaction,
   CashflowSheetLineId,
-  ParticipationEntry,
-  SettlementSystemCode,
   BudgetCodeEntry,
   CashflowCategory,
   Direction,
@@ -57,7 +55,6 @@ import {
   type BankTransaction,
 } from '../bank-reconciliation';
 import { matchBudgetCode } from '../budget-auto-match';
-import { detectParticipationRisk } from '../participation-risk-rules';
 
 // ═══════════════════════════════════════════════════════════════
 // 공통 헬퍼: 실제 비즈니스 데이터 패턴 생성
@@ -97,32 +94,6 @@ function makeTransaction(overrides: Partial<Transaction> & {
     updatedBy: 'test',
     updatedAt: now,
     ...overrides,
-  };
-}
-
-function makeParticipationEntry(params: {
-  memberId: string;
-  memberName: string;
-  rate: number;
-  settlementSystem: SettlementSystemCode;
-  clientOrg: string;
-  projectId: string;
-  projectName: string;
-}): ParticipationEntry {
-  return {
-    id: `${params.memberId}-${params.projectId}`,
-    memberId: params.memberId,
-    memberName: params.memberName,
-    projectId: params.projectId,
-    projectName: params.projectName,
-    rate: params.rate,
-    settlementSystem: params.settlementSystem,
-    clientOrg: params.clientOrg,
-    periodStart: '2026-01',
-    periodEnd: '2026-12',
-    isDocumentOnly: false,
-    note: '',
-    updatedAt: '2026-01-15T00:00:00.000Z',
   };
 }
 
@@ -719,118 +690,6 @@ describe('시나리오 5: 비목 자동 제안(Budget Auto-Match)', () => {
 
     expect(result.confidence).toBe('none',
       'codeBook이 비어있으면 매칭 불가');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// 시나리오 6: 참여율 이상 탐지
-// ═══════════════════════════════════════════════════════════════
-
-describe('시나리오 6: 참여율 이상 탐지 (Participation Risk)', () => {
-  it('동일 정산시스템에서 참여율 합산 120%이면 위험 플래그', () => {
-    const entries: ParticipationEntry[] = [
-      makeParticipationEntry({
-        memberId: 'm-a', memberName: '직원A', rate: 40,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '환경부',
-        projectId: 'p1', projectName: '사업A',
-      }),
-      makeParticipationEntry({
-        memberId: 'm-a', memberName: '직원A', rate: 40,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '산업부',
-        projectId: 'p2', projectName: '사업B',
-      }),
-      makeParticipationEntry({
-        memberId: 'm-a', memberName: '직원A', rate: 40,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '복지부',
-        projectId: 'p3', projectName: '사업C',
-      }),
-    ];
-
-    const risk = detectParticipationRisk(entries);
-
-    expect(risk.hasOverLimit).toBe(true,
-      'e나라도움 합산 120% > 100%이므로 위험 플래그가 설정되어야 한다');
-    expect(risk.overLimitMembers.length).toBeGreaterThanOrEqual(1,
-      '직원A가 위험 목록에 포함되어야 한다');
-    expect(risk.overLimitMembers[0].totalRate).toBe(120,
-      '합산 참여율이 120%이어야 한다');
-    expect(risk.overLimitMembers[0].projectNames.length).toBe(3,
-      '3개 프로젝트가 관련되어야 한다');
-  });
-
-  it('참여율 합산 100% 정확하면 위험이 아닌 경고 수준', () => {
-    const entries: ParticipationEntry[] = [
-      makeParticipationEntry({
-        memberId: 'm-b', memberName: '직원B', rate: 50,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '환경부',
-        projectId: 'p1', projectName: '사업A',
-      }),
-      makeParticipationEntry({
-        memberId: 'm-b', memberName: '직원B', rate: 50,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '산업부',
-        projectId: 'p2', projectName: '사업B',
-      }),
-    ];
-
-    const risk = detectParticipationRisk(entries);
-
-    expect(risk.hasOverLimit).toBe(false,
-      '합산 100%는 초과가 아니므로 overLimit이 아니다');
-    // 80% 초과이므로 경고 수준
-    expect(risk.hasWarning).toBe(true,
-      '합산 100% > 80%이므로 경고(WARNING)가 있어야 한다');
-  });
-
-  it('PRIVATE/NONE 정산시스템은 참여율 합산에서 제외된다', () => {
-    const entries: ParticipationEntry[] = [
-      makeParticipationEntry({
-        memberId: 'm-c', memberName: '직원C', rate: 80,
-        settlementSystem: 'PRIVATE', clientOrg: '민간A',
-        projectId: 'p1', projectName: '민간사업1',
-      }),
-      makeParticipationEntry({
-        memberId: 'm-c', memberName: '직원C', rate: 80,
-        settlementSystem: 'NONE', clientOrg: '미정',
-        projectId: 'p2', projectName: '미정사업',
-      }),
-    ];
-
-    const risk = detectParticipationRisk(entries);
-
-    expect(risk.hasOverLimit).toBe(false,
-      'PRIVATE/NONE 시스템은 교차검증 대상이 아니므로 위험 플래그 없음');
-    expect(risk.overLimitMembers.length).toBe(0,
-      '위험 목록이 비어야 한다');
-  });
-
-  it('filterMemberNames로 특정 직원만 필터링할 수 있다', () => {
-    const entries: ParticipationEntry[] = [
-      makeParticipationEntry({
-        memberId: 'm-a', memberName: '직원A', rate: 60,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '환경부',
-        projectId: 'p1', projectName: '사업A',
-      }),
-      makeParticipationEntry({
-        memberId: 'm-a', memberName: '직원A', rate: 60,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '산업부',
-        projectId: 'p2', projectName: '사업B',
-      }),
-      makeParticipationEntry({
-        memberId: 'm-b', memberName: '직원B', rate: 90,
-        settlementSystem: 'E_NARA_DOUM', clientOrg: '복지부',
-        projectId: 'p3', projectName: '사업C',
-      }),
-    ];
-
-    // 직원B만 필터링 — 90%이므로 overLimit 아님
-    const riskB = detectParticipationRisk(entries, ['직원B']);
-    expect(riskB.hasOverLimit).toBe(false,
-      '직원B만 필터링하면 90%이므로 위험 없음');
-
-    // 직원A만 필터링 — 120%이므로 overLimit
-    const riskA = detectParticipationRisk(entries, ['직원A']);
-    expect(riskA.hasOverLimit).toBe(true,
-      '직원A만 필터링하면 120%이므로 위험');
   });
 });
 

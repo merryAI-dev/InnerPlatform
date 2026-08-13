@@ -2403,9 +2403,8 @@ export async function syncProjectParticipationEntries({
     if (desiredEntries.has(doc.id)) continue;
     batch.delete(doc.ref);
   }
-  if (desiredEntries.size > 0 || existingSyncEntries.length > 0) {
-    await batch.commit();
-  }
+  await batch.commit();
+
 }
 
 export function createProjectRegistrationSubmittedOutboxHandler({

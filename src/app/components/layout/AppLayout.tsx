@@ -31,7 +31,7 @@ import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
 import { MyscWordmark } from '../brand/MyscWordmark';
 
 function AppLayoutContent() {
-  const { currentUser, transactions, participationEntries, dataSource } = useAppStore();
+  const { currentUser, transactions, dataSource } = useAppStore();
   const { isAuthenticated, isLoading: authLoading, user: authUser, logout, setWorkspacePreference } = useAuth();
   const hrAnnouncements = useOptionalHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
@@ -97,29 +97,7 @@ function AppLayoutContent() {
   const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
   const missingEvidenceCount = transactions.filter(t => t.evidenceStatus !== 'COMPLETE' && t.state !== 'REJECTED').length;
 
-  const participationDangerCount = React.useMemo(() => {
-    const memberMap = new Map<string, { eNara: number; orgs: Map<string, number> }>();
-    participationEntries
-      .filter((entry) => entry.source !== 'PROJECT_TEAM_SYNC')
-      .forEach(e => {
-        if (e.settlementSystem === 'NONE' || e.settlementSystem === 'PRIVATE') return;
-        let m = memberMap.get(e.memberId);
-        if (!m) { m = { eNara: 0, orgs: new Map() }; memberMap.set(e.memberId, m); }
-        if (e.settlementSystem === 'E_NARA_DOUM') m.eNara += e.rate;
-        const orgName = e.clientOrg.split('/')[0];
-        m.orgs.set(orgName, (m.orgs.get(orgName) || 0) + e.rate);
-      });
-    let count = 0;
-    memberMap.forEach(m => {
-      if (m.eNara > 100) { count++; return; }
-      for (const rate of m.orgs.values()) {
-        if (rate > 100) { count++; return; }
-      }
-    });
-    return count;
-  }, [participationEntries]);
-
-  const totalAlerts = pendingCount + (participationDangerCount > 0 ? participationDangerCount : 0);
+  const totalAlerts = pendingCount;
 
   if (authLoading || !isAuthenticated) return null;
 
@@ -164,7 +142,6 @@ function AppLayoutContent() {
 
   function getBadgeCount(to: string): number | null {
     if (to === '/evidence' && missingEvidenceCount > 0) return missingEvidenceCount;
-    if (to === '/participation' && participationDangerCount > 0) return participationDangerCount;
     if (to === '/hr-announcements') {
       const hrCount = hrAnnouncements?.getAllPendingCount() ?? 0;
       return hrCount > 0 ? hrCount : null;

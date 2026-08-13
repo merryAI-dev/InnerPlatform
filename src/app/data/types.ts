@@ -529,13 +529,23 @@ export function normalizeLaborSettlementBasis(raw: unknown): LaborSettlementBasi
   return value in LABOR_SETTLEMENT_BASIS_LABELS ? value as LaborSettlementBasis : 'NONE';
 }
 
-export type CrossVerifyRisk = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+export type ProjectPhaseStatus = '계약전' | '계약완료' | '계약완료(변경진행중)';
 
-export interface CrossVerifyRule {
-  systemA: SettlementSystemCode;
-  systemB: SettlementSystemCode;
-  risk: CrossVerifyRisk;
-  description: string;
+export interface ParticipationProject {
+  id: string;
+  name: string;
+  shortName: string;
+  clientOrg: string;
+  settlement: SettlementSystemCode;
+  settlementNote: string;
+  phase: ProjectPhaseStatus;
+  periodDesc: string;
+}
+
+export interface MyscEmployee {
+  id: string;
+  realName: string;
+  nickname: string;
 }
 
 /**
@@ -560,20 +570,6 @@ export interface ParticipationEntry {
   /** YYYY-MM별 서류 참여율. null은 원본 시트 미입력, 0은 명시적 0%다. */
   monthlyRates?: Record<string, number | null>;
   updatedAt: string;
-}
-
-/**
- * 교차검증 그룹: 동일 시스템 / 동일 기관 내 합산 결과
- */
-export interface CrossVerifyGroup {
-  memberId: string;
-  memberName: string;
-  groupKey: string;           // e.g. "E_NARA_DOUM" or "KOICA"
-  groupLabel: string;
-  entries: ParticipationEntry[];
-  totalRate: number;
-  risk: CrossVerifyRisk;
-  isOverLimit: boolean;       // totalRate > 100
 }
 
 // ── Interfaces ──

@@ -32,7 +32,6 @@ import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, SETTLEMENT_TYPE_LABELS,
   SETTLEMENT_TYPE_SHORT, BASIS_LABELS, ACCOUNT_TYPE_LABELS,
   PROJECT_PHASE_LABELS,
-  SETTLEMENT_SYSTEM_SHORT,
   type ProjectStatus, type Basis, type SettlementType, type Ledger,
   formatSettlementSheetPolicySummary,
   normalizeSettlementSheetPolicy,
@@ -42,7 +41,6 @@ import { Progress } from '../ui/progress';
 import { computeProjectCompleteness } from '../../data/project-completeness';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { normalizeProjectRevenueFields } from '../../platform/project-financials';
-import { buildProjectTeamParticipationEntries } from '../../platform/project-team-participation';
 import { describeProjectRequestVersion } from '../../platform/project-change-request';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
@@ -85,7 +83,7 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const {
     getProjectById, getProjectLedgers, transactions, templates,
-    addLedger, participationEntries, restoreProject, trashProject, updateProject,
+    addLedger, restoreProject, trashProject, updateProject,
   } = useAppStore();
 
   const project = getProjectById(projectId || '');
@@ -136,10 +134,6 @@ export function ProjectDetailPage() {
   }, [projectLedgers, transactions]);
 
   const completeness = useMemo(() => computeProjectCompleteness(project || {}), [project]);
-  const projectParticipationEntries = useMemo(() => {
-    if (!project) return [];
-    return buildProjectTeamParticipationEntries(project, participationEntries);
-  }, [participationEntries, project]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(project?.settlementSheetPolicy, project?.fundInputMode),
     [project?.fundInputMode, project?.settlementSheetPolicy],
@@ -657,40 +651,10 @@ export function ProjectDetailPage() {
             <AccordionItem value="project-detail-participation">
               <AccordionTrigger className="text-[13px]">참여 인력 현황</AccordionTrigger>
               <AccordionContent>
-                {projectParticipationEntries.length === 0 ? (
-                  <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                    연동된 참여 인력이 없습니다. 프로젝트 팀 정보를 저장하면 이 영역과 PM 인력 현황이 같은 데이터를 보여줍니다.
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>이름</TableHead>
-                        <TableHead>참여율</TableHead>
-                        <TableHead>기간</TableHead>
-                        <TableHead>정산 체계</TableHead>
-                        <TableHead>연동 상태</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {projectParticipationEntries.map((entry) => (
-                        <TableRow key={entry.id}>
-                          <TableCell>{entry.memberName || '-'}</TableCell>
-                          <TableCell>{Number.isFinite(entry.rate) ? `${entry.rate}%` : '-'}</TableCell>
-                          <TableCell>
-                            {[entry.periodStart, entry.periodEnd].filter(Boolean).join(' ~ ') || '-'}
-                          </TableCell>
-                          <TableCell>{SETTLEMENT_SYSTEM_SHORT[entry.settlementSystem] || '-'}</TableCell>
-                          <TableCell>
-                            <Badge variant={entry.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'}>
-                              {entry.source === 'PROJECT_TEAM_SYNC' ? '프로젝트 팀 연동' : '수동 입력'}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-dashed px-4 py-5 text-sm text-muted-foreground">
+                  <span>참여율 합산과 초과 경고는 서버 기준 참여인력 대시보드에서 확인합니다.</span>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/participation')}>참여인력 대시보드</Button>
+                </div>
               </AccordionContent>
             </AccordionItem>
 
