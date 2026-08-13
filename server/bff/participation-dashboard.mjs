@@ -1,6 +1,12 @@
 import { readOptionalText } from './bff-utils.mjs';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+const MAX_RULE_FILTER_VALUES = 4;
+const SETTLEMENT_SYSTEM_LABELS = {
+  E_NARA_DOUM: 'e나라도움', IRIS: 'IRIS', RCMS: 'RCMS', EZBARO: '통합이지바로', E_HIJO: 'e호조', EDUFINE: '에듀파인',
+  HAPPYEUM: '행복e음', AGRIX: 'AgriX', BOTAEM_E: '보탬e', SMTECH: 'SMTECH', KOCCA_PMS: 'e나라도움', NIPA: 'NIPA',
+  ACCOUNTANT: '회계사정산', PRIVATE: '자체 정산', OTHER: '기타', NONE: '시스템 미사용',
+};
 
 function monthsForYear(year) {
   return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
@@ -30,17 +36,30 @@ function displayMemberName(entry) {
   return readOptionalText(entry?.memberName) || readOptionalText(entry?.memberId) || '이름 미지정';
 }
 
+function normalizedValues(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map(readOptionalText).filter(Boolean))].slice(0, MAX_RULE_FILTER_VALUES);
+}
+
+function matchesRule(project, rule) {
+  const clientOrgs = rule.clientOrgs || [];
+  const settlementSystems = rule.settlementSystems || [];
+  return (!clientOrgs.length || clientOrgs.includes(readOptionalText(project.clientOrg)))
+    && (!settlementSystems.length || settlementSystems.includes(readOptionalText(project.settlementSystem) || 'NONE'));
+}
+
 export function buildParticipationDashboardSnapshot({ projects = [], entries = [], rules: savedRules = [], generatedAt = '' } = {}) {
   const projectById = new Map(projects.map((project) => [readOptionalText(project?.id), project]));
   const rules = savedRules
-    .filter((rule) => readOptionalText(rule?.kind) === 'USER_DEFINED' && readOptionalText(rule?.id) && readOptionalText(rule?.alias))
+    .filter((rule) => readOptionalText(rule?.kind) === 'USER_DEFINED' && readOptionalText(rule?.id) && readOptionalText(rule?.alias)
+      && (Array.isArray(rule?.clientOrgs) || Array.isArray(rule?.settlementSystems)))
     .map((rule) => ({
       id: readOptionalText(rule.id), alias: readOptionalText(rule.alias),
-      projectIds: [...new Set((Array.isArray(rule.projectIds) ? rule.projectIds : []).map(readOptionalText).filter((id) => projectById.has(id)))],
+      clientOrgs: normalizedValues(rule.clientOrgs),
+      settlementSystems: normalizedValues(rule.settlementSystems),
     }))
     .sort((left, right) => left.alias.localeCompare(right.alias, 'ko'));
   const buckets = new Map([
-    ['all', { id: 'all', alias: '전체 인력', projectIds: [...projectById.keys()].filter(Boolean), rows: new Map() }],
+    ['all', { id: 'all', alias: '전체 인력', clientOrgs: [], settlementSystems: [], rows: new Map() }],
     ...rules.map((rule) => [rule.id, { ...rule, rows: new Map() }]),
   ]);
 
@@ -49,7 +68,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     const project = projectById.get(projectId);
     if (!project) continue;
     for (const bucket of buckets.values()) {
-      if (!bucket.projectIds.includes(projectId)) continue;
+      if (!matchesRule(project, bucket)) continue;
       const memberId = readOptionalText(entry?.memberId) || `unresolved:${readOptionalText(entry?.id)}`;
       const row = bucket.rows.get(memberId) || {
         memberId,
@@ -84,8 +103,8 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     return {
       id: rule.id,
       alias: rule.alias,
-      projectIds: [...rule.projectIds].sort(),
-      projectCount: rule.projectIds.length,
+      clientOrgs: rule.clientOrgs,
+      settlementSystems: rule.settlementSystems,
       members,
     };
   });
@@ -95,6 +114,11 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     generatedAt,
     availableYears: [...availableYears].sort(),
     rules: serializedRules,
+    filterOptions: {
+      clientOrgs: [...new Set(projects.map((project) => readOptionalText(project?.clientOrg)).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ko')),
+      settlementSystems: [...new Set(projects.map((project) => readOptionalText(project?.settlementSystem) || 'NONE'))]
+        .sort().map((value) => ({ value, label: SETTLEMENT_SYSTEM_LABELS[value] || value })),
+    },
   };
 }
 
@@ -140,8 +164,8 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
     : snapshot.availableYears.at(-1) || new Date().getFullYear().toString();
   const monthKeys = monthsForYear(selectedYear);
   const months = monthKeys.map((yearMonth) => ({ yearMonth, label: `${Number(yearMonth.slice(5, 7))}월` }));
-  const ruleOptions = (snapshot.rules || []).map((rule) => ({ id: rule.id, alias: rule.alias, projectCount: rule.projectCount }));
-  const selectedRule = (snapshot.rules || []).find((rule) => rule.id === selectedRuleId) || snapshot.rules?.[0] || { id: 'all', alias: '전체 인력', members: [], projectIds: [], projectCount: 0 };
+  const ruleOptions = (snapshot.rules || []).map((rule) => ({ id: rule.id, alias: rule.alias, clientOrgs: rule.clientOrgs || [], settlementSystems: rule.settlementSystems || [] }));
+  const selectedRule = (snapshot.rules || []).find((rule) => rule.id === selectedRuleId) || snapshot.rules?.[0] || { id: 'all', alias: '전체 인력', members: [], clientOrgs: [], settlementSystems: [] };
   const members = (selectedRule.members || []).map((member) => {
     const monthsWithStatus = monthKeys.map((yearMonth) => {
       const rate = Number(member.monthlyRates?.[yearMonth] || 0);
@@ -157,12 +181,13 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
     availableYears: snapshot.availableYears || [],
     selectedYear,
     months,
-    selectedRule: { id: selectedRule.id, alias: selectedRule.alias, projectIds: selectedRule.projectIds || [], projectCount: selectedRule.projectCount || 0 },
+    selectedRule: { id: selectedRule.id, alias: selectedRule.alias, clientOrgs: selectedRule.clientOrgs || [], settlementSystems: selectedRule.settlementSystems || [] },
     ruleOptions,
     userRuleOptions: ruleOptions.filter((rule) => rule.id !== 'all'),
     members,
     warnings,
     warningCount: warnings.length,
     hasWarnings: warnings.length > 0,
+    filterOptions: snapshot.filterOptions || { clientOrgs: [], settlementSystems: [] },
   };
 }

@@ -52,15 +52,19 @@ export function mountParticipationDashboardRoutes(app, { db, now, idempotencySer
     const tenantId = readOptionalText(req.context?.tenantId);
     const alias = readOptionalText(req.body?.alias);
     const requestedId = readOptionalText(req.body?.id);
-    const projectIds = [...new Set((Array.isArray(req.body?.projectIds) ? req.body.projectIds : []).map(readOptionalText).filter(Boolean))];
+    const clientOrgs = [...new Set((Array.isArray(req.body?.clientOrgs) ? req.body.clientOrgs : []).map(readOptionalText).filter(Boolean))];
+    const settlementSystems = [...new Set((Array.isArray(req.body?.settlementSystems) ? req.body.settlementSystems : []).map(readOptionalText).filter(Boolean))];
     if (!tenantId) throw createHttpError(400, 'tenantId is required.', 'tenant_required');
     if (!alias || alias.length > 80) throw createHttpError(422, '규칙명은 1~80자로 입력해 주세요.', 'invalid_participation_rule_alias');
+    if (clientOrgs.length > 4 || settlementSystems.length > 4) throw createHttpError(422, '계약 대상과 정산 시스템은 각각 최대 4개까지 선택할 수 있습니다.', 'invalid_participation_rule_filter');
     const projectsSnap = await db.collection(`orgs/${tenantId}/projects`).get();
-    const validProjectIds = new Set(projectsSnap.docs.map((doc) => doc.id));
-    if (projectIds.some((projectId) => !validProjectIds.has(projectId))) throw createHttpError(422, '규칙에 연결할 수 없는 프로젝트가 포함되어 있습니다.', 'invalid_participation_rule_project');
+    const projects = projectsSnap.docs.map((doc) => doc.data() || {});
+    const validClientOrgs = new Set(projects.map((project) => readOptionalText(project.clientOrg)).filter(Boolean));
+    const validSettlementSystems = new Set(projects.map((project) => readOptionalText(project.settlementSystem) || 'NONE'));
+    if (clientOrgs.some((value) => !validClientOrgs.has(value)) || settlementSystems.some((value) => !validSettlementSystems.has(value))) throw createHttpError(422, '규칙 조건에 사용할 수 없는 값이 포함되어 있습니다.', 'invalid_participation_rule_filter');
     const ruleId = requestedId || `participation-rule-${crypto.randomUUID()}`;
     if (!/^participation-rule-[a-zA-Z0-9-]{1,80}$/.test(ruleId)) throw createHttpError(422, '규칙 식별자가 올바르지 않습니다.', 'invalid_participation_rule_id');
-    const rule = { id: ruleId, alias, projectIds, kind: 'USER_DEFINED' };
+    const rule = { id: ruleId, alias, clientOrgs, settlementSystems, kind: 'USER_DEFINED' };
     await db.doc(`orgs/${tenantId}/participation_rules/${ruleId}`).set({
       ...rule,
       tenantId,
