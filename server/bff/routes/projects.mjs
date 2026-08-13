@@ -265,6 +265,39 @@ function buildProjectExecutiveReviewSlackPayload({ project, projectRequest, revi
   };
 }
 
+function buildProjectCodeRegisteredSlackPayload({ project, projectRequest, projectCode, reviewerName }) {
+  const payload = project && typeof project === 'object' ? project : {};
+  const requestPayload = projectRequest?.payload && typeof projectRequest.payload === 'object'
+    ? projectRequest.payload
+    : {};
+  const projectName = trimSlackText(payload.name || requestPayload.name, 120);
+  const officialContractName = trimSlackText(payload.officialContractName || requestPayload.officialContractName, 220);
+  const clientOrg = trimSlackText(payload.clientOrg || requestPayload.clientOrg, 160);
+  const department = trimSlackText(payload.department || requestPayload.department, 120);
+  const requester = trimSlackText(projectRequest?.requestedByName, 120);
+  const requestId = trimSlackText(projectRequest?.id, 120);
+  const projectId = trimSlackText(payload.id, 120);
+  const code = trimSlackText(projectCode || payload.projectCode, 120);
+  const reviewer = trimSlackText(reviewerName, 120);
+  const lines = [
+    '*[InnerPlatform] 프로젝트 코드 등록 완료*',
+    `프로젝트명: \`${projectName}\``,
+    `프로젝트 코드: ${code}`,
+    `공식 계약명: ${officialContractName}`,
+    `계약 대상: ${clientOrg}`,
+    `담당조직(CIC): ${department}`,
+    `처리자: ${reviewer}`,
+    `요청자: ${requester}`,
+    `requestId: \`${requestId}\``,
+    `projectId: \`${projectId}\``,
+  ];
+
+  return {
+    text: `[InnerPlatform] 프로젝트 코드 등록 완료: ${code} · ${projectName}`,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } }],
+  };
+}
+
 function assertProjectRequestMatchesProject(request, projectId) {
   const normalizedProjectId = readOptionalText(projectId);
   const requestProjectIds = [request?.approvedProjectId, request?.targetProjectId]
@@ -3522,7 +3555,7 @@ export function mountProjectRoutes(app, {
       && isProjectChangeRequest(request)
       && readOptionalText(request?.status) === 'PENDING';
 
-    await mergeProjectAndRequestDocs({
+    const projectResult = await mergeProjectAndRequestDocs({
       db,
       projectPath,
       buildProjectPatch: async (currentProject, currentRequest, _nextVersion, tx) => {
@@ -3656,6 +3689,27 @@ export function mountProjectRoutes(app, {
       notFoundMessage: `Project not found: ${projectId}`,
     });
 
+    let slackDelivered = false;
+    let slackReason = null;
+    if (parsed.reviewStatus === 'AGREED') {
+      if (!projectRegistrationSlackService?.enabled || typeof projectRegistrationSlackService.notifyMessage !== 'function') {
+        slackReason = 'slack_not_configured';
+      } else {
+        try {
+          await projectRegistrationSlackService.notifyMessage(buildProjectCodeRegisteredSlackPayload({
+            project: projectResult.data,
+            projectRequest: projectResult.request || request,
+            projectCode,
+            reviewerName,
+          }));
+          slackDelivered = true;
+        } catch (error) {
+          console.error('[BFF] project code Slack notification failed:', error);
+          slackReason = error instanceof Error ? error.message : 'slack_delivery_failed';
+        }
+      }
+    }
+
     return {
       status: 200,
       body: {
@@ -3665,6 +3719,8 @@ export function mountProjectRoutes(app, {
         reviewStatus: parsed.reviewStatus,
         projectCode,
         reviewedAt: now,
+        slackDelivered,
+        slackReason,
       },
     };
   }));

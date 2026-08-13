@@ -55,7 +55,7 @@ function createDb(seed = {}) {
   };
 }
 
-function createRouteApp({ actorRole = 'finance', memberStatus = 'ACTIVE', seed = {} } = {}) {
+function createRouteApp({ actorRole = 'finance', memberStatus = 'ACTIVE', seed = {}, projectRegistrationSlackService } = {}) {
   const db = createDb({
     'orgs/tenant-a/members/finance-a': {
       uid: 'finance-a', role: actorRole, status: memberStatus,
@@ -83,6 +83,7 @@ function createRouteApp({ actorRole = 'finance', memberStatus = 'ACTIVE', seed =
       complete: vi.fn(async () => undefined),
       fail: vi.fn(async () => undefined),
     },
+    projectRegistrationSlackService,
   });
   app.use((error, _req, res, _next) => {
     res.status(error.statusCode || 500).json({ error: error.code || 'internal_error', message: error.message });
@@ -138,7 +139,8 @@ function reviewSeed(project = approvedProject(), projectRequest = approvedReques
 
 describe('management planning project review route', () => {
   it('agrees after executive approval, normalizes and atomically claims the project code', async () => {
-    const { app, db } = createRouteApp({ seed: reviewSeed() });
+    const projectRegistrationSlackService = { enabled: true, notifyMessage: vi.fn(async () => {}) };
+    const { app, db } = createRouteApp({ seed: reviewSeed(), projectRegistrationSlackService });
 
     const response = await request(app)
       .post('/api/v1/projects/project-a/management-planning-review')
@@ -158,6 +160,7 @@ describe('management planning project review route', () => {
       requestId: 'request-a',
       reviewStatus: 'AGREED',
       projectCode: 'AXR-2026-001',
+      slackDelivered: true,
     });
     expect(db.documents.get('orgs/tenant-a/projects/project-a')).toMatchObject({
       executiveReviewStatus: 'APPROVED',
@@ -184,6 +187,9 @@ describe('management planning project review route', () => {
       projectCode: 'AXR-2026-001',
       projectCodeKey: 'AXR-2026-001',
     });
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('프로젝트 코드 등록 완료: AXR-2026-001'),
+    }));
   });
 
   it('closes a resubmitted management-planning change request when it agrees', async () => {
