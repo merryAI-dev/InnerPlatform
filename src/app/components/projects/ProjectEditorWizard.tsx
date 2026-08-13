@@ -55,6 +55,7 @@ import {
   type SettlementSystemCode,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS, dedupeProjectDepartmentLabels } from '../../data/project-department-options';
+import { checkContractAmount } from '../../platform/project-contract-amount-check';
 import type { DirectoryPerson } from '../../platform/person-directory';
 import {
   buildProjectTeamMemberOptions,
@@ -572,12 +573,15 @@ function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> =
  * 마지막 단계 안내와 똑같은 뒷말을 붙인다. 이미 문장인 문구는 그대로 둔다.
  */
 function describeSubmitIssue(message: string) {
-  return message.endsWith('.') ? message : `${message} · 최종 저장 전 확인이 필요합니다`;
+  // 라벨 바로 옆이라 항목 이름은 이미 보인다. 뒷말을 붙이면 같은 말이 두 번 나온다.
+  return message.endsWith('.') ? message : `${message}을(를) 입력해 주세요.`;
 }
 
 interface ProjectFormSectionProps {
   title: string;
   required?: boolean;
+  /** 바로 아래가 표일 때. 표가 자기 윗선을 가지므로 섹션 제목의 밑선을 그리지 않는다. */
+  flushBelow?: boolean;
   /** 섹션 제목 밑에 한 줄로 붙는 부연. 필드 도움말과 섞이지 않도록 여기서만 쓴다. */
   description?: string;
   action?: ReactNode;
@@ -585,14 +589,14 @@ interface ProjectFormSectionProps {
 }
 
 /** 섹션 제목 + 굵은 밑줄. 단계 안의 묶음은 모두 이 모양 하나로 통일한다. */
-function ProjectFormSection({ title, required, description, action, children }: ProjectFormSectionProps) {
+function ProjectFormSection({ title, required, description, action, flushBelow, children }: ProjectFormSectionProps) {
   return (
     <section className="space-y-4">
-      <div className="flex items-end justify-between gap-4 border-b-2 border-slate-900 pb-2">
+      <div className={cn('flex items-end justify-between gap-4 pb-2', flushBelow ? '' : 'border-b border-slate-200')}>
         <div>
           <h3 className={FORM_SECTION_CLASS}>
             {title}
-            {required ? <span className="ml-0.5 text-[#0176D3]">*</span> : null}
+            {required ? <span className="ml-0.5 text-red-600">*</span> : null}
           </h3>
           {description ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{description}</p> : null}
         </div>
@@ -638,7 +642,7 @@ function ProjectFormRow({ label, required, note, hints, errors, issueLabel, chil
         <Label className={cn('inline-flex', FORM_LABEL_CLASS)}>
           <span>
             {label}
-            {required ? <span className="ml-0.5 text-[#0176D3]">*</span> : null}
+            {required ? <span className="ml-0.5 text-red-600">*</span> : null}
           </span>
         </Label>
         {note ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{note}</p> : null}
@@ -649,7 +653,7 @@ function ProjectFormRow({ label, required, note, hints, errors, issueLabel, chil
           <ul className={cn('mt-2 space-y-1', FORM_HINT_CLASS)}>
             {visibleHints.map((hint, index) => (
               <li key={index} className="flex gap-1.5">
-                <span aria-hidden className="shrink-0">·</span>
+                <span aria-hidden className="shrink-0">•</span>
                 <span className="min-w-0">{hint}</span>
               </li>
             ))}
@@ -659,7 +663,7 @@ function ProjectFormRow({ label, required, note, hints, errors, issueLabel, chil
           <ul className={cn('mt-2 space-y-1', FORM_ERROR_CLASS)} role="alert">
             {visibleErrors.map((message) => (
               <li key={message} className="flex gap-1.5">
-                <span aria-hidden className="shrink-0">·</span>
+                <span aria-hidden className="shrink-0">•</span>
                 <span className="min-w-0">{describeSubmitIssue(message)}</span>
               </li>
             ))}
@@ -2096,7 +2100,7 @@ export function ProjectEditorWizard({
     return (
       <div className={cn('overflow-x-auto bg-white', FORM_VALUE_CLASS)}>
         <table className="w-full min-w-[640px] border-collapse text-left">
-          <thead className="border-t-2 border-b border-slate-900 border-b-slate-200">
+          <thead className="border-y border-slate-200 bg-slate-50">
             <tr>
               <th scope="col" className={cn('w-10 px-3 py-2', FORM_LABEL_CLASS)}>#</th>
               <th scope="col" className={cn('px-3 py-2', FORM_LABEL_CLASS)}>서류</th>
@@ -2231,6 +2235,27 @@ export function ProjectEditorWizard({
     draft.financialYears.reduce((sum, row) => sum + row[field], 0)
   );
 
+  /**
+   * 계약금액과 항목 합계를 대조한다. 값을 고치지는 않는다 - 프로덕션 69건 중 식과 맞는
+   * 것이 8건뿐이라 자동 계산으로 바꾸면 56건의 계약금액이 다음 저장에 조용히 줄어든다.
+   * 다년도는 표 합계가 곧 저장값이므로 그 합계로 대조한다.
+   */
+  const contractAmountCheck = annualTotalsOwnAmounts
+    ? checkContractAmount({
+      contractAmount: annualTotal('contractAmount'),
+      salesVatAmount: annualTotal('salesVatAmount'),
+      totalRevenueAmount: annualTotal('totalRevenueAmount'),
+      totalActualCost: annualTotal('totalActualCost'),
+      supportAmount: annualTotal('supportAmount'),
+    })
+    : checkContractAmount({
+      contractAmount: draft.contractAmount,
+      salesVatAmount: draft.salesVatAmount,
+      totalRevenueAmount: draft.totalRevenueAmount,
+      totalActualCost: draft.totalActualCost,
+      supportAmount: draft.supportAmount,
+    });
+
   /** 금액 입력 아래 보조 표기. 한글 단위는 읽기 전용이고 저장값은 원 단위 그대로다. */
   const amountHint = (value: number, entered: boolean, prefix = '') => {
     if (!entered) return '미입력';
@@ -2264,7 +2289,7 @@ export function ProjectEditorWizard({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse text-left">
             <thead>
-              <tr className="border-t-2 border-b border-slate-900 border-b-slate-200">
+              <tr className="border-y border-slate-200 bg-slate-50">
                 <th scope="col" className={cn('py-2 pr-3', FORM_LABEL_CLASS)}>연도</th>
                 {columns.map(([field, label]) => (
                   <th key={field} scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>{label}</th>
@@ -2321,9 +2346,16 @@ export function ProjectEditorWizard({
         </div>
         <ul className={cn('space-y-1', FORM_HINT_CLASS)}>
           <li className="flex gap-1.5">
-            <span aria-hidden>·</span>
+            <span aria-hidden>•</span>
             <span>계약금액 합계 {koreanContractTotal || '0 원'}</span>
           </li>
+          {/* 계약금액과 나머지 네 항목의 합이 다르면 알려만 준다. 값은 고치지 않는다. */}
+          {contractAmountCheck.message ? (
+            <li className="flex gap-1.5 text-amber-700">
+              <span aria-hidden>•</span>
+              <span>{contractAmountCheck.message}</span>
+            </li>
+          ) : null}
         </ul>
         {emptyContractYears.length > 0 || unconfirmedYears.length > 0 || totalsDrifted ? (
           <ul className={cn('space-y-1', FORM_ERROR_CLASS)}>
@@ -2359,6 +2391,7 @@ export function ProjectEditorWizard({
             <ProjectFormSection
               title="등록 제출서류 7종"
               description="1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다."
+              flushBelow
             >
               {renderRegistrationDocumentTable()}
               {/* Contract-specific confirmations stay below the list; they belong to slot 1
@@ -2459,7 +2492,10 @@ export function ProjectEditorWizard({
               required
               issueLabel="계약금액"
               errors={fieldIssues('계약금액')}
-              hints={[amountHint(draft.contractAmount, hasContractAmountInput, PROJECT_CURRENCY_LABELS[draft.currency])]}
+              hints={[
+                amountHint(draft.contractAmount, hasContractAmountInput, PROJECT_CURRENCY_LABELS[draft.currency]),
+                contractAmountCheck.message,
+              ]}
             >
               <Input
                 inputMode="numeric"
@@ -2530,7 +2566,7 @@ export function ProjectEditorWizard({
             </div>
           </ProjectFormSection>
           {draft.financialYears.map((row, index) => (
-            <ProjectFormSection key={row.year} title={`${row.year}년 입금 계획`}>
+            <ProjectFormSection key={row.year} title={`${row.year}년 입금 계획`} flushBelow>
               {renderPaymentFields(row, index)}
             </ProjectFormSection>
           ))}
@@ -2685,7 +2721,7 @@ export function ProjectEditorWizard({
       </ProjectFormSection>
 
       {!hasMultiYearContract ? (
-        <ProjectFormSection title="입금 계획">
+        <ProjectFormSection title="입금 계획" flushBelow>
           {renderPaymentFields()}
         </ProjectFormSection>
       ) : null}
@@ -2776,7 +2812,7 @@ export function ProjectEditorWizard({
             <ul className={cn('space-y-1', FORM_ERROR_CLASS)} role="alert">
               {fieldIssues('참여인력 이름·역할', '운영매니저 1인 이상').map((message) => (
                 <li key={message} className="flex gap-1.5">
-                  <span aria-hidden className="shrink-0">·</span>
+                  <span aria-hidden className="shrink-0">•</span>
                   <span className="min-w-0">{describeSubmitIssue(message)}</span>
                 </li>
               ))}
@@ -2937,7 +2973,7 @@ export function ProjectEditorWizard({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] border-collapse text-left">
             <thead>
-              <tr className="border-t-2 border-b border-slate-900 border-b-slate-200">
+              <tr className="border-y border-slate-200 bg-slate-50">
                 <th scope="col" className={cn('py-2 pr-3', FORM_LABEL_CLASS)}>구분</th>
                 <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>금액 (원)</th>
                 <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>계약금액 대비</th>
@@ -2969,7 +3005,7 @@ export function ProjectEditorWizard({
                         onChange={(event) => updatePaymentExpectedMonth(field, event.target.value)}
                         className={cn('min-w-[150px]', FORM_CONTROL_CLASS)}
                       />
-                      {paymentPlan[field] > 0 ? <span aria-hidden className="text-[#0176D3]">*</span> : null}
+                      {paymentPlan[field] > 0 ? <span aria-hidden className="text-red-600">*</span> : null}
                     </div>
                   </td>
                 </tr>
@@ -3511,46 +3547,55 @@ export function ProjectEditorWizard({
           <Progress value={((stepIndex + 1) / STEPS.length) * 100} />
           {/* 원형 번호 인디케이터. 남은 필수 개수는 submitIssues 를 그대로 세어 배지로만
               얹는다(판정은 그대로). 칩을 누르면 그 단계로 이동한다. */}
-          <div className="mt-4 grid gap-2 lg:grid-cols-4">
+          {/* 레퍼런스(RCS Biz Center 가입 흐름)와 같은 형태 - 원형 번호를 선으로 잇고
+              라벨은 아래에 둔다. 남은 필수 개수는 라벨 옆 작은 숫자로만 얹는다. */}
+          <ol className="mt-5 flex items-start">
             {STEPS.map((item, index) => {
               const active = index === stepIndex;
+              const done = index < stepIndex;
               const remaining = stepIssueCounts[item.id];
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-current={active ? 'step' : undefined}
-                  onClick={() => setStepIndex(index)}
-                  className={cn(
-                    'flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors lg:py-3',
-                    FORM_LABEL_CLASS,
-                    active
-                      ? 'border-[#0176D3] bg-[#0176D3]/5 text-[#0176D3]'
-                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50',
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
-                      active ? 'border-[#0176D3] bg-[#0176D3] text-white' : 'border-slate-300 text-slate-500',
-                    )}
-                  >
-                    {index + 1}
-                  </span>
-                  <span className="truncate">{item.label}</span>
-                  {remaining > 0 ? (
+                <li key={item.id} className="flex min-w-0 flex-1 items-start">
+                  {index > 0 ? (
                     <span
-                      className="ml-auto shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700"
-                      title={`이 단계에 남은 필수 항목 ${remaining}개`}
-                    >
-                      {remaining}
-                    </span>
+                      aria-hidden
+                      className={cn('mt-[13px] h-px flex-1', done || active ? 'bg-[#0176D3]' : 'bg-slate-200')}
+                    />
                   ) : null}
-                </button>
+                  <button
+                    type="button"
+                    aria-current={active ? 'step' : undefined}
+                    onClick={() => setStepIndex(index)}
+                    className="flex w-[96px] shrink-0 flex-col items-center gap-2 px-1 text-center"
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'flex h-[27px] w-[27px] items-center justify-center rounded-full border text-[12px] font-bold transition-colors',
+                        done && 'border-[#0176D3] bg-[#0176D3] text-white',
+                        active && 'border-[#0176D3] bg-[#0176D3] text-white ring-4 ring-[#0176D3]/15',
+                        !done && !active && 'border-slate-300 bg-white text-slate-400',
+                      )}
+                    >
+                      {done ? '✓' : index + 1}
+                    </span>
+                    <span className={cn('flex items-center gap-1', FORM_LABEL_CLASS, active ? 'text-slate-900' : 'text-slate-500')}>
+                      <span className="truncate">{item.label}</span>
+                      {remaining > 0 ? (
+                        <span className="font-bold text-red-600" title={`남은 필수 항목 ${remaining}개`}>{remaining}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                  {index < STEPS.length - 1 ? (
+                    <span
+                      aria-hidden
+                      className={cn('mt-[13px] h-px flex-1', index < stepIndex ? 'bg-[#0176D3]' : 'bg-slate-200')}
+                    />
+                  ) : null}
+                </li>
               );
             })}
-          </div>
+          </ol>
         </CardContent>
       </Card>
 
@@ -3563,7 +3608,7 @@ export function ProjectEditorWizard({
             <ul className={cn('mt-2 space-y-1', FORM_HINT_CLASS)}>
               {STEP_PREPARATION_NOTES[step.id].map((note) => (
                 <li key={note} className="flex gap-1.5">
-                  <span aria-hidden className="shrink-0">·</span>
+                  <span aria-hidden className="shrink-0">•</span>
                   <span className="min-w-0">{note}</span>
                 </li>
               ))}
