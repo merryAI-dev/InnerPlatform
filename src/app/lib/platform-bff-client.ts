@@ -50,8 +50,8 @@ export interface ParticipationDashboardMember {
 export interface ParticipationDashboardRule {
   id: string;
   alias: string;
-  projectIds: string[];
-  projectCount: number;
+  clientOrgs: string[];
+  settlementSystems: string[];
 }
 
 export interface ParticipationDashboardSnapshot {
@@ -67,7 +67,7 @@ export interface ParticipationDashboardSnapshot {
   warnings: Array<{ yearMonth: string; rate: number; memberId: string; memberName: string }>;
   warningCount: number;
   hasWarnings: boolean;
-  projects: Array<{ id: string; name: string; clientOrg: string }>;
+  filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string }> };
 }
 
 export interface ProjectParticipationSnapshot {
@@ -1981,13 +1981,14 @@ export async function saveParticipationRuleViaBff(params: {
   actor: ActorLike;
   id?: string;
   alias: string;
-  projectIds: string[];
+  clientOrgs: string[];
+  settlementSystems: string[];
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'projectIds'>> {
-  const response = await resolveClient(params.client).post<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'projectIds'>>(
+}): Promise<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'clientOrgs' | 'settlementSystems'>> {
+  const response = await resolveClient(params.client).post<Pick<ParticipationDashboardRule, 'id' | 'alias' | 'clientOrgs' | 'settlementSystems'>>(
     '/api/v1/participation-dashboard/rules',
-    { tenantId: params.tenantId, actor: toRequestActor(params.actor), body: { id: params.id, alias: params.alias, projectIds: params.projectIds }, idempotencyKey: params.idempotencyKey, retries: 0, timeoutMs: 10_000 },
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), body: { id: params.id, alias: params.alias, clientOrgs: params.clientOrgs, settlementSystems: params.settlementSystems }, idempotencyKey: params.idempotencyKey, retries: 0, timeoutMs: 10_000 },
   );
   return response.data;
 }

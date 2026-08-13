@@ -14,10 +14,10 @@ const secondProject = {
 };
 
 describe('participation dashboard', () => {
-  it('uses a freely named multi-project rule and returns server-calculated 12-month warning rows', () => {
+  it('uses client-org and settlement-system conditions to return server-calculated 12-month warning rows', () => {
     const snapshot = buildParticipationDashboardSnapshot({
       projects: [project, secondProject],
-      rules: [{ id: 'participation-rule-agri', kind: 'USER_DEFINED', alias: '농식품 + 회계사 정산', projectIds: [project.id, secondProject.id] }],
+      rules: [{ id: 'participation-rule-agri', kind: 'USER_DEFINED', alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg], settlementSystems: [project.settlementSystem, secondProject.settlementSystem] }],
       entries: [
         { id: 'a', projectId: project.id, memberId: 'm-1', memberName: '보람', rate: 60, periodStart: '2026-01', periodEnd: '2026-12' },
         { id: 'b', projectId: project.id, memberId: 'm-1', memberName: '보람', rate: 50, periodStart: '2026-03', periodEnd: '2026-04' },
@@ -29,8 +29,8 @@ describe('participation dashboard', () => {
 
     expect(result.selectedRule).toMatchObject({ id: 'all', alias: '전체 인력' });
     const filtered = selectParticipationDashboardYear(snapshot, '2026', 'participation-rule-agri');
-    expect(filtered.selectedRule).toMatchObject({ alias: '농식품 + 회계사 정산', projectCount: 2 });
-    expect(filtered.userRuleOptions).toEqual([{ id: 'participation-rule-agri', alias: '농식품 + 회계사 정산', projectCount: 2 }]);
+    expect(filtered.selectedRule).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg] });
+    expect(filtered.userRuleOptions).toEqual([{ id: 'participation-rule-agri', alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg, secondProject.clientOrg], settlementSystems: [project.settlementSystem, secondProject.settlementSystem] }]);
     expect(filtered.members[0].projectLabel).toBe('agri-2026 · hongsi-2026');
     expect(filtered.members[0].months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
     expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'm-1', memberName: '보람', yearMonth: '2026-03', rate: 120 }]));
@@ -59,7 +59,7 @@ describe('participation dashboard routes', () => {
     app.use((error, _req, res, _next) => res.status(error.statusCode || 500).json({ code: error.code }));
     const snapshot = await request(app).get(`/api/v1/participation-dashboard/projects/${project.id}`).expect(200);
     expect(snapshot.body).toMatchObject({ projectId: project.id, headcount: 1, totalRate: 75, averageRate: 75, hasMembers: true });
-    const response = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'key').send({ alias: '농식품 + 회계사 정산', projectIds: [project.id, secondProject.id] }).expect(200);
-    expect(saved.get(`orgs/mysc/participation_rules/${response.body.id}`)).toMatchObject({ alias: '농식품 + 회계사 정산', projectIds: [project.id, secondProject.id], kind: 'USER_DEFINED' });
+    const response = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'key').send({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg], settlementSystems: [project.settlementSystem] }).expect(200);
+    expect(saved.get(`orgs/mysc/participation_rules/${response.body.id}`)).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg], settlementSystems: [project.settlementSystem], kind: 'USER_DEFINED' });
   });
 });
