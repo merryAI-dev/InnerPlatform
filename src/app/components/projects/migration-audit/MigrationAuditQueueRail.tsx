@@ -44,7 +44,7 @@ export function MigrationAuditQueueRail({
             </div>
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">PM 등록 대기열</p>
-              <p className="text-[14px] font-semibold text-slate-950">CIC 대표 검토 대기열</p>
+              <p className="text-[14px] font-semibold text-slate-950">조직장 결재 대기열</p>
             </div>
           </div>
         </div>

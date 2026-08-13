@@ -21,6 +21,7 @@ describe('BFF project change request payload merge', () => {
       supportAmount: 0,
       contractStart: '2026-01-01',
       contractEnd: '2026-12-31',
+      finalPaymentExpectedWeek: '26-12-4',
       settlementType: 'TYPE1',
       basis: '공급가액',
       accountType: 'OPERATING',
@@ -28,6 +29,7 @@ describe('BFF project change request payload merge', () => {
       managerName: '김인효(베리)',
       teamName: '개발협력센터',
       note: '승인 전 수정값',
+      finalPaymentExpectedWeek: '26-12-4',
       teamMembersDetailed: [
         { memberName: '김인효', memberNickname: '베리', role: 'PM', participationRate: 50 },
       ],

@@ -1515,6 +1515,7 @@ export function buildProjectRegistrationCanonicalDocuments({
       final: registrationAmount(payload.paymentPlan?.final),
     },
     paymentExpectedMonths: normalizePaymentExpectedMonths(payload.paymentExpectedMonths),
+    finalPaymentExpectedWeek: readOptionalText(payload.finalPaymentExpectedWeek),
     interestRefundPolicy: readOptionalText(payload.interestRefundPolicy) || undefined,
     quoteSubmissionDeferred: payload.quoteSubmissionDeferred === true,
     advanceInterimBelow70Reason: readOptionalText(payload.advanceInterimBelow70Reason),
@@ -1697,6 +1698,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     settlementSheetPolicy: pickValue('settlementSheetPolicy') || undefined,
     paymentPlan: pickValue('paymentPlan') || { contract: 0, interim: 0, final: 0 },
     paymentExpectedMonths: normalizePaymentExpectedMonths(pickValue('paymentExpectedMonths')),
+    finalPaymentExpectedWeek: pickText('finalPaymentExpectedWeek'),
     interestRefundPolicy: pickText('interestRefundPolicy') || undefined,
     quoteSubmissionDeferred: pickValue('quoteSubmissionDeferred') === true,
     advanceInterimBelow70Reason: pickText('advanceInterimBelow70Reason'),
@@ -1832,6 +1834,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       payload.paymentExpectedMonths || currentProject.paymentExpectedMonths,
     ),
+    finalPaymentExpectedWeek: readOptionalText(payload.finalPaymentExpectedWeek),
     interestRefundPolicy: readOptionalText(payload.interestRefundPolicy)
       || readOptionalText(currentProject.interestRefundPolicy)
       || undefined,
@@ -1901,6 +1904,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   teamMembersDetailed: '참여인력 (서류상·실제)',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
+  finalPaymentExpectedWeek: '최종 입금 예상 주차',
   interestRefundPolicy: '이자 반납 여부',
   quoteSubmissionDeferred: '산출내역서 이후 제출',
   advanceInterimBelow70Reason: '선금·중도금 70% 미만 사유',
@@ -1933,7 +1937,7 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
   'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
-  'paymentExpectedMonths', 'interestRefundPolicy', 'quoteSubmissionDeferred',
+  'paymentExpectedMonths', 'finalPaymentExpectedWeek', 'interestRefundPolicy', 'quoteSubmissionDeferred',
   'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'executiveApproverId', 'executiveApproverName', 'executiveApproverEmail',

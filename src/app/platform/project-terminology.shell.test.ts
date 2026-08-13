@@ -121,9 +121,8 @@ describe('project terminology contract', () => {
   it('keeps the shared standard terms present on the same surfaces', () => {
     [
       '프로젝트 등록 요청',
-      '프로젝트 등록 검토',
       '프로젝트 등록 및 승인서',
-      'CIC 대표 검토',
+      '조직장 결재',
       '프로젝트명',
       '계약 대상',
       '담당조직(CIC)',

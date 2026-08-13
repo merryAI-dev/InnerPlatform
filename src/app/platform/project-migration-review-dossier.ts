@@ -102,6 +102,65 @@ export interface MigrationReviewDossier {
     downloadURL: string;
     uploadedAt: string;
   };
+  submittedFields: Array<{
+    key: string;
+    label: string;
+    value: string;
+    wide: boolean;
+    missing: boolean;
+  }>;
+  missingSubmittedFields: string[];
+}
+
+const REQUEST_FIELD_LABELS: Record<string, string> = {
+  name: '프로젝트명', officialContractName: '공식 계약명', type: '프로젝트 유형', status: '프로젝트 상태', phase: '프로젝트 단계',
+  description: '상세 설명', clientOrg: '계약 대상', businessManagementGoogleFolderLink: '사업관리 구글 드라이브', department: '담당조직',
+  groupwareName: '그룹웨어명', currency: '통화', contractAmount: '계약금액', salesVatAmount: '매출부가세', totalRevenueAmount: '총수익',
+  totalActualCost: '총실비(원가)', supportAmount: '총지원금', financialInputFlags: '재무 입력 상태', registrationRequirementsVersion: '등록 양식 버전',
+  financialYears: '연도별 계약·재무', registrationConfirmations: '등록 확인 사항', registrationOptionalDocumentNotes: '선택 증빙 메모', checkout: '종료 확인 사항',
+  contractStart: '계약 시작일', contractEnd: '계약 종료일', contractType: '계약서 유형', settlementType: '정산 유형', basis: '정산 기준',
+  accountType: '통장 유형', interestRefundPolicy: '이자 반납 여부', settlementSystem: '정산 시스템', settlementSystemOther: '기타 정산 시스템',
+  laborSettlementBasis: '인건비 정산 기준', fundInputMode: '자금 입력 방식', settlementSheetPolicy: '현금흐름 시트 정책', paymentPlan: '입금 분할',
+  paymentExpectedMonths: '입금 예정월', finalPaymentExpectedWeek: '잔금 입금 예정 주차', laborTransferPlan: '인건비 이관 계획', advanceInterimBelow70Reason: '선금·중도금 70% 미만 사유',
+  paymentPlanDesc: '입금 계획 메모', settlementGuide: '정산 가이드', finalPaymentNote: '잔금 메모', projectPurpose: '프로젝트 목적',
+  registeredById: '등록자 ID', registeredByName: '등록자', registeredByEmail: '등록자 이메일', executiveApproverId: '조직장 ID', executiveApproverName: '조직장',
+  executiveApproverEmail: '조직장 이메일', managerId: '책임자 ID', managerName: '책임자', teamName: '팀명', teamMembers: '팀원 요약',
+  teamMembersDetailed: '팀원·참여율 상세', participantCondition: '참여 조건', note: '등록 메모', contractDocument: '계약서', quoteDocument: '견적서',
+  quoteSubmissionDeferred: '견적서 추후 제출', proposalDocument: '제안서', proposalWordOriginalDocument: '제안서 원본(워드)', proposalPptOriginalDocument: '제안서 원본(PPT)',
+  presentationPptOriginalDocument: '발표자료 원본(PPT)', rfpRequestEvidenceDocument: 'RFP·요청 근거', customerBusinessRegistrationDocument: '계약 대상 사업자등록증',
+  performanceCertificateDocument: '수행실적증명서', taxInvoiceDocument: '세금계산서', finalSettlementReportDocument: '최종 정산 보고서', contractAnalysis: '계약서 분석',
+};
+
+function formatSubmittedValue(value: unknown): string {
+  if (value == null || value === '') return '미입력';
+  if (typeof value === 'boolean') return value ? '예' : '아니오';
+  if (typeof value === 'number') return Number.isFinite(value) ? value.toLocaleString('ko-KR') : '미입력';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.length ? value.map(formatSubmittedValue).join('\n') : '미입력';
+  if (typeof value === 'object') {
+    const rows = Object.entries(value as Record<string, unknown>);
+    return rows.length
+      ? rows.map(([key, item]) => `${REQUEST_FIELD_LABELS[key] || key}: ${formatSubmittedValue(item)}`).join('\n')
+      : '미입력';
+  }
+  return String(value);
+}
+
+function buildSubmittedFields(request: ProjectRequest | null) {
+  const payload = resolveProjectRequestPayload(request);
+  if (!payload) return [{ key: 'payload', label: '제출 원문', value: '요청 문서가 없습니다.', wide: true, missing: true }];
+  const keys = [...Object.keys(REQUEST_FIELD_LABELS), ...Object.keys(payload).filter((key) => !(key in REQUEST_FIELD_LABELS))];
+  return keys.map((key) => {
+    const value = (payload as Record<string, unknown>)[key];
+    const formatted = formatSubmittedValue(value);
+    return {
+      key,
+      label: REQUEST_FIELD_LABELS[key] || key,
+      value: formatted,
+      wide: true,
+      missing: formatted === '미입력',
+    };
+  });
 }
 
 function readable(value: string | null | undefined, fallback = '-') {
@@ -272,6 +331,7 @@ export function buildMigrationReviewDossier(
     ? readReviewChangesFromRequest(request)
     : findLatestReviewChanges(auditHistory);
 
+  const submittedFields = buildSubmittedFields(request);
   return {
     headerTitle: readable(currentName),
     identity: {
@@ -336,5 +396,7 @@ export function buildMigrationReviewDossier(
       downloadURL: readable(contractDocument?.downloadURL),
       uploadedAt: formatDate(contractDocument?.uploadedAt),
     },
+    submittedFields,
+    missingSubmittedFields: submittedFields.filter((field) => field.missing).map((field) => field.label),
   };
 }

@@ -151,6 +151,7 @@ export function buildProjectPayloadFromProject(project: Project): ProjectRequest
     settlementSheetPolicy: project.settlementSheetPolicy,
     paymentPlan: project.paymentPlan,
     paymentExpectedMonths: project.paymentExpectedMonths,
+    finalPaymentExpectedWeek: text(project.finalPaymentExpectedWeek),
     advanceInterimBelow70Reason: text(project.advanceInterimBelow70Reason),
     paymentPlanDesc: text(project.paymentPlanDesc),
     settlementGuide: text(project.settlementGuide),
@@ -285,11 +286,20 @@ export function buildProjectPatchFromRequestPayload(
     accountType: payload.accountType,
     interestRefundPolicy: payload.interestRefundPolicy,
     settlementSystem: payload.settlementSystem,
+    ...(Object.prototype.hasOwnProperty.call(payload, 'settlementSystemOther')
+      ? { settlementSystemOther: text(payload.settlementSystemOther) }
+      : {}),
     laborSettlementBasis: payload.laborSettlementBasis,
+    ...(Object.prototype.hasOwnProperty.call(payload, 'laborTransferPlan')
+      ? { laborTransferPlan: payload.laborTransferPlan }
+      : {}),
     fundInputMode: payload.fundInputMode,
     settlementSheetPolicy: payload.settlementSheetPolicy,
     paymentPlan: payload.paymentPlan || input.baseProject.paymentPlan,
     paymentExpectedMonths: payload.paymentExpectedMonths || input.baseProject.paymentExpectedMonths,
+    ...(Object.prototype.hasOwnProperty.call(payload, 'finalPaymentExpectedWeek')
+      ? { finalPaymentExpectedWeek: text(payload.finalPaymentExpectedWeek) }
+      : {}),
     advanceInterimBelow70Reason: text(payload.advanceInterimBelow70Reason),
     paymentPlanDesc: text(payload.paymentPlanDesc),
     settlementGuide: text(payload.settlementGuide),

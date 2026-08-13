@@ -201,6 +201,7 @@ function validRegistrationPayload(overrides = {}) {
     fundInputMode: 'BANK_UPLOAD',
     paymentPlan: { contract: 50_000, interim: 0, final: 50_000 },
     paymentPlanDesc: '50/50',
+    finalPaymentExpectedWeek: '26-12-4',
     settlementGuide: 'Guide',
     finalPaymentNote: 'Final note',
     projectPurpose: 'Purpose',
@@ -739,6 +740,7 @@ describe('project registration draft service', () => {
       version: 1,
       taxInvoiceAmount: 0,
       isSettled: false,
+      finalPaymentExpectedWeek: '26-12-4',
     });
     expect(db.documents.get('orgs/tenant-a/projects/project-1')).not.toHaveProperty('arbitraryBrowserField');
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1')).toMatchObject({
@@ -746,7 +748,7 @@ describe('project registration draft service', () => {
       sourceDraftId: created.body.draft.draftId,
       status: 'PENDING',
       approvedProjectId: 'project-1',
-      payload: { name: VALID_V2_PROJECT_NAME },
+      payload: { name: VALID_V2_PROJECT_NAME, finalPaymentExpectedWeek: '26-12-4' },
     });
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload)
       .not.toHaveProperty('arbitraryBrowserField');
