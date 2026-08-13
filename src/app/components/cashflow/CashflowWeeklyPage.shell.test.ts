@@ -75,11 +75,11 @@ describe('CashflowWeeklyPage settlement status surface', () => {
   });
 
   it('keeps the executive approver and manager in separate columns', () => {
-    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자', managerName: '기존 담당자' }, [
+    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자' }, [
       { uid: 'owner-1', name: '원장 책임자', nameKo: '원장 책임자' },
     ])).toBe('원장 책임자');
-    expect(formatCashflowManager({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자', managerName: '기존 담당자' })).toBe('기존 담당자');
-    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자', managerName: '스냅샷 책임자' }, [])).toBe('스냅샷 책임자');
+    expect(formatCashflowManager({ managerName: '기존 담당자' })).toBe('기존 담당자');
+    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자' }, [])).toBe('스냅샷 책임자');
   });
 
   it('ANDs department and month status filters while accepting any matching selected-month week', () => {
