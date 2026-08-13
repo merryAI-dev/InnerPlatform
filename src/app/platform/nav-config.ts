@@ -19,18 +19,18 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    label: '인사이트',
+    label: 'CEO',
     items: [
-      { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
+      { to: '/dashboard', icon: LayoutDashboard, label: '통합 대시보드' },
     ],
   },
   {
-    label: '프로젝트 관리',
+    label: '관리자',
     items: [
-      { to: '/projects', icon: FolderKanban, label: '통합 관리' },
+      { to: '/projects', icon: FolderKanban, label: '통합 대시보드' },
       { to: '/projects/migration-audit', icon: ArrowLeftRight, label: '프로젝트 등록/승인' },
       { to: '/cashflow', icon: BarChart3, label: '현금흐름 승인' },
-      { to: '/participation', icon: Shield, label: '참여율 대시보드' },
+      { to: '/participation', icon: Shield, label: '참여율 관리' },
     ],
   },
   {
@@ -42,7 +42,7 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: '시스템 관리',
+    label: 'AXR',
     items: [
       { to: '/users', icon: UserCog, label: '권한 관리' },
       { to: '/settings?tab=members', icon: UserCog, label: '멤버DB' },

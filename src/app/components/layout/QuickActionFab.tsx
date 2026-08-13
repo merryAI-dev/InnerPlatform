@@ -11,7 +11,7 @@ import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-l
 const ACTIONS = [
   { icon: BarChart3, label: '캐시플로 모니터링', path: '/cashflow', color: '#0d9488' },
   { icon: FileCheck, label: '증빙/정산', path: '/evidence', color: '#f59e0b' },
-  { icon: Shield, label: '승인 대기열', path: '/approvals', color: '#0891b2' },
+  { icon: Shield, label: '프로젝트 등록/승인', path: '/approvals', color: '#0891b2' },
 ];
 
 export function QuickActionFab() {

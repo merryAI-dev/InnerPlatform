@@ -603,7 +603,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('reads a 61-project weekly overview with one JVM status request and sheet summary errors', async () => {
+  it('reads a 61-project weekly overview and exposes the previous month as the monthly-close target', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `project-${index + 1}`);
     const canonical = {
       version: '1',
@@ -621,13 +621,17 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ projectIds, yearMonth: '2026-08' })
       .expect(200);
 
-    expect(response.body).toMatchObject({ version: '2', yearMonth: '2026-08', items: canonical.items });
-    expect(response.body.errors).toHaveLength(62);
+    expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', items: canonical.items });
+    expect(response.body.errors).toHaveLength(2);
 
-    expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(fetchImpl).toHaveBeenCalledWith(
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1,
       'http://jvm-weekly.local/api/v1/cashflow/weekly-overview',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(2,
+      'http://jvm-weekly.local/api/v1/cashflow/settlement-statuses/batch',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-07' }) }),
     );
   });
 

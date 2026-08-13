@@ -3041,33 +3041,51 @@ export function mountJvmWeeklyApiRoutes(app, {
       }
       return { projectIds, yearMonth };
     });
-    const result = await trace.measure('java_overview', () => proxyJavaWeeklyRequest({
-      context: req.context,
-      method: 'POST',
-      path: '/api/v1/cashflow/weekly-overview',
-      command: 'read_cashflow_weekly_overview',
-      body: { projectIds, yearMonth },
-      mutation: false,
-    }), { projectCount: projectIds.length });
-    const sheetSummary = await trace.measure('sheet_formula_summary', () => readSheetFormulaProjectionActualSummaries({
-      db,
-      req,
-      projectIds,
-      yearMonth,
-      comparisonBoundary: resolveCashflowComparisonAsOf('', now()),
-      authMode,
-      workspaceEmailDomain,
-    }), { projectCount: projectIds.length });
-    const summaryByProjectId = new Map(sheetSummary.items.map((item) => [item.projectId, item]));
-    const resultErrors = Array.isArray(result?.errors) ? result.errors.filter((error) => error?.code !== 'SUMMARY_UNAVAILABLE') : [];
+    const monthCloseTargetYearMonth = previousYearMonth(yearMonth);
+    const [weeklyResult, monthStatusResult] = await trace.measure('java_overview', () => Promise.all([
+      proxyJavaWeeklyRequest({
+        context: req.context,
+        method: 'POST',
+        path: '/api/v1/cashflow/weekly-overview',
+        command: 'read_cashflow_weekly_overview',
+        body: { projectIds, yearMonth },
+        mutation: false,
+      }),
+      proxyJavaWeeklyRequest({
+        context: req.context,
+        method: 'POST',
+        path: '/api/v1/cashflow/settlement-statuses/batch',
+        command: 'read_cashflow_settlement_statuses_batch',
+        body: { projectIds, yearMonth: monthCloseTargetYearMonth },
+        mutation: false,
+      }),
+    ]), { projectCount: projectIds.length });
+    const alignedMonthStatusResult = await alignMonthSettlementStatus(db, req.context.tenantId, monthStatusResult);
+    const monthStatuses = new Map((Array.isArray(alignedMonthStatusResult?.items) ? alignedMonthStatusResult.items : []).map((item) => [
+      item?.projectId,
+      Array.isArray(item?.items)
+        ? item.items.find((status) => status?.period === 'MONTH') || null
+        : null,
+    ]));
     const combined = {
-      ...result,
-      version: '2',
-      items: (Array.isArray(result?.items) ? result.items : []).map((item) => ({
+      ...weeklyResult,
+      version: '3',
+      yearMonth,
+      monthCloseTargetYearMonth,
+      items: (Array.isArray(weeklyResult?.items) ? weeklyResult.items : []).map((item) => ({
         ...item,
-        projectionActualSummary: summaryByProjectId.get(item?.projectId) || null,
+        settlementStatuses: item?.settlementStatuses ? {
+          ...item.settlementStatuses,
+          items: item.settlementStatuses.items.map((status) => status?.period === 'MONTH'
+            ? (monthStatuses.get(item.projectId) || status)
+            : status),
+        } : null,
+        projectionActualSummary: null,
       })),
-      errors: [...resultErrors, ...sheetSummary.errors],
+      errors: [
+        ...(Array.isArray(weeklyResult?.errors) ? weeklyResult.errors : []),
+        ...(Array.isArray(alignedMonthStatusResult?.errors) ? alignedMonthStatusResult.errors : []),
+      ],
     };
     trace.emit('response', {
       outcome: 'ok',

@@ -6,8 +6,8 @@ const source = readFileSync(resolve(import.meta.dirname, 'PortalSubmissionsPage.
 
 describe('PortalSubmissionsPage weekly history', () => {
   it('keeps weekly status as read-only history and delegates final authority to monthly close', () => {
-    expect(source).toContain('주간 입력 기록 (조회용)');
-    expect(source).toContain('주차별 입력 이력은 조회만 가능하며, 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리합니다.');
+    expect(source).toContain('현금흐름 승인');
+    expect(source).toContain('주차별 입력 현황은 조회만 가능하며, 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리합니다.');
     expect(source).toContain('기존 제출 이력');
     expect(source).toContain('기존 결산 이력');
     expect(source).not.toContain('useCashflowEditLease');

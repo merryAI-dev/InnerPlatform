@@ -14,7 +14,6 @@ import { useFirebase } from '../../lib/firebase-context';
 import {
   fetchCashflowWeeklyOverviewViaBff,
   transitionCashflowSettlementStatusViaBff,
-  type CashflowProjectionActualSummary,
   type CashflowSettlementPeriod,
   type CashflowSettlementStatus,
   type CashflowSettlementStatusItem,
@@ -126,25 +125,25 @@ function SettlementStatusFilterSelect({
   );
 }
 
-function PeriodAmounts({
-  summary,
-  period,
-  loading,
-  error,
-}: {
-  summary: CashflowProjectionActualSummary | undefined;
-  period: CashflowSettlementPeriod;
-  loading?: boolean;
-  error?: boolean;
-}) {
-  if (error) return <div className="mt-1 text-[9px] text-amber-700">금액 확인 필요</div>;
-  if (loading) return <div className="mt-1 text-[9px] text-slate-400">금액 확인 중…</div>;
-  const amounts = summary?.periods.find((item) => item.period === period);
-  if (!amounts) return null;
-  if (amounts.differenceAmount === null) return <div className="mt-1 text-[9px] text-slate-400">시트값 없음</div>;
+function formatSettlementAt(value: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('day')}일 ${part('hour')}:${part('minute')}`;
+}
+
+function SettlementApprovalTimes({ item }: { item?: CashflowSettlementStatusItem }) {
+  const submittedAt = formatSettlementAt(item?.submittedAt || '');
+  const approvedAt = formatSettlementAt(item?.approvedAt || '');
+  if (!submittedAt && !approvedAt) return null;
   return (
-    <div className="mt-1 text-[9px] leading-tight text-slate-500 tabular-nums">
-      <div className="font-semibold text-slate-700">P-A {amounts.differenceAmount.toLocaleString('ko-KR')}원</div>
+    <div className="mt-1.5 space-y-0.5 text-left text-[9px] leading-tight text-slate-500">
+      {submittedAt ? <div>실무자 결재: {submittedAt}</div> : null}
+      {approvedAt ? <div>조직장 승인: {approvedAt}</div> : null}
     </div>
   );
 }
@@ -185,15 +184,6 @@ export function CashflowWeeklyPage() {
     return Object.fromEntries((overview?.errors || [])
       .filter((error) => error.code === 'STATUS_UNAVAILABLE')
       .map((error) => [error.projectId, '결산 상태를 불러오지 못했습니다. 다시 불러와 주세요.']));
-  }, [overview, overviewError, overviewProjectIds]);
-  const summaries = useMemo<Record<string, CashflowProjectionActualSummary>>(() => Object.fromEntries(
-    (overview?.items || []).flatMap((item) => item.projectionActualSummary ? [[item.projectId, item.projectionActualSummary]] : []),
-  ), [overview]);
-  const summaryErrors = useMemo<Record<string, boolean>>(() => {
-    if (overviewError) return Object.fromEntries(overviewProjectIds.map((projectId) => [projectId, true]));
-    return Object.fromEntries((overview?.errors || [])
-      .filter((error) => error.code === 'SUMMARY_UNAVAILABLE')
-      .map((error) => [error.projectId, true]));
   }, [overview, overviewError, overviewProjectIds]);
   const filteredProjects = useMemo(() => filterCashflowProjectsBySettlementStatus(
     projects,
@@ -265,12 +255,12 @@ export function CashflowWeeklyPage() {
     return () => { active = false; window.clearTimeout(requestTimer); };
   }, [orgId, overviewActor, overviewProjectIdsKey, refreshSequence, yearMonth]);
 
-  async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE') {
+  async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE', targetYearMonth = yearMonth) {
     if (!user?.idToken) return;
     const key = `${projectId}:${period}`;
     setActionKey(key);
     try {
-      await transitionCashflowSettlementStatusViaBff({ tenantId: orgId, actor: user, projectId, yearMonth, period, action });
+      await transitionCashflowSettlementStatusViaBff({ tenantId: orgId, actor: user, projectId, yearMonth: targetYearMonth, period, action });
       setRefreshSequence((current) => current + 1);
       toast.success(action === 'APPROVE' ? '정산을 승인했습니다.' : '조직장 승인 대기로 변경했습니다.');
     } catch (error) {
@@ -331,7 +321,7 @@ export function CashflowWeeklyPage() {
                 <tr className="bg-muted/30">
                   <th className="sticky left-0 top-0 z-40 min-w-[220px] border-b bg-slate-50 px-4 py-2 text-left font-bold">프로젝트</th>
                   <th className="sticky left-[220px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">담당자</th>
-                  <th className="sticky top-0 z-30 min-w-[150px] border-b bg-slate-50 px-3 py-2 text-center font-bold">월 결산</th>
+                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{overview?.monthCloseTargetYearMonth || '직전 월'} 결산</th>
                   <th className="sticky top-0 z-30 min-w-[140px] border-b bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
                   {monthWeeks.map((week) => (
                     <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
@@ -359,10 +349,10 @@ export function CashflowWeeklyPage() {
                             period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
-                            onAction={(action) => void transition(project.id, 'MONTH', action)}
+                            onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}
                           />
                         )}
-                        <PeriodAmounts summary={summaries[project.id]} period="MONTH" loading={overviewLoading && !summaries[project.id]} error={summaryErrors[project.id]} />
+                        <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
                       </td>
                       <td className="px-3 py-3 text-center">
                         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-[11px]" onClick={() => openProject(project.id)}>
@@ -382,7 +372,7 @@ export function CashflowWeeklyPage() {
                                 onAction={(action) => void transition(project.id, period, action)}
                               />
                             )}
-                            <PeriodAmounts summary={summaries[project.id]} period={period} loading={overviewLoading && !summaries[project.id]} error={summaryErrors[project.id]} />
+                            <SettlementApprovalTimes item={statusItem(projectStatuses, period)} />
                           </td>
                         );
                       })}
