@@ -151,7 +151,7 @@ function buildSubmittedFields(request: ProjectRequest | null) {
   if (!payload) return [{ key: 'payload', label: '제출 원문', value: '요청 문서가 없습니다.', wide: true, missing: true }];
   const keys = [...Object.keys(REQUEST_FIELD_LABELS), ...Object.keys(payload).filter((key) => !(key in REQUEST_FIELD_LABELS))];
   return keys.map((key) => {
-    const value = (payload as Record<string, unknown>)[key];
+    const value = (payload as unknown as Record<string, unknown>)[key];
     const formatted = formatSubmittedValue(value);
     return {
       key,

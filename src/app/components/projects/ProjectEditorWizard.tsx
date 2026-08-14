@@ -2831,7 +2831,7 @@ export function ProjectEditorWizard({
             const selectedNames = new Set(
               draft.teamMembersDetailed
                 .map((item, itemIndex) => (itemIndex === index ? '' : item.personId))
-                .filter(Boolean),
+                .filter((personId): personId is string => Boolean(personId)),
             );
             // 정산지원이라고 후보를 두 사람으로 좁히지 않는다. 담당이 바뀌거나 그 두 분이
             // 자리를 비우면 아무도 고를 수 없게 된다. 담당자 안내는 아래 문구로 남긴다.
