@@ -26,7 +26,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).not.toContain("['P - A'");
     expect(source).not.toContain('금액 조회 오류');
     expect(source).not.toContain('>조회 오류</span>');
-    expect(source).toContain('monthCloseTargetYearMonth');
+    expect(source).toContain('monthCloseTargetLabel');
     expect(source).toContain('실무자 결재:');
     expect(source).toContain('조직장 승인:');
     expect(source).not.toContain('PeriodAmounts');
@@ -37,7 +37,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}");
+    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, yearMonth)}");
     expect(source).toContain('주정산 이전');
     expect(source).toContain('결산 전');
     expect(source).toContain('조직장 승인 필요');
@@ -49,6 +49,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).not.toContain('window.setInterval');
     expect(source).not.toContain('window.location.reload');
     expect(source).not.toContain("onAction('SUBMIT')");
+    expect(source).not.toContain('{project.department} · {project.clientOrg}');
   });
 
   it('filters both visible rows and compliance requests by normalized department', () => {
