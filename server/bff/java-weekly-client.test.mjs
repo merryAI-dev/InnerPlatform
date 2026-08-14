@@ -875,11 +875,92 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it('replaces the legacy English closed-month message with stable Korean guidance', async () => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([
+      JSON.stringify({
+        code: 'cashflow_month_closed',
+        message: 'Cashflow month is closed and cannot be changed.',
+      }),
+    ], { status: 409 }));
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
+
+    const error = await client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/cashflow/project-a/weekly-update-complete',
+      command: 'complete_cashflow_weekly_update',
+      body: { idempotencyKey: 'weekly-closed-guide' },
+    }).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      statusCode: 409,
+      code: 'cashflow_month_closed',
+      message: '이미 누적 결산이 끝난 월이에요. 수정이 필요하면 관리자에게 월 재오픈을 요청해 주세요.',
+    });
+    expect(error.message).not.toMatch(/Cashflow|closed|cannot be changed/i);
+  });
+
+  it('replaces a technical authority contract error with a recovery guide', async () => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([
+      JSON.stringify({
+        code: 'cashflow_month_close_contract_invalid',
+        message: 'Stored cumulative cashflow close authority revision is invalid.',
+      }),
+    ], { status: 409 }));
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
+
+    const error = await client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/cashflow/project-a/weekly-update-complete',
+      command: 'complete_cashflow_weekly_update',
+      body: { idempotencyKey: 'invalid-authority-guide' },
+    }).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      statusCode: 409,
+      code: 'cashflow_month_close_contract_invalid',
+      message: '월 결산 기준 정보를 확인할 수 없어 안전하게 중단했어요. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.',
+    });
+    expect(error.message).not.toMatch(/Cashflow|Stored|Firestore|revision/i);
+  });
+
+  it.each([
+    [409, 'cashflow_unknown_conflict', 409, 'cashflow_unknown_conflict', '요청을 처리할 수 없습니다. 최신 상태와 입력 내용을 확인해 주세요.'],
+    [500, 'internal_error', 503, 'jvm_weekly_api_internal_error', '현금흐름 저장 서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'],
+  ])('does not expose an unknown upstream %i technical message', async (
+    upstreamStatus,
+    upstreamCode,
+    statusCode,
+    code,
+    message,
+  ) => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([
+      JSON.stringify({
+        code: upstreamCode,
+        message: 'Firestore cumulative close revision invariant failed in JVM adapter.',
+      }),
+    ], { status: upstreamStatus }));
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
+
+    const error = await client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/cashflow/project-a/month-close/reopen',
+      command: 'request_cashflow_month_reopen',
+      body: { idempotencyKey: `unknown-upstream-${upstreamStatus}` },
+    }).catch((caught) => caught);
+
+    expect(error).toMatchObject({ statusCode, code, message });
+    expect(error.message).not.toMatch(/Firestore|cumulative|revision|invariant|JVM|adapter/i);
+  });
+
   it.each([
     [401, 'weekly_auth_required', 401, false, 'failed'],
     [403, 'weekly_forbidden', 403, false, 'failed'],
     [404, 'weekly_not_found', 404, false, 'failed'],
     [409, 'weekly_conflict', 409, false, 'failed'],
+    [409, 'cashflow_month_reopen_revision_changed', 409, false, 'failed'],
     [422, 'weekly_invalid', 422, false, 'failed'],
     [500, 'internal_error', 503, true, 'uncertain'],
   ])('preserves a structured upstream %i response', async (

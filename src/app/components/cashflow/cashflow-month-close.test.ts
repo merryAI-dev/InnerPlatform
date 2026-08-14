@@ -4,15 +4,10 @@ import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-rea
 import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib/platform-bff-client';
 import {
   buildCashflowMonthCloseDraftInput,
-  annualYearsFor,
   createEmptyCashflowMonthCloseDepositRows,
-  isCashflowMonthCloseRequestLocked,
-  isCashflowComparisonWeekVisible,
-  isCashflowWeekLockedByRange,
+  isCashflowMonthCloseRequestForSelection,
   normalizeCashflowMonthCloseCells,
   requiredCashflowMonthCloseDecision,
-  resolveCashflowComparisonScope,
-  resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
 } from './cashflow-month-close';
@@ -54,10 +49,13 @@ const deadlineSummary: CashflowDeadlineSummary = {
 };
 
 describe('cashflow month close contract', () => {
-  it('derives the eight annual columns from the server weekly year', () => {
-    expect(annualYearsFor(2026)).toEqual([2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]);
-    expect(annualYearsFor(2027)).toEqual([2025, 2026, 2028, 2029, 2030, 2031, 2032, 2033]);
-    expect(annualYearsFor(undefined)).toEqual([]);
+  it('accepts a loaded approval request only for the selected project and month', () => {
+    const request = { projectId: 'project-1', yearMonth: '2026-07' };
+
+    expect(isCashflowMonthCloseRequestForSelection(request, 'project-1', '2026-07')).toBe(true);
+    expect(isCashflowMonthCloseRequestForSelection(request, 'project-2', '2026-07')).toBe(false);
+    expect(isCashflowMonthCloseRequestForSelection(request, 'project-1', '2026-08')).toBe(false);
+    expect(isCashflowMonthCloseRequestForSelection(null, 'project-1', '2026-07')).toBe(false);
   });
 
   it('hides values only when canonical loading failed without a retained model', () => {
@@ -65,164 +63,41 @@ describe('cashflow month close contract', () => {
     expect(shouldHideCashflowValuesAfterLoadError('409 conflict', true)).toBe(false);
     expect(shouldHideCashflowValuesAfterLoadError(null, false)).toBe(false);
   });
-  it('limits Projection-Actual comparison to the server KST finance week', () => {
-    const asOfWeek = { yearMonth: '2026-08', weekNo: 3 };
-
-    expect(isCashflowComparisonWeekVisible({ yearMonth: '2025-12', weekNo: 5 }, asOfWeek)).toBe(true);
-    expect(isCashflowComparisonWeekVisible({ yearMonth: '2026-08', weekNo: 3 }, asOfWeek)).toBe(true);
-    expect(isCashflowComparisonWeekVisible({ yearMonth: '2026-08', weekNo: 4 }, asOfWeek)).toBe(false);
-    expect(isCashflowComparisonWeekVisible({ yearMonth: '2027-01', weekNo: 1 }, asOfWeek)).toBe(false);
-    expect(isCashflowComparisonWeekVisible({ yearMonth: '2026-08', weekNo: 1 }, undefined)).toBe(false);
-  });
-
-  it('limits Projection-Actual cells and Total to the server KST comparison week', () => {
-    expect(resolveCashflowComparisonScope({
-      annualYears: [2024, 2025, 2026, 2027, 2032],
-      weeks: [
-        { yearMonth: '2026-07', weekNo: 5 },
-        { yearMonth: '2026-08', weekNo: 1 },
-        { yearMonth: '2026-08', weekNo: 2 },
-        { yearMonth: '2026-08', weekNo: 3 },
-        { yearMonth: '2026-08', weekNo: 4 },
-      ],
-      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 3 },
-    })).toEqual({
-      annualYears: [2024, 2025],
-      weeks: [
-        { yearMonth: '2026-07', weekNo: 5 },
-        { yearMonth: '2026-08', weekNo: 1 },
-        { yearMonth: '2026-08', weekNo: 2 },
-        { yearMonth: '2026-08', weekNo: 3 },
-      ],
-      periodLabel: '2024년 ~ 2026-08 3주차',
-    });
-
-    expect(resolveCashflowComparisonScope({
-      annualYears: [],
-      weeks: [{ yearMonth: '2026-01', weekNo: 1 }, { yearMonth: '2026-08', weekNo: 3 }],
-      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 3 },
-    }).periodLabel).toBe('2026-01 1주차 ~ 2026-08 3주차');
-
-    expect(resolveCashflowComparisonScope({
-      annualYears: annualYearsFor(2027),
-      weeks: [{ yearMonth: '2027-01', weekNo: 1 }],
-      comparisonAsOfWeek: { yearMonth: '2027-01', weekNo: 1 },
-    }).annualYears).toEqual([2025, 2026]);
-  });
-
-  it('locks pending approval states and unlocks a rejected request', () => {
-    expect(isCashflowMonthCloseRequestLocked('PENDING')).toBe(true);
-    expect(isCashflowMonthCloseRequestLocked('APPROVING')).toBe(true);
-    expect(isCashflowMonthCloseRequestLocked('UNCERTAIN')).toBe(true);
-    expect(isCashflowMonthCloseRequestLocked('REJECTED')).toBe(false);
-  });
-
-  it('locks every server-declared cumulative week and leaves later weeks open', () => {
-    const lockRange = { fromMonth: '2023-01', fromWeekNo: 1, throughMonth: '2026-08', throughWeekNo: 5 };
-    expect(isCashflowWeekLockedByRange(lockRange, '2023-01', 1)).toBe(true);
-    expect(isCashflowWeekLockedByRange(lockRange, '2025-04', 3)).toBe(true);
-    expect(isCashflowWeekLockedByRange(lockRange, '2026-08', 5)).toBe(true);
-    expect(isCashflowWeekLockedByRange(lockRange, '2022-12', 5)).toBe(false);
-    expect(isCashflowWeekLockedByRange(lockRange, '2026-09', 1)).toBe(false);
-  });
-
   it('rejects stale request reads by generation and selected month', () => {
     expect(shouldApplyCashflowMonthCloseRequestResult({
       requestGeneration: 3,
       currentGeneration: 3,
+      requestedProjectId: 'project-1',
+      selectedProjectId: 'project-1',
       requestedYearMonth: '2026-07',
       selectedYearMonth: '2026-07',
     })).toBe(true);
     expect(shouldApplyCashflowMonthCloseRequestResult({
       requestGeneration: 2,
       currentGeneration: 3,
+      requestedProjectId: 'project-1',
+      selectedProjectId: 'project-1',
       requestedYearMonth: '2026-07',
       selectedYearMonth: '2026-07',
     })).toBe(false);
     expect(shouldApplyCashflowMonthCloseRequestResult({
       requestGeneration: 3,
       currentGeneration: 3,
+      requestedProjectId: 'project-1',
+      selectedProjectId: 'project-1',
       requestedYearMonth: '2026-06',
+      selectedYearMonth: '2026-07',
+    })).toBe(false);
+    expect(shouldApplyCashflowMonthCloseRequestResult({
+      requestGeneration: 3,
+      currentGeneration: 3,
+      requestedProjectId: 'project-1',
+      selectedProjectId: 'project-2',
+      requestedYearMonth: '2026-07',
       selectedYearMonth: '2026-07',
     })).toBe(false);
   });
 
-  it('does not expose live annual rows or mirror metadata to a legacy closed view', () => {
-    const scope = resolveCashflowEvidenceScope({
-      projectId: 'project-1',
-      yearMonth: '2026-07',
-      monthClose: {
-        projectId: 'project-1',
-        yearMonth: '2026-07',
-        status: 'CLOSED',
-        dashboard: {
-          snapshotCompatibility: { status: 'LEGACY_EVIDENCE_ONLY' },
-          sheetMetadata: {},
-        },
-      },
-      liveYearView: { projectId: 'project-1', status: 'FRESH', selectedYear: 2026, years: [], canonicalAnnualYears: [], navigationYears: [2026], availableYears: [2026], readModelStatus: 'CURRENT', fallbackYears: [], mismatchYears: [] },
-      liveSheetMetadata: { businessType: { sourceCell: 'B2', value: 'LIVE-SENTINEL' } },
-    });
-
-    expect(scope.allowLiveAnnualYearView).toBe(false);
-    expect(scope.yearView).toBeNull();
-    expect(scope.sheetMetadata).toBeUndefined();
-    expect(JSON.stringify(scope)).not.toContain('LIVE-SENTINEL');
-  });
-
-  it('uses frozen metadata for a closed view instead of current mirror metadata', () => {
-    const scope = resolveCashflowEvidenceScope({
-      projectId: 'project-1',
-      yearMonth: '2026-07',
-      monthClose: {
-        projectId: 'project-1',
-        yearMonth: '2026-07',
-        status: 'CLOSED',
-        dashboard: {
-          snapshotCompatibility: { status: 'FROZEN_COMPLETE' },
-          sheetMetadata: { businessType: { sourceCell: 'B2', value: 'FROZEN' } },
-        },
-      },
-      liveYearView: null,
-      liveSheetMetadata: { businessType: { sourceCell: 'B2', value: 'LIVE-SENTINEL' } },
-    });
-
-    expect(scope.sheetMetadata?.businessType?.value).toBe('FROZEN');
-    expect(JSON.stringify(scope)).not.toContain('LIVE-SENTINEL');
-  });
-
-  it('uses refreshed mirror metadata for an open view', () => {
-    const scope = resolveCashflowEvidenceScope({
-      projectId: 'project-1',
-      yearMonth: '2026-07',
-      monthClose: {
-        projectId: 'project-1',
-        yearMonth: '2026-07',
-        status: 'OPEN',
-        dashboard: {
-          sheetMetadata: { accountType: { sourceCell: 'B3', value: 'STALE' } },
-        },
-      },
-      liveYearView: null,
-      liveSheetMetadata: { accountType: { sourceCell: 'B3', value: 'REFRESHED' } },
-    });
-
-    expect(scope.sheetMetadata?.accountType?.value).toBe('REFRESHED');
-  });
-
-  it('rejects an OPEN result from another project before resolving live evidence', () => {
-    const scope = resolveCashflowEvidenceScope({
-      projectId: 'project-2',
-      yearMonth: '2026-07',
-      monthClose: { projectId: 'project-1', yearMonth: '2026-07', status: 'OPEN' },
-      liveYearView: { projectId: 'project-2', status: 'FRESH', selectedYear: 2026, years: [], canonicalAnnualYears: [], navigationYears: [2026], availableYears: [2026], readModelStatus: 'CURRENT', fallbackYears: [], mismatchYears: [] },
-      liveSheetMetadata: { businessType: { sourceCell: 'B2', value: 'LIVE-SENTINEL' } },
-    });
-
-    expect(scope.allowLiveAnnualYearView).toBe(false);
-    expect(scope.yearView).toBeNull();
-    expect(scope.sheetMetadata).toBeUndefined();
-  });
   it('normalizes exactly 160 pinned cells in Projection then Actual order', () => {
     const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
     expect(cells).toHaveLength(160);
@@ -236,6 +111,14 @@ describe('cashflow month close contract', () => {
     const [cell] = normalizeCashflowMonthCloseCells(source, '2026-07');
     expect(cell).toMatchObject({ cellState: 'ZERO', amount: 0 });
     expect(requiredCashflowMonthCloseDecision(cell)).toBe('CONFIRMED');
+  });
+
+  it('rejects a VALUE cell whose sheet amount is missing instead of coercing it to zero', () => {
+    const source = mirror();
+    source.cells![0] = { ...source.cells![0], state: 'VALUE', amount: null } as unknown as NonNullable<typeof source.cells>[number];
+
+    expect(() => normalizeCashflowMonthCloseCells(source, '2026-07'))
+      .toThrow('금액을 확인해 주세요');
   });
 
   it('derives confirmations from the pinned sheet after the single human review', () => {

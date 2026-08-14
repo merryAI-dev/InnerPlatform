@@ -45,6 +45,9 @@ function canonicalizeAdminPath(pathname: string): string | undefined {
   if (pathname === '/management-planning/project-codes' || pathname.startsWith('/management-planning/project-codes/')) {
     return '/management-planning/project-codes';
   }
+  if (pathname === '/axr' || pathname === '/axr/cashflow-period-policy' || pathname.startsWith('/axr/cashflow-period-policy/')) {
+    return '/axr/cashflow-period-policy';
+  }
   if (pathname.startsWith('/projects/new')) return '/projects/new';
   if (pathname.startsWith('/projects/') && pathname.endsWith('/edit')) return '/projects/new';
   if (pathname === '/projects' || pathname.startsWith('/projects/')) return '/projects';

@@ -30,16 +30,9 @@ describe('firestore rules policy alignment', () => {
   });
 
   // ── isBootstrapAdminEmail ──
-  it('bootstrap admin emails match auth-bootstrap defaults', () => {
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('admin@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('ai@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('ylee@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jyoo@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jslee@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jhsong@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jybaek@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('fin@mysc.co.kr');
-    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('hwkim@mysc.co.kr');
+  it('keeps bootstrap recovery separate from Firestore runtime role checks', () => {
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toEqual(['mwbyun1220@mysc.co.kr']);
+    expect(firestoreRulesText).toContain("getMemberRole(orgId) in ['admin']");
   });
 
   // ── canWrite roles (admin, finance, pm — viewer excluded) ──

@@ -86,6 +86,17 @@ describe('admin nav access control', () => {
     expect(canShowAdminNavItem('viewer', '/users')).toBe(false);
   });
 
+  it('keeps the AXR cashflow period policy route admin-only', () => {
+    expect(canShowAdminNavItem('admin', '/axr/cashflow-period-policy')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/axr/cashflow-period-policy')).toBe(false);
+    expect(canShowAdminNavItem('pm', '/axr/cashflow-period-policy')).toBe(false);
+    expect(canShowAdminNavItem('viewer', '/axr/cashflow-period-policy')).toBe(false);
+    expect(canAccessAdminPath('admin', '/axr/cashflow-period-policy')).toBe(true);
+    expect(canAccessAdminPath('finance', '/axr/cashflow-period-policy')).toBe(false);
+    expect(canAccessAdminPath('admin', '/axr')).toBe(true);
+    expect(canAccessAdminPath('finance', '/axr')).toBe(false);
+  });
+
   it('still rejects empty or unknown roles from admin nav', () => {
     expect(canShowAdminNavItem('', '/')).toBe(false);
     expect(canShowAdminNavItem(undefined, '/')).toBe(false);

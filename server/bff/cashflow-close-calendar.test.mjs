@@ -5,6 +5,7 @@ import {
   cumulativeCloseMonthsOrNull,
   monthsBetween,
   previousYearMonth,
+  readCashflowCumulativeCloseAuthority,
 } from './cashflow-close-calendar.mjs';
 import { cashflowMonthCloseDeadline } from './cashflow-close-deadline.mjs';
 
@@ -42,5 +43,38 @@ describe('cashflow close calendar', () => {
     expect(cashflowCumulativeCloseCycle('2026-09', '2026-08-09')?.eligible).toBe(false);
     expect(cashflowCumulativeCloseCycle('bad', '2026-08-09')).toBeNull();
     expect(cashflowCumulativeCloseCycle('2026-08', 'bad')).toBeNull();
+  });
+
+  it('accepts only complete cumulative authority heads and the explicit empty JVM state', () => {
+    const head = {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      tenantId: 'tenant-a',
+      projectId: 'project-a',
+      status: 'CLOSED',
+      fromMonth: '2023-01',
+      closedThrough: '2026-07',
+      rootHash: `sha256:${'a'.repeat(64)}`,
+      revision: 1,
+    };
+    expect(readCashflowCumulativeCloseAuthority(head, {
+      tenantId: 'tenant-a', projectId: 'project-a',
+    })).toMatchObject({ status: 'CLOSED', closedThrough: '2026-07', revision: 1 });
+    expect(readCashflowCumulativeCloseAuthority({ ...head, status: 'REOPEN_REQUESTED', revision: 2 }, {
+      tenantId: 'tenant-a', projectId: 'project-a',
+    })).toMatchObject({ status: 'REOPEN_REQUESTED', closedThrough: '2026-07', revision: 2 });
+    expect(readCashflowCumulativeCloseAuthority({
+      ...head, status: 'OPEN', closedThrough: '', rootHash: '', revision: 0,
+    }, {
+      tenantId: 'tenant-a', projectId: 'project-a', allowOpen: true,
+    })).toEqual({ status: 'OPEN', closedThrough: null, rootHash: null, revision: 0 });
+    expect(readCashflowCumulativeCloseAuthority({ ...head, rootHash: 'sha256:broken' }, {
+      tenantId: 'tenant-a', projectId: 'project-a',
+    })).toBeNull();
+    expect(readCashflowCumulativeCloseAuthority({ ...head, closedThrough: '2022-12' }, {
+      tenantId: 'tenant-a', projectId: 'project-a',
+    })).toBeNull();
+    expect(readCashflowCumulativeCloseAuthority({ ...head, status: 'closed' }, {
+      tenantId: 'tenant-a', projectId: 'project-a',
+    })).toBeNull();
   });
 });

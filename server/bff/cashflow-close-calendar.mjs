@@ -11,9 +11,37 @@ import { cashflowMonthCloseDeadline } from './cashflow-close-deadline.mjs';
 
 export const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
 export const CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH = '2023-01';
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function readCashflowCumulativeCloseAuthority(
+  value,
+  { tenantId, projectId, allowOpen = false },
+) {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const status = text(record.status);
+  const revision = record.revision;
+  const closedThrough = text(record.closedThrough);
+  const rootHash = text(record.rootHash);
+  const commonValid = text(record.contractVersion) === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+    && text(record.tenantId) === tenantId
+    && text(record.projectId) === projectId
+    && text(record.fromMonth) === CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH;
+  if (allowOpen && commonValid && status === 'OPEN'
+    && !closedThrough && !rootHash && revision === 0) {
+    return { status, closedThrough: null, rootHash: null, revision };
+  }
+  if (!commonValid
+    || !['CLOSED', 'REOPEN_REQUESTED'].includes(status)
+    || !/^\d{4}-(0[1-9]|1[0-2])$/.test(closedThrough)
+    || closedThrough < CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
+    || !SHA256_PATTERN.test(rootHash)
+    || !Number.isSafeInteger(revision)
+    || revision < 1) return null;
+  return { status, closedThrough, rootHash, revision };
 }
 
 export function monthsBetween(startYearMonth, endYearMonth) {

@@ -104,6 +104,54 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '승인 결과를 확인하고 있어요. 잠시 후 월 결산 상태를 확인해 주세요.',
     resolution: 'wait',
   }],
+  ['cashflow_month_closed', {
+    guide: '이미 누적 결산이 끝난 월이에요. 수정이 필요하면 관리자에게 월 재오픈을 요청해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_month_close_contract_invalid', {
+    guide: '월 결산 기준 정보를 확인할 수 없어 안전하게 중단했어요. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_month_reopen_decision_forbidden', {
+    guide: '현재 프로젝트의 활성 조직장 또는 Runtime 관리자만 재오픈을 결정할 수 있어요. 담당 조직장을 확인해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_month_reopen_latest_horizon_only', {
+    guide: '가장 최근 누적 월 결산만 다시 열 수 있어요. 최신 결산 월을 확인한 뒤 요청해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_month_reopen_month_not_closed', {
+    guide: '해당 월은 아직 마감되지 않았어요. 마감 상태를 확인해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_month_reopen_revision_changed', {
+    guide: '검토 중 월 결산 상태가 바뀌었어요. 최신 상태를 다시 불러온 뒤 요청해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_month_reopen_latest_request_required', {
+    guide: '현재 최신 월 결산 요청이 바뀌었어요. 최신 요청을 다시 불러와 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_month_reopen_request_missing', {
+    guide: '재오픈할 월 결산 요청을 찾을 수 없어요. 목록을 새로고침한 뒤 요청을 확인해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_month_reopen_not_awaiting_decision', {
+    guide: '이 재오픈 요청은 이미 처리됐거나 승인 대기 상태가 아니에요. 최신 상태를 다시 불러와 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_month_reopen_counter_invalid', {
+    guide: '재오픈 이력 값이 올바르지 않아 안전하게 중단했어요. 시스템 담당자에게 문의해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_month_reopen_decision_invalid', {
+    guide: '재오픈 결정값이 올바르지 않아요. 승인 또는 반려를 선택해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_month_reopen_period_invalid', {
+    guide: '결산 월 형식이 올바르지 않아요. 대상 월을 확인해 주세요.',
+    resolution: 'contact',
+  }],
   ['internal_error', {
     guide: '요청을 처리하는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.',
     resolution: 'retry',

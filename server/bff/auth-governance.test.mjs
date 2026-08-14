@@ -126,6 +126,24 @@ describe('auth governance helpers', () => {
     });
   });
 
+  it('requires an explicit audit reason for every deep sync plan', () => {
+    const [entry] = mergeAuthGovernanceDirectory({
+      authUsers: [{ uid: 'uid-target', email: 'target@mysc.co.kr', customClaims: { role: 'pm' } }],
+      memberDocs: [{
+        docId: 'uid-target',
+        data: { uid: 'uid-target', email: 'target@mysc.co.kr', role: 'pm', status: 'ACTIVE' },
+      }],
+    });
+
+    expect(() => buildDeepSyncPlan({
+      entry,
+      targetRole: 'finance',
+      tenantId: 'mysc',
+      actorId: 'u-admin',
+      timestamp: '2026-08-14T01:02:03.000Z',
+    })).toThrow(expect.objectContaining({ code: 'role_change_reason_required' }));
+  });
+
   it('parses server bootstrap admin env values on top of defaults', () => {
     const emails = parseBootstrapAdminEmails({
       BOOTSTRAP_ADMIN_EMAILS: 'extra@mysc.co.kr',
@@ -133,10 +151,10 @@ describe('auth governance helpers', () => {
     });
 
     expect(emails).toEqual(expect.arrayContaining([
-      'admin@mysc.co.kr',
-      'jslee@mysc.co.kr',
+      'mwbyun1220@mysc.co.kr',
       'extra@mysc.co.kr',
       'one@mysc.co.kr',
     ]));
+    expect(emails).not.toContain('admin@mysc.co.kr');
   });
 });

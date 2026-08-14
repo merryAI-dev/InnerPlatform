@@ -6,6 +6,8 @@ const ROUTE_LABELS: Record<string, string> = {
   'projects': '프로젝트',
   'new': '사업 등록',
   'cashflow': '캐시플로',
+  'axr': 'AXR',
+  'cashflow-period-policy': '현금흐름 기간·마감 정책',
   'evidence': '증빙/정산',
   'participation': '참여율 관리',
   'koica-personnel': 'KOICA 인력배치',

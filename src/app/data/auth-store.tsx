@@ -9,7 +9,7 @@ import {
   type User as FirebaseUser,
 } from 'firebase/auth';
 import type { UserRole } from './types';
-import { ORG_MEMBERS, PROJECTS } from './mock-data';
+import { PROJECTS } from './mock-data';
 import { featureFlags } from '../config/feature-flags';
 import {
   getAuthInstance,
@@ -22,11 +22,8 @@ import {
 import {
   normalizeEmail,
   resolveProjectIdForManager,
-  resolveRoleFromDirectory,
   type ProjectOwnerEntry,
-  type RoleDirectoryEntry,
 } from './auth-helpers';
-import { isBootstrapAdminEmail } from './auth-bootstrap';
 import { resolveEffectiveAuthRole } from './auth-role-resolution';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
@@ -136,12 +133,6 @@ const GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY = 'mysc-google-workspace-token-map';
 const DEFAULT_ORG_ID = getDefaultOrgId();
 const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
 const DEV_AUTH_HARNESS_CONFIG = readDevAuthHarnessConfig(import.meta.env);
-
-const ROLE_DIRECTORY: RoleDirectoryEntry[] = ORG_MEMBERS.map((member) => ({
-  uid: member.uid,
-  email: member.email,
-  role: member.role,
-}));
 
 const PROJECT_OWNERS: ProjectOwnerEntry[] = PROJECTS.map((project) => ({
   id: project.id,
@@ -288,8 +279,6 @@ function mapFirebaseUserToAuthUser(
   );
   const role = resolveEffectiveAuthRole({
     memberRole: member?.role,
-    directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
-    bootstrapAdmin: isBootstrapAdminEmail(normalizedEmail),
   });
   return {
     uid: firebaseUser.uid,
@@ -345,7 +334,6 @@ async function upsertMemberFromFirebase(
     memberSnap.exists() ? (memberSnap.data() as Record<string, unknown>) : undefined,
     legacySnap?.exists() ? (legacySnap.data() as Record<string, unknown>) : undefined,
   ) as Partial<MemberDoc> | undefined;
-  const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
   const access = resolveMemberProjectAccessState(existing);
   const mergedProjectIds = normalizeProjectIds([
     ...access.normalizedProjectIds,
@@ -369,8 +357,6 @@ async function upsertMemberFromFirebase(
     role: resolveEffectiveAuthRole({
       memberRole: existing?.role,
       claimRole: roleFromClaims,
-      directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
-      bootstrapAdmin,
     }),
     tenantId,
     status: existing?.status || 'ACTIVE',

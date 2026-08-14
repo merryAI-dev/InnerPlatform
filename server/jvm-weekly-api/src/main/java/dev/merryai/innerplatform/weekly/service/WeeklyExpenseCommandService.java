@@ -4,8 +4,12 @@ import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
+import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
+import dev.merryai.innerplatform.weekly.service.query.CashflowMonthReopenAuthorityResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -147,6 +151,7 @@ public class WeeklyExpenseCommandService {
     public static final String REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.reopen";
     public static final String REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.requestReopen";
     public static final String DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.decideReopen";
+    public static final String READ_CASHFLOW_MONTH_REOPEN_AUTHORITY_COMMAND = "cashflowMonth.readReopenAuthority";
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
 
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
@@ -156,6 +161,7 @@ public class WeeklyExpenseCommandService {
     private static final Set<String> CASHFLOW_VARIANCE_REVIEW_ROLES = Set.of("admin", "finance", "tenant_admin");
 
     private final WeeklyExpensePersistence persistence;
+    private final CashflowMonthReopenPort cashflowMonthReopenPort;
     private final WeeklyExpenseAuthorizationService authorizationService;
     private final WeeklyExpenseSpreadsheetService spreadsheetService;
     private final ObjectMapper objectMapper;
@@ -173,6 +179,7 @@ public class WeeklyExpenseCommandService {
             throw new IllegalStateException("Cashflow edit leases require a deployed JVM runtime.");
         }
         this.persistence = persistence;
+        this.cashflowMonthReopenPort = persistence;
         this.authorizationService = authorizationService;
         this.objectMapper = objectMapper;
         this.cashflowEditLeasesEnabled = cashflowEditLeasesEnabled;
@@ -1024,6 +1031,32 @@ public class WeeklyExpenseCommandService {
         );
     }
 
+    public CashflowMonthReopenAuthorityResult readCashflowMonthReopenAuthority(
+        CashflowMonthReopenPort.Actor actor,
+        String projectId
+    ) {
+        try {
+            readCashflowMonthReopenDecisionAuthority(actor, projectId);
+            return CashflowMonthReopenAuthorityResult.allowed(
+                READ_CASHFLOW_MONTH_REOPEN_AUTHORITY_COMMAND,
+                projectId
+            );
+        } catch (CashflowMonthReopenPolicy.Violation error) {
+            if (error.reason() != CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN) {
+                throw error;
+            }
+            return CashflowMonthReopenAuthorityResult.forbidden(
+                READ_CASHFLOW_MONTH_REOPEN_AUTHORITY_COMMAND,
+                projectId
+            );
+        } catch (CashflowMonthReopenPort.DecisionAuthorityUnavailable error) {
+            return CashflowMonthReopenAuthorityResult.unavailable(
+                READ_CASHFLOW_MONTH_REOPEN_AUTHORITY_COMMAND,
+                projectId
+            );
+        }
+    }
+
     public CashflowVarianceResponse updateCashflowVariance(
         TrustedActorContext actor,
         String projectId,
@@ -1129,7 +1162,7 @@ public class WeeklyExpenseCommandService {
             5,
             "Cashflow month close"
         );
-        WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.closeCashflowMonth(
+        CashflowMonthCloseState saved = persistence.closeCashflowMonth(
             writer,
             projectId,
             CASHFLOW_SHEET_LAB_ACTUAL_SOURCE,
@@ -1546,10 +1579,21 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.requestCashflowMonthReopen(
-            writer,
+        CashflowMonthReopenPolicy.Facts facts = cashflowMonthReopenPort.findCashflowMonthReopenFacts(
+            writer.tenantId(),
             projectId,
-            request
+            request.yearMonth()
+        );
+        CashflowMonthReopenPolicy.RequestTransition transition = CashflowMonthReopenPolicy.request(
+            facts,
+            request.yearMonth(),
+            request.expectedRevision()
+        );
+        CashflowMonthCloseState saved = cashflowMonthReopenPort.applyCashflowMonthReopenRequest(
+            reopenActor(writer),
+            projectId,
+            transition,
+            request.reason()
         );
         WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
             writer,
@@ -1584,8 +1628,7 @@ public class WeeklyExpenseCommandService {
             || request.reason().isBlank()) {
             throw new IllegalArgumentException("A decision and reason are required for a cashflow month reopen request.");
         }
-        TrustedActorContext writer = requireCashflowWritePermissionWithoutLeaseRuntime(
-            DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
+        TrustedActorContext writer = requireCashflowMonthReopenDecisionPermission(
             actor,
             projectId
         );
@@ -1601,10 +1644,22 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.decideCashflowMonthReopen(
-            writer,
+        CashflowMonthReopenPolicy.Facts facts = cashflowMonthReopenPort.findCashflowMonthReopenFacts(
+            writer.tenantId(),
             projectId,
-            request
+            request.yearMonth()
+        );
+        CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decide(
+            facts,
+            request.yearMonth(),
+            request.expectedRevision(),
+            CashflowMonthReopenPolicy.Decision.valueOf(request.decision())
+        );
+        CashflowMonthCloseState saved = cashflowMonthReopenPort.applyCashflowMonthReopenDecision(
+            reopenActor(writer),
+            projectId,
+            transition,
+            request.reason()
         );
         WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
             writer,
@@ -3845,7 +3900,7 @@ public class WeeklyExpenseCommandService {
         String projectId,
         String commandName,
         String idempotencyKey,
-        WeeklyExpensePersistence.CashflowMonthCloseRecord close
+        CashflowMonthCloseState close
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("yearMonth", close.yearMonth());
@@ -3880,52 +3935,10 @@ public class WeeklyExpenseCommandService {
 
     private CashflowMonthCloseResponse monthCloseResponse(
         String commandName,
-        WeeklyExpensePersistence.CashflowMonthCloseRecord close,
+        CashflowMonthCloseState close,
         String auditId
     ) {
-        return new CashflowMonthCloseResponse(
-            true,
-            commandName,
-            close.projectId(),
-            close.yearMonth(),
-            close.status(),
-            close.revision(),
-            close.reopenCount(),
-            close.projectWarningCount(),
-            close.amendmentCount(),
-            close.postDeadlineAmendmentWarningCount(),
-            close.lastAmendmentAt(),
-            close.lastAmendmentByUid(),
-            close.lastAmendmentByName(),
-            close.lastAmendmentReason(),
-            close.lastAmendmentDeadline(),
-            close.lastAmendmentPostDeadline(),
-            close.lastAmendmentEvidence(),
-            close.snapshotHash(),
-            close.previousSnapshotHash(),
-            close.snapshot(),
-            close.previousSnapshot(),
-            close.closeEligible(),
-            close.evaluatedBusinessDate(),
-            close.closeDeadline(),
-            close.late(),
-            close.closedAt(),
-            close.closedByUid(),
-            close.closedByName(),
-            close.reopenReason(),
-            close.reopenRequestedAt(),
-            close.reopenRequestedByUid(),
-            close.reopenDecision(),
-            close.reopenDecisionReason(),
-            close.reopenDecidedAt(),
-            close.reopenDecidedByUid(),
-            auditId,
-            String.valueOf(close.snapshot().getOrDefault("requestId", "")),
-            longMetadata(close.snapshot().get("requestRevision")),
-            String.valueOf(close.snapshot().getOrDefault("manifestHash", "")),
-            String.valueOf(close.snapshot().getOrDefault("rootHash", "")),
-            longMetadata(close.snapshot().get("headRevision"))
-        );
+        return CashflowMonthCloseResponse.fromState(commandName, close, auditId, close.status());
     }
 
     private long longMetadata(Object value) {
@@ -4027,6 +4040,34 @@ public class WeeklyExpenseCommandService {
         );
         authorizationService.requireAllowed(commandName, storedActor);
         return storedActor;
+    }
+
+    private TrustedActorContext requireCashflowMonthReopenDecisionPermission(
+        TrustedActorContext actor,
+        String projectId
+    ) {
+        CashflowMonthReopenPolicy.DecisionAuthority authority =
+            readCashflowMonthReopenDecisionAuthority(reopenActor(actor), projectId);
+        cashflowMonthReopenPort.bindCashflowMonthReopenDecisionAuthority(authority);
+        return new TrustedActorContext(
+            actor.tenantId(), actor.id(), actor.email(), authority.storedRole(), actor.name()
+        );
+    }
+
+    private CashflowMonthReopenPolicy.DecisionAuthority readCashflowMonthReopenDecisionAuthority(
+        CashflowMonthReopenPort.Actor actor,
+        String projectId
+    ) {
+        return CashflowMonthReopenPolicy.requireDecisionAuthority(
+            cashflowMonthReopenPort.findCashflowMonthReopenDecisionAuthorityFacts(
+                actor,
+                projectId
+            )
+        );
+    }
+
+    private CashflowMonthReopenPort.Actor reopenActor(TrustedActorContext actor) {
+        return new CashflowMonthReopenPort.Actor(actor.tenantId(), actor.id(), actor.name());
     }
 
     private List<CashflowSheetLabApplyRequest.Cell> requireCompleteCashflowSheetMonth(

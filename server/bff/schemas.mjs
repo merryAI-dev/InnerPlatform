@@ -410,6 +410,17 @@ export const memberRoleUpdateSchema = z.object({
 
 export const memberDeepSyncSchema = memberRoleUpdateSchema;
 
+export const memberBulkDeepSyncSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+  items: z.array(z.object({
+    identityKey: NON_EMPTY_STRING.max(320),
+    role: memberRoleUpdateSchema.shape.role,
+  }).strict()).min(1).max(100),
+}).strict().refine(
+  ({ items }) => new Set(items.map(({ identityKey }) => identityKey.trim().toLowerCase())).size === items.length,
+  { message: 'identityKey must be unique', path: ['items'] },
+);
+
 // ── 인력 명부 (persons) ──
 // 근로형태와 재직상태는 다른 축이다. 파트너도 휴직할 수 있고, 정규직도 퇴사한다
 // (= 계약에 endDate 가 붙는다). 둘을 한 필드로 합치면 표현할 수 없는 조합이 생긴다.

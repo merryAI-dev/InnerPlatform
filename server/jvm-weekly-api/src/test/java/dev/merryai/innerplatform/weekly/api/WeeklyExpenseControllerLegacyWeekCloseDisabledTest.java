@@ -2,6 +2,8 @@ package dev.merryai.innerplatform.weekly.api;
 
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
+import dev.merryai.innerplatform.weekly.service.query.CashflowDashboardSectionQueryService;
+import dev.merryai.innerplatform.weekly.service.query.CashflowMonthDashboardQueryService;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -14,7 +16,16 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class WeeklyExpenseControllerLegacyWeekCloseDisabledTest {
     private final WeeklyExpenseCommandService commandService = mock(WeeklyExpenseCommandService.class);
     private final WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
-    private final WeeklyExpenseController controller = new WeeklyExpenseController(commandService, new CashflowReadService(persistence), false);
+    private final CashflowReadService readService = new CashflowReadService(persistence);
+    private final WeeklyExpenseController controller = new WeeklyExpenseController(
+        commandService,
+        readService,
+        new CashflowMonthDashboardQueryService(
+            readService,
+            new CashflowDashboardSectionQueryService()
+        ),
+        false
+    );
 
     @Test
     void rejectsLegacyWeeklySubmitBeforeRunningACommand() {

@@ -6,6 +6,7 @@ import {
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
   deepSyncAuthGovernanceUserViaBff,
+  deepSyncAuthGovernanceUsersViaBff,
   fetchAuthGovernanceUsersViaBff,
   fetchAssignedProjectRequestsViaBff,
   fetchLatestProjectRequestViaBff,
@@ -48,6 +49,9 @@ import {
   fetchCashflowActivityViaBff,
   fetchCashflowAppliedCellChangesViaBff,
   type CashflowCumulativeCloseScope,
+  type CashflowMonthCloseActions,
+  type CashflowMonthClosePresentation,
+  type CashflowOperationsSummary,
   reopenCashflowWeeklyUpdateViaBff,
   requestCashflowMonthCloseViaBff,
   fetchCurrentCashflowMonthCloseRequestViaBff,
@@ -245,7 +249,60 @@ describe('platform-bff-client', () => {
     expect(result.dashboard?.cumulativeCloseScope?.weekCount).toBe(220);
     expect(result.dashboard?.cumulativeCloseScope?.cellCount).toBe(7040);
     expect(result.dashboard?.projectionActualSummary).toBe(projectionActualSummary);
-    expect(result.dashboard?.projectionActualSummary.settlementDifferenceAmount).toBe(18_371_453);
+    expect(result.dashboard?.projectionActualSummary?.settlementDifferenceAmount).toBe(18_371_453);
+  });
+
+  it('passes through the server presentation, actions, and operations summary unchanged', async () => {
+    const presentation = {
+      asOfDate: '2026-08-14',
+      annualBefore: [{ year: 2024, label: '2024년' }],
+      annualAfter: [{ year: 2027, label: '2027년' }],
+      weeks: [{
+        yearMonth: '2026-08', weekNo: 3, weekStart: '2026-08-10', weekEnd: '2026-08-16',
+        label: '26-8-3', isCurrent: true, monthStatus: 'OPEN' as const, monthStatusLabel: '결산 전',
+        weeklyStatus: 'COMPLETED_LATE' as const, weeklyStatusLabel: '기한 후 완료',
+        statusLabel: '기한 후 완료', surfaceTone: 'success' as const,
+      }],
+      months: [{
+        yearMonth: '2026-08', label: '2026년 08월', columnCount: 5, status: 'OPEN' as const,
+        locked: false, overdue: false, badgeLabel: '', tone: 'default' as const,
+      }],
+      comparison: {
+        annualBefore: [{ year: 2024, label: '2024년' }], annualAfter: [],
+        weeks: [], cells: [], changed: false, periodLabel: '2024년 ~ 2026-08 3주차',
+      },
+      monthClose: { statusLabel: '결산 전', tone: 'neutral' as const },
+      evidenceSource: 'DASHBOARD' as const,
+    } satisfies CashflowMonthClosePresentation;
+    const actions = {
+      completeWeekly: { enabled: false, guide: '주간 가이드' },
+      changeExecutiveApprover: { enabled: false, guide: '조직장 가이드' },
+      requestMonthClose: { enabled: false, guide: '서버 가이드', label: '월 결산 요청' },
+      withdrawMonthClose: { enabled: false, guide: '회수 가이드' },
+      requestMonthReopen: { enabled: false, guide: '재오픈 가이드' },
+      cumulativeScope: { ready: false, guide: '누적 범위 가이드' },
+    } satisfies CashflowMonthCloseActions;
+    const operationsSummary = {
+      status: {
+        kind: 'blocked', tone: 'danger', count: 2, label: '서버 요약', detail: '서버 상세',
+      },
+      rates: {
+        projection: { state: 'AVAILABLE', percent: 77, barPercent: 77, statusLabel: '미달' },
+        actual: { state: 'UNAVAILABLE', percent: null, barPercent: 0, statusLabel: '확인 필요' },
+      },
+    } satisfies CashflowOperationsSummary;
+    const sectionErrors = [{ section: 'cashflow', code: 'sentinel', label: '서버 섹션명' }];
+    const data = { projectId: 'p001', yearMonth: '2026-08', presentation, actions, operationsSummary, sectionErrors };
+    const client = asMockClient({ get: vi.fn(async () => ({ data })), post: vi.fn(), request: vi.fn() });
+
+    const result = await fetchCashflowMonthCloseViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001', yearMonth: '2026-08', client,
+    });
+
+    expect(result.presentation).toBe(presentation);
+    expect(result.actions).toBe(actions);
+    expect(result.operationsSummary).toBe(operationsSummary);
+    expect(result.sectionErrors).toBe(sectionErrors);
   });
 
   it('sends cashflow metadata intents with the exact project lease and no client audit fields', async () => {
@@ -1197,6 +1254,7 @@ describe('platform-bff-client', () => {
           role: 'admin',
           mirroredLegacyCount: 1,
           claimsUpdated: true,
+          claimsSyncStatus: 'SYNCED',
           updatedAt: '2026-04-13T06:30:00.000Z',
         },
       })),
@@ -1223,6 +1281,54 @@ describe('platform-bff-client', () => {
       }),
     );
     expect(response.claimsUpdated).toBe(true);
+    expect(response.claimsSyncStatus).toBe('SYNCED');
+  });
+
+  it('posts one bulk deep sync request and preserves per-item outcomes', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          outcomes: [
+            { identityKey: 'first@mysc.co.kr', status: 'FAILED', errorCode: 'internal_error', message: '다시 시도해 주세요.' },
+            {
+              identityKey: 'second@mysc.co.kr',
+              status: 'SUCCEEDED',
+              result: { role: 'finance', claimsSyncStatus: 'SYNCED' },
+            },
+          ],
+          summary: { total: 2, succeeded: 1, failed: 1, pendingClaimsSync: 0 },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const response = await deepSyncAuthGovernanceUsersViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-1' },
+      reason: '권한 일괄 정렬',
+      items: [
+        { identityKey: 'first@mysc.co.kr', role: 'finance' },
+        { identityKey: 'second@mysc.co.kr', role: 'finance' },
+      ],
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledTimes(1);
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/admin/auth-governance/users/deep-sync-bulk',
+      expect.objectContaining({
+        body: {
+          reason: '권한 일괄 정렬',
+          items: [
+            { identityKey: 'first@mysc.co.kr', role: 'finance' },
+            { identityKey: 'second@mysc.co.kr', role: 'finance' },
+          ],
+        },
+      }),
+    );
+    expect(response.summary).toEqual({ total: 2, succeeded: 1, failed: 1, pendingClaimsSync: 0 });
+    expect(response.outcomes.map(({ status }) => status)).toEqual(['FAILED', 'SUCCEEDED']);
   });
 
   it('calls project request contract analysis endpoint', async () => {

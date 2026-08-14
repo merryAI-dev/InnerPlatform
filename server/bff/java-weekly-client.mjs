@@ -83,6 +83,17 @@ const GENERIC_UPSTREAM_ERROR_CODES = new Set([
   'unexpected_error',
 ]);
 
+const SAFE_UPSTREAM_CLIENT_MESSAGES = new Map([
+  [
+    'cashflow_month_closed',
+    '이미 누적 결산이 끝난 월이에요. 수정이 필요하면 관리자에게 월 재오픈을 요청해 주세요.',
+  ],
+  [
+    'cashflow_month_close_contract_invalid',
+    '월 결산 기준 정보를 확인할 수 없어 안전하게 중단했어요. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.',
+  ],
+]);
+
 function readJavaError(status, payload) {
   const upstreamCode = readOptionalText(payload?.code);
   const hasStableCode = /^[a-z][a-z0-9_]{2,100}$/.test(upstreamCode)
@@ -91,7 +102,8 @@ function readJavaError(status, payload) {
   const normalizedStatus = upstreamFailure ? 503 : status;
   const message = upstreamFailure
     ? '현금흐름 저장 서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
-    : (readOptionalText(payload?.message) || readOptionalText(payload?.error) || `Java weekly API request failed with ${status}`);
+    : (SAFE_UPSTREAM_CLIENT_MESSAGES.get(upstreamCode)
+      || '요청을 처리할 수 없습니다. 최신 상태와 입력 내용을 확인해 주세요.');
   const code = hasStableCode
     ? upstreamCode
     : (upstreamFailure ? 'jvm_weekly_api_internal_error' : 'java_weekly_api_error');

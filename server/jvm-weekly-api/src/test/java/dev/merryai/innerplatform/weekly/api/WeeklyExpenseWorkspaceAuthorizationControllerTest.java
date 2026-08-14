@@ -1,6 +1,8 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseAuditEventRepository;
+import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +52,15 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
             .when(weeklyExpensePersistence).requireCashflowWritePermission(any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowMonthClosePermission(any(), any());
+        doAnswer(invocation -> {
+            CashflowMonthReopenPort.Actor actor = invocation.getArgument(0);
+            String projectId = invocation.getArgument(1);
+            return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
+                actor.tenantId(), actor.id(), projectId, true, actor.tenantId(), projectId,
+                actor.id(), "ACTIVE", "organization_head", actor.id()
+            );
+        }).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
+        doNothing().when(weeklyExpensePersistence).bindCashflowMonthReopenDecisionAuthority(any());
         doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
         doNothing().when(weeklyExpensePersistence).requireCashflowWeeksOpen(any(), any(), any());
     }

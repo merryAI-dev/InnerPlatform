@@ -4,8 +4,11 @@ import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
-import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
+import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
+import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
@@ -36,7 +39,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-public interface WeeklyExpensePersistence {
+public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, CashflowReadPort {
     record AppliedCellChangeAuditSource(
         String eventId,
         String projectId,
@@ -164,47 +167,6 @@ public interface WeeklyExpensePersistence {
 
     /** One authoritative read of the single weekly cashflow block. */
 
-
-    record CashflowMonthCloseRecord(
-        String projectId,
-        String yearMonth,
-        String status,
-        long revision,
-        long reopenCount,
-        long projectWarningCount,
-        long amendmentCount,
-        long postDeadlineAmendmentWarningCount,
-        String lastAmendmentAt,
-        String lastAmendmentByUid,
-        String lastAmendmentByName,
-        String lastAmendmentReason,
-        String lastAmendmentDeadline,
-        boolean lastAmendmentPostDeadline,
-        Map<String, Object> lastAmendmentEvidence,
-        String snapshotHash,
-        String previousSnapshotHash,
-        Map<String, Object> snapshot,
-        Map<String, Object> previousSnapshot,
-        boolean closeEligible,
-        String evaluatedBusinessDate,
-        String closeDeadline,
-        boolean late,
-        String closedAt,
-        String closedByUid,
-        String closedByName,
-        String reopenReason,
-        String reopenRequestedAt,
-        String reopenRequestedByUid,
-        String reopenDecision,
-        String reopenDecisionReason,
-        String reopenDecidedAt,
-        String reopenDecidedByUid
-    ) {
-        public CashflowMonthCloseRecord {
-            snapshot = snapshot == null ? Map.of() : Map.copyOf(snapshot);
-            previousSnapshot = previousSnapshot == null ? Map.of() : Map.copyOf(previousSnapshot);
-        }
-    }
 
     record CashflowVarianceRecord(
         String sheetId,
@@ -343,6 +305,25 @@ public interface WeeklyExpensePersistence {
         );
     }
 
+    @Override
+    default CashflowMonthReopenPolicy.DecisionAuthorityFacts findCashflowMonthReopenDecisionAuthorityFacts(
+        CashflowMonthReopenPort.Actor actor,
+        String projectId
+    ) {
+        throw new CashflowMonthReopenPort.DecisionAuthorityUnavailable();
+    }
+
+    @Override
+    default void bindCashflowMonthReopenDecisionAuthority(
+        CashflowMonthReopenPolicy.DecisionAuthority authority
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_reopen_decision_permission_backend_unavailable",
+            "Cashflow month-reopen decision permission checks require the Firestore transaction backend."
+        );
+    }
+
     default List<CashflowSettlementStatusRecord> findCashflowSettlementStatuses(
         String tenantId,
         String projectId,
@@ -413,7 +394,7 @@ public interface WeeklyExpensePersistence {
         );
     }
 
-    default CashflowMonthCloseRecord findCashflowMonthClose(
+    default CashflowMonthCloseState findCashflowMonthClose(
         String tenantId,
         String projectId,
         String yearMonth
@@ -437,7 +418,7 @@ public interface WeeklyExpensePersistence {
         );
     }
 
-    default CashflowMonthCloseRecord closeCashflowMonth(
+    default CashflowMonthCloseState closeCashflowMonth(
         TrustedActorContext actor,
         String projectId,
         String sourceSheetKey,
@@ -485,7 +466,7 @@ public interface WeeklyExpensePersistence {
     }
 
     default CashflowCumulativeCloseHead findCashflowCumulativeCloseHead(String tenantId, String projectId) {
-        return new CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
+        return null;
     }
 
     default CashflowWeeklyUpdateCompletionRecord reopenCashflowWeeklyUpdate(
@@ -500,10 +481,25 @@ public interface WeeklyExpensePersistence {
         );
     }
 
-    default CashflowMonthCloseRecord requestCashflowMonthReopen(
-        TrustedActorContext actor,
+    @Override
+    default CashflowMonthReopenPolicy.Facts findCashflowMonthReopenFacts(
+        String tenantId,
         String projectId,
-        CashflowMonthReopenCommands.RequestReopen request
+        String yearMonth
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_reopen_backend_unavailable",
+            "Cashflow month reopen facts require the Firestore transaction backend."
+        );
+    }
+
+    @Override
+    default CashflowMonthCloseState applyCashflowMonthReopenRequest(
+        CashflowMonthReopenPort.Actor actor,
+        String projectId,
+        CashflowMonthReopenPolicy.RequestTransition transition,
+        String reason
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,
@@ -512,10 +508,12 @@ public interface WeeklyExpensePersistence {
         );
     }
 
-    default CashflowMonthCloseRecord decideCashflowMonthReopen(
-        TrustedActorContext actor,
+    @Override
+    default CashflowMonthCloseState applyCashflowMonthReopenDecision(
+        CashflowMonthReopenPort.Actor actor,
         String projectId,
-        CashflowMonthReopenCommands.DecideReopen request
+        CashflowMonthReopenPolicy.DecisionTransition transition,
+        String reason
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,

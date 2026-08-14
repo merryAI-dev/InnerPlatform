@@ -1,15 +1,6 @@
 import { createHttpError, normalizeRole, readOptionalText } from './bff-utils.mjs';
 
 export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS = [
-  'admin@mysc.co.kr',
-  'ai@mysc.co.kr',
-  'ylee@mysc.co.kr',
-  'jyoo@mysc.co.kr',
-  'jslee@mysc.co.kr',
-  'jhsong@mysc.co.kr',
-  'jybaek@mysc.co.kr',
-  'fin@mysc.co.kr',
-  'hwkim@mysc.co.kr',
   'mwbyun1220@mysc.co.kr',
 ];
 
@@ -204,7 +195,10 @@ export function buildDeepSyncPlan({
   const canonicalUid = readOptionalText(entry?.authUid || entry?.canonicalMember?.uid || canonicalDocId);
   const displayName = readOptionalText(entry?.displayName || base.name || email);
   const status = normalizeStatus(base.status) || 'ACTIVE';
-  const normalizedReason = readOptionalText(reason) || 'admin auth governance deep sync';
+  const normalizedReason = readOptionalText(reason);
+  if (!normalizedReason) {
+    throw createHttpError(400, 'Role change reason is required', 'role_change_reason_required');
+  }
 
   const canonicalPatch = {
     ...base,
