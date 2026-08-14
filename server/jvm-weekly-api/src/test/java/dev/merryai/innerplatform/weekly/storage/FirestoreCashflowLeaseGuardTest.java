@@ -4,8 +4,11 @@ import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
+import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.firestore.CollectionReference;
 import com.google.cloud.firestore.DocumentReference;
@@ -50,6 +53,7 @@ import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseWeeklyStatusEntity;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseAuthorizationService;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import dev.merryai.innerplatform.weekly.service.WeeklyProjectExistenceRepository;
+import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
@@ -740,6 +744,66 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void reopenDecisionAllowsOnlyExactActiveOrganizationHeadOrRuntimeAdmin() {
+        for (String role : List.of("pm", "viewer")) {
+            Fixture head = fixture(member(Map.of("role", role, "projectIds", List.of())), Map.of());
+            head.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+                "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1"
+            ));
+
+            assertThat(head.persistence.runCommandTransaction(() ->
+                authorizeMonthReopenDecision(head.persistence, ACTOR, "project-a")
+            ).storedRole()).isEqualTo(role);
+        }
+
+        Fixture pathIdentifiedHead = fixture(member(Map.of("role", "viewer", "projectIds", List.of())), Map.of());
+        pathIdentifiedHead.documents.put(
+            "orgs/tenant-a/projects/project-a",
+            Map.of("executiveApproverId", "pm-1")
+        );
+        assertThat(pathIdentifiedHead.persistence.runCommandTransaction(() ->
+            authorizeMonthReopenDecision(pathIdentifiedHead.persistence, ACTOR, "project-a")
+        ).storedRole()).isEqualTo("viewer");
+
+        Fixture admin = fixture(member(Map.of("role", "admin", "projectIds", List.of())), Map.of());
+        admin.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "someone-else"
+        ));
+        assertThat(admin.persistence.runCommandTransaction(() ->
+            authorizeMonthReopenDecision(admin.persistence, ACTOR, "project-a")
+        ).storedRole()).isEqualTo("admin");
+
+        for (String role : List.of("finance", "pm", "viewer")) {
+            Fixture denied = fixture(member(Map.of("role", role, "projectIds", List.of("project-a"))), Map.of());
+            denied.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+                "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "someone-else"
+            ));
+
+            assertThatThrownBy(() -> denied.persistence.runCommandTransaction(() ->
+                authorizeMonthReopenDecision(denied.persistence, ACTOR, "project-a")
+            ))
+                .isInstanceOfSatisfying(CashflowMonthReopenPolicy.Violation.class, error ->
+                    assertThat(error.reason()).isEqualTo(
+                        CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN
+                    ));
+            assertThat(denied.pendingWrites).isEmpty();
+        }
+
+        Fixture mismatchedProject = fixture(member(Map.of("role", "admin", "projectIds", List.of())), Map.of());
+        mismatchedProject.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "another-project", "tenantId", "tenant-a", "executiveApproverId", "pm-1"
+        ));
+        assertThatThrownBy(() -> mismatchedProject.persistence.runCommandTransaction(() ->
+            authorizeMonthReopenDecision(mismatchedProject.persistence, ACTOR, "project-a")
+        ))
+            .isInstanceOfSatisfying(CashflowMonthReopenPolicy.Violation.class, error ->
+                assertThat(error.reason()).isEqualTo(
+                    CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN
+                ));
+        assertThat(mismatchedProject.pendingWrites).isEmpty();
+    }
+
+    @Test
     void usesStoredRoleForCrossProjectAccessAndRequiresCanonicalProjectInTransaction() {
         Fixture finance = fixture(member(Map.of("role", "finance", "projectIds", List.of())), activeLease());
         assertThatCode(() -> finance.persistence.runCommandTransaction(() -> {
@@ -940,6 +1004,34 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthlyApplyRequiresMigrationForCanonicalOpenWithHistoricalEvidence() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(monthClosePath("project-a", "2026-07"), Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "status", "OPEN",
+            "revision", 0L,
+            "reopenCount", 0L,
+            "snapshot", Map.of("version", 1)
+        ));
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest("historical-open-month", targetRevision, "")
+        )))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_month_close_migration_required"));
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
+    }
+
+    @Test
     void monthlyApplyRejectsPartialLegacyCountersAndLegacyHistory() {
         List<Map<String, Object>> invalidCloses = List.of(
             Map.of("revision", 0L),
@@ -1132,6 +1224,7 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void multiMonthApplyRequiresReasonAndAmendsAClosedMonthBeforeItsDeadlineWithoutAWarning() {
         Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", closedThrough("2026-08"));
         fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-08", Map.of(
             "contractVersion", "cashflow-month-close-v1",
             "tenantId", "tenant-a",
@@ -1162,7 +1255,7 @@ class FirestoreCashflowLeaseGuardTest {
             .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error -> {
                 assertThat(error.statusCode()).isEqualTo(409);
                 assertThat(error.code()).isEqualTo("cashflow_closed_month_reason_required");
-                assertThat(error.details().get("closedMonths")).isEqualTo(List.of("2026-08"));
+                assertThat(error.details().get("closedMonths")).isEqualTo(List.of("2026-07", "2026-08"));
             });
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
 
@@ -1192,6 +1285,7 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void multiMonthApplyReportsEveryLateClosedMonthAndRecordsEachOnce() {
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-10-11"));
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", closedThrough("2026-08"));
         fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
             "contractVersion", "cashflow-month-close-v1",
             "tenantId", "tenant-a",
@@ -1303,8 +1397,8 @@ class FirestoreCashflowLeaseGuardTest {
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request)))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("closed");
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_month_close_migration_required"));
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_month_amendments/"));
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/weekly_api_audit_events/"));
@@ -1511,11 +1605,12 @@ class FirestoreCashflowLeaseGuardTest {
             "project-a",
             SESSION,
             legacyRequest
-        ))).isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("snapshot hash");
+        ))).isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+            assertThat(error.code()).isEqualTo("cashflow_month_close_migration_required"));
         assertThat(legacyClosed.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
 
         Fixture closed = fixture(activeMember(), activeLease());
+        closed.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", closedThrough("2026-07"));
         closed.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
             "contractVersion", "cashflow-month-close-v1",
             "tenantId", "tenant-a",
@@ -1577,7 +1672,7 @@ class FirestoreCashflowLeaseGuardTest {
                 assertThat(evidence)
                     .containsEntry("closeRevision", 1L)
                     .containsEntry("resultingCloseRevision", 2L)
-                    .containsEntry("closeSnapshotHash", "sha256:" + "f".repeat(64))
+                    .containsEntry("closeSnapshotHash", SOURCE_REVISION)
                     .containsEntry("sourceRevision", SOURCE_REVISION)
                     .containsEntry("targetRevision", "sha256:298012959db83e193536ff7f60735889252ceaa4325de6944465e2dd197fcb44");
                 assertThat((List<?>) evidence.get("calculationChecks")).hasSize(10);
@@ -1587,6 +1682,7 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void postDeadlineClosedMonthSheetChangeRequiresReasonAndRecordsOneWarning() {
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-11"));
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", closedThrough("2026-07"));
         fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
             "contractVersion", "cashflow-month-close-v1",
             "tenantId", "tenant-a",
@@ -2319,9 +2415,56 @@ class FirestoreCashflowLeaseGuardTest {
             ))
         );
         putCompleteProjectionWindow(fixture, "2026-07", 3);
+        String appliedTargetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            fixture.documents.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
+                .map(Map.Entry::getValue)
+                .toList()
+        );
         fixture.documents.put(
             "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
-            Map.of("projectId", "project-a", "weeklyYear", 2026, "sourceRevision", SOURCE_REVISION)
+            Map.of(
+                "projectId", "project-a",
+                "weeklyYear", 2026,
+                "status", "FRESH",
+                "sourceRevision", SOURCE_REVISION,
+                "appliedSourceRevision", SOURCE_REVISION,
+                "targetRevisionAtFetch", appliedTargetRevision,
+                "appliedTargetRevision", appliedTargetRevision,
+                "sheetFacts", Map.of("weeklyCalculationChecks", List.of(Map.of(
+                    "mode", "projection",
+                    "yearMonth", "2026-07",
+                    "weekNo", 3,
+                    "reported", Map.of(
+                        "openingBalance", 900L,
+                        "depositTotal", 150L,
+                        "withdrawalTotal", 50L,
+                        "balance", 1_000L
+                    ),
+                    "sourceCells", Map.of(
+                        "openingBalance", "D20",
+                        "depositTotal", "AN20",
+                        "withdrawalTotal", "AN29",
+                        "balance", "AN30"
+                    )
+                ), Map.of(
+                    "mode", "projection",
+                    "yearMonth", "2026-07",
+                    "weekNo", 4,
+                    "reported", Map.of(
+                        "openingBalance", 1_000L,
+                        "depositTotal", 200L,
+                        "withdrawalTotal", 50L,
+                        "balance", 1_150L
+                    ),
+                    "sourceCells", Map.of(
+                        "openingBalance", "D20",
+                        "depositTotal", "AO20",
+                        "withdrawalTotal", "AO29",
+                        "balance", "AO30"
+                    )
+                )))
+            )
         );
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
         CompleteCashflowWeeklyUpdateRequest firstRequest = new CompleteCashflowWeeklyUpdateRequest(
@@ -2360,6 +2503,24 @@ class FirestoreCashflowLeaseGuardTest {
             .satisfies(value -> assertThat(value.get("snapshotHash")).asString().startsWith("sha256:"))
             .satisfies(value -> assertThat(value.get("targetRevision")).asString().startsWith("sha256:"))
             .containsKey("snapshot");
+        Map<?, ?> completionSnapshot = (Map<?, ?>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+        ).get("snapshot");
+        Map<?, ?> forecastBaseline = (Map<?, ?>) completionSnapshot.get("forecastBaseline");
+        assertThat(forecastBaseline.get("contractVersion")).isEqualTo("cashflow-forecast-baseline-v1");
+        assertThat(forecastBaseline.get("status")).isEqualTo("AVAILABLE");
+        assertThat(forecastBaseline.get("yearMonth")).isEqualTo("2026-07");
+        assertThat(forecastBaseline.get("weekNo")).isEqualTo(4);
+        assertThat(forecastBaseline.get("sourceRevision")).isEqualTo(SOURCE_REVISION);
+        assertThat(forecastBaseline.get("reported")).isEqualTo(Map.of(
+            "openingBalance", 1_000L,
+            "depositTotal", 200L,
+            "withdrawalTotal", 50L,
+            "balance", 1_150L
+        ));
+        Map<?, ?> baselineSourceCells = (Map<?, ?>) forecastBaseline.get("sourceCells");
+        assertThat(baselineSourceCells.get("openingBalance")).isEqualTo("AN30");
+        assertThat(baselineSourceCells.get("balance")).isEqualTo("AO30");
         assertThat(fixture.documents.keySet())
             .anyMatch(path -> path.startsWith(
                 "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1"
@@ -2370,6 +2531,299 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(fixture.documents.keySet().stream()
             .filter(path -> path.contains("/cashflow_weekly_update_completion_versions/")))
             .containsExactly("orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1");
+    }
+
+    @Test
+    void weeklyCompletionWhitelistsForecastBaselineFieldsWithoutTrustingMirrorExtras() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-07", 3);
+        String appliedTargetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            fixture.documents.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
+                .map(Map.Entry::getValue)
+                .toList()
+        );
+        Map<String, Object> reported = new LinkedHashMap<>(Map.of(
+            "openingBalance", 1_000L,
+            "depositTotal", 200L,
+            "withdrawalTotal", 50L,
+            "balance", 1_150L
+        ));
+        reported.put("legacyExtra", null);
+        Map<String, Object> sourceCells = new LinkedHashMap<>(Map.of(
+            "openingBalance", "D20",
+            "depositTotal", "AO20",
+            "withdrawalTotal", "AO29",
+            "balance", "AO30"
+        ));
+        sourceCells.put("legacyExtra", null);
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            Map.of(
+                "projectId", "project-a",
+                "weeklyYear", 2026,
+                "status", "FRESH",
+                "sourceRevision", SOURCE_REVISION,
+                "appliedSourceRevision", SOURCE_REVISION,
+                "targetRevisionAtFetch", appliedTargetRevision,
+                "appliedTargetRevision", appliedTargetRevision,
+                "sheetFacts", Map.of("weeklyCalculationChecks", List.of(Map.of(
+                    "mode", "projection",
+                    "yearMonth", "2026-07",
+                    "weekNo", 3,
+                    "sourceCells", Map.of("balance", "AN30")
+                ), Map.of(
+                    "mode", "projection",
+                    "yearMonth", "2026-07",
+                    "weekNo", 4,
+                    "reported", reported,
+                    "sourceCells", sourceCells
+                )))
+            )
+        );
+
+        CashflowWeeklyUpdateCompletionResponse response = fixture.persistence.runCommandTransaction(() ->
+            commandService(fixture.persistence).completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-baseline-extra-null", "2026-07", 3, "2026-07-16T09:00:00Z"
+                )
+            )
+        );
+
+        assertThat(response.status()).isEqualTo("LOCKED");
+        Map<?, ?> completion = fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+        );
+        Map<?, ?> snapshot = (Map<?, ?>) completion.get("snapshot");
+        Map<?, ?> baseline = (Map<?, ?>) snapshot.get("forecastBaseline");
+        assertThat(baseline.get("status")).isEqualTo("AVAILABLE");
+        assertThat(((Map<?, ?>) baseline.get("reported")).keySet()).isEqualTo(Set.of(
+            "openingBalance", "depositTotal", "withdrawalTotal", "balance"
+        ));
+        assertThat(((Map<?, ?>) baseline.get("sourceCells")).keySet()).isEqualTo(Set.of(
+            "openingBalance", "depositTotal", "withdrawalTotal", "balance"
+        ));
+    }
+
+    @Test
+    void malformedForecastMirrorEvidenceNeverAbortsTheCanonicalWeeklyCompletion() {
+        List<Object> malformedChecks = List.of(
+            List.of(Map.of(
+                "mode", "projection",
+                "yearMonth", "2026-07",
+                "weekNo", 3,
+                "sourceCells", Map.of("balance", "AN30")
+            ), Map.of(
+                "mode", "projection",
+                "yearMonth", "2026-07",
+                "weekNo", 4,
+                "reported", Map.of(
+                    "openingBalance", 1_000L,
+                    "depositTotal", "200",
+                    "withdrawalTotal", 50L,
+                    "balance", 1_150L
+                ),
+                "sourceCells", Map.of(
+                    "openingBalance", "D20",
+                    "depositTotal", "AO20",
+                    "withdrawalTotal", "AO29",
+                    "balance", "AO30"
+                )
+            )),
+            List.of("not-a-weekly-check", 42L)
+        );
+
+        for (int index = 0; index < malformedChecks.size(); index++) {
+            int scenario = index;
+            Fixture fixture = fixture(activeMember(), Map.of());
+            putCompleteProjectionWindow(fixture, "2026-07", 3);
+            String appliedTargetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+                fixture.documents.entrySet().stream()
+                    .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
+                    .map(Map.Entry::getValue)
+                    .toList()
+            );
+            fixture.documents.put(
+                "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+                Map.of(
+                    "projectId", "project-a",
+                    "weeklyYear", 2026,
+                    "status", "FRESH",
+                    "sourceRevision", SOURCE_REVISION,
+                    "appliedSourceRevision", SOURCE_REVISION,
+                    "targetRevisionAtFetch", appliedTargetRevision,
+                    "appliedTargetRevision", appliedTargetRevision,
+                    "sheetFacts", Map.of("weeklyCalculationChecks", malformedChecks.get(scenario))
+                )
+            );
+
+            CashflowWeeklyUpdateCompletionResponse response = fixture.persistence.runCommandTransaction(() ->
+                commandService(fixture.persistence).completeCashflowWeeklyUpdate(
+                    ACTOR,
+                    "project-a",
+                    new CompleteCashflowWeeklyUpdateRequest(
+                        "weekly-baseline-malformed-" + scenario,
+                        "2026-07",
+                        3,
+                        "2026-07-16T09:00:00Z"
+                    )
+                )
+            );
+
+            assertThat(response.status()).isEqualTo("LOCKED");
+            Map<?, ?> completion = fixture.documents.get(
+                "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+            );
+            Map<?, ?> snapshot = (Map<?, ?>) completion.get("snapshot");
+            Map<?, ?> baseline = (Map<?, ?>) snapshot.get("forecastBaseline");
+            assertThat(baseline.get("status")).isEqualTo("UNAVAILABLE");
+            assertThat(baseline.get("reason")).isEqualTo("SHEET_PROJECTION_FORMULA_UNAVAILABLE");
+            assertThat(baseline.containsKey("reported")).isFalse();
+        }
+    }
+
+    @Test
+    void weeklyCompletionDoesNotInventAForecastBaselineFromAnUnappliedMirror() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-07", 3);
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            Map.of(
+                "projectId", "project-a",
+                "weeklyYear", 2026,
+                "sourceRevision", SOURCE_REVISION,
+                "sheetFacts", Map.of("weeklyCalculationChecks", List.of(Map.of(
+                    "mode", "projection",
+                    "yearMonth", "2026-07",
+                    "weekNo", 4,
+                    "reported", Map.of(
+                        "openingBalance", 1_000L,
+                        "depositTotal", 200L,
+                        "withdrawalTotal", 50L,
+                        "balance", 1_150L
+                    )
+                )))
+            )
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-baseline-unapplied", "2026-07", 3, "2026-07-16T09:00:00Z"
+                )
+            ));
+
+        Map<?, ?> completion = fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+        );
+        Map<?, ?> snapshot = (Map<?, ?>) completion.get("snapshot");
+        Map<?, ?> baseline = (Map<?, ?>) snapshot.get("forecastBaseline");
+        assertThat(baseline.get("status")).isEqualTo("UNAVAILABLE");
+        assertThat(baseline.get("reason")).isEqualTo("SHEET_REVISION_MISMATCH");
+        assertThat(baseline.containsKey("reported")).isFalse();
+    }
+
+    @Test
+    void weeklyCompletionDoesNotCreateAForecastBaselineOutsideTheSheetWeeklyYear() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-12", 5);
+        String appliedTargetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            fixture.documents.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
+                .map(Map.Entry::getValue)
+                .toList()
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            Map.of(
+                "projectId", "project-a",
+                "weeklyYear", 2026,
+                "status", "FRESH",
+                "sourceRevision", SOURCE_REVISION,
+                "appliedSourceRevision", SOURCE_REVISION,
+                "targetRevisionAtFetch", appliedTargetRevision,
+                "appliedTargetRevision", appliedTargetRevision,
+                "sheetFacts", Map.of("weeklyCalculationChecks", List.of())
+            )
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-baseline-outside-grain", "2026-12", 5, "2026-12-31T09:00:00Z"
+                )
+            ));
+
+        Map<?, ?> completion = fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-12-w5"
+        );
+        Map<?, ?> snapshot = (Map<?, ?>) completion.get("snapshot");
+        assertThat(snapshot.containsKey("forecastBaseline")).isFalse();
+    }
+
+    @Test
+    void weeklyCompletionDoesNotCaptureAForecastBaselineFromTargetRevisionDrift() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-07", 3);
+        String appliedTargetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            fixture.documents.entrySet().stream()
+                .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
+                .map(Map.Entry::getValue)
+                .toList()
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            Map.of(
+                "projectId", "project-a",
+                "weeklyYear", 2026,
+                "status", "FRESH",
+                "sourceRevision", SOURCE_REVISION,
+                "appliedSourceRevision", SOURCE_REVISION,
+                "targetRevisionAtFetch", "sha256:stale-target",
+                "appliedTargetRevision", appliedTargetRevision,
+                "sheetFacts", Map.of("weeklyCalculationChecks", List.of(Map.of(
+                    "mode", "projection",
+                    "yearMonth", "2026-07",
+                    "weekNo", 4,
+                    "reported", Map.of(
+                        "openingBalance", 1_000L,
+                        "depositTotal", 200L,
+                        "withdrawalTotal", 50L,
+                        "balance", 1_150L
+                    ),
+                    "sourceCells", Map.of(
+                        "openingBalance", "D20",
+                        "depositTotal", "AO20",
+                        "withdrawalTotal", "AO29",
+                        "balance", "AO30"
+                    )
+                )))
+            )
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-baseline-target-drift", "2026-07", 3, "2026-07-16T09:00:00Z"
+                )
+            ));
+
+        Map<?, ?> completion = fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+        );
+        Map<?, ?> snapshot = (Map<?, ?>) completion.get("snapshot");
+        Map<?, ?> baseline = (Map<?, ?>) snapshot.get("forecastBaseline");
+        assertThat(baseline.get("status")).isEqualTo("UNAVAILABLE");
+        assertThat(baseline.get("reason")).isEqualTo("SHEET_REVISION_MISMATCH");
+        assertThat(baseline.containsKey("reported")).isFalse();
     }
 
     @Test
@@ -3155,6 +3609,10 @@ class FirestoreCashflowLeaseGuardTest {
 
         Fixture closedFixture = fixture(activeMember(), Map.of());
         closedFixture.documents.put(
+            "orgs/tenant-a/cashflow_cumulative_close_heads/project-a",
+            closedThrough("2026-07")
+        );
+        closedFixture.documents.put(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
             lockedWeeklyCompletion("2026-07", 3, 1)
         );
@@ -3176,8 +3634,8 @@ class FirestoreCashflowLeaseGuardTest {
                 "reopen-closed-month", "2026-07", 3, 1, "긴급 정정"
             )
         )))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("closed");
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_month_closed"));
     }
 
     @Test
@@ -3621,6 +4079,10 @@ class FirestoreCashflowLeaseGuardTest {
     void varianceRejectsClosedMonthsStaleRevisionsAndInvalidStateWithoutPartialWrites() {
         for (String status : List.of("CLOSED", "REOPEN_REQUESTED")) {
             Fixture fixture = fixture(member(Map.of("role", "admin")), activeLease());
+            fixture.documents.put(
+                "orgs/tenant-a/cashflow_cumulative_close_heads/project-a",
+                closedThrough("2026-07")
+            );
             fixture.documents.put(varianceWeekPath(), varianceWeek());
             fixture.documents.put(monthClosePath("project-a", "2026-07"), new LinkedHashMap<>(Map.of(
                 "contractVersion", "cashflow-month-close-v1",
@@ -3688,8 +4150,8 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void closedRequestedAndUnknownMonthStatesFailClosedForProjectionWrites() {
-        for (String status : List.of("CLOSED", "REOPEN_REQUESTED", "DONE", "BROKEN", "open", " CLOSED ")) {
+    void monthlyRunWithoutAnAuthorityHeadRequiresMigrationBeforeProjectionWrites() {
+        for (String status : List.of("CLOSED", "REOPEN_REQUESTED")) {
             Fixture fixture = fixture(activeMember(), activeLease());
             fixture.documents.put(monthClosePath("project-a", "2026-07"), Map.of(
                 "contractVersion", "cashflow-month-close-v1",
@@ -3711,12 +4173,39 @@ class FirestoreCashflowLeaseGuardTest {
                     new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 1, "SALES_IN", BigDecimal.TEN)
                 ))
             )))
-                .isInstanceOf(WeeklyExpenseConflictException.class);
+                .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                    assertThat(error.code()).isEqualTo("cashflow_month_close_migration_required"));
 
             assertThat(fixture.documents).doesNotContainKey(weekPath());
             assertThat(fixture.documents.get(leasePath("project-a")))
                 .containsEntry("state", "ACTIVE")
                 .doesNotContainKeys("releasedAt", "releaseReason");
+        }
+
+        for (String status : List.of("DONE", "BROKEN", "open", " CLOSED ")) {
+            Fixture fixture = fixture(activeMember(), activeLease());
+            fixture.documents.put(monthClosePath("project-a", "2026-07"), Map.of(
+                "contractVersion", "cashflow-month-close-v1",
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-07",
+                "status", status,
+                "revision", 1L,
+                "reopenCount", 0L
+            ));
+
+            assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+                fixture.persistence
+            ).upsertProjection(
+                ACTOR,
+                "project-a",
+                SESSION,
+                new UpsertProjectionRequest("invalid-run-" + status, List.of(
+                    new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 1, "SALES_IN", BigDecimal.TEN)
+                ))
+            )))
+                .isInstanceOf(WeeklyExpenseConflictException.class)
+                .hasMessageContaining("canonical");
         }
     }
 
@@ -3760,6 +4249,7 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void changedClosedPastActualRollsBackTheOpenMonthWrite() {
         Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", closedThrough("2026-06"));
         fixture.documents.put(monthClosePath("project-a", "2026-06"), closedMonth("2026-06", 1, 0));
         Map<String, Object> june = new LinkedHashMap<>(Map.of(
             "tenantId", "tenant-a",
@@ -3785,8 +4275,8 @@ class FirestoreCashflowLeaseGuardTest {
             );
             return null;
         }))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("closed");
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_month_closed"));
 
         assertThat(fixture.documents.get(junePath)).isEqualTo(june);
         assertThat(fixture.documents).doesNotContainKey(weekPath());
@@ -3862,6 +4352,9 @@ class FirestoreCashflowLeaseGuardTest {
             "role", "finance",
             "projectIds", List.of()
         )));
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1"
+        ));
         fixture.documents.put("orgs/tenant-a/members/finance-1", member(Map.of(
             "uid", "finance-1",
             "role", "finance",
@@ -3909,7 +4402,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(fixture.persistence.runCommandTransaction(() -> service.readCashflowWeeklyUpdate(
             READ_ACTOR, "project-a", "2026-06", 3
         )).status()).isEqualTo("OPEN");
-        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
             ACTOR,
             "project-a",
             SESSION,
@@ -3918,14 +4411,17 @@ class FirestoreCashflowLeaseGuardTest {
                     "2026-06", 3, "SALES_IN", BigDecimal.valueOf(300)
                 )
             ))
-        ))).doesNotThrowAnyException();
+        )))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_month_close_migration_required"));
     }
 
     @Test
     void legacyReopenRequestWithoutRequesterCanStillBeDecided() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(monthClosePath("project-a", "2026-06"), closedMonth("2026-06", 1, 0));
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
+        fixture.persistence.runCommandTransaction(() -> requestMonthReopen(
+            fixture.persistence,
             ACTOR,
             "project-a",
             new CashflowMonthReopenCommands.RequestReopen("legacy-request", "2026-06", 1, "레거시 정정")
@@ -3933,8 +4429,9 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, Object> close = fixture.documents.get(monthClosePath("project-a", "2026-06"));
         ((Map<String, Object>) close.get("reopenRequest")).remove("requestedByUid");
 
-        WeeklyExpensePersistence.CashflowMonthCloseRecord decided = fixture.persistence.runCommandTransaction(() ->
-            fixture.persistence.decideCashflowMonthReopen(
+        CashflowMonthCloseState decided = fixture.persistence.runCommandTransaction(() ->
+            decideMonthReopen(
+                fixture.persistence,
                 ACTOR,
                 "project-a",
                 new CashflowMonthReopenCommands.DecideReopen("legacy-decision", "2026-06", 2, "APPROVE", "승인")
@@ -3942,6 +4439,28 @@ class FirestoreCashflowLeaseGuardTest {
         );
 
         assertThat(decided.status()).isEqualTo("OPEN");
+    }
+
+    @Test
+    void legacySnapshotNullEvidenceDoesNotAbortAValidMonthReopen() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        Map<String, Object> close = closedMonth("2026-06", 1, 0);
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("legacyOptionalEvidence", null);
+        close.put("snapshot", snapshot);
+        fixture.documents.put(monthClosePath("project-a", "2026-06"), close);
+
+        CashflowMonthCloseState reopened = fixture.persistence.runCommandTransaction(() -> requestMonthReopen(
+            fixture.persistence,
+            ACTOR,
+            "project-a",
+            new CashflowMonthReopenCommands.RequestReopen(
+                "legacy-null-evidence", "2026-06", 1, "레거시 증빙 정정"
+            )
+        ));
+
+        assertThat(reopened.status()).isEqualTo("REOPEN_REQUESTED");
+        assertThat(reopened.snapshot()).containsEntry("legacyOptionalEvidence", null);
     }
 
     @Test
@@ -3974,7 +4493,7 @@ class FirestoreCashflowLeaseGuardTest {
             new LinkedHashMap<>(Map.of("status", "OPEN"))
         );
 
-        WeeklyExpensePersistence.CashflowMonthCloseRecord result = fixture.persistence.runCommandTransaction(() ->
+        CashflowMonthCloseState result = fixture.persistence.runCommandTransaction(() ->
             fixture.persistence.findCashflowMonthClose("tenant-a", "project-a", "2026-06")
         );
         assertThat(result.status()).isEqualTo("OPEN");
@@ -4010,7 +4529,8 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.documents.put(monthClosePath("project-a", "2026-06"), closedMonth("2026-06", 1, 0));
 
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
-            fixture.persistence.requestCashflowMonthReopen(
+            requestMonthReopen(
+                fixture.persistence,
                 ACTOR,
                 "project-a",
                 new CashflowMonthReopenCommands.RequestReopen("legacy-write-guard", "2026-06", 1, "증빙 재확인")
@@ -4045,7 +4565,8 @@ class FirestoreCashflowLeaseGuardTest {
         );
 
         assertThatThrownBy(() -> revisionFixture.persistence.runCommandTransaction(() ->
-            revisionFixture.persistence.requestCashflowMonthReopen(
+            requestMonthReopen(
+                revisionFixture.persistence,
                 ACTOR,
                 "project-a",
                 new CashflowMonthReopenCommands.RequestReopen(
@@ -4056,8 +4577,9 @@ class FirestoreCashflowLeaseGuardTest {
                 )
             )
         ))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("exceeds the supported range");
+            .isInstanceOf(CashflowMonthReopenPolicy.Violation.class)
+            .satisfies(error -> assertThat(((CashflowMonthReopenPolicy.Violation) error).reason())
+                .isEqualTo(CashflowMonthReopenPolicy.ViolationReason.COUNTER_OUT_OF_RANGE));
         assertThat(revisionFixture.documents.get(monthClosePath("project-a", "2026-06")))
             .containsEntry("status", "CLOSED")
             .containsEntry("revision", Long.MAX_VALUE);
@@ -4218,6 +4740,27 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void missingCumulativeCloseHeadIsReportedAsMissingInsteadOfOpen() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+
+        assertThat(fixture.persistence.findCashflowCumulativeCloseHead("tenant-a", "project-a"))
+            .isNull();
+    }
+
+    @Test
+    void malformedCumulativeCloseHeadUsesTheTypedApplicationReadSignal() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
+            "tenantId", "tenant-a",
+            "projectId", "project-a"
+        ));
+
+        assertThatThrownBy(() -> fixture.persistence.findCashflowCumulativeCloseHead(
+            "tenant-a", "project-a"
+        )).isInstanceOf(CashflowReadPort.InvalidCumulativeCloseAuthority.class);
+    }
+
+    @Test
     void cumulativeCloseUsesThePreviousMonthDataAndPublishesHeadAtomically() {
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-01"));
         CloseCashflowMonthRequest request = cumulativeCloseRequest(fixture, "2026-08", "cumulative-44");
@@ -4269,6 +4812,7 @@ class FirestoreCashflowLeaseGuardTest {
             "tenantId", "tenant-a",
             "projectId", "project-a",
             "status", "CLOSED",
+            "fromMonth", "2023-01",
             "closedThrough", "2026-08",
             "rootHash", SOURCE_REVISION,
             "revision", 1L
@@ -4301,6 +4845,7 @@ class FirestoreCashflowLeaseGuardTest {
             "tenantId", "tenant-a",
             "projectId", "project-a",
             "status", "CLOSED",
+            "fromMonth", "2023-01",
             "settlementMonth", "2026-08",
             "closedThrough", "2026-07",
             "rootHash", SOURCE_REVISION,
@@ -4355,6 +4900,7 @@ class FirestoreCashflowLeaseGuardTest {
             "tenantId", "tenant-a",
             "projectId", "project-a",
             "status", "CLOSED",
+            "fromMonth", "2023-01",
             "closedThrough", "2026-08",
             "rootHash", SOURCE_REVISION,
             "revision", 1L
@@ -4380,6 +4926,209 @@ class FirestoreCashflowLeaseGuardTest {
                 ACTOR, "project-a", List.of("2026-08"), SOURCE_REVISION, "승인된 정정", "guard-amend"
             );
             fixture.persistence.requireCashflowMonthsOpen("tenant-a", "project-a", List.of("2026-08", "2026-09"));
+            return null;
+        })).doesNotThrowAnyException();
+    }
+
+    @Test
+    void partialCumulativeHeadFailsClosedWithoutCanonicalWritesOrAmendments() {
+        Fixture write = fixture(activeMember(), activeLease());
+        write.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
+            "tenantId", "tenant-a",
+            "projectId", "project-a"
+        ));
+        Map<String, Map<String, Object>> beforeWrite = new HashMap<>(write.documents);
+
+        assertThatThrownBy(() -> write.persistence.runCommandTransaction(() -> commandService(
+            write.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("partial-head-write", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch("2026-08", 1, "SALES_IN", BigDecimal.TEN)
+            ))
+        )))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> {
+                assertThat(((WeeklyExpenseEditLeaseException) error).code())
+                    .isEqualTo("cashflow_month_close_contract_invalid");
+                assertThat(error.getMessage())
+                    .doesNotContain("Cashflow", "Stored", "Firestore", "revision");
+            });
+        assertThat(write.documents).isEqualTo(beforeWrite);
+
+        Fixture amendment = fixture(activeMember(), activeLease());
+        amendment.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
+            "tenantId", "tenant-a",
+            "projectId", "project-a"
+        ));
+        Map<String, Map<String, Object>> beforeAmendment = new HashMap<>(amendment.documents);
+
+        assertThatThrownBy(() -> amendment.persistence.runCommandTransaction(() -> {
+            amendment.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            amendment.persistence.authorizeCashflowSheetMonthAmendments(
+                ACTOR,
+                "project-a",
+                List.of("2026-08"),
+                SOURCE_REVISION,
+                "승인된 정정",
+                "partial-head-amendment"
+            );
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
+                .isEqualTo("cashflow_month_close_contract_invalid"));
+        assertThat(amendment.documents).isEqualTo(beforeAmendment);
+    }
+
+    @Test
+    void settlementMonthHistoryDoesNotExtendTheCumulativeCloseBoundary() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
+            "contractVersion", "cashflow-cumulative-close-v2",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "status", "CLOSED",
+            "fromMonth", "2023-01",
+            "settlementMonth", "2026-08",
+            "closedThrough", "2026-07",
+            "rootHash", SOURCE_REVISION,
+            "revision", 1L
+        ));
+        fixture.documents.put(monthClosePath("project-a", "2026-08"), closedMonth("2026-08", 1, 0));
+
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("open-settlement-month", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch("2026-08", 1, "SALES_IN", BigDecimal.TEN)
+            ))
+        ))).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("closed-through-month", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 1, "SALES_IN", BigDecimal.TEN)
+            ))
+        )))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
+                .isEqualTo("cashflow_month_closed"));
+    }
+
+    @Test
+    void weeklyCompletionUsesClosedThroughInsteadOfSettlementMonthAsItsWriteBoundary() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-08", 3);
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.ofEntries(
+            Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
+            Map.entry("tenantId", "tenant-a"),
+            Map.entry("projectId", "project-a"),
+            Map.entry("status", "CLOSED"),
+            Map.entry("fromMonth", "2023-01"),
+            Map.entry("settlementMonth", "2026-08"),
+            Map.entry("closedThrough", "2026-07"),
+            Map.entry("rootHash", SOURCE_REVISION),
+            Map.entry("revision", 1L)
+        ));
+
+        CashflowWeeklyUpdateCompletionResponse august = fixture.persistence.runCommandTransaction(() ->
+            commandService(fixture.persistence).completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-open-after-july-close", "2026-08", 3, "2026-08-13T07:00:00Z"
+                )
+            )
+        );
+
+        assertThat(august.status()).isEqualTo("LOCKED");
+        assertThat(fixture.documents).containsKey(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-08-w3"
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            commandService(fixture.persistence).completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-blocked-inside-july-close", "2026-07", 5, "2026-07-31T07:00:00Z"
+                )
+            )
+        ))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> {
+                WeeklyExpenseEditLeaseException lease = (WeeklyExpenseEditLeaseException) error;
+                assertThat(lease.code()).isEqualTo("cashflow_month_closed");
+                assertThat(lease.getMessage()).contains("누적 결산 완료 월");
+                assertThat(lease.getMessage()).doesNotContain("Cashflow month is closed");
+            });
+        assertThat(fixture.documents).doesNotContainKey(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w5"
+        );
+    }
+
+    @Test
+    void cumulativeAuthorityOnlyLocksTheCanonicalHeadYear() {
+        Fixture annualYear = fixture(activeMember(), activeLease());
+        annualYear.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
+            "contractVersion", "cashflow-cumulative-close-v2",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "status", "CLOSED",
+            "fromMonth", "2023-01",
+            "closedThrough", "2026-07",
+            "rootHash", SOURCE_REVISION,
+            "revision", 1L
+        ));
+
+        assertThatCode(() -> annualYear.persistence.runCommandTransaction(() -> {
+            annualYear.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            annualYear.persistence.requireCashflowMonthsOpen(
+                "tenant-a", "project-a", List.of("2025-12", "2026-08")
+            );
+            return null;
+        })).doesNotThrowAnyException();
+
+        Fixture driftedMirror = fixture(activeMember(), activeLease());
+        driftedMirror.documents.put(
+            "orgs/tenant-a/cashflow_cumulative_close_heads/project-a",
+            annualYear.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a")
+        );
+        driftedMirror.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
+            "projectId", "project-a", "weeklyYear", 2027
+        ));
+        assertThatThrownBy(() -> driftedMirror.persistence.runCommandTransaction(() -> {
+            driftedMirror.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            driftedMirror.persistence.requireCashflowMonthsOpen(
+                "tenant-a", "project-a", List.of("2026-07")
+            );
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
+                .isEqualTo("cashflow_month_closed"));
+
+        Fixture missingGrain = fixture(activeMember(), activeLease());
+        missingGrain.documents.put(
+            "orgs/tenant-a/cashflow_cumulative_close_heads/project-a",
+            annualYear.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a")
+        );
+        missingGrain.documents.remove("orgs/tenant-a/cashflow_sheet_mirrors/project-a");
+        assertThatCode(() -> missingGrain.persistence.runCommandTransaction(() -> {
+            missingGrain.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            missingGrain.persistence.requireCashflowMonthsOpen(
+                "tenant-a", "project-a", List.of("2026-08")
+            );
             return null;
         })).doesNotThrowAnyException();
     }
@@ -4452,13 +5201,13 @@ class FirestoreCashflowLeaseGuardTest {
         );
         fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
             .closeCashflowMonth(ACTOR, "project-a", SESSION, first));
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
-            ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
+        fixture.persistence.runCommandTransaction(() -> requestMonthReopen(
+            fixture.persistence, ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
                 "legacy-reopen-request", "2026-08", 1, "레거시 결산 정정"
             )
         ));
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen(
+        fixture.persistence.runCommandTransaction(() -> decideMonthReopen(
+            fixture.persistence, FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen(
                 "legacy-reopen-decision", "2026-08", 2, "APPROVE", "정정 승인"
             )
         ));
@@ -4488,7 +5237,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
             .containsEntry("settlementMonth", "2026-08")
             .containsEntry("closedThrough", "2026-08")
-            .containsEntry("revision", 4L);
+            .containsEntry("revision", 3L);
     }
 
     @Test
@@ -4506,26 +5255,33 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void cumulativeReopenOnlyRetreatsTheLatestHorizonAndKeepsRootEvidence() {
         Fixture fixture = fixture(activeMember(), Map.of());
-        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
+        Map<String, Object> authorityHead = new LinkedHashMap<>(Map.of(
             "contractVersion", "cashflow-cumulative-close-v2", "tenantId", "tenant-a", "projectId", "project-a",
-            "status", "CLOSED", "closedThrough", "2026-08", "rootHash", SOURCE_REVISION, "revision", 1L
+            "status", "CLOSED", "fromMonth", "2023-01", "closedThrough", "2026-08",
+            "rootHash", SOURCE_REVISION, "revision", 1L
         ));
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", authorityHead);
         fixture.documents.put(monthClosePath("project-a", "2026-08"), Map.of(
             "contractVersion", "cashflow-month-close-v1", "tenantId", "tenant-a", "projectId", "project-a",
             "yearMonth", "2026-08", "status", "CLOSED", "revision", 1L, "reopenCount", 0L,
             "snapshotHash", SOURCE_REVISION
         ));
 
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> fixture.persistence
-            .requestCashflowMonthReopen(ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            requestMonthReopen(fixture.persistence, ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
                 "reopen-old", "2026-07", 1, "과거 월"
-            )))).isInstanceOf(WeeklyExpenseConflictException.class).hasMessageContaining("latest");
+            )))).isInstanceOf(CashflowMonthReopenPolicy.Violation.class)
+            .satisfies(error -> assertThat(((CashflowMonthReopenPolicy.Violation) error).reason())
+                .isEqualTo(CashflowMonthReopenPolicy.ViolationReason.LATEST_HORIZON_ONLY));
+        verify(fixture.transaction, never()).set(any(DocumentReference.class), any(), any());
 
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
-            ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen("reopen-latest", "2026-08", 1, "정정")
+        fixture.persistence.runCommandTransaction(() -> requestMonthReopen(
+            fixture.persistence, ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen("reopen-latest", "2026-08", 1, "정정")
         ));
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen("reopen-decision", "2026-08", 2, "APPROVE", "승인")
+        assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
+            .isEqualTo(authorityHead);
+        fixture.persistence.runCommandTransaction(() -> decideMonthReopen(
+            fixture.persistence, FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen("reopen-decision", "2026-08", 2, "APPROVE", "승인")
         ));
 
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
@@ -4535,11 +5291,41 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void cumulativeReopenRejectionDoesNotMutateTheAuthorityHead() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        Map<String, Object> authorityHead = new LinkedHashMap<>(Map.of(
+            "contractVersion", "cashflow-cumulative-close-v2", "tenantId", "tenant-a", "projectId", "project-a",
+            "status", "CLOSED", "fromMonth", "2023-01", "closedThrough", "2026-08",
+            "rootHash", SOURCE_REVISION, "revision", 1L
+        ));
+        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", authorityHead);
+        fixture.documents.put(monthClosePath("project-a", "2026-08"), Map.of(
+            "contractVersion", "cashflow-month-close-v1", "tenantId", "tenant-a", "projectId", "project-a",
+            "yearMonth", "2026-08", "status", "CLOSED", "revision", 1L, "reopenCount", 0L,
+            "snapshotHash", SOURCE_REVISION
+        ));
+
+        fixture.persistence.runCommandTransaction(() -> requestMonthReopen(
+            fixture.persistence, ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen(
+                "reopen-rejected", "2026-08", 1, "정정"
+            )
+        ));
+        fixture.persistence.runCommandTransaction(() -> decideMonthReopen(
+            fixture.persistence, FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen(
+                "reopen-rejected-decision", "2026-08", 2, "REJECT", "반려"
+            )
+        ));
+
+        assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
+            .isEqualTo(authorityHead);
+    }
+
+    @Test
     void cumulativeReopenUsesSettlementMonthAndReopensTheStoredDataMonth() {
         Fixture fixture = fixture(activeMember(), Map.of());
         fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
             "contractVersion", "cashflow-cumulative-close-v2", "tenantId", "tenant-a", "projectId", "project-a",
-            "status", "CLOSED", "settlementMonth", "2026-08", "closedThrough", "2026-07",
+            "status", "CLOSED", "fromMonth", "2023-01", "settlementMonth", "2026-08", "closedThrough", "2026-07",
             "rootHash", SOURCE_REVISION, "revision", 1L
         ));
         fixture.documents.put(monthClosePath("project-a", "2026-08"), Map.of(
@@ -4550,11 +5336,11 @@ class FirestoreCashflowLeaseGuardTest {
         String completionPath = "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1";
         fixture.documents.put(completionPath, lockedWeeklyCompletion("2026-07", 1, 1));
 
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
-            ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen("reopen-request", "2026-08", 1, "정정")
+        fixture.persistence.runCommandTransaction(() -> requestMonthReopen(
+            fixture.persistence, ACTOR, "project-a", new CashflowMonthReopenCommands.RequestReopen("reopen-request", "2026-08", 1, "정정")
         ));
-        fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen("reopen-decision", "2026-08", 2, "APPROVE", "승인")
+        fixture.persistence.runCommandTransaction(() -> decideMonthReopen(
+            fixture.persistence, FINANCE_ACTOR, "project-a", new CashflowMonthReopenCommands.DecideReopen("reopen-decision", "2026-08", 2, "APPROVE", "승인")
         ));
 
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
@@ -5210,6 +5996,45 @@ class FirestoreCashflowLeaseGuardTest {
         );
     }
 
+    private static CashflowMonthCloseState requestMonthReopen(
+        WeeklyExpensePersistence persistence,
+        TrustedActorContext actor,
+        String projectId,
+        CashflowMonthReopenCommands.RequestReopen request
+    ) {
+        CashflowMonthReopenPolicy.Facts facts = persistence.findCashflowMonthReopenFacts(
+            actor.tenantId(), projectId, request.yearMonth()
+        );
+        return persistence.applyCashflowMonthReopenRequest(
+            new CashflowMonthReopenPort.Actor(actor.tenantId(), actor.id(), actor.name()),
+            projectId,
+            CashflowMonthReopenPolicy.request(facts, request.yearMonth(), request.expectedRevision()),
+            request.reason()
+        );
+    }
+
+    private static CashflowMonthCloseState decideMonthReopen(
+        WeeklyExpensePersistence persistence,
+        TrustedActorContext actor,
+        String projectId,
+        CashflowMonthReopenCommands.DecideReopen request
+    ) {
+        CashflowMonthReopenPolicy.Facts facts = persistence.findCashflowMonthReopenFacts(
+            actor.tenantId(), projectId, request.yearMonth()
+        );
+        return persistence.applyCashflowMonthReopenDecision(
+            new CashflowMonthReopenPort.Actor(actor.tenantId(), actor.id(), actor.name()),
+            projectId,
+            CashflowMonthReopenPolicy.decide(
+                facts,
+                request.yearMonth(),
+                request.expectedRevision(),
+                CashflowMonthReopenPolicy.Decision.valueOf(request.decision())
+            ),
+            request.reason()
+        );
+    }
+
     private static Map<String, Object> activeMember() {
         return member(Map.of());
     }
@@ -5223,6 +6048,23 @@ class FirestoreCashflowLeaseGuardTest {
         ));
         value.putAll(overrides);
         return value;
+    }
+
+    private static CashflowMonthReopenPort.Actor reopenActor(TrustedActorContext actor) {
+        return new CashflowMonthReopenPort.Actor(actor.tenantId(), actor.id(), actor.name());
+    }
+
+    private static CashflowMonthReopenPolicy.DecisionAuthority authorizeMonthReopenDecision(
+        WeeklyExpensePersistence persistence,
+        TrustedActorContext actor,
+        String projectId
+    ) {
+        CashflowMonthReopenPolicy.DecisionAuthority authority =
+            CashflowMonthReopenPolicy.requireDecisionAuthority(
+                persistence.findCashflowMonthReopenDecisionAuthorityFacts(reopenActor(actor), projectId)
+            );
+        persistence.bindCashflowMonthReopenDecisionAuthority(authority);
+        return authority;
     }
 
     private static Map<String, Object> activeLease() {
@@ -5414,6 +6256,19 @@ class FirestoreCashflowLeaseGuardTest {
             "snapshotHash", SOURCE_REVISION,
             "snapshot", Map.of("sourceFingerprint", SOURCE_REVISION)
         ));
+    }
+
+    private static Map<String, Object> closedThrough(String yearMonth) {
+        return Map.of(
+            "contractVersion", "cashflow-cumulative-close-v2",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "status", "CLOSED",
+            "fromMonth", "2023-01",
+            "closedThrough", yearMonth,
+            "rootHash", SOURCE_REVISION,
+            "revision", 1L
+        );
     }
 
     private static String weekPath() {

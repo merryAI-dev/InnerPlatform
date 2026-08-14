@@ -1,5 +1,7 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
+
 import java.util.Map;
 
 public record CashflowMonthCloseResponse(
@@ -94,6 +96,77 @@ public record CashflowMonthCloseResponse(
             reopenRequestedAt, reopenRequestedByUid, reopenDecision, reopenDecisionReason, reopenDecidedAt,
             reopenDecidedByUid, auditId, "", 0, "", "", 0
         );
+    }
+
+    public CashflowMonthCloseResponse withStatus(String operationalStatus) {
+        return new CashflowMonthCloseResponse(
+            ok, commandName, projectId, yearMonth, operationalStatus, revision, reopenCount,
+            projectWarningCount, amendmentCount, postDeadlineAmendmentWarningCount,
+            lastAmendmentAt, lastAmendmentByUid, lastAmendmentByName, lastAmendmentReason,
+            lastAmendmentDeadline, lastAmendmentPostDeadline, lastAmendmentEvidence,
+            snapshotHash, previousSnapshotHash, snapshot, previousSnapshot, closeEligible,
+            evaluatedBusinessDate, closeDeadline, late, closedAt, closedByUid, closedByName,
+            reopenReason, reopenRequestedAt, reopenRequestedByUid, reopenDecision,
+            reopenDecisionReason, reopenDecidedAt, reopenDecidedByUid, auditId, requestId,
+            requestRevision, manifestHash, rootHash, headRevision
+        );
+    }
+
+    public static CashflowMonthCloseResponse fromState(
+        String commandName,
+        CashflowMonthCloseState state,
+        String auditId,
+        String status
+    ) {
+        return new CashflowMonthCloseResponse(
+            true,
+            commandName,
+            state.projectId(),
+            state.yearMonth(),
+            status,
+            state.revision(),
+            state.reopenCount(),
+            state.projectWarningCount(),
+            state.amendmentCount(),
+            state.postDeadlineAmendmentWarningCount(),
+            state.lastAmendmentAt(),
+            state.lastAmendmentByUid(),
+            state.lastAmendmentByName(),
+            state.lastAmendmentReason(),
+            state.lastAmendmentDeadline(),
+            state.lastAmendmentPostDeadline(),
+            state.lastAmendmentEvidence(),
+            state.snapshotHash(),
+            state.previousSnapshotHash(),
+            state.snapshot(),
+            state.previousSnapshot(),
+            state.closeEligible(),
+            state.evaluatedBusinessDate(),
+            state.closeDeadline(),
+            state.late(),
+            state.closedAt(),
+            state.closedByUid(),
+            state.closedByName(),
+            state.reopenReason(),
+            state.reopenRequestedAt(),
+            state.reopenRequestedByUid(),
+            state.reopenDecision(),
+            state.reopenDecisionReason(),
+            state.reopenDecidedAt(),
+            state.reopenDecidedByUid(),
+            auditId,
+            String.valueOf(state.snapshot().getOrDefault("requestId", "")),
+            longMetadata(state.snapshot().get("requestRevision")),
+            String.valueOf(state.snapshot().getOrDefault("manifestHash", "")),
+            String.valueOf(state.snapshot().getOrDefault("rootHash", "")),
+            longMetadata(state.snapshot().get("headRevision"))
+        );
+    }
+
+    private static long longMetadata(Object value) {
+        if (value instanceof Number number) return number.longValue();
+        if (value instanceof String text && text.matches("\\d+")) return Long.parseLong(text);
+        return 0;
     }
 
     private static String nullableText(String value) {

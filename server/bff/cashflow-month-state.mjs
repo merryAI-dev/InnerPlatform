@@ -1,6 +1,5 @@
 import { createHttpError, readOptionalText } from './bff-utils.mjs';
-
-const LOCKED_STATUSES = new Set(['PENDING', 'APPROVED', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN']);
+import { readCashflowCumulativeCloseAuthority } from './cashflow-close-calendar.mjs';
 
 function isYearMonth(value) {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
@@ -17,38 +16,92 @@ function lockRange(record) {
     : null;
 }
 
+const MONTH_CLOSE_COUNTERS = [
+  'revision',
+  'reopenCount',
+  'amendmentCount',
+  'postDeadlineAmendmentWarningCount',
+];
+const MONTH_CLOSE_MAP_EVIDENCE = [
+  'snapshot',
+  'previousSnapshot',
+  'lastAmendmentEvidence',
+  'reopenRequest',
+  'reopenDecision',
+  'reopenContext',
+];
+const MONTH_CLOSE_TEXT_EVIDENCE = [
+  'snapshotHash',
+  'previousSnapshotHash',
+  'latestVersionId',
+  'closedAt',
+  'closedByUid',
+  'closedByName',
+  'lastAmendmentAt',
+  'lastAmendmentByUid',
+  'lastAmendmentByName',
+  'lastAmendmentReason',
+  'lastAmendmentDeadline',
+];
+
+function isPristineOpenMonthClose(close) {
+  const legacy = !Object.hasOwn(close, 'contractVersion');
+  if (!legacy && readOptionalText(close.contractVersion) !== 'cashflow-month-close-v1') return false;
+  if (readOptionalText(close.status) !== 'OPEN') return false;
+  if (!legacy && (!Object.hasOwn(close, 'revision') || !Object.hasOwn(close, 'reopenCount'))) return false;
+  if (MONTH_CLOSE_COUNTERS.some((field) => (
+    Object.hasOwn(close, field) && (!Number.isSafeInteger(close[field]) || close[field] !== 0)
+  ))) return false;
+  if (MONTH_CLOSE_MAP_EVIDENCE.some((field) => {
+    if (!Object.hasOwn(close, field)) return false;
+    const value = close[field];
+    return !value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 0;
+  })) return false;
+  if (MONTH_CLOSE_TEXT_EVIDENCE.some((field) => (
+    Object.hasOwn(close, field)
+    && (typeof close[field] !== 'string' || close[field].trim() !== '')
+  ))) return false;
+  return !Object.hasOwn(close, 'lastAmendmentPostDeadline')
+    || close.lastAmendmentPostDeadline === false;
+}
+
 export function cashflowMonthRequestCovers(record, { projectId, yearMonth }) {
   if (readOptionalText(record?.projectId) !== projectId) return false;
   const range = lockRange(record);
   return Boolean(range && yearMonth >= range.fromMonth && yearMonth <= range.throughMonth);
 }
 
-export function cashflowMonthLockFor(records, { projectId, yearMonth }) {
-  for (const record of records) {
-    if (!cashflowMonthRequestCovers(record, { projectId, yearMonth })) continue;
-    const range = lockRange(record);
-    const status = readOptionalText(record?.status).toUpperCase();
-    if (LOCKED_STATUSES.has(status)) return { status, ...range, requestId: readOptionalText(record?.requestId) };
-  }
-  return null;
-}
-
 export async function assertCashflowMonthWritable({ db, transaction, tenantId, projectId, yearMonth }) {
   if (!isYearMonth(yearMonth)) {
-    throw createHttpError(400, 'Cashflow month is invalid', 'cashflow_month_invalid');
+    throw createHttpError(400, '대상 월 형식을 확인해 주세요.', 'cashflow_month_invalid');
   }
-  const query = db.collection(`orgs/${tenantId}/cashflow_month_close_requests`)
-    .where('projectId', '==', projectId);
-  const snapshot = transaction ? await transaction.get(query) : await query.get();
-  const lock = cashflowMonthLockFor(snapshot.docs.map((doc) => doc.data() || {}), { projectId, yearMonth });
-  if (!lock) return;
+  const read = (ref) => (transaction ? transaction.get(ref) : ref.get());
+  const headSnapshot = await read(db.doc(`orgs/${tenantId}/cashflow_cumulative_close_heads/${projectId}`));
+  if (headSnapshot.exists) {
+    const authority = readCashflowCumulativeCloseAuthority(headSnapshot.data(), { tenantId, projectId });
+    if (!authority) {
+      throw createHttpError(409, '월 결산 기준 정보를 확인할 수 없어 안전하게 중단했어요. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.', 'cashflow_month_close_contract_invalid');
+    }
+    const weeklyYear = Number(authority.closedThrough.slice(0, 4));
+    if (!yearMonth.startsWith(`${weeklyYear}-`)) return;
+    if (yearMonth > authority.closedThrough) return;
+    throw createHttpError(409, `${yearMonth} 누적 결산 완료 월은 수정할 수 없습니다.`, 'cashflow_month_locked');
+  }
+
+  const closeSnapshot = await read(db.doc(`orgs/${tenantId}/monthly_closes/${projectId}-${yearMonth}`));
+  if (!closeSnapshot.exists) return;
+  const close = closeSnapshot.data() || {};
+  if (
+    readOptionalText(close.tenantId) !== tenantId
+    || readOptionalText(close.projectId) !== projectId
+    || readOptionalText(close.yearMonth) !== yearMonth
+  ) {
+    throw createHttpError(409, '월 결산 기준 정보를 확인할 수 없어 안전하게 중단했어요. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.', 'cashflow_month_close_contract_invalid');
+  }
+  if (isPristineOpenMonthClose(close)) return;
   throw createHttpError(
     409,
-    `${yearMonth} 월은 ${lock.status === 'PENDING' ? '결재 대기' : '월 결산'} 상태라 수정할 수 없습니다.`,
-    'cashflow_month_locked',
+    `${yearMonth} 마감 이력에 대응하는 누적 마감 기준이 없어 관리자 복구가 필요합니다.`,
+    'cashflow_month_close_migration_required',
   );
-}
-
-export function isCashflowMonthLockedStatus(status) {
-  return LOCKED_STATUSES.has(readOptionalText(status).toUpperCase());
 }

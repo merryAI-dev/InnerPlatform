@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, FolderKanban, BarChart3,
   Building2, Shield, UserCog,
-  ListChecks, ArrowLeftRight, Hash, Users,
+  ListChecks, ArrowLeftRight, CalendarRange, Hash, Users,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -44,6 +44,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'AXR',
     items: [
+      { to: '/axr/cashflow-period-policy', icon: CalendarRange, label: '현금흐름 기간·마감 정책' },
       { to: '/users', icon: UserCog, label: '권한 관리' },
       { to: '/settings?tab=members', icon: UserCog, label: '멤버DB' },
       { to: '/people', icon: Users, label: '인력 명부' },

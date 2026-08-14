@@ -4,15 +4,11 @@ import type {
   CashflowMonthCloseConfirmation,
   CashflowMonthCloseDepositScheduleRow,
   CashflowMonthCloseDraftInput,
-  CashflowMonthCloseLockRange,
   CashflowManagementCheck,
   CashflowManagementConfirmation,
   CashflowDeadlineSummary,
 } from '../../lib/platform-bff-client';
-import type {
-  CashflowSheetLabMirrorResult,
-  CashflowSheetLabYearViewResult,
-} from '../../lib/sheets-cashflow-readonly-client';
+import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-readonly-client';
 
 export type CashflowMonthCloseDecision = CashflowMonthCloseConfirmation['decision'];
 export type CashflowMonthCloseDecisionMap = Record<string, CashflowMonthCloseDecision | undefined>;
@@ -23,115 +19,29 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
 
-export function annualYearsFor(weeklyYear: number | undefined): number[] {
-  if (!Number.isSafeInteger(weeklyYear)) return [];
-  const year = Number(weeklyYear);
-  return [year - 2, year - 1, ...Array.from({ length: 6 }, (_, index) => year + index + 1)];
-}
-
 export function shouldHideCashflowValuesAfterLoadError(error: string | null, hasCanonical: boolean): boolean {
   return Boolean(error) && !hasCanonical;
 }
 
-export function isCashflowComparisonWeekVisible(
-  week: { yearMonth: string; weekNo: number },
-  comparisonAsOfWeek?: { yearMonth: string; weekNo: number },
-): boolean {
-  if (!comparisonAsOfWeek) return false;
-  return `${week.yearMonth}:${String(week.weekNo).padStart(2, '0')}`
-    <= `${comparisonAsOfWeek.yearMonth}:${String(comparisonAsOfWeek.weekNo).padStart(2, '0')}`;
-}
-
-export function resolveCashflowComparisonScope<T extends { yearMonth: string; weekNo: number }>(input: {
-  annualYears: number[];
-  weeks: T[];
-  comparisonAsOfWeek?: { yearMonth: string; weekNo: number };
-}): { annualYears: number[]; weeks: T[]; periodLabel: string } {
-  const asOf = input.comparisonAsOfWeek;
-  if (!asOf) return { annualYears: [], weeks: [], periodLabel: '서버 기준 주차 확인 중' };
-  const asOfYear = Number.parseInt(asOf.yearMonth.slice(0, 4), 10);
-  const annualYears = input.annualYears.filter((year) => year < asOfYear);
-  const weeks = input.weeks.filter((week) => isCashflowComparisonWeekVisible(week, asOf));
-  const periodStart = annualYears.length > 0
-    ? `${annualYears[0]}년`
-    : weeks.length > 0
-      ? `${weeks[0].yearMonth} ${weeks[0].weekNo}주차`
-      : `${asOf.yearMonth} ${asOf.weekNo}주차`;
-  return {
-    annualYears,
-    weeks,
-    periodLabel: `${periodStart} ~ ${asOf.yearMonth} ${asOf.weekNo}주차`,
-  };
-}
-
-export function isCashflowMonthCloseRequestLocked(status?: string): boolean {
-  return ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status || '');
-}
-
-export function isCashflowWeekLockedByRange(
-  lockRange: CashflowMonthCloseLockRange | undefined,
+export function isCashflowMonthCloseRequestForSelection(
+  request: { projectId: string; yearMonth: string } | null,
+  projectId: string,
   yearMonth: string,
-  weekNo: number,
 ): boolean {
-  if (!lockRange) return false;
-  const target = `${yearMonth}-w${String(weekNo).padStart(2, '0')}`;
-  const start = `${lockRange.fromMonth}-w${String(lockRange.fromWeekNo).padStart(2, '0')}`;
-  const end = `${lockRange.throughMonth}-w${String(lockRange.throughWeekNo).padStart(2, '0')}`;
-  return target >= start && target <= end;
+  return request?.projectId === projectId && request.yearMonth === yearMonth;
 }
 
 export function shouldApplyCashflowMonthCloseRequestResult(input: {
   requestGeneration: number;
   currentGeneration: number;
+  requestedProjectId: string;
+  selectedProjectId: string;
   requestedYearMonth: string;
   selectedYearMonth: string;
 }): boolean {
   return input.requestGeneration === input.currentGeneration
+    && input.requestedProjectId === input.selectedProjectId
     && input.requestedYearMonth === input.selectedYearMonth;
-}
-
-export type CashflowSheetDashboardMetadata = NonNullable<
-  NonNullable<CashflowSheetLabMirrorResult['sheetFacts']>['metadata']
->;
-
-export function resolveCashflowEvidenceScope(input: {
-  projectId: string;
-  yearMonth: string;
-  monthClose: {
-    projectId: string;
-    yearMonth: string;
-    status: string;
-    dashboard?: {
-      snapshotCompatibility?: { status?: string };
-      sheetMetadata?: Record<string, unknown>;
-    };
-  } | null;
-  liveYearView: CashflowSheetLabYearViewResult | null;
-  liveSheetMetadata?: CashflowSheetDashboardMetadata;
-}): {
-  allowLiveAnnualYearView: boolean;
-  yearView: CashflowSheetLabYearViewResult | null;
-  sheetMetadata?: CashflowSheetDashboardMetadata;
-} {
-  const sameScope = input.monthClose?.projectId === input.projectId
-    && input.monthClose.yearMonth === input.yearMonth;
-  const allowLiveAnnualYearView = sameScope
-    && input.monthClose?.status === 'OPEN'
-    && input.monthClose.dashboard?.snapshotCompatibility?.status !== 'LEGACY_EVIDENCE_ONLY';
-  const frozenMetadata = input.monthClose?.dashboard?.sheetMetadata;
-  const hasFrozenMetadata = sameScope
-    && input.monthClose?.status !== 'OPEN'
-    && frozenMetadata != null
-    && Object.keys(frozenMetadata).length > 0;
-  return {
-    allowLiveAnnualYearView,
-    yearView: allowLiveAnnualYearView ? input.liveYearView : null,
-    sheetMetadata: hasFrozenMetadata
-      ? frozenMetadata as CashflowSheetDashboardMetadata
-      : allowLiveAnnualYearView
-        ? input.liveSheetMetadata
-        : undefined,
-  };
 }
 
 export function cashflowMonthCloseConfirmationKey(input: {
@@ -205,8 +115,8 @@ export function normalizeCashflowMonthCloseCells(
     });
     if (cellsByKey.has(key)) throw new Error(`중복된 시트 셀이 있습니다: ${key}`);
     const hasValue = source.state === 'VALUE' || source.state === 'ZERO';
-    const amount = hasValue ? Number(source.amount) : null;
-    if (hasValue && !Number.isFinite(amount)) {
+    const amount = hasValue ? source.amount : null;
+    if (hasValue && (typeof amount !== 'number' || !Number.isSafeInteger(amount))) {
       throw new Error(`${source.sourceCell || source.sourceLabel || key} 금액을 확인해 주세요.`);
     }
     cellsByKey.set(key, {

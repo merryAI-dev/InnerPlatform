@@ -47,6 +47,23 @@ describe('cashflow management checks', () => {
     expect(negativeProjectionCheck(weeks, 200)).toMatchObject({ status: 'OK' });
   });
 
+  it('keeps sparse lines at zero but marks a declared malformed amount unavailable', () => {
+    expect(negativeProjectionCheck([
+      { yearMonth: '2026-07', weekNo: 1, projection: { SALES_IN: 100 } },
+    ], 0)).toMatchObject({ status: 'OK' });
+
+    expect(negativeProjectionCheck([
+      { yearMonth: '2026-07', weekNo: 1, projection: { SALES_IN: '100' } },
+    ], 0)).toMatchObject({
+      status: 'REVIEW_REQUIRED',
+      findings: ['Projection 금액 확인 필요'],
+    });
+    expect(negativeProjectionCheck([], null)).toMatchObject({
+      status: 'REVIEW_REQUIRED',
+      findings: ['Projection 이월 잔액 확인 필요'],
+    });
+  });
+
   it('keeps confirmation and comparison rules anchored to the id list', () => {
     const confirmations = validManagementConfirmations([
       { checkId: 'labor-transfer', decision: 'confirmed' },

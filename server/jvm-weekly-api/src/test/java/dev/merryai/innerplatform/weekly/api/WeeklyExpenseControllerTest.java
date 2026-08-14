@@ -2,6 +2,8 @@ package dev.merryai.innerplatform.weekly.api;
 
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +17,10 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionReposi
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
+import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
+import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
+import dev.merryai.innerplatform.weekly.service.query.CashflowDashboardSectionQueryService;
+import dev.merryai.innerplatform.weekly.service.query.CashflowMonthDashboardQueryService;
 import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +30,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -44,6 +51,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
@@ -102,6 +110,15 @@ class WeeklyExpenseControllerTest {
             .when(weeklyExpensePersistence).requireCashflowWritePermission(any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowMonthClosePermission(any(), any());
+        doAnswer(invocation -> {
+            CashflowMonthReopenPort.Actor actor = invocation.getArgument(0);
+            String projectId = invocation.getArgument(1);
+            return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
+                actor.tenantId(), actor.id(), projectId, true, actor.tenantId(), projectId,
+                actor.id(), "ACTIVE", "organization_head", actor.id()
+            );
+        }).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
+        doNothing().when(weeklyExpensePersistence).bindCashflowMonthReopenDecisionAuthority(any());
         doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
         doNothing().when(weeklyExpensePersistence).requireCashflowWeeksOpen(any(), any(), any());
     }
@@ -373,7 +390,9 @@ class WeeklyExpenseControllerTest {
         WeeklyExpensePersistence snapshotPersistence = mock(WeeklyExpensePersistence.class);
         when(snapshotPersistence.findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year"))
             .thenReturn(null);
-        WeeklyExpenseController snapshotController = new WeeklyExpenseController(snapshotCommandService, new CashflowReadService(snapshotPersistence), false);
+        WeeklyExpenseController snapshotController = testController(
+            snapshotCommandService, new CashflowReadService(snapshotPersistence), false
+        );
 
         CashflowSnapshotResponse response = snapshotController.cashflowSnapshot(
             "project-no-year", "tenant-no-year", "viewer-no-year", "viewer", "viewer@example.com"
@@ -1560,8 +1579,9 @@ class WeeklyExpenseControllerTest {
     void cashflowMonthDashboardSourceReturnsCloseAndCashflowInOneResponse() {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
-        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-month-dashboard"), eq("2026-06")))
-            .thenReturn(new CashflowMonthCloseResponse(
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-month-dashboard", "project-month-dashboard", "2026-06"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
             true, "cashflowMonth.read", "project-month-dashboard", "2026-06", "OPEN",
             0, 0, 0,
             0, 0, null, null, null, null, null, false,
@@ -1569,21 +1589,16 @@ class WeeklyExpenseControllerTest {
             null, null, Map.of(), Map.of(), false,
             "2026-07-20", "2026-07-10", true,
             null, null, null, null, null, null, null, null, null, null, null
-        ));
+        )));
         when(dashboardPersistence.findCashflowDeclaredWeeklyYear("tenant-month-dashboard", "project-month-dashboard"))
             .thenReturn(2026);
         CashflowLedgerSource dashboardSource =
             new CashflowLedgerSource(List.of(), List.of());
         when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026))
             .thenReturn(dashboardSource);
-        when(dashboardCommandService.readCashflowProjectionActualSummary(
-            any(), eq("project-month-dashboard"), same(dashboardSource)
-        ))
-            .thenReturn(new CashflowProjectionActualSummaryBatchResponse.Item(
-                "project-month-dashboard", "2023-01",
-                new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
-                new java.math.BigDecimal("18371453"), false
-            ));
+        when(dashboardPersistence.findCashflowLedgerSource(
+            "tenant-month-dashboard", "project-month-dashboard", 2026, "2023-01", "2026-08"
+        )).thenReturn(dashboardSource);
         Map<String, String> completeAnnualStates = new LinkedHashMap<>();
         CashflowLineCatalog.ALL_LINES.forEach(line -> completeAnnualStates.put(line, "EMPTY"));
         completeAnnualStates.put("SALES_IN", "VALUE");
@@ -1617,7 +1632,9 @@ class WeeklyExpenseControllerTest {
             )
         ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        ).readCashflowMonthDashboardSource(
             "project-month-dashboard",
             "2026-06",
             "tenant-month-dashboard",
@@ -1640,13 +1657,131 @@ class WeeklyExpenseControllerTest {
             assertThat(source.lineStates()).containsEntry("SALES_IN", "VALUE");
         });
         assertThat(response.projectionActualSummary().settlementDifferenceAmount())
-            .isEqualByComparingTo("18371453");
-        verify(dashboardPersistence, times(1))
+            .isEqualByComparingTo("0");
+        assertThat(response.cumulativeClose().availability()).isEqualTo("MISSING");
+        assertThat(response.cumulativeClose().status()).isNull();
+        assertThat(response.cumulativeClose().fromMonth()).isNull();
+        assertThat(response.cumulativeClose().headRevision()).isNull();
+        verify(dashboardPersistence)
             .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026);
-        verify(dashboardCommandService).readCashflowProjectionActualSummary(
-            any(), eq("project-month-dashboard"), same(dashboardSource)
+        verify(dashboardPersistence).findCashflowLedgerSource(
+            "tenant-month-dashboard", "project-month-dashboard", 2026, "2023-01", "2026-08"
         );
-        verify(dashboardCommandService, never()).readCashflowProjectionActualSummaries(any(), any());
+    }
+
+    @Test
+    void dashboardUsesCumulativeHeadForOperationalStatusAndKeepsStaleCloseAsEvidence() {
+        WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        CashflowMonthCloseResponse staleLatestRun = new CashflowMonthCloseResponse(
+            true, "cashflowMonth.read", "project-stale-close", "2026-08", "CLOSED",
+            1, 0, 0, 0, 0, null, null, null, null, null, false,
+            Map.of(), "sha256:" + "b".repeat(64), null, Map.of("ledgerWeeks", List.of()), Map.of(), true,
+            "2026-09-01", "2026-09-10", false,
+            "2026-08-31T15:00:00Z", "finance-1", "재무",
+            null, null, null, null, null, null, null, "audit-stale-close"
+        );
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-stale-close", "project-stale-close", "2026-08"
+        )).thenReturn(monthCloseState(staleLatestRun));
+        when(dashboardPersistence.findCashflowCumulativeCloseHead(
+            "tenant-stale-close", "project-stale-close"
+        )).thenReturn(new CashflowCumulativeCloseHead(
+            "CLOSED", "2023-01", "2026-08", "2026-07", "sha256:" + "a".repeat(64), 4
+        ));
+        when(dashboardPersistence.findCashflowDeclaredWeeklyYear(
+            "tenant-stale-close", "project-stale-close"
+        )).thenReturn(2026);
+        CashflowLedgerSource liveSource = new CashflowLedgerSource(List.of(), List.of());
+        when(dashboardPersistence.findCashflowLedgerSource(
+            "tenant-stale-close", "project-stale-close", 2026
+        )).thenReturn(liveSource);
+        when(dashboardPersistence.findCashflowOpeningBalance(
+            "tenant-stale-close", "project-stale-close", 2026
+        )).thenReturn(new CashflowOpeningBalance(
+            2026,
+            new CashflowOpeningBalance.Mode(
+                java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+            ),
+            new CashflowOpeningBalance.Mode(
+                java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+            )
+        ));
+        when(dashboardCommandService.readCashflowProjectionActualSummary(
+            any(), eq("project-stale-close"), same(liveSource)
+        )).thenReturn(new CashflowProjectionActualSummaryBatchResponse.Item(
+            "project-stale-close", "2023-01",
+            new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-08", 3),
+            java.math.BigDecimal.ZERO, true
+        ));
+
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService,
+            new CashflowReadService(dashboardPersistence),
+            false
+        ).readCashflowMonthDashboardSource(
+            "project-stale-close", "2026-08", "tenant-stale-close",
+            "viewer-stale-close", "viewer", "viewer@example.com"
+        );
+
+        assertThat(response.monthClose().status()).isEqualTo("OPEN");
+        assertThat(response.snapshotCompatibility().status()).isEqualTo("LIVE_CURRENT");
+        assertThat(response.cashflow()).isNotNull();
+        JsonNode json = objectMapper.valueToTree(response);
+        assertThat(json.path("latestRun").path("status").asText()).isEqualTo("CLOSED");
+        assertThat(json.path("monthStatusEvidence").path("issueCode").asText())
+            .isEqualTo("MONTH_CLOSE_HISTORY_STATUS_DIFFERS_FROM_CUMULATIVE_AUTHORITY");
+        assertThat(json.path("monthStatusEvidence").path("closedThrough").asText())
+            .isEqualTo("2026-07");
+        assertThat(json.path("reopenRequest").path("enabled").asBoolean()).isTrue();
+    }
+
+    @Test
+    void missingCumulativeHeadNeverExposesStaleClosedHistoryAsOperationalAuthority() {
+        WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-missing-head", "project-missing-head", "2026-08"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
+            true, "cashflowMonth.read", "project-missing-head", "2026-08", "CLOSED",
+            1, 0, 0, 0, 0, null, null, null, null, null, false,
+            Map.of(), "sha256:" + "c".repeat(64), null, Map.of("ledgerWeeks", List.of()),
+            Map.of(), true, "2026-09-01", "2026-09-10", false,
+            "2026-08-31T15:00:00Z", "finance-1", "재무",
+            null, null, null, null, null, null, null, "audit-missing-head"
+        )));
+
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService,
+            new CashflowReadService(dashboardPersistence),
+            false
+        ).readCashflowMonthDashboardSource(
+            "project-missing-head", "2026-08", "tenant-missing-head",
+            "viewer-missing-head", "viewer", "viewer@example.com"
+        );
+
+        assertThat(response.monthClose().status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.latestRun().status()).isEqualTo("CLOSED");
+        assertThat(response.monthStatusEvidence().authorityAvailability()).isEqualTo("MISSING");
+        assertThat(response.monthStatusEvidence().operationalStatus()).isNull();
+        assertThat(response.monthStatusEvidence().issueCode())
+            .isEqualTo("CUMULATIVE_CLOSE_AUTHORITY_MISSING");
+        assertThat(response.snapshotCompatibility().status()).isEqualTo("AUTHORITY_UNAVAILABLE");
+        assertThat(response.cashflow()).isNull();
+        assertThat(response.openingBalances()).isNull();
+        assertThat(response.blockers()).contains(new CashflowMonthDashboardSourceResponse.Blocker(
+            "CUMULATIVE_CLOSE_AUTHORITY_MISSING",
+            "누적 월 결산 기준이 아직 없습니다. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요."
+        ));
+        verify(dashboardPersistence, never()).findCashflowLedgerSource(
+            "tenant-missing-head", "project-missing-head", 2026
+        );
+        verify(dashboardPersistence, never()).findCashflowGlobalLedgerSource(
+            "tenant-missing-head", "project-missing-head"
+        );
+        verify(dashboardPersistence, never()).findCashflowOpeningBalance(
+            "tenant-missing-head", "project-missing-head", 2026
+        );
     }
 
     @Test
@@ -1655,14 +1790,15 @@ class WeeklyExpenseControllerTest {
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
         when(dashboardPersistence.findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year"))
             .thenReturn(null);
-        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-no-year"), eq("2026-06")))
-            .thenReturn(new CashflowMonthCloseResponse(
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-no-year", "project-no-year", "2026-06"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
                 true, "cashflowMonth.read", "project-no-year", "2026-06", "OPEN",
                 0, 0, 0, 0, 0, null, null, null, null, null, false,
                 Map.of(), null, null, Map.of(), Map.of(), false,
                 "2026-07-20", "2026-07-10", true,
                 null, null, null, null, null, null, null, null, null, null, null
-            ));
+            )));
         when(dashboardPersistence.findCashflowOpeningBalance("tenant-no-year", "project-no-year", 2026))
             .thenReturn(new CashflowOpeningBalance(
                 2026,
@@ -1681,19 +1817,219 @@ class WeeklyExpenseControllerTest {
             java.math.BigDecimal.ZERO, true
         ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        ).readCashflowMonthDashboardSource(
             "project-no-year", "2026-06", "tenant-no-year", "viewer-no-year", "viewer", "viewer@example.com"
         );
 
         assertThat(response.monthClose().status()).isEqualTo("OPEN");
-        assertThat(response.cashflow().readModel().months()).isEmpty();
+        assertThat(response.cashflow()).isNull();
         assertThat(response.openingBalances().selectedYear()).isEqualTo(2026);
-        assertThat(response.blockers()).containsExactly(new CashflowMonthDashboardSourceResponse.Blocker(
-            "SHEET_SOURCE_REQUIRED", "먼저 시트값을 불러와 주세요."
-        ));
-        verify(dashboardPersistence, times(1))
+        assertThat(response.projectionActualSummary()).isNull();
+        assertThat(response.blockers()).extracting(CashflowMonthDashboardSourceResponse.Blocker::code)
+            .containsExactlyInAnyOrder(
+                "SHEET_SOURCE_REQUIRED",
+                "CASHFLOW_SOURCE_UNAVAILABLE",
+                "PROJECTION_ACTUAL_SUMMARY_UNAVAILABLE"
+            );
+        assertThat(response.sectionErrors()).extracting(
+            CashflowMonthDashboardSourceResponse.SectionError::section,
+            CashflowMonthDashboardSourceResponse.SectionError::code
+        ).containsExactlyInAnyOrder(
+            org.assertj.core.groups.Tuple.tuple("cashflow", "cashflow_declared_weekly_year_missing"),
+            org.assertj.core.groups.Tuple.tuple(
+                "projectionActualSummary", "cashflow_projection_actual_summary_unavailable"
+            )
+        );
+        verify(dashboardPersistence, times(2))
             .findCashflowDeclaredWeeklyYear("tenant-no-year", "project-no-year");
         verify(dashboardPersistence, never()).findCashflowLedgerSource(any(), any(), anyInt());
+    }
+
+    @Test
+    void cumulativeAuthorityFailuresBlockOnlyThatDashboardSection() {
+        Map<String, RuntimeException> failures = Map.of(
+            "INVALID", new CashflowReadPort.InvalidCumulativeCloseAuthority(),
+            "UNAVAILABLE", new CashflowReadPort.Unavailable(
+                new RuntimeException("firestore read unavailable")
+            )
+        );
+
+        failures.forEach((availability, failure) -> {
+            WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+            WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+            when(dashboardPersistence.findCashflowMonthClose(
+                "tenant-authority-read", "project-authority-read", "2026-06"
+            )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
+                    true, "cashflowMonth.read", "project-authority-read", "2026-06", "OPEN",
+                    0, 0, 0, 0, 0, null, null, null, null, null, false,
+                    Map.of(), null, null, Map.of(), Map.of(), false,
+                    "2026-07-20", "2026-07-10", true,
+                    null, null, null, null, null, null, null, null, null, null, null
+                )));
+            when(dashboardPersistence.findCashflowDeclaredWeeklyYear("tenant-authority-read", "project-authority-read"))
+                .thenReturn(2026);
+            CashflowLedgerSource ledgerSource = new CashflowLedgerSource(List.of(), List.of());
+            when(dashboardPersistence.findCashflowLedgerSource(
+                "tenant-authority-read", "project-authority-read", 2026, "2023-01", "2026-08"
+            )).thenReturn(ledgerSource);
+            when(dashboardPersistence.findCashflowOpeningBalance("tenant-authority-read", "project-authority-read", 2026))
+                .thenReturn(new CashflowOpeningBalance(
+                    2026,
+                    new CashflowOpeningBalance.Mode(
+                        java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+                    ),
+                    new CashflowOpeningBalance.Mode(
+                        java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+                    )
+                ));
+            when(dashboardPersistence.findCashflowCumulativeCloseHead("tenant-authority-read", "project-authority-read"))
+                .thenThrow(failure);
+            when(dashboardCommandService.readCashflowProjectionActualSummary(
+                any(), eq("project-authority-read"), any(CashflowLedgerSource.class)
+            )).thenReturn(new CashflowProjectionActualSummaryBatchResponse.Item(
+                "project-authority-read", "2023-01",
+                new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
+                java.math.BigDecimal.ZERO, true
+            ));
+
+            CashflowMonthDashboardSourceResponse response = testController(
+                dashboardCommandService,
+                new CashflowReadService(dashboardPersistence),
+                false
+            ).readCashflowMonthDashboardSource(
+                "project-authority-read",
+                "2026-06",
+                "tenant-authority-read",
+                "viewer-authority-read",
+                "viewer",
+                "viewer@example.com"
+            );
+
+            assertThat(response.monthClose().status()).isEqualTo("UNAVAILABLE");
+            assertThat(response.monthStatusEvidence().operationalStatus()).isNull();
+            assertThat(response.cashflow()).isNull();
+            assertThat(response.openingBalances()).isNull();
+            assertThat(response.projectionActualSummary().settlementMatches()).isTrue();
+            assertThat(response.cumulativeClose().availability()).isEqualTo(availability);
+            assertThat(response.cumulativeClose().status()).isNull();
+            assertThat(response.blockers()).anySatisfy(blocker -> {
+                assertThat(blocker.code()).isEqualTo("CUMULATIVE_CLOSE_AUTHORITY_" + availability);
+                assertThat(blocker.message()).doesNotContain("firestore", "Stored authority");
+            });
+        });
+    }
+
+    @Test
+    void independentDashboardSectionFailuresReturnPartialResultsWithoutTechnicalMessages() {
+        Map<String, String> expectedSectionCodes = Map.of(
+            "weeklyYear", "cashflow_declared_weekly_year_unavailable",
+            "ledger", "cashflow_ledger_source_unavailable",
+            "openingBalances", "cashflow_opening_balances_unavailable",
+            "projectionActualSummary", "cashflow_projection_actual_summary_unavailable"
+        );
+
+        expectedSectionCodes.forEach((failedSection, expectedCode) -> {
+            String projectId = "project-partial-" + failedSection;
+            String tenantId = "tenant-partial";
+            CashflowReadPort.Unavailable technicalFailure = new CashflowReadPort.Unavailable(
+                new IllegalStateException(
+                    "Firestore adapter exploded at internal line 917 for " + failedSection
+                )
+            );
+            WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+            WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+            when(dashboardPersistence.findCashflowMonthClose(
+                tenantId, projectId, "2026-06"
+            )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
+                    true, "cashflowMonth.read", projectId, "2026-06", "OPEN",
+                    0, 0, 0, 0, 0, null, null, null, null, null, false,
+                    Map.of(), null, null, Map.of(), Map.of(), false,
+                    "2026-07-20", "2026-07-10", true,
+                    null, null, null, null, null, null, null, null, null, null, null
+                )));
+            CashflowLedgerSource ledgerSource = new CashflowLedgerSource(List.of(), List.of());
+            when(dashboardPersistence.findCashflowDeclaredWeeklyYear(tenantId, projectId))
+                .thenReturn(2026);
+            when(dashboardPersistence.findCashflowLedgerSource(tenantId, projectId, 2026))
+                .thenReturn(ledgerSource);
+            when(dashboardPersistence.findCashflowLedgerSource(
+                tenantId, projectId, 2026, "2023-01", "2026-08"
+            )).thenReturn(ledgerSource);
+            when(dashboardPersistence.findCashflowOpeningBalance(tenantId, projectId, 2026))
+                .thenReturn(new CashflowOpeningBalance(
+                    2026,
+                    new CashflowOpeningBalance.Mode(
+                        java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+                    ),
+                    new CashflowOpeningBalance.Mode(
+                        java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+                    )
+                ));
+            CashflowProjectionActualSummaryBatchResponse.Item summary =
+                new CashflowProjectionActualSummaryBatchResponse.Item(
+                    projectId, "2023-01",
+                    new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
+                    java.math.BigDecimal.ZERO, true
+                );
+            when(dashboardCommandService.readCashflowProjectionActualSummary(
+                any(), eq(projectId), same(ledgerSource)
+            )).thenReturn(summary);
+            when(dashboardCommandService.readCashflowProjectionActualSummaries(
+                any(), any(CashflowProjectionActualSummaryBatchRequest.class)
+            )).thenReturn(new CashflowProjectionActualSummaryBatchResponse("1", List.of(summary)));
+
+            switch (failedSection) {
+                case "weeklyYear" -> when(dashboardPersistence.findCashflowDeclaredWeeklyYear(tenantId, projectId))
+                    .thenThrow(technicalFailure).thenReturn(2026);
+                case "ledger" -> when(dashboardPersistence.findCashflowLedgerSource(tenantId, projectId, 2026))
+                    .thenThrow(technicalFailure);
+                case "openingBalances" -> when(dashboardPersistence.findCashflowOpeningBalance(tenantId, projectId, 2026))
+                    .thenThrow(technicalFailure);
+                case "projectionActualSummary" -> when(dashboardPersistence.findCashflowLedgerSource(
+                    tenantId, projectId, 2026, "2023-01", "2026-08"
+                )).thenThrow(technicalFailure);
+                default -> throw new IllegalStateException("Unexpected fixture section " + failedSection);
+            }
+
+            CashflowMonthDashboardSourceResponse response = testController(
+                dashboardCommandService,
+                new CashflowReadService(dashboardPersistence),
+                false
+            ).readCashflowMonthDashboardSource(
+                projectId, "2026-06", tenantId, "viewer-partial", "viewer", "viewer@example.com"
+            );
+
+            assertThat(response.monthClose().status()).isEqualTo("OPEN");
+            assertThat(response.cumulativeClose().availability()).isEqualTo("MISSING");
+            assertThat(response.sectionErrors()).containsExactly(
+                new CashflowMonthDashboardSourceResponse.SectionError(
+                    failedSection.equals("weeklyYear") || failedSection.equals("ledger")
+                        ? "cashflow"
+                        : failedSection,
+                    expectedCode
+                )
+            );
+            assertThat(response.blockers()).singleElement().satisfies(blocker -> {
+                assertThat(blocker.code()).endsWith("_UNAVAILABLE");
+                assertThat(blocker.message())
+                    .doesNotContain("Firestore", "adapter", "internal", "917", failedSection);
+            });
+            if (failedSection.equals("weeklyYear") || failedSection.equals("ledger")) {
+                assertThat(response.cashflow()).isNull();
+                assertThat(response.openingBalances()).isNotNull();
+                assertThat(response.projectionActualSummary()).isNotNull();
+            } else if (failedSection.equals("openingBalances")) {
+                assertThat(response.cashflow()).isNotNull();
+                assertThat(response.openingBalances()).isNull();
+                assertThat(response.projectionActualSummary()).isNotNull();
+            } else {
+                assertThat(response.cashflow()).isNotNull();
+                assertThat(response.openingBalances()).isNotNull();
+                assertThat(response.projectionActualSummary()).isNull();
+            }
+        });
     }
 
     @Test
@@ -1708,8 +2044,11 @@ class WeeklyExpenseControllerTest {
             "includedYears", List.of(),
             "excludedWeeklyYears", List.of()
         );
-        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-frozen"), eq("2026-06")))
-            .thenReturn(new CashflowMonthCloseResponse(
+        when(dashboardPersistence.findCashflowCumulativeCloseHead("tenant-frozen", "project-frozen"))
+            .thenReturn(closedHead("2026-06"));
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-frozen", "project-frozen", "2026-06"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
                 true, "cashflowMonth.read", "project-frozen", "2026-06", "CLOSED",
                 1, 0, 0,
                 0, 0, null, null, null, null, null, false,
@@ -1724,9 +2063,11 @@ class WeeklyExpenseControllerTest {
                 "2026-07-20", "2026-07-10", true,
                 "2026-07-10T00:00:00Z", "finance-1", "재무",
                 null, null, null, null, null, null, null, "audit-1"
-            ));
+            )));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        ).readCashflowMonthDashboardSource(
             "project-frozen",
             "2026-06",
             "tenant-frozen",
@@ -1764,8 +2105,11 @@ class WeeklyExpenseControllerTest {
             ),
             "ledgerWeeks", List.of()
         );
-        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-amended"), eq("2026-06")))
-            .thenReturn(new CashflowMonthCloseResponse(
+        when(dashboardPersistence.findCashflowCumulativeCloseHead("tenant-amended", "project-amended"))
+            .thenReturn(closedHead("2026-06"));
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-amended", "project-amended", "2026-06"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
                 true, "cashflowMonth.read", "project-amended", "2026-06", "CLOSED",
                 2, 0, 1,
                 1, 0, "2026-07-09T00:00:00Z", "finance-2", "보람", "시트 정정", "2026-07-10", false,
@@ -1780,7 +2124,7 @@ class WeeklyExpenseControllerTest {
                 "2026-07-09", "2026-07-10", false,
                 "2026-07-08T00:00:00Z", "finance-1", "재무",
                 null, null, null, null, null, null, null, "audit-amended"
-            ));
+            )));
         CashflowLedgerSource liveSource =
             new CashflowLedgerSource(
                 List.of(),
@@ -1803,7 +2147,9 @@ class WeeklyExpenseControllerTest {
             )
         ));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        ).readCashflowMonthDashboardSource(
             "project-amended",
             "2026-06",
             "tenant-amended",
@@ -1816,10 +2162,8 @@ class WeeklyExpenseControllerTest {
         assertThat(response.cashflow()).isNotNull();
         assertThat(response.openingBalances().selectedYear()).isEqualTo(2026);
         assertThat(response.snapshotCompatibility().status()).isEqualTo("LIVE_AMENDED");
-        verify(dashboardCommandService, times(2)).readCashflowMonthClose(
-            any(),
-            eq("project-amended"),
-            eq("2026-06")
+        verify(dashboardPersistence, times(2)).findCashflowMonthClose(
+            "tenant-amended", "project-amended", "2026-06"
         );
         verify(dashboardPersistence).findCashflowGlobalLedgerSource("tenant-amended", "project-amended");
         verify(dashboardPersistence).findCashflowOpeningBalance(
@@ -1870,8 +2214,14 @@ class WeeklyExpenseControllerTest {
             "2026-07-09", "2026-07-10", false, null, null, null,
             null, null, null, null, null, null, null, "audit-drift"
         );
-        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-drift"), eq("2026-06")))
-            .thenReturn(first, drifted, first, drifted);
+        when(dashboardPersistence.findCashflowCumulativeCloseHead("tenant-drift", "project-drift"))
+            .thenReturn(closedHead("2026-06"));
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-drift", "project-drift", "2026-06"
+        )).thenReturn(
+            monthCloseState(first), monthCloseState(drifted),
+            monthCloseState(first), monthCloseState(drifted)
+        );
         when(dashboardPersistence.findCashflowGlobalLedgerSource("tenant-drift", "project-drift"))
             .thenReturn(new CashflowLedgerSource(
                 List.of(), List.of(), targetRevision
@@ -1888,7 +2238,9 @@ class WeeklyExpenseControllerTest {
             )
         ));
 
-        WeeklyExpenseController controller = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false);
+        WeeklyExpenseController controller = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        );
         assertThatThrownBy(() -> controller.readCashflowMonthDashboardSource(
             "project-drift",
             "2026-06",
@@ -1897,8 +2249,8 @@ class WeeklyExpenseControllerTest {
             "viewer",
             "viewer@example.com"
         )).isInstanceOf(WeeklyExpenseConflictException.class);
-        verify(dashboardCommandService, times(4)).readCashflowMonthClose(
-            any(), eq("project-drift"), eq("2026-06")
+        verify(dashboardPersistence, times(4)).findCashflowMonthClose(
+            "tenant-drift", "project-drift", "2026-06"
         );
     }
 
@@ -1907,8 +2259,12 @@ class WeeklyExpenseControllerTest {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
         stubProjectionActualSummary(dashboardCommandService, "project-legacy-frozen");
-        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-legacy-frozen"), eq("2026-06")))
-            .thenReturn(new CashflowMonthCloseResponse(
+        when(dashboardPersistence.findCashflowCumulativeCloseHead(
+            "tenant-frozen", "project-legacy-frozen"
+        )).thenReturn(closedHead("2026-06"));
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-frozen", "project-legacy-frozen", "2026-06"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
                 true, "cashflowMonth.read", "project-legacy-frozen", "2026-06", "CLOSED",
                 1, 0, 0,
                 0, 0, null, null, null, null, null, false,
@@ -1919,9 +2275,11 @@ class WeeklyExpenseControllerTest {
                 "2026-07-20", "2026-07-10", true,
                 "2026-07-10T00:00:00Z", "finance-1", "재무",
                 null, null, null, null, null, null, null, "audit-legacy"
-            ));
+            )));
 
-        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(dashboardCommandService, new CashflowReadService(dashboardPersistence), false).readCashflowMonthDashboardSource(
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        ).readCashflowMonthDashboardSource(
             "project-legacy-frozen",
             "2026-06",
             "tenant-frozen",
@@ -2038,7 +2396,8 @@ class WeeklyExpenseControllerTest {
                     .header("x-edit-finalize", "true")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
-                .andExpect(status().isGone());
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("cashflow_month_close_backend_unavailable"));
         }
 
     }
@@ -2066,7 +2425,30 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void cashflowMonthReopenDecisionRejectsInvalidDecisionAndNonApproverRoles() throws Exception {
+    void cashflowMonthReopenRequestCallsTheCanonicalCommandService() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "month-reopen-request-valid-001",
+              "yearMonth": "2026-06",
+              "expectedRevision": 1,
+              "reason": "증빙 정정 필요"
+            }
+            """;
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close/month-close/reopen-request"),
+                "tenant-month-close",
+                "pm-month-close",
+                "pm"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("cashflow_data_project_backend_unavailable"));
+    }
+
+    @Test
+    void cashflowMonthReopenDecisionDelegatesRoleAuthorityToTheCanonicalPermissionGate() throws Exception {
         String invalidDecision = """
             {
               "idempotencyKey": "month-reopen-decision-invalid-001",
@@ -2095,6 +2477,17 @@ class WeeklyExpenseControllerTest {
               "reason": "증빙 확인 완료"
             }
             """;
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close/month-close/reopen-decision"),
+                "tenant-month-close",
+                "finance-month-close",
+                "finance"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validDecision))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("cashflow_data_project_backend_unavailable"));
+
         for (String role : List.of("pm", "viewer", "auditor")) {
             mockMvc.perform(asActor(
                     post("/api/v1/cashflow/project-month-close/month-close/reopen-decision"),
@@ -2104,8 +2497,167 @@ class WeeklyExpenseControllerTest {
                 )
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(validDecision))
-                .andExpect(status().isGone());
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("cashflow_data_project_backend_unavailable"));
         }
+    }
+
+    @Test
+    void cashflowMonthReopenDecisionDoesNotReapplyAGenericRoleListAfterTheCanonicalGate() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "month-reopen-decision-custom-role-001",
+              "yearMonth": "2026-06",
+              "expectedRevision": 2,
+              "decision": "APPROVE",
+              "reason": "조직장 확인 완료"
+            }
+            """;
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close/month-close/reopen-decision"),
+                "tenant-month-close",
+                "organization-head-month-close",
+                "viewer"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("cashflow_data_project_backend_unavailable"));
+    }
+
+    @Test
+    void cashflowMonthReopenConflictsExposeAStableOperationCodeAndKoreanActionGuide() {
+        ResponseEntity<Map<String, String>> response = controller.cashflowMonthReopenConflict(
+            new CashflowMonthReopenPolicy.Violation(
+                CashflowMonthReopenPolicy.ViolationReason.REVISION_CHANGED
+            )
+        );
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody()).containsEntry(
+            "code",
+            "cashflow_month_reopen_revision_changed"
+        );
+        assertThat(response.getBody().get("message"))
+            .contains("최신 상태")
+            .doesNotContain("revision");
+    }
+
+    @Test
+    void cashflowMonthReopenDecisionAuthorityRejectsWithAStableForbiddenGuide() {
+        ResponseEntity<Map<String, String>> response = controller.cashflowMonthReopenConflict(
+            new CashflowMonthReopenPolicy.Violation(
+                CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN
+            )
+        );
+
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+        assertThat(response.getBody())
+            .containsEntry("code", "cashflow_month_reopen_decision_forbidden")
+            .hasEntrySatisfying("message", message -> assertThat(message)
+                .asString()
+                .contains("활성 조직장", "담당 조직장을 확인"));
+    }
+
+    @Test
+    void cashflowMonthReopenAuthorityReadUsesTheCanonicalDomainPolicy() throws Exception {
+        doAnswer(invocation -> {
+            CashflowMonthReopenPort.Actor actor = invocation.getArgument(0);
+            String projectId = invocation.getArgument(1);
+            boolean runtimeAdmin = actor.id().equals("admin-month-close");
+            return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
+                actor.tenantId(), actor.id(), projectId, true, actor.tenantId(), projectId,
+                actor.id(), "ACTIVE", runtimeAdmin ? "admin" : "viewer",
+                runtimeAdmin ? "another-head" : actor.id()
+            );
+        }).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
+
+        for (String actorId : List.of("organization-head-month-close", "admin-month-close")) {
+            mockMvc.perform(asActor(
+                    get("/api/v1/cashflow/project-month-close/month-close/reopen-authority"),
+                    "tenant-month-close",
+                    actorId,
+                    "viewer"
+                ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true))
+                .andExpect(jsonPath("$.commandName").value("cashflowMonth.readReopenAuthority"))
+                .andExpect(jsonPath("$.projectId").value("project-month-close"))
+                .andExpect(jsonPath("$.availability").value("ALLOWED"))
+                .andExpect(jsonPath("$.canDecideReopen").value(true));
+        }
+    }
+
+    @Test
+    void cashflowMonthReopenAuthorityReadReturnsStableForbiddenForEveryDomainRejection() throws Exception {
+        List<CashflowMonthReopenPolicy.DecisionAuthorityFacts> denied = List.of(
+            new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
+                "tenant-month-close", "head-month-close", "project-month-close",
+                true, "tenant-month-close", "project-month-close",
+                "head-month-close", "INACTIVE", "viewer", "head-month-close"
+            ),
+            new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
+                "tenant-month-close", "head-month-close", "project-month-close",
+                true, "tenant-month-close", "project-month-close",
+                "head-month-close", "ACTIVE", "viewer", "another-head"
+            ),
+            new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
+                "tenant-month-close", "head-month-close", "project-month-close",
+                true, "tenant-month-close", "another-project",
+                "head-month-close", "ACTIVE", "viewer", "head-month-close"
+            )
+        );
+
+        for (CashflowMonthReopenPolicy.DecisionAuthorityFacts facts : denied) {
+            doReturn(facts).when(weeklyExpensePersistence)
+                .findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
+
+            mockMvc.perform(asActor(
+                    get("/api/v1/cashflow/project-month-close/month-close/reopen-authority"),
+                    "tenant-month-close",
+                    "head-month-close",
+                    "viewer"
+                ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availability").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.canDecideReopen").value(false))
+                .andExpect(jsonPath("$.guide").value(org.hamcrest.Matchers.containsString("활성 조직장")));
+        }
+    }
+
+    @Test
+    void cashflowMonthReopenAuthorityReadDegradesToUnavailableWithoutLeakingStorageErrors() throws Exception {
+        doThrow(new CashflowMonthReopenPort.DecisionAuthorityUnavailable(
+            new IllegalStateException("Firestore socket credentials raw detail")
+        )).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
+
+        mockMvc.perform(asActor(
+                get("/api/v1/cashflow/project-month-close/month-close/reopen-authority"),
+                "tenant-month-close",
+                "head-month-close",
+                "viewer"
+            ))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.availability").value("UNAVAILABLE"))
+            .andExpect(jsonPath("$.canDecideReopen").value(false))
+            .andExpect(jsonPath("$.guide").value(org.hamcrest.Matchers.containsString("잠시 후")))
+            .andExpect(jsonPath("$.guide").value(org.hamcrest.Matchers.not(
+                org.hamcrest.Matchers.containsString("Firestore")
+            )));
+    }
+
+    @Test
+    void cashflowMonthReopenMutationAuthorityUnavailableHasAStableKoreanGuide() {
+        ResponseEntity<Map<String, Object>> response = controller.cashflowMonthReopenAuthorityUnavailable();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        assertThat(response.getBody())
+            .containsEntry("code", "cashflow_month_reopen_authority_unavailable")
+            .hasEntrySatisfying("message", message -> assertThat(message)
+                .asString()
+                .contains("잠시 후")
+                .doesNotContain("Firestore", "transaction"));
     }
 
     @Test
@@ -2843,5 +3395,44 @@ class WeeklyExpenseControllerTest {
                 java.math.BigDecimal.ZERO, true
             )
         )));
+    }
+
+    private static WeeklyExpenseController testController(
+        WeeklyExpenseCommandService commandService,
+        CashflowReadService readService,
+        boolean legacyWeekCloseEnabled
+    ) {
+        return new WeeklyExpenseController(
+            commandService,
+            readService,
+            new CashflowMonthDashboardQueryService(
+                readService,
+                new CashflowDashboardSectionQueryService()
+            ),
+            legacyWeekCloseEnabled
+        );
+    }
+
+    private static CashflowMonthCloseState monthCloseState(CashflowMonthCloseResponse response) {
+        return new CashflowMonthCloseState(
+            response.projectId(), response.yearMonth(), response.status(), response.revision(),
+            response.reopenCount(), response.projectWarningCount(), response.amendmentCount(),
+            response.postDeadlineAmendmentWarningCount(), response.lastAmendmentAt(),
+            response.lastAmendmentByUid(), response.lastAmendmentByName(), response.lastAmendmentReason(),
+            response.lastAmendmentDeadline(), response.lastAmendmentPostDeadline(),
+            response.lastAmendmentEvidence(), response.snapshotHash(), response.previousSnapshotHash(),
+            response.snapshot(), response.previousSnapshot(), response.closeEligible(),
+            response.evaluatedBusinessDate(), response.closeDeadline(), response.late(),
+            response.closedAt(), response.closedByUid(), response.closedByName(), response.reopenReason(),
+            response.reopenRequestedAt(), response.reopenRequestedByUid(), response.reopenDecision(),
+            response.reopenDecisionReason(), response.reopenDecidedAt(), response.reopenDecidedByUid()
+        );
+    }
+
+    private static CashflowCumulativeCloseHead closedHead(String closedThrough) {
+        return new CashflowCumulativeCloseHead(
+            "CLOSED", "2023-01", java.time.YearMonth.parse(closedThrough).plusMonths(1).toString(),
+            closedThrough, "sha256:" + "f".repeat(64), 1
+        );
     }
 }

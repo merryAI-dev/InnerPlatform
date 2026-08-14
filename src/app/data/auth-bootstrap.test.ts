@@ -2,17 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { isBootstrapAdminEmail, parseBootstrapAdminEmails } from './auth-bootstrap';
 
 describe('auth bootstrap admins', () => {
-  it('includes default bootstrap admins even when env is empty', () => {
+  it('keeps only the recovery owner as a default bootstrap admin', () => {
     const emails = parseBootstrapAdminEmails({});
-    expect(emails).toContain('admin@mysc.co.kr');
-    expect(emails).toContain('ai@mysc.co.kr');
-    expect(emails).toContain('ylee@mysc.co.kr');
-    expect(emails).toContain('jyoo@mysc.co.kr');
-    expect(emails).toContain('jslee@mysc.co.kr');
-    expect(emails).toContain('jhsong@mysc.co.kr');
-    expect(emails).toContain('jybaek@mysc.co.kr');
-    expect(emails).toContain('fin@mysc.co.kr');
-    expect(emails).toContain('hwkim@mysc.co.kr');
+    expect(emails).toEqual(['mwbyun1220@mysc.co.kr']);
   });
 
   it('merges and normalizes env bootstrap admin emails', () => {
@@ -26,7 +18,8 @@ describe('auth bootstrap admins', () => {
   });
 
   it('checks bootstrap admin emails case-insensitively', () => {
-    expect(isBootstrapAdminEmail('AI@MYSC.CO.KR', {})).toBe(true);
+    expect(isBootstrapAdminEmail('MWBYUN1220@MYSC.CO.KR', {})).toBe(true);
+    expect(isBootstrapAdminEmail('AI@MYSC.CO.KR', {})).toBe(false);
     expect(isBootstrapAdminEmail('nobody@mysc.co.kr', {})).toBe(false);
   });
 });

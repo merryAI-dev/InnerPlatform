@@ -2,12 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { resolveEffectiveAuthRole } from './auth-role-resolution';
 
 describe('resolveEffectiveAuthRole', () => {
-  it('keeps an explicit member role ahead of bootstrap admin and claims', () => {
+  it('keeps an explicit member role ahead of claims', () => {
     expect(resolveEffectiveAuthRole({
       memberRole: 'pm',
       claimRole: 'admin',
-      directoryRole: 'finance',
-      bootstrapAdmin: true,
     })).toBe('pm');
   });
 
@@ -15,17 +13,13 @@ describe('resolveEffectiveAuthRole', () => {
     expect(resolveEffectiveAuthRole({
       memberRole: '',
       claimRole: 'finance',
-      directoryRole: 'pm',
-      bootstrapAdmin: false,
     })).toBe('finance');
   });
 
-  it('uses bootstrap admin only as a fallback for missing member and claim roles', () => {
+  it('does not infer a privileged role when member and claim roles are missing', () => {
     expect(resolveEffectiveAuthRole({
       memberRole: '',
       claimRole: '',
-      directoryRole: 'pm',
-      bootstrapAdmin: true,
-    })).toBe('admin');
+    })).toBe('pm');
   });
 });

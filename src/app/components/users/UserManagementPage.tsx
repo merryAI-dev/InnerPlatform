@@ -18,6 +18,7 @@ import type { UserRole } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import {
   deepSyncAuthGovernanceUserViaBff,
+  deepSyncAuthGovernanceUsersViaBff,
   fetchAuthGovernanceUsersViaBff,
   type AuthGovernanceUserRow,
   type AuthGovernanceSummary,
@@ -177,8 +178,8 @@ export function UserManagementPage() {
         if (prev && response.items.some((row) => row.identityKey === prev)) return prev;
         return response.items[0]?.identityKey || '';
       });
-    } catch (err: any) {
-      setError(err?.message || 'Auth governance 목록을 불러오지 못했습니다.');
+    } catch {
+      setError('권한 목록을 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.');
     } finally {
       setLoading(false);
     }
@@ -217,17 +218,21 @@ export function UserManagementPage() {
     const role = draftRoles[row.identityKey] || getRecommendedGovernanceRole(row);
     setSyncingIdentityKey(row.identityKey);
     try {
-      await deepSyncAuthGovernanceUserViaBff({
+      const result = await deepSyncAuthGovernanceUserViaBff({
         tenantId: orgId,
         actor: authUser,
         identityKey: row.identityKey,
         role,
         reason: 'admin auth governance dashboard deep sync',
       });
-      toast.success(`${row.email} 권한 정렬을 반영했습니다.`);
+      if (result.claimsSyncStatus === 'PENDING') {
+        toast.warning(`${row.email} 권한 원본은 저장했지만 로그인 권한 동기화가 대기 중입니다. 잠시 후 다시 확인해 주세요.`);
+      } else {
+        toast.success(`${row.email} 권한 정렬을 반영했습니다.`);
+      }
       await loadGovernance();
-    } catch (err: any) {
-      toast.error(err?.message || '권한 정렬을 반영하지 못했습니다.');
+    } catch {
+      toast.error('권한 정렬을 반영하지 못했습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.');
     } finally {
       setSyncingIdentityKey('');
     }
@@ -243,19 +248,26 @@ export function UserManagementPage() {
 
     setBulkSyncing(true);
     try {
-      for (const row of targets) {
-        await deepSyncAuthGovernanceUserViaBff({
-          tenantId: orgId,
-          actor: authUser,
+      const result = await deepSyncAuthGovernanceUsersViaBff({
+        tenantId: orgId,
+        actor: authUser,
+        items: targets.map((row) => ({
           identityKey: row.identityKey,
           role: draftRoles[row.identityKey] || getRecommendedGovernanceRole(row),
-          reason: 'admin auth governance dashboard bulk deep sync',
-        });
+        })),
+        reason: 'admin auth governance dashboard bulk deep sync',
+      });
+      if (result.summary.failed > 0) {
+        const firstFailure = result.outcomes.find((outcome) => outcome.status === 'FAILED');
+        toast.warning(`${result.summary.succeeded}건을 반영했고 ${result.summary.failed}건은 반영하지 못했습니다. ${firstFailure?.message || '목록을 새로고침한 뒤 다시 시도해 주세요.'}`);
+      } else if (result.summary.pendingClaimsSync > 0) {
+        toast.warning(`${result.summary.succeeded}건의 권한 원본을 반영했고, ${result.summary.pendingClaimsSync}건은 로그인 권한 동기화가 대기 중입니다. 잠시 후 다시 확인해 주세요.`);
+      } else {
+        toast.success(`${result.summary.succeeded}건의 권한 정렬을 반영했습니다.`);
       }
-      toast.success(`${targets.length}건의 권한 정렬을 반영했습니다.`);
       await loadGovernance();
-    } catch (err: any) {
-      toast.error(err?.message || '일괄 정렬 중 오류가 발생했습니다.');
+    } catch {
+      toast.error('일괄 정렬 요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       setBulkSyncing(false);
     }

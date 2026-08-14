@@ -72,7 +72,9 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND, Set.of("admin", "finance", "pm", "viewer", "tenant_admin")),
         Map.entry(WeeklyExpenseCommandService.REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND, Set.of("admin", "finance", "pm", "viewer", "tenant_admin")),
         Map.entry(WeeklyExpenseCommandService.REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("admin", "finance", "pm", "viewer", "tenant_admin")),
-        Map.entry(WeeklyExpenseCommandService.DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("admin", "finance")),
+        Map.entry(WeeklyExpenseCommandService.DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of(
+            "admin", "finance", "pm", "viewer", "tenant_admin", "auditor", "support", "security"
+        )),
         Map.entry(WeeklyExpenseCommandService.CLOSE_WEEK_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND, Set.of("admin", "finance"))
     );

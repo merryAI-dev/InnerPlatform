@@ -425,7 +425,22 @@ export interface AuthGovernanceDeepSyncResult {
   role: string;
   mirroredLegacyCount: number;
   claimsUpdated: boolean;
+  claimsSyncStatus: 'SYNCED' | 'PENDING' | 'NOT_APPLICABLE';
   updatedAt: string;
+}
+
+export type AuthGovernanceBulkDeepSyncOutcome =
+  | { identityKey: string; status: 'SUCCEEDED'; result: AuthGovernanceDeepSyncResult }
+  | { identityKey: string; status: 'FAILED'; errorCode: string; message: string };
+
+export interface AuthGovernanceBulkDeepSyncResult {
+  outcomes: AuthGovernanceBulkDeepSyncOutcome[];
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    pendingClaimsSync: number;
+  };
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -1065,22 +1080,30 @@ export interface CashflowMonthCloseDashboard {
   confirmations: CashflowMonthCloseConfirmation[];
   managementChecks: CashflowManagementCheck[];
   managementConfirmations: CashflowManagementConfirmation[];
-  openingBalances?: CashflowOpeningBalances;
+  openingBalances?: CashflowOpeningBalances | null;
   snapshotCompatibility: {
-    status: 'LIVE_CURRENT' | 'LIVE_AMENDED' | 'FROZEN_COMPLETE' | 'LEGACY_EVIDENCE_ONLY';
+    status: 'LIVE_CURRENT' | 'LIVE_AMENDED' | 'FROZEN_COMPLETE' | 'LEGACY_EVIDENCE_ONLY' | 'AUTHORITY_UNAVAILABLE';
     missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
   };
   // 주간 준수 이력을 못 읽으면 서버가 null 로 내리고 sectionErrors 로 알린다.
   deadlineSummary: CashflowDeadlineSummary | null;
-  projectionActualSummary: CashflowProjectionActualSummary;
+  projectionActualSummary: CashflowProjectionActualSummary | null;
+  cumulativeCloseAuthority: {
+    availability: 'AVAILABLE' | 'MISSING' | 'INVALID' | 'UNAVAILABLE';
+    status: 'CLOSED' | 'REOPEN_REQUESTED' | null;
+    fromMonth: string | null;
+    closedThrough: string | null;
+    rootHash: string | null;
+    headRevision: number | null;
+  };
   cumulativeCloseScope: CashflowCumulativeCloseScope | null;
   monthCloseStatuses?: Array<{
     yearMonth: string;
     status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | string;
     closeDeadline?: string | null;
     closeOverdue?: boolean;
-    sheetCalculationChecks?: CashflowMonthCloseDashboard['sheetCalculationChecks'];
-  }>;
+    sheetCalculationChecks?: CashflowMonthCloseDashboard['sheetCalculationChecks'] | null;
+  }> | null;
   postCloseAdjustment: {
     reason: string;
     changedCount: number;
@@ -1095,36 +1118,36 @@ export interface CashflowMonthCloseDashboard {
   draftRevision: number | null;
   totals: {
     projection: {
-      totalIn: number;
-      totalOut: number;
-      balance: number;
+      totalIn: number | null;
+      totalOut: number | null;
+      balance: number | null;
       rowTotals: Record<string, number>;
       weeks: CashflowModeReadModel['weeks'];
     };
     actual: {
-      totalIn: number;
-      totalOut: number;
-      balance: number;
+      totalIn: number | null;
+      totalOut: number | null;
+      balance: number | null;
       rowTotals: Record<string, number>;
       weeks: CashflowModeReadModel['weeks'];
     };
     difference: {
-      totalIn: number;
-      totalOut: number;
-      balance: number;
+      totalIn: number | null;
+      totalOut: number | null;
+      balance: number | null;
     };
   };
   comparison: CashflowComparisonMonth | null;
   summary: {
-    projectionProgressPercent: number;
-    projectionContractAmount?: number;
-    projectionTotalIn?: number;
-    projectionSalesAndVatTotal?: number;
-    contractDifference?: number;
-    contractCoveragePercent?: number;
-    actualProgressPercent: number;
-    confirmationProgressPercent: number;
-    settlementProgressPercent: number;
+    projectionProgressPercent: number | null;
+    projectionContractAmount?: number | null;
+    projectionTotalIn?: number | null;
+    projectionSalesAndVatTotal?: number | null;
+    contractDifference?: number | null;
+    contractCoveragePercent?: number | null;
+    actualProgressPercent: number | null;
+    confirmationProgressPercent: number | null;
+    settlementProgressPercent: number | null;
     settlementDifferenceAmount?: number;
     settlementMatches?: boolean;
     settlementCompletedWeekCount: number;
@@ -1265,6 +1288,8 @@ export interface CashflowMonthCloseRequest {
   yearMonth: string;
   throughMonth?: string;
   status: CashflowMonthCloseRequestStatus;
+  canDecideReopen: boolean;
+  reopenAuthorityAvailability?: 'ALLOWED' | 'FORBIDDEN' | 'UNAVAILABLE';
   revision: number;
   fromMonth?: string;
   manifestHash?: string;
@@ -1286,6 +1311,17 @@ export interface CashflowMonthCloseRequest {
   decisionReason: string | null;
   withdrawnAt?: string | null;
   withdrawReason?: string | null;
+  reopenRequest?: {
+    reason: string | null;
+    requestedByUid: string | null;
+    requestedAt: string | null;
+  } | null;
+  reopenDecision?: {
+    decision: CashflowMonthReopenDecision | null;
+    reason: string | null;
+    decidedByUid: string | null;
+    decidedAt: string | null;
+  } | null;
   reviewWarnings: Array<{ code: string; message: string; details?: unknown }>;
   monthSnapshot: CashflowMonthCloseMonthSnapshot | null;
 }
@@ -1360,6 +1396,97 @@ export interface DecideCashflowMonthReopenPayload {
   reason: string;
 }
 
+export interface CashflowMonthCloseActionDecision {
+  enabled: boolean;
+  guide: string;
+}
+
+export interface CashflowMonthCloseActions {
+  completeWeekly: CashflowMonthCloseActionDecision;
+  changeExecutiveApprover: CashflowMonthCloseActionDecision;
+  requestMonthClose: CashflowMonthCloseActionDecision & { label: string };
+  withdrawMonthClose: CashflowMonthCloseActionDecision;
+  requestMonthReopen: CashflowMonthCloseActionDecision;
+  cumulativeScope: { ready: boolean; guide: string };
+}
+
+export interface CashflowOperationsRate {
+  state: 'AVAILABLE' | 'ZERO_CONTRACT' | 'UNAVAILABLE';
+  percent: number | null;
+  barPercent: number;
+  statusLabel: string;
+}
+
+export interface CashflowOperationsSummary {
+  status: {
+    kind: 'ready' | 'review' | 'blocked' | 'unavailable';
+    tone: 'success' | 'warning' | 'danger';
+    count: number;
+    label: string;
+    detail: string;
+  };
+  rates: {
+    projection: CashflowOperationsRate;
+    actual: CashflowOperationsRate;
+  };
+}
+
+export interface CashflowMonthClosePresentationYear {
+  year: number;
+  label: string;
+}
+
+export interface CashflowMonthClosePresentationWeek {
+  yearMonth: string;
+  weekNo: number;
+  weekStart: string;
+  weekEnd: string;
+  label: string;
+  isCurrent: boolean;
+  monthStatus: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | null;
+  monthStatusLabel: string;
+  weeklyStatus: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING' | null;
+  weeklyStatusLabel: string;
+  statusLabel: string;
+  surfaceTone: 'unavailable' | 'closed' | 'danger' | 'warning' | 'success' | 'current' | 'default';
+}
+
+export interface CashflowMonthClosePresentation {
+  asOfDate: string;
+  annualBefore: CashflowMonthClosePresentationYear[];
+  annualAfter: CashflowMonthClosePresentationYear[];
+  weeks: CashflowMonthClosePresentationWeek[];
+  months: Array<{
+    yearMonth: string;
+    label: string;
+    columnCount: number;
+    status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | null;
+    locked: boolean;
+    overdue: boolean;
+    badgeLabel: string;
+    tone: 'unavailable' | 'closed' | 'danger' | 'warning' | 'default';
+  }>;
+  comparison: {
+    annualBefore: CashflowMonthClosePresentationYear[];
+    annualAfter: CashflowMonthClosePresentationYear[];
+    weeks: CashflowMonthClosePresentationWeek[];
+    cells: Array<{
+      yearMonth: string;
+      weekNo: number;
+      weekLabel: string;
+      weekRange: string;
+      difference: number | null;
+    }>;
+    changed: boolean;
+    periodLabel: string;
+  };
+  monthClose: {
+    statusLabel: string;
+    tone: 'danger' | 'warning' | 'success' | 'neutral';
+  };
+  evidenceSource: 'DASHBOARD';
+}
+
 export interface CashflowMonthCloseResult {
   ok: boolean;
   commandName: string;
@@ -1382,6 +1509,7 @@ export interface CashflowMonthCloseResult {
   snapshot: Record<string, unknown>;
   previousSnapshot: Record<string, unknown>;
   late: boolean;
+  closeEligible?: boolean;
   closedAt: string | null;
   closedByUid: string | null;
   closedByName: string | null;
@@ -1393,10 +1521,14 @@ export interface CashflowMonthCloseResult {
   reopenDecidedAt: string | null;
   reopenDecidedByUid: string | null;
   auditId: string | null;
+  actions: CashflowMonthCloseActions;
+  operationsSummary: CashflowOperationsSummary;
+  presentation: CashflowMonthClosePresentation;
   dashboard?: CashflowMonthCloseDashboard;
+  blockers?: Array<{ code: string; message: string; details?: unknown }>;
   // 본체(dashboard-source)는 성공했지만 부가 조회가 실패해 일부 섹션이 비었을 때.
   // 화면은 그대로 그리되 이 목록으로 사용자에게 알리고 재시도 경로를 준다.
-  sectionErrors?: Array<{ section: 'sheetPublication' | 'deadlineSummary' | string; code: string }>;
+  sectionErrors?: Array<{ section: 'sheetPublication' | 'deadlineSummary' | string; code: string; label: string }>;
 }
 
 export interface CashflowWeeklyUpdateCompletionResult {
@@ -1476,6 +1608,12 @@ export interface CashflowProjectionActualSummary {
   differenceAmount: number;
   settlementDifferenceAmount: number;
   settlementMatches: boolean;
+  display?: {
+    periodLabel: string;
+    statusLabel: string;
+    statusTone: 'success' | 'danger';
+    differenceLabel: string;
+  };
   periods: Array<{
     period: CashflowSettlementPeriod;
     differenceAmount: number | null;
@@ -2306,6 +2444,26 @@ export async function deepSyncAuthGovernanceUserViaBff(params: {
         ...(params.reason ? { reason: params.reason } : {}),
       },
       timeoutMs: 10000,
+    },
+  );
+  return response.data;
+}
+
+export async function deepSyncAuthGovernanceUsersViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  items: Array<{ identityKey: string; role: string }>;
+  reason: string;
+  client?: PlatformApiClientLike;
+}): Promise<AuthGovernanceBulkDeepSyncResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<AuthGovernanceBulkDeepSyncResult>(
+    '/api/v1/admin/auth-governance/users/deep-sync-bulk',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { items: params.items, reason: params.reason },
+      timeoutMs: 120000,
     },
   );
   return response.data;

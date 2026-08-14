@@ -67,6 +67,22 @@ const baseSnapshot = {
 const payload = {
   weeks: [{ yearMonth: '2026-07', weekNo: 1, projection: { SALES_IN: 1200 } }],
 };
+const cumulativeRootHash = `sha256:${'a'.repeat(64)}`;
+
+function cumulativeCloseHead(overrides = {}) {
+  return {
+    contractVersion: 'cashflow-cumulative-close-v2',
+    tenantId: 'tenant-a',
+    projectId: 'project-a',
+    status: 'CLOSED',
+    fromMonth: '2023-01',
+    closedThrough: '2026-07',
+    settlementMonth: '2026-08',
+    rootHash: cumulativeRootHash,
+    revision: 1,
+    ...overrides,
+  };
+}
 
 function harness() {
   let nowMs = Date.parse('2026-07-12T00:00:00.000Z');
@@ -85,6 +101,7 @@ function harness() {
       uid: 'actor-viewer', name: 'Viewer', role: 'viewer', status: 'ACTIVE', projectIds: ['project-a'],
     },
     'orgs/tenant-a/projects/project-a': { id: 'project-a', name: 'Project A', version: 3 },
+    'orgs/tenant-a/cashflow_sheet_mirrors/project-a': { projectId: 'project-a', weeklyYear: 2026 },
     'orgs/tenant-a/cashflow_weeks/week-a': {
       projectId: 'project-a', yearMonth: '2026-07', weekNo: 1, projection: { SALES_IN: 1000 },
     },
@@ -243,33 +260,23 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 409, code: 'draft_version_conflict' });
   });
 
-  it('blocks month-close private drafts from the authoritative request even when monthly_closes is absent', async () => {
-    const closeRequest = {
-      requestId: 'project-a-2026-07', tenantId: 'tenant-a', projectId: 'project-a',
-      yearMonth: '2026-07', status: 'PENDING', revision: 1,
-    };
+  it('blocks month-close private drafts from the cumulative close head', async () => {
+    const closeHead = cumulativeCloseHead();
     const monthClosePayload = { monthClose: { yearMonth: '2026-07' } };
 
-    for (const status of [
-      'PENDING', 'APPROVED', 'REOPEN_REQUESTED',
-    ]) {
-      const openHarness = harness();
-      openHarness.db.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-07', {
-        ...closeRequest,
-        status,
-      });
-      await expect(openHarness.service.open({
-        ...openHarness.base, idempotencyKey: `open-${status}`, baseSnapshot,
-        payload: monthClosePayload,
-      })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
-    }
+    const openHarness = harness();
+    openHarness.db.documents.set('orgs/tenant-a/cashflow_cumulative_close_heads/project-a', closeHead);
+    await expect(openHarness.service.open({
+      ...openHarness.base, idempotencyKey: 'open-closed-range', baseSnapshot,
+      payload: monthClosePayload,
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
 
     const updateHarness = harness();
     await updateHarness.service.open({
       ...updateHarness.base, idempotencyKey: 'open-month-before-close', baseSnapshot,
       payload: monthClosePayload,
     });
-    updateHarness.db.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-07', closeRequest);
+    updateHarness.db.documents.set('orgs/tenant-a/cashflow_cumulative_close_heads/project-a', closeHead);
     await expect(updateHarness.service.update({
       ...updateHarness.base, idempotencyKey: 'update-closed-month', expectedDraftRevision: 0,
       payload: {},
@@ -285,22 +292,185 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
   });
 
-  it('uses the request state even when the old monthly close says the opposite', async () => {
-    const closedLegacyOnly = harness();
-    closedLegacyOnly.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
-      projectId: 'project-a', yearMonth: '2026-07', status: 'CLOSED',
+  it('uses closedThrough instead of the settlement month or approval request state', async () => {
+    const laterMonth = harness();
+    laterMonth.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(),
+    );
+    laterMonth.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-08', {
+      tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-08', status: 'CLOSED',
     });
-    await expect(openDraft(closedLegacyOnly, 'legacy-closed-only')).resolves.toMatchObject({ status: 200 });
+    laterMonth.db.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
+      requestId: 'project-a-2026-08', tenantId: 'tenant-a', projectId: 'project-a',
+      yearMonth: '2026-08', status: 'APPROVED', revision: 1,
+    });
+    await expect(laterMonth.service.open({
+      ...laterMonth.base,
+      idempotencyKey: 'later-settlement-month',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-08' } },
+    })).resolves.toMatchObject({ status: 200 });
 
-    const reopened = harness();
-    reopened.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
-      projectId: 'project-a', yearMonth: '2026-07', status: 'CLOSED',
+    const closedRange = harness();
+    closedRange.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(),
+    );
+    closedRange.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+      tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN',
     });
-    reopened.db.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-07', {
+    closedRange.db.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-07', {
       requestId: 'project-a-2026-07', tenantId: 'tenant-a', projectId: 'project-a',
-      yearMonth: '2026-07', status: 'REOPENED', revision: 2,
+      yearMonth: '2026-07', status: 'REOPENED', revision: 3,
     });
-    await expect(openDraft(reopened, 'request-reopened')).resolves.toMatchObject({ status: 200 });
+    await expect(closedRange.service.open({
+      ...closedRange.base,
+      idempotencyKey: 'closed-through-wins',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-07' } },
+    }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
+  });
+
+  it('limits cumulative month authority to the canonical head year', async () => {
+    const annualYear = harness();
+    annualYear.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(),
+    );
+
+    await expect(annualYear.service.open({
+      ...annualYear.base,
+      idempotencyKey: 'annual-year-outside-month-authority',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2025-12' } },
+    })).resolves.toMatchObject({ status: 200 });
+
+    const driftedMirror = harness();
+    driftedMirror.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(),
+    );
+    driftedMirror.db.documents.set('orgs/tenant-a/cashflow_sheet_mirrors/project-a', {
+      projectId: 'project-a', weeklyYear: 2027,
+    });
+    await expect(driftedMirror.service.open({
+      ...driftedMirror.base,
+      idempotencyKey: 'drifted-mirror-cannot-reopen-closed-head-month',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-07' } },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
+
+    const missingGrain = harness();
+    missingGrain.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(),
+    );
+    missingGrain.db.documents.delete('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    await expect(missingGrain.service.open({
+      ...missingGrain.base,
+      idempotencyKey: 'missing-weekly-year-authority',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-08' } },
+    })).resolves.toMatchObject({ status: 200 });
+  });
+
+  it.each([
+    ['contractVersion', { contractVersion: 'legacy' }],
+    ['tenantId', { tenantId: 'tenant-b' }],
+    ['projectId', { projectId: 'project-b' }],
+    ['status', { status: 'OPEN' }],
+    ['closedThrough', { closedThrough: '2026-13' }],
+    ['rootHash', { rootHash: 'sha256:broken' }],
+    ['revision', { revision: 0 }],
+  ])('fails closed when cumulative authority %s is invalid', async (_field, override) => {
+    const h = harness();
+    h.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(override),
+    );
+    await expect(h.service.open({
+      ...h.base,
+      idempotencyKey: `invalid-head-${_field}`,
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-08' } },
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'cashflow_month_close_contract_invalid',
+      message: expect.not.stringMatching(/Cashflow|Stored|Firestore|revision/i),
+    });
+  });
+
+  it.each([
+    ['legacy', {}],
+    ['canonical', { contractVersion: 'cashflow-month-close-v1', revision: 0, reopenCount: 0 }],
+  ])('allows a genuinely pristine %s OPEN run without authority', async (_kind, contract) => {
+    const h = harness();
+    h.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+      tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN',
+      ...contract,
+    });
+
+    await expect(h.service.open({
+      ...h.base,
+      idempotencyKey: `pristine-open-${_kind}`,
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-07' } },
+    })).resolves.toMatchObject({ status: 200 });
+  });
+
+  it('keeps a requested reopen head authoritative until the canonical decision', async () => {
+    const h = harness();
+    h.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead({ status: 'REOPEN_REQUESTED', revision: 2 }),
+    );
+    await expect(h.service.open({
+      ...h.base,
+      idempotencyKey: 'reopen-requested-head',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-07' } },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
+  });
+
+  it('requires migration when legacy close history has no cumulative authority head', async () => {
+    const legacy = harness();
+    legacy.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+      tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-07', status: 'CLOSED',
+    });
+    await expect(legacy.service.open({
+      ...legacy.base,
+      idempotencyKey: 'legacy-close-without-head',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-07' } },
+    }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_close_migration_required' });
+  });
+
+  it.each([
+    ['revision', { revision: 1 }],
+    ['reopen', { reopenCount: 1 }],
+    ['snapshot', { snapshot: { version: 1 } }],
+    ['closed', { closedAt: '2026-07-31T15:00:00Z' }],
+    ['amendment', { lastAmendmentEvidence: { sourceRevision: 'sha256:legacy' } }],
+  ])('requires migration when an OPEN run retains %s evidence without authority', async (_kind, evidence) => {
+    const h = harness();
+    h.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+      contractVersion: 'cashflow-month-close-v1',
+      tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN',
+      revision: 0, reopenCount: 0, ...evidence,
+    });
+
+    await expect(h.service.open({
+      ...h.base,
+      idempotencyKey: `historical-open-${_kind}`,
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2026-07' } },
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'cashflow_month_close_migration_required',
+    });
   });
 
   it('rejects writes after the exact cashflow lease expires', async () => {
@@ -401,25 +571,21 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_metadata_version_conflict' });
   });
 
-  it('locks weekly status writes only for canonical pending or approved requests', async () => {
-    const cases = ['PENDING', 'APPROVED', 'REOPEN_REQUESTED'];
+  it('locks weekly status writes only inside the cumulative closedThrough boundary', async () => {
+    const h = harness();
+    h.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead(),
+    );
 
-    for (const status of cases) {
-      const h = harness();
-      h.db.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-07', {
-        requestId: 'project-a-2026-07', tenantId: 'tenant-a', projectId: 'project-a',
-        yearMonth: '2026-07', status, revision: 1,
-      });
-
-      await expect(h.service.applyWeeklySubmissionStatusIntent({
-        ...h.base, idempotencyKey: `weekly-status-${status}`, yearMonth: '2026-07', weekNo: 1,
-        expectedRevision: 0, changes: { projectionUpdated: true },
-      })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
-      expect(h.db.documents.has(
-        'orgs/tenant-a/weekly_submission_status/project-a-2026-07-w1',
-      )).toBe(false);
-      expect(h.auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
-    }
+    await expect(h.service.applyWeeklySubmissionStatusIntent({
+      ...h.base, idempotencyKey: 'weekly-status-closed-through', yearMonth: '2026-07', weekNo: 1,
+      expectedRevision: 0, changes: { projectionUpdated: true },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
+    expect(h.db.documents.has(
+      'orgs/tenant-a/weekly_submission_status/project-a-2026-07-w1',
+    )).toBe(false);
+    expect(h.auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
   });
 
   it('replaces the project evidence-required map with revision fencing and server audit metadata', async () => {

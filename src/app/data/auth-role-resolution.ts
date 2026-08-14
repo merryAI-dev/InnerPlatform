@@ -22,19 +22,12 @@ function normalizeUserRole(role: string | undefined): UserRole | undefined {
 export function resolveEffectiveAuthRole(options: {
   memberRole?: string;
   claimRole?: string;
-  directoryRole?: string;
-  bootstrapAdmin?: boolean;
 }): UserRole {
   const memberRole = normalizeUserRole(options.memberRole);
   if (memberRole) return memberRole;
 
   const claimRole = normalizeUserRole(options.claimRole);
   if (claimRole) return claimRole;
-
-  if (options.bootstrapAdmin) return 'admin';
-
-  const directoryRole = normalizeUserRole(options.directoryRole);
-  if (directoryRole) return directoryRole;
 
   return 'pm';
 }

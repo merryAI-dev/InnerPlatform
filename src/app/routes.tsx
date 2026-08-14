@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from 'react';
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { AdminRouteProviders } from './data/admin-route-providers';
@@ -57,6 +57,7 @@ const CashflowPage = lazyRoute(() => import('./components/cashflow/CashflowPage'
 const CashflowWeeklyPage = lazyRoute(() => import('./components/cashflow/CashflowWeeklyPage'), 'CashflowWeeklyPage');
 const CashflowAnalyticsPage = lazyRoute(() => import('./components/cashflow/CashflowAnalyticsPage'), 'CashflowAnalyticsPage');
 const CashflowExportPage = lazyRoute(() => import('./components/cashflow/CashflowExportPage'), 'CashflowExportPage');
+const CashflowPeriodPolicyPage = lazyRoute(() => import('./components/cashflow/CashflowPeriodPolicyPage'), 'CashflowPeriodPolicyPage');
 const ProjectCashflowSheetPage = lazyRoute(() => import('./components/cashflow/ProjectCashflowSheetPage'), 'ProjectCashflowSheetPage');
 const EvidenceQueuePage = lazyRoute(() => import('./components/evidence/EvidenceQueuePage'), 'EvidenceQueuePage');
 const AuditLogPage = lazyRoute(() => import('./components/audit/AuditLogPage'), 'AuditLogPage');
@@ -157,6 +158,8 @@ export const router = createBrowserRouter([
       { path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> },
       { path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> },
       { path: 'cashflow/export', element: <S C={CashflowExportPage} /> },
+      { path: 'axr', element: <Navigate to="/axr/cashflow-period-policy" replace /> },
+      { path: 'axr/cashflow-period-policy', element: <S C={CashflowPeriodPolicyPage} /> },
       { path: 'cashflow/projects', element: <S C={CashflowPage} /> },
       { path: 'cashflow/projects/:projectId', element: <S C={ProjectCashflowSheetPage} /> },
       { path: 'evidence', element: <S C={EvidenceQueuePage} /> },

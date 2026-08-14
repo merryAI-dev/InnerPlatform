@@ -80,6 +80,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'change_events',
       'views',
       'members',
+      'persons',
       'cashflow_weeks',
       'outbox_deliveries',
       'idempotency_keys',
@@ -2060,8 +2061,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       uid: 'u-target',
       tenantId,
       role: 'viewer',
+      status: 'ACTIVE',
       email: 'target@example.com',
       updatedAt: new Date().toISOString(),
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-target`).set({
+      personId: 'person-target',
+      uid: 'u-target',
+      name: 'Target User',
     });
 
     const forbidden = await api
@@ -2070,6 +2077,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .send({ role: 'finance', reason: 'test' });
 
     expect(forbidden.status).toBe(403);
+
+    const missingReason = await api
+      .patch('/api/v1/members/u-target/role')
+      .set({ ...defaultHeaders, 'x-actor-role': 'admin', 'idempotency-key': 'idem-role-reason-required' })
+      .send({ role: 'finance' });
+
+    expect(missingReason.status).toBe(400);
+    expect(missingReason.body.error).toBe('role_change_reason_required');
 
     const changed = await api
       .patch('/api/v1/members/u-target/role')
@@ -2092,11 +2107,54 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(roleChangeLog).toBeTruthy();
   });
 
+  it('changes roles only for one exact ACTIVE member/People UID pair', async () => {
+    await db.doc(`orgs/${tenantId}/members/legacy-target`).set({
+      uid: 'canonical-target', tenantId, role: 'pm', status: 'ACTIVE',
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-canonical-target`).set({
+      personId: 'person-canonical-target', uid: 'canonical-target', name: 'Canonical Target',
+    });
+
+    const mismatched = await api
+      .patch('/api/v1/members/legacy-target/role')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-role-exact-uid' })
+      .send({ role: 'finance', reason: 'exact UID guard' });
+    expect(mismatched.status).toBe(409);
+    expect(mismatched.body.error).toBe('member_uid_invalid');
+
+    await db.doc(`orgs/${tenantId}/members/unlinked-target`).set({
+      uid: 'unlinked-target', tenantId, role: 'pm', status: 'ACTIVE',
+    });
+    const unlinked = await api
+      .patch('/api/v1/members/unlinked-target/role')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-role-unlinked-uid' })
+      .send({ role: 'finance', reason: 'People link required' });
+    expect(unlinked.status).toBe(409);
+    expect(unlinked.body.error).toBe('people_uid_unlinked');
+
+    await db.doc(`orgs/${tenantId}/members/ambiguous-target`).set({
+      uid: 'ambiguous-target', tenantId, role: 'pm', status: 'ACTIVE',
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-ambiguous-a`).set({
+      personId: 'person-ambiguous-a', uid: 'ambiguous-target', name: 'Ambiguous A',
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-ambiguous-b`).set({
+      personId: 'person-ambiguous-b', uid: 'ambiguous-target', name: 'Ambiguous B',
+    });
+    const ambiguous = await api
+      .patch('/api/v1/members/ambiguous-target/role')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-role-ambiguous-uid' })
+      .send({ role: 'finance', reason: 'People link must be unique' });
+    expect(ambiguous.status).toBe(409);
+    expect(ambiguous.body.error).toBe('people_uid_ambiguous');
+  });
+
   it('uses member fallback for firebase auth when token role is missing and ignores spoofed header role', async () => {
     await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
       uid: 'u-firebase-roleless',
       tenantId,
       role: 'pm',
+      status: 'ACTIVE',
       email: 'roleless@mysc.co.kr',
       updatedAt: new Date().toISOString(),
     });
@@ -2105,8 +2163,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       uid: 'u-target',
       tenantId,
       role: 'viewer',
+      status: 'ACTIVE',
       email: 'target@example.com',
       updatedAt: new Date().toISOString(),
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-target`).set({
+      personId: 'person-target',
+      uid: 'u-target',
+      name: 'Target User',
     });
 
     const firebaseApi = request(createBffApp({
@@ -2206,14 +2270,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(row).toMatchObject({
       authUid: 'u-jslee',
       effectiveRole: 'pm',
-      driftFlags: expect.arrayContaining(['duplicate_member_docs', 'legacy_role_mismatch', 'bootstrap_admin_not_adopted']),
+      driftFlags: expect.arrayContaining(['duplicate_member_docs', 'legacy_role_mismatch']),
       permissionOverview: {
         isActive: true,
         accessibleProjects: [{ id: 'p-governance', name: '권한 점검 사업' }],
         organizationHeadProjects: [{ id: 'p-governance', name: '권한 점검 사업' }],
         canRequestCashflowClose: true,
         canApproveProjectRegistration: true,
-        canDecideCashflowReopen: false,
+        canDecideCashflowReopen: true,
       },
     });
     expect(response.body.summary.duplicateMemberDocs).toBeGreaterThanOrEqual(1);
@@ -2283,13 +2347,28 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       uid: 'u-admin-1',
       tenantId,
       role: 'admin',
+      status: 'ACTIVE',
       email: 'admin1@example.com',
       updatedAt: new Date().toISOString(),
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-admin-1`).set({
+      personId: 'person-admin-1', uid: 'u-admin-1', name: 'Admin One',
+    });
+    await db.doc(`orgs/${tenantId}/members/inactive-admin`).set({
+      uid: 'inactive-admin', tenantId, role: 'admin', status: 'INACTIVE',
+    });
+    await db.doc(`orgs/${tenantId}/members/invalid-admin-doc`).set({
+      uid: 'different-uid', tenantId, role: 'admin', status: 'ACTIVE',
     });
 
     const denied = await api
       .patch('/api/v1/members/u-admin-1/role')
-      .set({ ...defaultHeaders, 'x-actor-role': 'admin', 'idempotency-key': 'idem-last-admin-demote' })
+      .set({
+        ...defaultHeaders,
+        'x-actor-id': 'u-admin-1',
+        'x-actor-role': 'admin',
+        'idempotency-key': 'idem-last-admin-demote',
+      })
       .send({ role: 'viewer', reason: 'test lockout prevention' });
 
     expect(denied.status).toBe(409);
@@ -2299,13 +2378,22 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       uid: 'u-admin-2',
       tenantId,
       role: 'admin',
+      status: 'ACTIVE',
       email: 'admin2@example.com',
       updatedAt: new Date().toISOString(),
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-admin-2`).set({
+      personId: 'person-admin-2', uid: 'u-admin-2', name: 'Admin Two',
     });
 
     const ok = await api
       .patch('/api/v1/members/u-admin-2/role')
-      .set({ ...defaultHeaders, 'x-actor-role': 'admin', 'idempotency-key': 'idem-second-admin-demote' })
+      .set({
+        ...defaultHeaders,
+        'x-actor-id': 'u-admin-1',
+        'x-actor-role': 'admin',
+        'idempotency-key': 'idem-second-admin-demote',
+      })
       .send({ role: 'viewer', reason: 'leaving one admin' });
 
     expect(ok.status).toBe(200);

@@ -1,7 +1,7 @@
 package dev.merryai.innerplatform.weekly.api;
 
-import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,8 +28,12 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.server.ResponseStatusException;
 import dev.merryai.innerplatform.weekly.domain.CashflowWeekTotals;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
+import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
+import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
+import dev.merryai.innerplatform.weekly.service.query.CashflowMonthDashboardQueryService;
 import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -40,8 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Supplier;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -51,15 +53,19 @@ public class WeeklyExpenseController {
     private static final System.Logger LOGGER = System.getLogger(WeeklyExpenseController.class.getName());
     private final WeeklyExpenseCommandService commandService;
     private final CashflowReadService readService;
+    private final CashflowMonthDashboardQueryService dashboardQueryService;
     private final boolean legacyWeekCloseEnabled;
 
+    @Autowired
     public WeeklyExpenseController(
         WeeklyExpenseCommandService commandService,
         CashflowReadService readService,
+        CashflowMonthDashboardQueryService dashboardQueryService,
         @Value("${weekly.legacy-week-close-enabled:false}") boolean legacyWeekCloseEnabled
     ) {
         this.commandService = commandService;
         this.readService = readService;
+        this.dashboardQueryService = dashboardQueryService;
         this.legacyWeekCloseEnabled = legacyWeekCloseEnabled;
     }
 
@@ -415,6 +421,23 @@ public class WeeklyExpenseController {
         );
     }
 
+    @GetMapping("/cashflow/{projectId}/month-close/reopen-authority")
+    public CashflowMonthReopenAuthorityResponse readCashflowMonthReopenAuthority(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+    ) {
+        TrustedActorContext actor = actorContext(tenantId, actorId, actorRole, actorEmail);
+        return CashflowMonthReopenAuthorityResponse.from(
+            commandService.readCashflowMonthReopenAuthority(
+                new CashflowMonthReopenPort.Actor(actor.tenantId(), actor.id(), actor.name()),
+                projectId
+            )
+        );
+    }
+
     @GetMapping("/cashflow/{projectId}/settlement-statuses")
     public CashflowSettlementStatusesResponse readCashflowSettlementStatuses(
         @PathVariable String projectId,
@@ -467,24 +490,22 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest
     ) {
         TrustedActorContext actor = actorContext(tenantId, actorId, actorRole, actorEmail);
+        commandService.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND,
+            actor,
+            projectId
+        );
         String requestId = httpRequest == null ? "" : httpRequest.getHeader("x-request-id");
         requestId = requestId == null ? "" : requestId.trim();
-        for (int attempt = 0; attempt < 2; attempt += 1) {
-            CashflowMonthDashboardSourceResponse response = readCashflowMonthDashboardSourceAttempt(
-                actor,
-                tenantId,
-                projectId,
-                yearMonth,
-                requestId,
-                attempt + 1
+        CashflowMonthDashboardQueryService.Result result;
+        try {
+            result = dashboardQueryService.read(tenantId, projectId, yearMonth, requestId);
+        } catch (CashflowMonthDashboardQueryService.UnstableRead error) {
+            throw new WeeklyExpenseConflictException(
+                "현금흐름 원장이 조회 중 변경되었습니다. 화면을 새로고침한 뒤 다시 시도해 주세요."
             );
-            if (response != null) {
-                return response;
-            }
         }
-        throw new WeeklyExpenseConflictException(
-            "Cashflow ledger changed while the closed-month evidence was being read. Reload and try again."
-        );
+        return dashboardSourceResponse(result, yearMonth);
     }
 
     public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
@@ -500,186 +521,137 @@ public class WeeklyExpenseController {
         );
     }
 
-    private CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSourceAttempt(
-        TrustedActorContext actor,
-        String tenantId,
-        String projectId,
-        String yearMonth,
-        String requestId,
-        int attempt
-    ) {
-        long dashboardStartedAt = System.nanoTime();
-        CashflowMonthCloseResponse monthClose = dashboardRead(
-            requestId, projectId, attempt, "month_close",
-            () -> commandService.readCashflowMonthClose(actor, projectId, yearMonth)
-        );
-        boolean open = "OPEN".equals(monthClose.status());
-        String amendmentSnapshotHash = String.valueOf(
-            monthClose.lastAmendmentEvidence().getOrDefault("closeSnapshotHash", "")
-        );
-        boolean amendedClosed = "CLOSED".equals(monthClose.status())
-            && monthClose.amendmentCount() > 0
-            && !amendmentSnapshotHash.isBlank()
-            && amendmentSnapshotHash.equals(monthClose.snapshotHash());
-        boolean currentLedgerView = open || amendedClosed;
-        CashflowMonthDashboardSourceResponse.SnapshotCompatibility snapshotCompatibility = amendedClosed
-            ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_AMENDED", List.of())
-            : open
-                ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
-                : frozenSnapshotCompatibility(monthClose);
-        CompletableFuture<Integer> weeklyYearFuture = open
-            ? dashboardReadAsync(requestId, projectId, attempt, "declared_weekly_year", () -> readService.declaredWeeklyYear(tenantId, projectId))
-            : CompletableFuture.completedFuture(null);
-        CompletableFuture<CashflowOpeningBalancesResponse> openingBalancesFuture = currentLedgerView
-            ? dashboardReadAsync(requestId, projectId, attempt, "opening_balance", () -> toOpeningBalancesResponse(readService.openingBalance(
-                tenantId, projectId, Integer.parseInt(yearMonth.substring(0, 4))
-            )))
-            : CompletableFuture.completedFuture(snapshotCompatibility.missingEvidence().contains("OPENING_BALANCES")
-                ? null
-                : frozenOpeningBalances(monthClose, yearMonth));
-        CompletableFuture<CashflowCumulativeCloseHead> cumulativeFuture = dashboardReadAsync(
-            requestId, projectId, attempt, "cumulative_close_head",
-            () -> readService.cumulativeCloseHead(tenantId, projectId)
-        );
-        CompletableFuture<CashflowLedgerSource> sourceFuture = amendedClosed
-            ? dashboardReadAsync(requestId, projectId, attempt, "global_ledger", () -> readService.globalLedgerSource(tenantId, projectId))
-            : weeklyYearFuture.thenCompose(weeklyYear -> weeklyYear == null
-                ? CompletableFuture.completedFuture(new CashflowLedgerSource(List.of(), List.of()))
-                : dashboardReadAsync(requestId, projectId, attempt, "weekly_ledger", () -> readCashflowSource(tenantId, projectId, weeklyYear)));
-        Integer weeklyYear = weeklyYearFuture.join();
-        List<CashflowMonthDashboardSourceResponse.Blocker> blockers = open && weeklyYear == null
-            ? List.of(new CashflowMonthDashboardSourceResponse.Blocker(
-                "SHEET_SOURCE_REQUIRED",
-                "먼저 시트값을 불러와 주세요."
-            ))
-            : List.of();
-        CashflowLedgerSource source = currentLedgerView ? sourceFuture.join() : null;
-        CashflowSnapshotResponse cashflow = currentLedgerView ? buildCashflowSnapshot(projectId, source) : null;
-        CashflowOpeningBalancesResponse openingBalances = openingBalancesFuture.join();
-        if (openingBalances != null) {
-            CloseCashflowMonthRequest.requireOpeningBalances(openingBalances, yearMonth);
-        }
-        if (amendedClosed) {
-            CashflowMonthCloseResponse verified = commandService.readCashflowMonthClose(actor, projectId, yearMonth);
-            String expectedTargetRevision = String.valueOf(
-                verified.lastAmendmentEvidence().getOrDefault("resultingTargetRevision", "")
-            );
-            boolean stableEvidence =
-                "CLOSED".equals(verified.status())
-                && verified.amendmentCount() > 0
-                && monthClose.snapshotHash().equals(verified.snapshotHash())
-                && monthClose.lastAmendmentEvidence().equals(verified.lastAmendmentEvidence());
-            if (!stableEvidence
-                || expectedTargetRevision.isBlank()
-                || !expectedTargetRevision.equals(source.targetRevision())) {
-                return null;
-            }
-            monthClose = verified;
-        }
-        CashflowCumulativeCloseHead cumulative = cumulativeFuture.join();
-        if (cumulative == null) {
-            cumulative = new CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
-        }
-        CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary;
-        if (source != null) {
-            projectionActualSummary = commandService.readCashflowProjectionActualSummary(actor, projectId, source);
-        } else {
-            CashflowProjectionActualSummaryBatchResponse summaryResponse = commandService
-                .readCashflowProjectionActualSummaries(
-                    actor, new CashflowProjectionActualSummaryBatchRequest(List.of(projectId))
-                );
-            if (summaryResponse == null || summaryResponse.items().size() != 1
-                || !projectId.equals(summaryResponse.items().getFirst().projectId())) {
-                throw new WeeklyExpenseConflictException("Canonical projection-actual summary is unavailable.");
-            }
-            projectionActualSummary = summaryResponse.items().getFirst();
-        }
-        CashflowMonthDashboardSourceResponse response = new CashflowMonthDashboardSourceResponse(
-            monthClose,
-            cashflow,
-            openingBalances,
-            snapshotCompatibility,
-            new CashflowMonthDashboardSourceResponse.CumulativeClose(
-                cumulative.status(), cumulative.fromMonth(), cumulative.closedThrough(), cumulative.rootHash(),
-                cumulative.headRevision()
-            ),
-            projectionActualSummary,
-            blockers
-        );
-        dashboardLog(requestId, projectId, attempt, "complete", (System.nanoTime() - dashboardStartedAt) / 1_000_000L);
-        return response;
-    }
-
-    private <T> CompletableFuture<T> dashboardReadAsync(
-        String requestId,
-        String projectId,
-        int attempt,
-        String phase,
-        Supplier<T> operation
-    ) {
-        return CompletableFuture.supplyAsync(() -> dashboardRead(requestId, projectId, attempt, phase, operation));
-    }
-
-    private <T> T dashboardRead(
-        String requestId,
-        String projectId,
-        int attempt,
-        String phase,
-        Supplier<T> operation
-    ) {
-        long startedAt = System.nanoTime();
-        try {
-            return operation.get();
-        } finally {
-            dashboardLog(requestId, projectId, attempt, phase, (System.nanoTime() - startedAt) / 1_000_000L);
-        }
-    }
-
-    private void dashboardLog(String requestId, String projectId, int attempt, String phase, long durationMs) {
-        LOGGER.log(
-            System.Logger.Level.INFO,
-            "cashflow_dashboard_source requestId={0} projectId={1} attempt={2} phase={3} durationMs={4}",
-            requestId, projectId, attempt, phase, durationMs
-        );
-    }
-
-    private CashflowMonthDashboardSourceResponse.SnapshotCompatibility frozenSnapshotCompatibility(
-        CashflowMonthCloseResponse monthClose
-    ) {
-        List<String> missingEvidence = new ArrayList<>();
-        Map<String, Object> snapshot = monthClose.snapshot();
-        if (snapshot == null || !snapshot.containsKey("openingBalances")) {
-            missingEvidence.add("OPENING_BALANCES");
-        }
-        if (snapshot == null || !snapshot.containsKey("ledgerWeeks")) {
-            missingEvidence.add("LEDGER_WEEKS");
-        }
-        return new CashflowMonthDashboardSourceResponse.SnapshotCompatibility(
-            missingEvidence.isEmpty() ? "FROZEN_COMPLETE" : "LEGACY_EVIDENCE_ONLY",
-            missingEvidence
-        );
-    }
-
-    private CashflowOpeningBalancesResponse frozenOpeningBalances(
-        CashflowMonthCloseResponse monthClose,
+    private CashflowMonthDashboardSourceResponse dashboardSourceResponse(
+        CashflowMonthDashboardQueryService.Result result,
         String yearMonth
     ) {
-        Object raw = monthClose.snapshot().get("openingBalances");
-        if (raw == null) {
-            throw new WeeklyExpenseConflictException(
-                "Closed cashflow snapshot is missing its row-level opening-balance contract."
+        String operationalStatus = result.operationalStatus();
+        CashflowMonthCloseResponse latestRun = CashflowMonthCloseResponse.fromState(
+            WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND,
+            result.latestRun(),
+            "",
+            result.latestRun().status()
+        );
+        CashflowMonthCloseResponse monthClose = CashflowMonthCloseResponse.fromState(
+            WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND,
+            result.latestRun(),
+            "",
+            operationalStatus == null ? "UNAVAILABLE" : operationalStatus
+        );
+        CashflowMonthDashboardQueryService.Authority authority = result.authority();
+        CashflowMonthDashboardSourceResponse.CumulativeClose cumulativeClose = authority.isAvailable()
+            ? new CashflowMonthDashboardSourceResponse.CumulativeClose(
+                "AVAILABLE",
+                authority.head().status(),
+                authority.head().fromMonth(),
+                authority.head().closedThrough(),
+                authority.head().rootHash(),
+                authority.head().headRevision()
+            )
+            : CashflowMonthDashboardSourceResponse.CumulativeClose.unavailable(authority.availability());
+        return new CashflowMonthDashboardSourceResponse(
+            monthClose,
+            latestRun,
+            new CashflowMonthDashboardSourceResponse.MonthStatusEvidence(
+                "CUMULATIVE_CLOSE_HEAD",
+                authority.availability(),
+                operationalStatus,
+                latestRun.status(),
+                authority.isAvailable() ? authority.head().closedThrough() : null,
+                result.monthStatusIssueCode()
+            ),
+            result.source() == null ? null : buildCashflowSnapshot(result.latestRun().projectId(), result.source()),
+            openingBalancesResponse(result.openingBalances(), yearMonth),
+            new CashflowMonthDashboardSourceResponse.SnapshotCompatibility(
+                result.snapshotCompatibility().status(),
+                result.snapshotCompatibility().missingEvidence()
+            ),
+            cumulativeClose,
+            projectionActualSummaryResponse(result.projectionActualSummary()),
+            result.blockers().stream()
+                .map(blocker -> new CashflowMonthDashboardSourceResponse.Blocker(
+                    blocker.code(), blockerGuide(blocker.code())
+                ))
+                .toList(),
+            result.sectionErrors().stream()
+                .map(error -> new CashflowMonthDashboardSourceResponse.SectionError(
+                    error.section(), error.code()
+                ))
+                .toList(),
+            new CashflowMonthDashboardSourceResponse.ActionCapability(
+                result.reopenRequest().enabled(),
+                result.reopenRequest().reasonCode()
+            )
+        );
+    }
+
+    private String blockerGuide(String code) {
+        return switch (code) {
+            case "SHEET_SOURCE_REQUIRED" -> "먼저 시트값을 불러와 주세요.";
+            case "CUMULATIVE_CLOSE_AUTHORITY_MISSING" ->
+                "누적 월 결산 기준이 아직 없습니다. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.";
+            case "CUMULATIVE_CLOSE_AUTHORITY_INVALID" ->
+                "누적 월 결산 기준이 손상되었습니다. AXR 관리자에게 복구를 요청해 주세요.";
+            case "CUMULATIVE_CLOSE_AUTHORITY_UNAVAILABLE" ->
+                "누적 월 결산 기준을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.";
+            case "CASHFLOW_SOURCE_UNAVAILABLE" ->
+                "현금흐름 원장을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.";
+            case "OPENING_BALANCES_UNAVAILABLE" ->
+                "이월 잔액을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.";
+            case "PROJECTION_ACTUAL_SUMMARY_UNAVAILABLE" ->
+                "Projection–Actual 요약을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.";
+            default -> "현금흐름 자료 일부를 확인할 수 없습니다. 잠시 후 다시 불러와 주세요.";
+        };
+    }
+
+    private CashflowOpeningBalancesResponse openingBalancesResponse(
+        CashflowMonthDashboardQueryService.OpeningBalances openingBalances,
+        String yearMonth
+    ) {
+        if (openingBalances == null) return null;
+        if (openingBalances.live() != null) {
+            return CloseCashflowMonthRequest.requireOpeningBalances(
+                toOpeningBalancesResponse(openingBalances.live()),
+                yearMonth
             );
         }
         try {
             return CloseCashflowMonthRequest.requireOpeningBalances(
-                JSON.convertValue(raw, CashflowOpeningBalancesResponse.class),
+                JSON.convertValue(openingBalances.frozen(), CashflowOpeningBalancesResponse.class),
                 yearMonth
             );
         } catch (RuntimeException error) {
             throw new WeeklyExpenseConflictException(
-                "Closed cashflow snapshot has an invalid row-level opening-balance contract."
+                "마감된 현금흐름의 이월 잔액 근거를 확인할 수 없습니다. AXR 관리자에게 복구를 요청해 주세요."
             );
         }
+    }
+
+    private CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummaryResponse(
+        dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator.Summary summary
+    ) {
+        if (summary == null) return null;
+        return new CashflowProjectionActualSummaryBatchResponse.Item(
+            summary.projectId(),
+            summary.fromMonth(),
+            new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek(
+                summary.comparisonAsOfWeek().yearMonth(),
+                summary.comparisonAsOfWeek().weekNo()
+            ),
+            summary.projectionAmount(),
+            summary.actualAmount(),
+            summary.projectionActualDifferenceAmount(),
+            summary.settlementDifferenceAmount(),
+            summary.settlementMatches(),
+            summary.periods().stream()
+                .map(period -> new CashflowProjectionActualSummaryBatchResponse.PeriodSummary(
+                    period.period(),
+                    period.projectionAmount(),
+                    period.actualAmount(),
+                    period.projectionActualDifferenceAmount()
+                ))
+                .toList()
+        );
     }
 
     @PostMapping("/cashflow/{projectId}/month-close")
@@ -692,9 +664,11 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody CloseCashflowMonthRequest request
     ) {
-        throw new ResponseStatusException(
-            HttpStatus.GONE,
-            "Cashflow month close is committed by the approval request API."
+        return commandService.closeCashflowMonth(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
         );
     }
 
@@ -789,9 +763,13 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody RequestCashflowMonthReopenRequest request
     ) {
-        throw new ResponseStatusException(
-            HttpStatus.GONE,
-            "Cashflow month reopen is committed by the approval request API."
+        return commandService.requestCashflowMonthReopen(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            httpRequest.getHeader("x-data-project-id"),
+            new CashflowMonthReopenCommands.RequestReopen(
+                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason()
+            )
         );
     }
 
@@ -805,9 +783,14 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody DecideCashflowMonthReopenRequest request
     ) {
-        throw new ResponseStatusException(
-            HttpStatus.GONE,
-            "Cashflow month reopen is committed by the approval request API."
+        return commandService.decideCashflowMonthReopen(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            httpRequest.getHeader("x-data-project-id"),
+            new CashflowMonthReopenCommands.DecideReopen(
+                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(),
+                request.decision(), request.reason()
+            )
         );
     }
 
@@ -1192,6 +1175,71 @@ public class WeeklyExpenseController {
         String cashflowLine,
         BigDecimal amount
     ) {
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(CashflowMonthReopenPolicy.Violation.class)
+    public ResponseEntity<Map<String, String>> cashflowMonthReopenConflict(
+        CashflowMonthReopenPolicy.Violation error
+    ) {
+        int status = error.reason() == CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN
+            ? 403
+            : 409;
+        return ResponseEntity.status(status).body(Map.of(
+            "ok", "false",
+            "code", cashflowMonthReopenConflictCode(error.reason()),
+            "message", cashflowMonthReopenConflictGuide(error.reason())
+        ));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(
+        CashflowMonthReopenPort.DecisionAuthorityUnavailable.class
+    )
+    public ResponseEntity<Map<String, Object>> cashflowMonthReopenAuthorityUnavailable() {
+        return ResponseEntity.status(503).body(Map.of(
+            "ok", false,
+            "code", "cashflow_month_reopen_authority_unavailable",
+            "message", "재오픈 권한을 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
+        ));
+    }
+
+    private String cashflowMonthReopenConflictCode(CashflowMonthReopenPolicy.ViolationReason reason) {
+        return switch (reason) {
+            case DECISION_FORBIDDEN -> "cashflow_month_reopen_decision_forbidden";
+            case LATEST_HORIZON_ONLY -> "cashflow_month_reopen_latest_horizon_only";
+            case MONTH_NOT_CLOSED -> "cashflow_month_reopen_month_not_closed";
+            case REVISION_CHANGED -> "cashflow_month_reopen_revision_changed";
+            case LATEST_REQUEST_REQUIRED -> "cashflow_month_reopen_latest_request_required";
+            case REQUEST_MISSING -> "cashflow_month_reopen_request_missing";
+            case NOT_AWAITING_DECISION -> "cashflow_month_reopen_not_awaiting_decision";
+            case COUNTER_OUT_OF_RANGE -> "cashflow_month_reopen_counter_invalid";
+            case DECISION_INVALID -> "cashflow_month_reopen_decision_invalid";
+            case PERIOD_INVALID -> "cashflow_month_reopen_period_invalid";
+        };
+    }
+
+    private String cashflowMonthReopenConflictGuide(CashflowMonthReopenPolicy.ViolationReason reason) {
+        return switch (reason) {
+            case DECISION_FORBIDDEN ->
+                "현재 프로젝트의 활성 조직장 또는 Runtime 관리자만 재오픈을 결정할 수 있어요. 담당 조직장을 확인해 주세요.";
+            case LATEST_HORIZON_ONLY ->
+                "가장 최근 누적 결산 월만 재오픈할 수 있어요. 최신 결산 상태를 다시 불러온 뒤 해당 월에서 요청해 주세요.";
+            case MONTH_NOT_CLOSED ->
+                "닫힌 월 결산만 재오픈할 수 있어요. 최신 결산 상태를 확인해 주세요.";
+            case REVISION_CHANGED ->
+                "검토하는 동안 월 결산 상태가 변경됐어요. 최신 상태를 다시 불러온 뒤 재시도해 주세요.";
+            case LATEST_REQUEST_REQUIRED ->
+                "가장 최근 누적 결산의 재오픈 요청만 결정할 수 있어요. 최신 요청을 다시 확인해 주세요.";
+            case REQUEST_MISSING ->
+                "재오픈 요청을 찾을 수 없어요. 최신 월 결산 상태를 다시 불러와 주세요.";
+            case NOT_AWAITING_DECISION ->
+                "이미 처리됐거나 결정 대기 중이 아닌 재오픈 요청이에요. 최신 상태를 다시 확인해 주세요.";
+            case COUNTER_OUT_OF_RANGE ->
+                "월 결산 이력 값에 복구가 필요해요. AXR 관리자에게 문의해 주세요.";
+            case DECISION_INVALID ->
+                "재오픈 결정값을 확인할 수 없어요. 승인 또는 반려를 다시 선택해 주세요.";
+            case PERIOD_INVALID ->
+                "재오픈 대상 월을 확인할 수 없어요. 월을 다시 선택해 주세요.";
+        };
     }
 
     @org.springframework.web.bind.annotation.ExceptionHandler(WeeklyExpenseConflictException.class)

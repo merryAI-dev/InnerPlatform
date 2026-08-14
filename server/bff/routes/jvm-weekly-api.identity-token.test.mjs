@@ -36,6 +36,23 @@ function monthDashboardSource() {
   };
   return {
     monthClose,
+    latestRun: monthClose,
+    monthStatusEvidence: {
+      authority: 'CUMULATIVE_CLOSE_HEAD',
+      authorityAvailability: 'AVAILABLE',
+      operationalStatus: 'CLOSED',
+      latestRunStatus: 'CLOSED',
+      closedThrough: '2026-06',
+      issueCode: null,
+    },
+    cumulativeClose: {
+      availability: 'AVAILABLE',
+      status: 'CLOSED',
+      fromMonth: '2023-01',
+      closedThrough: '2026-06',
+      rootHash: `sha256:${'a'.repeat(64)}`,
+      headRevision: 1,
+    },
     snapshotCompatibility: { status: 'LEGACY_EVIDENCE_ONLY', missingEvidence: ['OPENING_BALANCES', 'LEDGER_WEEKS'] },
     projectionActualSummary: {
       projectId: 'project-a',

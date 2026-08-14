@@ -97,11 +97,37 @@ export function negativeProjectionCheck(weeks, openingBalance = 0) {
   let balance = safeAmount(openingBalance);
   let prepay = 0;
   const findings = [];
+  if (balance === null) {
+    return managementCheck(
+      'negative-projection-balance',
+      'REVIEW_REQUIRED',
+      'Projection 잔액 마이너스',
+      'Projection 이월 잔액을 확인할 수 없어 잔액을 판정할 수 없습니다.',
+      ['Projection 이월 잔액 확인 필요'],
+    );
+  }
   for (const week of weeks) {
-    const totalIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => week.projection?.[lineId])) || 0;
-    const totalOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => week.projection?.[lineId])) || 0;
+    const projection = week.projection && typeof week.projection === 'object' ? week.projection : {};
+    const totalIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => (
+      Object.hasOwn(projection, lineId) ? projection[lineId] : 0
+    )));
+    const totalOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => (
+      Object.hasOwn(projection, lineId) ? projection[lineId] : 0
+    )));
+    const prepayAmount = Object.hasOwn(projection, 'MYSC_PREPAY_IN')
+      ? safeAmount(projection.MYSC_PREPAY_IN)
+      : 0;
+    if (totalIn === null || totalOut === null || prepayAmount === null) {
+      return managementCheck(
+        'negative-projection-balance',
+        'REVIEW_REQUIRED',
+        'Projection 잔액 마이너스',
+        'Projection 금액 중 확인할 수 없는 값이 있어 잔액을 판정할 수 없습니다.',
+        ['Projection 금액 확인 필요'],
+      );
+    }
     balance += totalIn - totalOut;
-    prepay += safeAmount(week.projection?.MYSC_PREPAY_IN);
+    prepay += prepayAmount;
     if (balance < 0) {
       findings.push(`${week.yearMonth} ${week.weekNo}주차 · 잔액 ${balance.toLocaleString('ko-KR')}원${prepay > 0 ? '' : ' · MYSC 선입금 Projection 없음'}`);
     }
