@@ -156,6 +156,11 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.analysis.summary).toContain('계약 기간과 계약금액');
     expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
     expect(dossier.contractDocument.downloadURL).toContain('contract.pdf');
+    expect(dossier.submittedFields.find((field) => field.label === '인건비 정산 기준')?.value).toBe('미입력');
+    expect(dossier.submittedFields.find((field) => field.label === '정산 가이드')?.value).toBe('정산 가이드');
+    expect(dossier.submittedFields.find((field) => field.label === '등록 메모')?.value).toBe('임원 검토 메모 없음');
+    expect(dossier.missingSubmittedFields).toContain('인건비 정산 기준');
+    expect(Object.keys(request.payload).every((key) => dossier.submittedFields.some((field) => field.key === key))).toBe(true);
   });
 
   it('falls back to project fields even when no project request document is attached', () => {

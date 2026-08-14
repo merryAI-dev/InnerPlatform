@@ -45,23 +45,23 @@ describe('display name comes from the roster fields', () => {
     expect(option.label).toBe('하송희(솔)');
   });
 
-  it('applies the same rule to the team member picker fallback', () => {
-    // 팀원 후보의 출처는 인력 명부지만, 명부를 못 읽었을 때 쓰는 계정 원장 경로에도
-    // 같은 이름 정규화가 적용되어야 한다.
+  it('does not use the account ledger when the People roster is unavailable', () => {
     const options = buildProjectTeamMemberOptions([], [
       member({ uid: 'u1', name: 'Inhyo Ko (베리)', nameKo: '고인효', nickname: '베리' }),
     ]);
-    expect(options[0].label).toBe('고인효(베리)');
-    expect(options[0].value).toBe('고인효');
+    expect(options).toEqual([]);
   });
 
-  it('keeps one entry per person when both documents disagree on the combined string', () => {
-    const options = buildProjectTeamMemberOptions([], [
+  it('uses one People record even when account documents disagree', () => {
+    const options = buildProjectTeamMemberOptions([{
+      personId: 'person-1', name: '김정태', nickname: '에이블', employmentType: 'FULL_TIME',
+    }], [
       member({ uid: 'u1', name: 'Jeongtae KIM (Able)', nameKo: '김정태', nickname: '에이블' }),
       member({ uid: 'u2', name: '김정태(에이블)', nameKo: '김정태', nickname: '에이블' }),
     ]);
     expect(options).toHaveLength(1);
     expect(options[0].label).toBe('김정태(에이블)');
+    expect(options[0].value).toBe('person-1');
   });
 
   it('regularizes every project owner display from the roster UID', () => {

@@ -42,6 +42,7 @@ interface ReviewFact {
   label: string;
   value: string;
   wide?: boolean;
+  missing?: boolean;
 }
 
 const ATTACHMENT_CHANGE_KEYS = new Set(['contractDocument', 'quoteDocument', 'proposalDocument']);
@@ -57,8 +58,8 @@ function statusStripClass(tone: ReviewTone) {
   return 'border-amber-200 bg-amber-50/90 text-amber-900';
 }
 
-function valueClass(value: string) {
-  return value === '-' ? 'text-slate-400' : 'text-slate-950';
+function valueClass(value: string, missing = false) {
+  return missing || value === '미입력' ? 'text-rose-700' : value === '-' ? 'text-slate-400' : 'text-slate-950';
 }
 
 function formatMoney(value?: number) {
@@ -117,7 +118,7 @@ function ReviewFactGrid({ items }: { items: ReviewFact[] }) {
           }`}
         >
           <dt className="text-[11px] font-medium text-slate-500">{item.label}</dt>
-          <dd className={`mt-1 whitespace-pre-wrap break-words text-[13px] leading-6 font-medium ${valueClass(item.value)}`}>
+          <dd className={`mt-1 whitespace-pre-wrap break-words text-[13px] leading-6 font-medium ${valueClass(item.value, item.missing)}`}>
             {item.value || '-'}
           </dd>
         </div>
@@ -197,7 +198,7 @@ export function MigrationAuditDetailPanel({
     return (
       <Card className="border-slate-200/80 bg-white shadow-sm" data-testid="migration-review-dossier">
         <CardContent className="py-24 text-center text-[12px] text-muted-foreground">
-          좌측 대기열에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 계약/재무·팀/인력을 바로 읽고 CIC 대표 검토 결정을 끝낼 수 있습니다.
+          좌측 대기열에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 계약/재무·팀/인력을 바로 읽고 조직장 결재를 진행할 수 있습니다.
         </CardContent>
       </Card>
     );
@@ -267,6 +268,14 @@ export function MigrationAuditDetailPanel({
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+          {dossier.missingSubmittedFields.length > 0 ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+              <p className="text-[12px] font-semibold text-rose-900">작성 누락 항목 {dossier.missingSubmittedFields.length}건</p>
+              <p className="mt-1 text-[12px] leading-6 text-rose-800">
+                {dossier.missingSubmittedFields.join(' · ')}
+              </p>
+            </div>
+          ) : null}
           <ReviewSection
             eyebrow="기본 정보"
             title="프로젝트 식별 정보"
@@ -379,6 +388,14 @@ export function MigrationAuditDetailPanel({
           </ReviewSection>
 
           <ReviewSection
+            eyebrow="제출 원문"
+            title="등록·수정 작성값 전체"
+            description="승인 판단은 아래 요청 문서 원문을 기준으로 합니다. 비어 있는 필드도 누락하지 않고 표시합니다."
+          >
+            <ReviewFactGrid items={dossier.submittedFields} />
+          </ReviewSection>
+
+          <ReviewSection
             eyebrow="계약 분석 보조 정보"
             title="계약서 요약과 PDF 원문"
             description="분석 메모가 부족하면 PDF 원문을 바로 대조합니다."
@@ -453,7 +470,7 @@ export function MigrationAuditDetailPanel({
         >
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">CIC 대표 검토 결정</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">조직장 결재</p>
               <p className="mt-1 text-[12px] text-slate-600">
                 상단이나 좌측이 아니라 여기서만 승인, 수정 요청 후 반려, 중복·폐기를 결정합니다.
               </p>

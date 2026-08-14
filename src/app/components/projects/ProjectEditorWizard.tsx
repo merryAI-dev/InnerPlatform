@@ -713,16 +713,18 @@ function TeamMemberSearchCombobox({
 
   const handleSelect = (value: string) => {
     if (value === 'none') {
-      onSelect({ memberName: '', memberNickname: '' });
+      onSelect({ personId: undefined, memberName: '', memberNickname: '' });
       setOpen(false);
       return;
     }
     const option = optionMap[value];
+    if (!option) return;
     onSelect({
       inputMode: 'search',
       identityInput: undefined,
-      memberName: option?.name || value,
-      memberNickname: option?.nickname || '',
+      personId: option.personId,
+      memberName: option.name,
+      memberNickname: option.nickname,
     });
     setOpen(false);
   };
@@ -775,8 +777,8 @@ function TeamMemberSearchCombobox({
                 </CommandItem>
               ) : null}
               {options.map((option) => {
-                const disabled = selectedNames.has(option.value);
-                const selected = option.value === member.memberName;
+                    const disabled = selectedNames.has(option.personId);
+                    const selected = option.personId === member.personId;
                 return (
                   <CommandItem
                     key={option.value}
@@ -2828,15 +2830,15 @@ export function ProjectEditorWizard({
             const teamMemberInputMode = member.inputMode === 'manual' ? 'manual' : 'search';
             const selectedNames = new Set(
               draft.teamMembersDetailed
-                .map((item, itemIndex) => (itemIndex === index ? '' : item.memberName))
-                .filter(Boolean),
+                .map((item, itemIndex) => (itemIndex === index ? '' : item.personId))
+                .filter((personId): personId is string => Boolean(personId)),
             );
             // 정산지원이라고 후보를 두 사람으로 좁히지 않는다. 담당이 바뀌거나 그 두 분이
             // 자리를 비우면 아무도 고를 수 없게 된다. 담당자 안내는 아래 문구로 남긴다.
             const availableTeamMemberOptions = teamMemberOptions;
             const availableTeamMemberOptionMap = teamMemberOptionMap;
-            const currentTeamMemberOptionExists = !member.memberName
-              || availableTeamMemberOptions.some((option) => option.value === member.memberName);
+            const currentTeamMemberOptionExists = !member.personId
+              || availableTeamMemberOptions.some((option) => option.personId === member.personId);
             return (
               <div key={`team-member-${index}`} className="rounded-lg border border-slate-200 bg-white p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -2862,6 +2864,7 @@ export function ProjectEditorWizard({
                       onValueChange={(value) => updateTeamMember(index, {
                         inputMode: value === 'manual' ? 'manual' : 'search',
                         identityInput: value === 'manual' ? '' : undefined,
+                        personId: undefined,
                         memberName: '',
                         memberNickname: '',
                       })}

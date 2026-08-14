@@ -45,6 +45,8 @@ function normalizeProjectTeamMemberRow(
     role: String(member?.role || '').trim(),
     participationRate: toRate(member?.participationRate),
   };
+  const personId = String(member?.personId || '').trim();
+  if (personId) normalized.personId = personId;
   if (typeof member?.isDocumentOnly === 'boolean') {
     normalized.isDocumentOnly = member.isDocumentOnly;
   } else if (normalized.memberName && (

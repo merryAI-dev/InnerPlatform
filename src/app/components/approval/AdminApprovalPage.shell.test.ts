@@ -13,9 +13,9 @@ describe('AdminApprovalPage shell contract', () => {
     expect(source).toContain('<ProjectMigrationAuditPage embedded reviewScope="pending" />');
     expect(source).toContain('pendingProjectReviews');
     expect(source).toContain('project.executiveReviewStatus');
-    expect(source).toContain('프로젝트 등록 검토');
-    expect(source).toContain('대표 검토');
-    expect(source).toContain('프로젝트 등록 요청부터 먼저 정리합니다');
+    expect(source).not.toContain('프로젝트 등록 검토');
+    expect(source).not.toContain('대표 검토');
+    expect(source).not.toContain('승인 대기 항목');
     expect(source).not.toContain('ProjectRequestApprovalSection');
     expect(source).not.toContain('EXPENSE_SETS');
     expect(source).not.toContain('CHANGE_REQUESTS');

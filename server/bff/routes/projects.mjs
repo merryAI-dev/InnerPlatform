@@ -1515,6 +1515,7 @@ export function buildProjectRegistrationCanonicalDocuments({
       final: registrationAmount(payload.paymentPlan?.final),
     },
     paymentExpectedMonths: normalizePaymentExpectedMonths(payload.paymentExpectedMonths),
+    finalPaymentExpectedWeek: readOptionalText(payload.finalPaymentExpectedWeek),
     interestRefundPolicy: readOptionalText(payload.interestRefundPolicy) || undefined,
     quoteSubmissionDeferred: payload.quoteSubmissionDeferred === true,
     advanceInterimBelow70Reason: readOptionalText(payload.advanceInterimBelow70Reason),
@@ -1697,6 +1698,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     settlementSheetPolicy: pickValue('settlementSheetPolicy') || undefined,
     paymentPlan: pickValue('paymentPlan') || { contract: 0, interim: 0, final: 0 },
     paymentExpectedMonths: normalizePaymentExpectedMonths(pickValue('paymentExpectedMonths')),
+    finalPaymentExpectedWeek: pickText('finalPaymentExpectedWeek'),
     interestRefundPolicy: pickText('interestRefundPolicy') || undefined,
     quoteSubmissionDeferred: pickValue('quoteSubmissionDeferred') === true,
     advanceInterimBelow70Reason: pickText('advanceInterimBelow70Reason'),
@@ -1832,6 +1834,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       payload.paymentExpectedMonths || currentProject.paymentExpectedMonths,
     ),
+    finalPaymentExpectedWeek: readOptionalText(payload.finalPaymentExpectedWeek),
     interestRefundPolicy: readOptionalText(payload.interestRefundPolicy)
       || readOptionalText(currentProject.interestRefundPolicy)
       || undefined,
@@ -1901,6 +1904,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   teamMembersDetailed: '참여인력 (서류상·실제)',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
+  finalPaymentExpectedWeek: '최종 입금 예상 주차',
   interestRefundPolicy: '이자 반납 여부',
   quoteSubmissionDeferred: '산출내역서 이후 제출',
   advanceInterimBelow70Reason: '선금·중도금 70% 미만 사유',
@@ -1933,7 +1937,7 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
   'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
-  'paymentExpectedMonths', 'interestRefundPolicy', 'quoteSubmissionDeferred',
+  'paymentExpectedMonths', 'finalPaymentExpectedWeek', 'interestRefundPolicy', 'quoteSubmissionDeferred',
   'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'executiveApproverId', 'executiveApproverName', 'executiveApproverEmail',
@@ -2251,11 +2255,13 @@ function normalizeProjectTeamMembersDetailed(value) {
   return (Array.isArray(value) ? value : [])
     .map((member) => {
       const normalized = {
+        personId: readOptionalText(member?.personId),
         memberName: readOptionalText(member?.memberName),
         memberNickname: readOptionalText(member?.memberNickname),
         role: readOptionalText(member?.role),
         participationRate: normalizeParticipationRate(member?.participationRate),
       };
+      if (!normalized.personId) delete normalized.personId;
       if (typeof member?.isDocumentOnly === 'boolean') normalized.isDocumentOnly = member.isDocumentOnly;
       const laborAllocationStartMonth = normalizeMonth(member?.laborAllocationStartMonth);
       const laborAllocationEndMonth = normalizeMonth(member?.laborAllocationEndMonth);
@@ -2385,30 +2391,30 @@ export async function syncProjectParticipationEntries({
   const members = memberSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
   const memberByIdentity = new Map();
   for (const member of members) {
-    for (const key of [
-      readOptionalText(member?.nickname),
-      readOptionalText(member?.name),
-    ]) {
-      if (!key) continue;
-      memberByIdentity.set(key.toLowerCase(), member);
+    for (const key of [readOptionalText(member?.nickname), readOptionalText(member?.name)]) {
+      if (key) memberByIdentity.set(key.toLowerCase(), member);
     }
   }
 
   const desiredEntries = new Map();
   for (const member of teamMembers) {
-    if (!member.role || (!member.memberName && !member.memberNickname)) continue;
+    const personId = readOptionalText(member?.personId);
+    if (!member.role || (!personId && !member.memberName && !member.memberNickname)) continue;
+    const key = buildProjectTeamMemberSyncKey(member);
     const matchedMember = resolveProjectTeamMemberLookupKeys(member)
       .map((lookupKey) => memberByIdentity.get(lookupKey))
       .find(Boolean);
     const memberId = readOptionalText(matchedMember?.uid || matchedMember?.id)
-      || `project-team:${buildProjectTeamMemberSyncKey(member)}`;
-    const displayName = readOptionalText(matchedMember?.name) || member.memberNickname || member.memberName;
-    const key = buildProjectTeamMemberSyncKey(member);
+      || `project-team:${key}`;
+    const memberName = readOptionalText(matchedMember?.name)
+      || member.memberNickname
+      || member.memberName;
     const entryId = `pte-${project.id}-${key}`;
     desiredEntries.set(entryId, {
       id: entryId,
+      ...(personId ? { personId } : {}),
       memberId,
-      memberName: displayName,
+      memberName,
       projectId: project.id,
       projectName: project.name,
       projectShortName: readOptionalText(project.shortName) || undefined,

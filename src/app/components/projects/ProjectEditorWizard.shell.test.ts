@@ -94,7 +94,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('· 기존 선택');
     // Linkage is still judged against the ledger, so the unlinked warning keeps firing.
     expect(source).toContain('ledgerMemberOptions.find((member) => member.uid === draft.registeredById)');
-    expect(source).toContain("onSelect({ memberName: '', memberNickname: '' })");
+    expect(source).toContain("onSelect({ personId: undefined, memberName: '', memberNickname: '' })");
     expect(source).toContain('currentTeamMemberOptionExists');
     expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
   });

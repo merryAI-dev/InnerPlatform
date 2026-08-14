@@ -54,12 +54,12 @@ describe('팀원 후보', () => {
     expect(options.map((option) => option.name)).not.toContain('김혜령');
   });
 
-  it('명부를 못 읽으면 계정 원장으로 후보를 만든다 — 빈 목록이면 팀원을 아예 못 고른다', () => {
+  it('명부를 못 읽으면 후보를 만들지 않는다 — People ID 없는 배정을 새로 만들지 않는다', () => {
     const options = buildProjectTeamMemberOptions([], [
       { uid: 'u-boram', name: '변민욱(보람)', email: 'boram@mysc.co.kr', role: 'pm', status: 'ACTIVE' },
       { uid: 'u-left', name: '퇴사자', email: 'left@mysc.co.kr', role: 'viewer', status: 'INACTIVE' },
     ]);
-    expect(options.map((option) => option.label)).toEqual(['변민욱(보람)']);
+    expect(options).toEqual([]);
   });
 
   it('명부도 계정도 없으면 빈 목록이다 — 코드에 박힌 명단으로 되돌아가지 않는다', () => {

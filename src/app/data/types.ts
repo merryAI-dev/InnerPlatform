@@ -553,6 +553,8 @@ export interface MyscEmployee {
  */
 export interface ParticipationEntry {
   id: string;
+  /** People SSOT. Legacy rows may not have this until backfill completes. */
+  personId?: string;
   memberId: string;
   memberName: string;
   projectId: string;
@@ -885,6 +887,8 @@ export interface ProjectRequestContractAnalysis {
 }
 
 export interface ProjectTeamMemberAssignment {
+  /** 인력 명부(orgs/{org}/persons)의 SSOT 식별자 */
+  personId?: string;
   inputMode?: 'search' | 'manual';
   identityInput?: string;
   memberName: string;

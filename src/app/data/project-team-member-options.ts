@@ -12,6 +12,7 @@ function memberLabel(name: string, nickname: string): string {
 }
 
 export interface ProjectTeamMemberOption {
+  personId: string;
   value: string;
   name: string;
   nickname: string;
@@ -36,6 +37,7 @@ export function findProjectTeamMemberOption(
   if (!nickname && !parsed.nickname) return undefined;
   const resolved = parsed.nickname || nickname;
   return {
+    personId: directory.resolveId(normalized) || '',
     value: parsed.name,
     name: parsed.name,
     nickname: resolved,
@@ -50,7 +52,7 @@ export function splitMemberDisplayName(value: string): { name: string; nickname:
   return { name: match[1].trim(), nickname: match[2].trim() };
 }
 
-/** 인력 명부 레코드를 후보로 만든다. 배정에는 이름·별명만 저장되므로 계정이 없어도 고를 수 있다. */
+/** 인력 명부 레코드를 후보로 만든다. 선택값은 이름이 아니라 People ID다. */
 function rosterOptions(roster: DirectoryPerson[]): ProjectTeamMemberOption[] {
   const options = new Map<string, ProjectTeamMemberOption>();
   roster.forEach((person) => {
@@ -58,31 +60,8 @@ function rosterOptions(roster: DirectoryPerson[]): ProjectTeamMemberOption[] {
     const name = String(person?.name || '').trim();
     if (!name) return;
     const nickname = String(person?.nickname || '').trim();
-    const key = name.toLowerCase();
-    if (options.has(key)) return;
-    options.set(key, { value: name, name, nickname, label: memberLabel(name, nickname) });
-  });
-  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
-}
-
-/** 계정 원장으로 후보를 만든다. 인력 명부를 못 읽었을 때만 쓰는 안전망. */
-function memberFallbackOptions(members: OrgMember[]): ProjectTeamMemberOption[] {
-  const options = new Map<string, ProjectTeamMemberOption>();
-  members.forEach((member) => {
-    const status = String(member.status || '').trim().toUpperCase();
-    if (status === 'INACTIVE' || status === 'DELETED') return;
-    const parsed = splitMemberDisplayName(member.name || '');
-    const displayName = String(member.nameKo || '').trim() || parsed.name;
-    if (!String(member.uid || '').trim() || !displayName) return;
-    const nickname = String(member.nickname || '').trim() || parsed.nickname || '';
-    const key = displayName.toLowerCase();
-    if (options.has(key)) return;
-    options.set(key, {
-      value: displayName,
-      name: displayName,
-      nickname,
-      label: memberLabel(displayName, nickname),
-    });
+    if (options.has(person.personId)) return;
+    options.set(person.personId, { personId: person.personId, value: person.personId, name, nickname, label: memberLabel(name, nickname) });
   });
   return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
 }
@@ -92,17 +71,13 @@ function memberFallbackOptions(members: OrgMember[]): ProjectTeamMemberOption[] 
  *
  * 출처는 인력 명부(orgs/{org}/persons) 하나다. HR 담당자가 /people 에서 관리한다.
  * 계정 원장을 출처로 쓰면 로그인한 적 없는 사람이 후보에서 빠지고, 퇴사해도 계정이
- * 살아 있으면 계속 남는다. 배정에는 이름과 별명만 저장되므로 계정은 필요하지 않다.
- *
- * 명부를 아직/영영 못 읽었을 때만 계정 원장으로 후보를 만든다. 빈 목록을 돌려주면
- * 사람이 팀원을 아예 못 고른다.
+ * 살아 있으면 계속 남는다. 배정은 People ID를 저장하므로 계정은 필요하지 않다.
  */
 export function buildProjectTeamMemberOptions(
   roster: DirectoryPerson[],
-  members: OrgMember[] = [],
+  _members: OrgMember[] = [],
 ): ProjectTeamMemberOption[] {
-  const fromRoster = rosterOptions(roster);
-  return fromRoster.length ? fromRoster : memberFallbackOptions(members);
+  return rosterOptions(roster);
 }
 
 /** 인력 명부 레코드로 디렉터리를 만든다. 호출부가 person-directory 를 직접 몰라도 되게. */

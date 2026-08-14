@@ -9,14 +9,16 @@ export function mountParticipationDashboardRoutes(app, { db, now, idempotencySer
     if (!db) throw createHttpError(503, '참여율 대시보드를 읽을 수 없습니다.', 'firestore_unconfigured');
     const tenantId = readOptionalText(req.context?.tenantId);
     if (!tenantId) throw createHttpError(400, 'tenantId is required.', 'tenant_required');
-    const [projectsSnap, entriesSnap, rulesSnap] = await Promise.all([
+    const [projectsSnap, entriesSnap, peopleSnap, rulesSnap] = await Promise.all([
       db.collection(`orgs/${tenantId}/projects`).get(),
       db.collection(`orgs/${tenantId}/partEntries`).get(),
+      db.collection(`orgs/${tenantId}/persons`).get(),
       db.collection(`orgs/${tenantId}/participation_rules`).get(),
     ]);
     const snapshot = buildParticipationDashboardSnapshot({
       projects: projectsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
       entries: entriesSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
+      people: peopleSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
       rules: rulesSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
       generatedAt: new Date().toISOString(),
     });

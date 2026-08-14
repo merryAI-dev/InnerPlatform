@@ -119,7 +119,7 @@ function resolveExecutiveBanner(project: Project) {
   };
   return {
     tone: 'warning', title: '검토 대기',
-    description: 'CIC 대표 검토 대기 상태입니다. 수정 저장 시 같은 승인 대기열에서 최신 값으로 확인됩니다.',
+    description: '조직장 결재 대기 상태입니다. 수정 저장 시 같은 승인 대기열에서 최신 값으로 확인됩니다.',
   };
 }
 

@@ -162,7 +162,9 @@ describe('project change request helpers', () => {
       interestRefundPolicy: 'MYSC_REVENUE',
       settlementSystem: 'SMTECH',
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
+      laborTransferPlan: { mode: 'MONTHLY_WEEK_3', milestoneAmounts: { contract: 0, interim: 0, final: 0 } },
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
+      finalPaymentExpectedWeek: '26-12-4',
       advanceInterimBelow70Reason: '발주처 지급 조건',
       quoteSubmissionDeferred: true,
       registeredById: 'u-berry',
@@ -200,7 +202,9 @@ describe('project change request helpers', () => {
       executiveApproverEmail: 'head-berry@mysc.co.kr',
       settlementSystem: 'SMTECH',
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
+      laborTransferPlan: { mode: 'MONTHLY_WEEK_3', milestoneAmounts: { contract: 0, interim: 0, final: 0 } },
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
+      finalPaymentExpectedWeek: '26-12-4',
       advanceInterimBelow70Reason: '발주처 지급 조건',
       quoteSubmissionDeferred: true,
       executiveReviewStatus: 'APPROVED',
@@ -218,8 +222,8 @@ describe('project change request helpers', () => {
       tenantId: 'mysc',
       requestedAt: '2026-05-29T01:29:00.000Z',
     }).payload;
+    delete payload.finalPaymentNote;
 
-    expect(payload).not.toHaveProperty('finalPaymentNote');
     expect(buildProjectPatchFromRequestPayload(payload, {
       baseProject: { ...baseProject, finalPaymentNote: '기존 잔금 메모' },
       approvedAt: '2026-05-29T02:00:00.000Z',

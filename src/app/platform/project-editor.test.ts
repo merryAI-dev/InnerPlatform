@@ -178,7 +178,7 @@ describe('project editor draft mapping', () => {
       interestRefundPolicy: 'MYSC_REVENUE',
       quoteSubmissionDeferred: true,
     });
-    expect(payload).not.toHaveProperty('finalPaymentExpectedWeek');
+    expect(payload).toHaveProperty('finalPaymentExpectedWeek', '26-8-1');
     expect(patch).toMatchObject({
       totalActualCost: 12_000,
       interestRefundPolicy: 'MYSC_REVENUE',
@@ -475,10 +475,10 @@ describe('project editor draft mapping', () => {
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });
     expect(payload.paymentExpectedMonths).toEqual({ contract: '2026-04', interim: '2026-06', final: '2026-10' });
     expect(payload.advanceInterimBelow70Reason).toBe('발주처 지급 조건');
-    expect(payload).not.toHaveProperty('finalPaymentNote');
+    expect(payload.finalPaymentNote).toBe('잔금은 검수 후 2주 이내');
     expect(payload.note).toBe('기존 비고 유지');
     expect(payload.registrationConfirmations).toEqual(draft.registrationConfirmations);
-    expect(payload).not.toHaveProperty('finalPaymentExpectedWeek');
+    expect(payload).toHaveProperty('finalPaymentExpectedWeek', '');
     expect(payload.quoteDocument?.name).toBe('quote.pdf');
     expect(payload.proposalDocument?.name).toBe('proposal.pdf');
     expect(payload.contractAnalysis).toEqual({ provider: 'heuristic', summary: '기존 분석값' });
