@@ -7,6 +7,7 @@ import {
   formatCashflowExecutiveApprover,
   formatCashflowManager,
 } from './CashflowWeeklyPage';
+import type { PersonRecord } from '../../lib/platform-bff-client';
 
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
 
@@ -76,11 +77,14 @@ describe('CashflowWeeklyPage settlement status surface', () => {
   });
 
   it('keeps the executive approver and manager in separate columns', () => {
-    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자' }, [
-      { uid: 'owner-1', name: '원장 책임자', nameKo: '원장 책임자' },
-    ])).toBe('원장 책임자');
-    expect(formatCashflowManager({ managerName: '기존 담당자' })).toBe('기존 담당자');
-    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자' }, [])).toBe('스냅샷 책임자');
+    const people: Array<Pick<PersonRecord, 'uid' | 'name' | 'nickname' | 'email'>> = [{ uid: 'owner-1', name: '원장 책임자', nickname: '원장', email: 'owner@example.com' }];
+    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자' }, people)).toBe('원장 책임자(원장)');
+    expect(formatCashflowManager({ managerId: 'owner-1', managerName: '기존 담당자' }, people)).toBe('원장 책임자(원장)');
+    expect(formatCashflowExecutiveApprover({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자' }, people)).toBe('연결 필요');
+    expect(formatCashflowManager({ managerId: 'missing', managerName: '기존 담당자' }, people)).toBe('연결 필요');
+    expect(source).toContain('People 연결 필요');
+    expect(source).toContain('레거시 이름은 표시만 하고, 선택한 People UID로만');
+    expect(source).toContain('flex flex-col items-center gap-0.5 text-center');
   });
 
   it('ANDs department and month status filters while accepting any matching selected-month week', () => {

@@ -23,7 +23,8 @@ import {
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
 import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-transaction-log';
-import type { OrgMember, Project } from '../../data/types';
+import type { PersonRecord } from '../../lib/platform-bff-client';
+import type { Project } from '../../data/types';
 
 export function filterCashflowProjectsByDepartment<T extends { department?: unknown }>(projects: T[], department: string): T[] {
   return projects.filter((project) => department === 'ALL' || normalizeProjectDepartment(project.department) === department);
@@ -31,13 +32,43 @@ export function filterCashflowProjectsByDepartment<T extends { department?: unkn
 
 type SettlementStatusFilter = 'ALL' | CashflowSettlementStatus;
 
-export function formatCashflowExecutiveApprover(project: Pick<Project, 'executiveApproverId' | 'executiveApproverName'>, members: Array<Pick<OrgMember, 'uid' | 'name' | 'nameKo'>>) {
-  const rosterOwner = members.find((member) => member.uid === project.executiveApproverId);
-  return String(rosterOwner?.nameKo || rosterOwner?.name || project.executiveApproverName || '').trim() || '-';
+export interface CashflowOwnerOption {
+  uid: string;
+  label: string;
+  email: string;
 }
 
-export function formatCashflowManager(project: Pick<Project, 'managerName'>) {
-  return String(project.managerName || '').trim() || '-';
+/** People 명부의 UID가 프로젝트 담당자·승인자의 유일한 표시 근거다. */
+export function buildCashflowOwnerOptions(people: Array<Pick<PersonRecord, 'uid' | 'name' | 'nickname' | 'email'>>): CashflowOwnerOption[] {
+  const byUid = new Map<string, CashflowOwnerOption>();
+  people.forEach((person) => {
+    const uid = String(person.uid || '').trim();
+    const name = String(person.name || '').trim();
+    if (!uid || !name || byUid.has(uid)) return;
+    const nickname = String(person.nickname || '').trim();
+    byUid.set(uid, { uid, label: nickname ? `${name}(${nickname})` : name, email: String(person.email || '').trim() });
+  });
+  return [...byUid.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+}
+
+export function resolveCashflowOwner(
+  uid: string | undefined,
+  legacyName: string | undefined,
+  options: CashflowOwnerOption[],
+) {
+  const person = options.find((option) => option.uid === String(uid || '').trim());
+  return {
+    label: person?.label || '',
+    legacyName: String(legacyName || '').trim(),
+  };
+}
+
+export function formatCashflowExecutiveApprover(project: Pick<Project, 'executiveApproverId' | 'executiveApproverName'>, people: Array<Pick<PersonRecord, 'uid' | 'name' | 'nickname' | 'email'>>) {
+  return resolveCashflowOwner(project.executiveApproverId, project.executiveApproverName, buildCashflowOwnerOptions(people)).label || '연결 필요';
+}
+
+export function formatCashflowManager(project: Pick<Project, 'managerId' | 'managerName'>, people: Array<Pick<PersonRecord, 'uid' | 'name' | 'nickname' | 'email'>>) {
+  return resolveCashflowOwner(project.managerId, project.managerName, buildCashflowOwnerOptions(people)).label || '연결 필요';
 }
 
 export function filterCashflowProjectsBySettlementStatus<T extends { id: string; department?: unknown }>(
@@ -143,7 +174,7 @@ function SettlementApprovalTimes({ item }: { item?: CashflowSettlementStatusItem
   const approvedAt = formatSettlementAt(item?.approvedAt || '');
   if (!submittedAt && !approvedAt) return null;
   return (
-    <div className="mt-1.5 space-y-0.5 text-left text-[9px] leading-tight text-slate-500">
+    <div className="mt-1.5 flex flex-col items-center gap-0.5 text-center text-[9px] leading-tight text-slate-500">
       {submittedAt ? <div>실무자 결재: {submittedAt}</div> : null}
       {approvedAt ? <div>조직장 승인: {approvedAt}</div> : null}
     </div>
@@ -152,7 +183,7 @@ function SettlementApprovalTimes({ item }: { item?: CashflowSettlementStatusItem
 
 export function CashflowWeeklyPage() {
   const navigate = useNavigate();
-  const { projects, members } = useAppStore();
+  const { projects, persons, updateProject } = useAppStore();
   const { user } = useAuth();
   const { orgId } = useFirebase();
   const { yearMonth, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
@@ -162,6 +193,7 @@ export function CashflowWeeklyPage() {
   const [overviewError, setOverviewError] = useState('');
   const [refreshSequence, setRefreshSequence] = useState(0);
   const [actionKey, setActionKey] = useState('');
+  const [ownerLinkingKey, setOwnerLinkingKey] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
   const [monthStatusFilter, setMonthStatusFilter] = useState<SettlementStatusFilter>('ALL');
   const [weekStatusFilter, setWeekStatusFilter] = useState<SettlementStatusFilter>('ALL');
@@ -170,6 +202,25 @@ export function CashflowWeeklyPage() {
     ...projects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean),
   ])).sort((left, right) => left.localeCompare(right, 'ko')), [projects]);
   const departmentProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
+  const ownerOptions = useMemo(
+    () => buildCashflowOwnerOptions(persons),
+    [persons],
+  );
+  const ownerLinkIssues = useMemo(() => {
+    if (persons.length === 0) return [];
+    return projects.flatMap((project) => {
+      const executiveApprover = resolveCashflowOwner(project.executiveApproverId, project.executiveApproverName, ownerOptions);
+      const manager = resolveCashflowOwner(project.managerId, project.managerName, ownerOptions);
+      return [
+        ...(!executiveApprover.label && (project.executiveApproverId || executiveApprover.legacyName) ? [{
+          key: `${project.id}:executive`, project, role: '조직장' as const, legacyName: executiveApprover.legacyName, uid: project.executiveApproverId || '',
+        }] : []),
+        ...(!manager.label && (project.managerId || manager.legacyName) ? [{
+          key: `${project.id}:manager`, project, role: '책임자' as const, legacyName: manager.legacyName, uid: project.managerId || '',
+        }] : []),
+      ];
+    });
+  }, [ownerOptions, persons.length, projects]);
   const overviewProjectIds = useMemo(() => departmentProjects.map((project) => project.id), [departmentProjects]);
   const overviewProjectIdsKey = useMemo(() => JSON.stringify(overviewProjectIds), [overviewProjectIds]);
   const overviewActor = useMemo(() => user ? {
@@ -272,6 +323,23 @@ export function CashflowWeeklyPage() {
     }
   }
 
+  async function linkProjectOwner(project: Project, role: '조직장' | '책임자', uid: string) {
+    const owner = ownerOptions.find((option) => option.uid === uid);
+    if (!owner) return;
+    const key = `${project.id}:${role}`;
+    setOwnerLinkingKey(key);
+    try {
+      await updateProject(project.id, role === '조직장'
+        ? { executiveApproverId: owner.uid, executiveApproverName: owner.label, executiveApproverEmail: owner.email }
+        : { managerId: owner.uid, managerName: owner.label });
+      toast.success(`${project.name} ${role}를 ${owner.label}로 연결했습니다.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `${role} 연결을 저장하지 못했습니다.`);
+    } finally {
+      setOwnerLinkingKey('');
+    }
+  }
+
   function openProject(projectId: string) {
     navigate(`/cashflow/projects/${projectId}?ym=${encodeURIComponent(yearMonth)}&view=compare#projection-actual-comparison`);
   }
@@ -314,6 +382,36 @@ export function CashflowWeeklyPage() {
         <span className="pb-2 text-[11px] text-muted-foreground">{filteredProjects.length}개 프로젝트</span>
       </div>
 
+      {ownerLinkIssues.length > 0 ? (
+        <Card className="border-red-200 bg-red-50/40">
+          <CardContent className="space-y-2 p-3">
+            <div>
+              <p className="text-[12px] font-semibold text-red-800">People 연결 필요 {ownerLinkIssues.length}건</p>
+              <p className="text-[11px] text-red-700">레거시 이름은 표시만 하고, 선택한 People UID로만 프로젝트 담당자를 연결합니다.</p>
+            </div>
+            <div className="max-h-44 space-y-2 overflow-auto">
+              {ownerLinkIssues.map((issue) => (
+                <div key={issue.key} className="grid items-center gap-2 rounded-md border border-red-100 bg-white px-2 py-2 md:grid-cols-[minmax(150px,1fr)_70px_minmax(160px,1fr)_minmax(180px,1fr)]">
+                  <span className="truncate text-[11px] font-medium">{issue.project.name}</span>
+                  <span className="text-[11px] text-slate-600">{issue.role}</span>
+                  <span className="truncate text-[11px] text-red-700">기존값: {issue.legacyName || issue.uid}</span>
+                  <Select
+                    value={undefined}
+                    disabled={ownerLinkingKey === `${issue.project.id}:${issue.role}`}
+                    onValueChange={(uid) => void linkProjectOwner(issue.project, issue.role, uid)}
+                  >
+                    <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="People에서 연결" /></SelectTrigger>
+                    <SelectContent>
+                      {ownerOptions.map((owner) => <SelectItem key={owner.uid} value={owner.uid}>{owner.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           {overviewError ? <div role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-[11px] text-amber-900">{overviewError}</div> : null}
@@ -338,13 +436,15 @@ export function CashflowWeeklyPage() {
                 {filteredProjects.map((project) => {
                   const projectStatuses = statuses[project.id];
                   const canApprove = user?.uid === project.executiveApproverId;
+                  const executiveApprover = resolveCashflowOwner(project.executiveApproverId, project.executiveApproverName, ownerOptions);
+                  const manager = resolveCashflowOwner(project.managerId, project.managerName, ownerOptions);
                   return (
                     <tr key={project.id} className="border-t border-border/30 transition-colors hover:bg-muted/20">
                       <td className="sticky left-0 z-20 bg-white px-3 py-2">
                         <p className="truncate font-semibold">{project.name}</p>
                       </td>
-                      <td className="sticky left-[180px] z-20 bg-white px-2 py-2 font-medium">{formatCashflowExecutiveApprover(project, members)}</td>
-                      <td className="sticky left-[284px] z-20 bg-white px-2 py-2 font-medium">{formatCashflowManager(project)}</td>
+                      <td className="sticky left-[180px] z-20 bg-white px-2 py-2 font-medium">{executiveApprover.label || <span className="text-red-700">연결 필요</span>}</td>
+                      <td className="sticky left-[284px] z-20 bg-white px-2 py-2 font-medium">{manager.label || <span className="text-red-700">연결 필요</span>}</td>
                       <td className="px-3 py-3 text-center">
                         {statusErrors[project.id] ? <span className="text-amber-700">정보 확인 필요</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
