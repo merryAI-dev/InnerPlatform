@@ -590,7 +590,7 @@ describe('project route helpers', () => {
         expect.objectContaining({ paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, isSettled: false }),
       ],
     });
-    expect(patch).not.toHaveProperty('finalPaymentExpectedWeek');
+    expect(patch.finalPaymentExpectedWeek).toBe('27-12-4');
     expect(patch.financialYears?.[0]?.finalPaymentExpectedWeek).toBe('26-8-1');
   });
 
