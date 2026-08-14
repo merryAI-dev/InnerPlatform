@@ -603,35 +603,46 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('reads a 61-project weekly overview and exposes the previous month as the monthly-close target', async () => {
+  it('reads one 61-project weekly overview and exposes its monthly status as the previous-month close', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `project-${index + 1}`);
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-1-2026-08', {
+      requestId: 'project-1-2026-08', projectId: 'project-1', yearMonth: '2026-08', status: 'PENDING',
+    });
     const canonical = {
       version: '1',
       yearMonth: '2026-08',
-      items: [{ projectId: 'project-1', settlementStatuses: null, projectionActualSummary: null }],
-      errors: [{ projectId: 'project-1', code: 'STATUS_UNAVAILABLE' }],
+      items: [{
+        projectId: 'project-1',
+        settlementStatuses: {
+          projectId: 'project-1', yearMonth: '2026-08',
+          items: [{ period: 'MONTH', status: 'COMPLETED' }, { period: 'WEEK_1', status: 'COMPLETED' }],
+        },
+        projectionActualSummary: null,
+      }],
+      errors: [],
     };
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
 
     const response = await request(app)
       .post('/api/v1/cashflow/weekly-overview')
       .send({ projectIds, yearMonth: '2026-08' })
       .expect(200);
 
-    expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월', items: canonical.items });
-    expect(response.body.errors).toHaveLength(2);
+    expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월' });
+    expect(response.body.items[0].settlementStatuses.items).toEqual([
+      { period: 'MONTH', status: 'PENDING_APPROVAL' },
+      { period: 'WEEK_1', status: 'COMPLETED' },
+    ]);
+    expect(response.body.errors).toEqual([]);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(fetchImpl).toHaveBeenNthCalledWith(1,
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(
       'http://jvm-weekly.local/api/v1/cashflow/weekly-overview',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
-    );
-    expect(fetchImpl).toHaveBeenNthCalledWith(2,
-      'http://jvm-weekly.local/api/v1/cashflow/settlement-statuses/batch',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-07' }) }),
     );
   });
 

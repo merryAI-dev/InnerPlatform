@@ -162,8 +162,11 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
   if (!db?.doc) return result;
   await Promise.all(projects.map(async (project) => {
     const projectId = readOptionalText(project?.projectId);
-    const yearMonth = readOptionalText(project?.yearMonth);
-    if (!projectId || !yearMonth || !Array.isArray(project.items)) return;
+    const yearMonth = readOptionalText(project?.yearMonth) || readOptionalText(result?.yearMonth);
+    const statusItems = Array.isArray(project?.items)
+      ? project.items
+      : project?.settlementStatuses?.items;
+    if (!projectId || !yearMonth || !Array.isArray(statusItems)) return;
     const snapshot = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
     if (!snapshot.exists) return;
     const requestStatus = readOptionalText(snapshot.data()?.status);
@@ -172,7 +175,12 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
       : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
         ? 'PENDING_APPROVAL'
         : 'WAITING_FOR_UPDATE';
-    project.items = project.items.map((item) => item.period === 'MONTH' ? { ...item, status } : item);
+    const alignedItems = statusItems.map((item) => item.period === 'MONTH' ? { ...item, status } : item);
+    if (Array.isArray(project?.items)) {
+      project.items = alignedItems;
+    } else {
+      project.settlementStatuses = { ...project.settlementStatuses, items: alignedItems };
+    }
   }));
   return result;
 }
@@ -3042,50 +3050,27 @@ export function mountJvmWeeklyApiRoutes(app, {
       return { projectIds, yearMonth };
     });
     const monthCloseTargetYearMonth = previousYearMonth(yearMonth);
-    const [weeklyResult, monthStatusResult] = await trace.measure('java_overview', () => Promise.all([
-      proxyJavaWeeklyRequest({
-        context: req.context,
-        method: 'POST',
-        path: '/api/v1/cashflow/weekly-overview',
-        command: 'read_cashflow_weekly_overview',
-        body: { projectIds, yearMonth },
-        mutation: false,
-      }),
-      proxyJavaWeeklyRequest({
-        context: req.context,
-        method: 'POST',
-        path: '/api/v1/cashflow/settlement-statuses/batch',
-        command: 'read_cashflow_settlement_statuses_batch',
-        body: { projectIds, yearMonth: monthCloseTargetYearMonth },
-        mutation: false,
-      }),
-    ]), { projectCount: projectIds.length });
-    const alignedMonthStatusResult = await alignMonthSettlementStatus(db, req.context.tenantId, monthStatusResult);
-    const monthStatuses = new Map((Array.isArray(alignedMonthStatusResult?.items) ? alignedMonthStatusResult.items : []).map((item) => [
-      item?.projectId,
-      Array.isArray(item?.items)
-        ? item.items.find((status) => status?.period === 'MONTH') || null
-        : null,
-    ]));
+    const weeklyResult = await trace.measure('java_overview', () => proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'POST',
+      path: '/api/v1/cashflow/weekly-overview',
+      command: 'read_cashflow_weekly_overview',
+      body: { projectIds, yearMonth },
+      mutation: false,
+    }), { projectCount: projectIds.length });
+    const alignedWeeklyResult = await alignMonthSettlementStatus(db, req.context.tenantId, weeklyResult);
     const combined = {
-      ...weeklyResult,
+      ...alignedWeeklyResult,
       version: '3',
       yearMonth,
       monthCloseTargetYearMonth,
       monthCloseTargetLabel: `${Number(monthCloseTargetYearMonth.slice(5, 7))}월`,
-      items: (Array.isArray(weeklyResult?.items) ? weeklyResult.items : []).map((item) => ({
+      items: (Array.isArray(alignedWeeklyResult?.items) ? alignedWeeklyResult.items : []).map((item) => ({
         ...item,
-        settlementStatuses: item?.settlementStatuses ? {
-          ...item.settlementStatuses,
-          items: item.settlementStatuses.items.map((status) => status?.period === 'MONTH'
-            ? (monthStatuses.get(item.projectId) || status)
-            : status),
-        } : null,
         projectionActualSummary: null,
       })),
       errors: [
-        ...(Array.isArray(weeklyResult?.errors) ? weeklyResult.errors : []),
-        ...(Array.isArray(alignedMonthStatusResult?.errors) ? alignedMonthStatusResult.errors : []),
+        ...(Array.isArray(alignedWeeklyResult?.errors) ? alignedWeeklyResult.errors : []),
       ],
     };
     trace.emit('response', {

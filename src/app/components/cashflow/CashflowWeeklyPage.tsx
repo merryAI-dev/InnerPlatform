@@ -321,9 +321,9 @@ export function CashflowWeeklyPage() {
             <table className="w-full min-w-[1440px] border-separate border-spacing-0 text-[11px]">
               <thead>
                 <tr className="bg-muted/30">
-                  <th className="sticky left-0 top-0 z-40 min-w-[220px] border-b bg-slate-50 px-4 py-2 text-left font-bold">프로젝트</th>
-                  <th className="sticky left-[220px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">조직장</th>
-                  <th className="sticky left-[340px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">책임자</th>
+                  <th className="sticky left-0 top-0 z-40 min-w-[180px] border-b bg-slate-50 px-3 py-2 text-left font-bold">프로젝트</th>
+                  <th className="sticky left-[180px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">조직장</th>
+                  <th className="sticky left-[284px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">책임자</th>
                   <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{overview?.monthCloseTargetLabel || '직전 월'} 결산</th>
                   <th className="sticky top-0 z-30 min-w-[140px] border-b border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
                   {monthWeeks.map((week) => (
@@ -340,12 +340,11 @@ export function CashflowWeeklyPage() {
                   const canApprove = user?.uid === project.executiveApproverId;
                   return (
                     <tr key={project.id} className="border-t border-border/30 transition-colors hover:bg-muted/20">
-                      <td className="sticky left-0 z-20 bg-white px-4 py-3">
+                      <td className="sticky left-0 z-20 bg-white px-3 py-2">
                         <p className="truncate font-semibold">{project.name}</p>
-                        <p className="truncate text-[10px] text-muted-foreground">{project.department} · {project.clientOrg}</p>
                       </td>
-                      <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{formatCashflowExecutiveApprover(project, members)}</td>
-                      <td className="sticky left-[340px] z-20 bg-white px-3 py-3 font-medium">{formatCashflowManager(project)}</td>
+                      <td className="sticky left-[180px] z-20 bg-white px-2 py-2 font-medium">{formatCashflowExecutiveApprover(project, members)}</td>
+                      <td className="sticky left-[284px] z-20 bg-white px-2 py-2 font-medium">{formatCashflowManager(project)}</td>
                       <td className="px-3 py-3 text-center">
                         {statusErrors[project.id] ? <span className="text-amber-700">정보 확인 필요</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
@@ -353,7 +352,7 @@ export function CashflowWeeklyPage() {
                             period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
-                            onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}
+                            onAction={(action) => void transition(project.id, 'MONTH', action, yearMonth)}
                           />
                         )}
                         <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
