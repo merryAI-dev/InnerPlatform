@@ -84,10 +84,7 @@ public final class CashflowMonthReopenPolicy {
         String nextSettlementMonth = "";
         if (approved && facts.cumulative()) {
             nextClosedThrough = YearMonth.parse(dataYearMonth).minusMonths(1).toString();
-            if (facts.settlementMonth().isBlank()
-                || facts.settlementMonth().equals(facts.closedThrough())) {
-                nextSettlementMonth = nextClosedThrough;
-            }
+            nextSettlementMonth = YearMonth.parse(nextClosedThrough).plusMonths(1).toString();
         }
 
         return new DecisionTransition(

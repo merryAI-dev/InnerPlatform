@@ -94,6 +94,7 @@ public record CashflowMonthDashboardSourceResponse(
         String availability,
         String status,
         String fromMonth,
+        String settlementMonth,
         String closedThrough,
         String rootHash,
         Long headRevision
@@ -103,7 +104,7 @@ public record CashflowMonthDashboardSourceResponse(
         }
 
         public static CumulativeClose unavailable(String availability) {
-            return new CumulativeClose(availability, null, null, null, null, null);
+            return new CumulativeClose(availability, null, null, null, null, null, null);
         }
     }
     public record SnapshotCompatibility(

@@ -38,7 +38,8 @@ public record CashflowMonthCloseState(
     String reopenDecision,
     String reopenDecisionReason,
     String reopenDecidedAt,
-    String reopenDecidedByUid
+    String reopenDecidedByUid,
+    boolean additionalHistoricalEvidence
 ) {
     public CashflowMonthCloseState {
         lastAmendmentEvidence = immutableCopy(lastAmendmentEvidence);
@@ -72,7 +73,8 @@ public record CashflowMonthCloseState(
             && blank(reopenDecision)
             && blank(reopenDecisionReason)
             && blank(reopenDecidedAt)
-            && blank(reopenDecidedByUid);
+            && blank(reopenDecidedByUid)
+            && !additionalHistoricalEvidence;
     }
 
     private static boolean blank(String value) {

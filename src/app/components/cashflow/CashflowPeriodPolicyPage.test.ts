@@ -107,6 +107,7 @@ const snapshot: CashflowPeriodPolicyResponse = {
     executiveApprover: {
       status: 'LINKED', statusLabel: '조직장 연결됨', tone: 'positive', uid: 'people-uid-a', personId: 'person-a', displayName: '김조직장',
       expectedVersion: 7, expectedVersionLabel: 'version 7',
+      changeAction: { enabled: true, status: 'AVAILABLE', tone: 'positive', guide: '' },
     },
     forecastVariance: {
       status: 'AVAILABLE', statusLabel: '편차 비교 가능', tone: 'positive', eligibleCount: 1, coverageCount: 1,
@@ -216,6 +217,36 @@ describe('CashflowPeriodPolicyView', () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain('기간·마감 정책 접근 권한이 없습니다');
     expect(html).not.toContain('다시 불러오기');
+  });
+
+  it('서버가 조직장 변경을 잠그면 안내를 표시하고 폼 입력과 submit을 모두 차단한다', () => {
+    const html = render({
+      kind: 'ready',
+      snapshot: {
+        ...snapshot,
+        items: [{
+          ...snapshot.items[0],
+          executiveApprover: {
+            ...snapshot.items[0].executiveApprover,
+            changeAction: {
+              enabled: false,
+              status: 'LOCKED',
+              tone: 'caution',
+              guide: '승인 대기 중인 월 결산을 먼저 완료하거나 취소해 주세요.',
+            },
+          },
+        }],
+      } as CashflowPeriodPolicyResponse,
+    });
+
+    expect(html).toContain('승인 대기 중인 월 결산을 먼저 완료하거나 취소해 주세요.');
+    expect(html).toMatch(/<select(?=[^>]*id="executive-approver-project-a")(?=[^>]*disabled="")[^>]*>/);
+    expect(html).toMatch(/<input(?=[^>]*placeholder="People UID 연결 근거")(?=[^>]*disabled="")[^>]*>/);
+    expect(html).toMatch(/<button(?=[^>]*type="submit")(?=[^>]*disabled="")[^>]*>연결<\/button>/);
+
+    const sectionsSource = readFileSync(resolve(import.meta.dirname, 'CashflowPeriodPolicySections.tsx'), 'utf8');
+    expect(sectionsSource).toContain('if (!item.executiveApprover.changeAction.enabled) return;');
+    expect(sectionsSource).not.toContain("changeAction.status === 'LOCKED'");
   });
 
   it('renders the server-provided ERP next action for unrepairable evidence without a recovery button', () => {

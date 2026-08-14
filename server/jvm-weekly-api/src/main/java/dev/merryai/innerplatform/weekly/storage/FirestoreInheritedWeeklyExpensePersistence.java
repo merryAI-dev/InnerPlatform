@@ -99,6 +99,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private static final String CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION = "cashflow-month-close-v1";
     private static final String CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION = "cashflow-cumulative-close-v2";
     private static final String CASHFLOW_FORECAST_BASELINE_CONTRACT_VERSION = "cashflow-forecast-baseline-v1";
+    private static final List<String> CASHFLOW_MONTH_CLOSE_MAP_EVIDENCE_FIELDS = List.of(
+        "snapshot", "previousSnapshot", "lastAmendmentEvidence",
+        "reopenRequest", "reopenDecision", "reopenContext"
+    );
+    private static final List<String> CASHFLOW_MONTH_CLOSE_TEXT_EVIDENCE_FIELDS = List.of(
+        "snapshotHash", "previousSnapshotHash", "latestVersionId",
+        "closedAt", "closedByUid", "closedByName",
+        "reopenReason", "reopenRequestedAt", "reopenRequestedByUid",
+        "reopenDecisionReason", "reopenDecidedAt", "reopenDecidedByUid",
+        "lastAmendmentAt", "lastAmendmentByUid", "lastAmendmentByName",
+        "lastAmendmentReason", "lastAmendmentDeadline"
+    );
     static final List<String> CASHFLOW_MONTH_CLOSE_READ_FIELDS = List.of(
         "contractVersion", "yearMonth", "revision", "reopenCount", "status",
         "postDeadlineAmendmentWarningCount"
@@ -652,9 +664,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             DocumentReference closeRef = db.document(monthlyClosePath(actor.tenantId(), projectId, yearMonth));
             DocumentSnapshot closeSnapshot = get(closeRef);
             Map<String, Object> close = closeSnapshot.exists() ? data(closeSnapshot) : Map.of();
-            if (!close.isEmpty()) {
-                canonicalMonthStatus(close, actor.tenantId(), projectId, yearMonth);
-            }
             Map<String, Object> head = cumulativeCloseHead(actor.tenantId(), projectId);
             if (head.isEmpty()) {
                 if (!close.isEmpty() && !isPristineOpenMonthClose(
@@ -668,6 +677,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 }
                 if (states != null) states.put(key, "OPEN");
                 continue;
+            }
+            if (!close.isEmpty()) {
+                canonicalMonthStatus(close, actor.tenantId(), projectId, yearMonth);
             }
             boolean cumulativeClosed = isCumulativeClosed(actor.tenantId(), projectId, yearMonth);
             if (states != null) states.put(key, "OPEN");
@@ -1434,7 +1446,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             head.put("status", "CLOSED");
             head.put("fromMonth", CASHFLOW_CUMULATIVE_BASELINE.toString());
             head.put("closedThrough", cumulative.throughMonth());
-            head.put("settlementMonth", request.yearMonth());
+            head.put("settlementMonth", YearMonth.parse(cumulative.throughMonth()).plusMonths(1).toString());
             head.put("rootHash", request.manifestHash());
             head.put("revision", cumulative.headRevision());
             head.put("requestId", request.requestId());
@@ -2881,9 +2893,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Map<String, CashflowLedgerSource> result = new LinkedHashMap<>();
         for (Map.Entry<String, List<DocumentSnapshot>> entry : documentsByProject.entrySet()) {
-            result.put(entry.getKey(), cashflowLedgerSource(
+            CashflowLedgerSource source = cashflowLedgerSource(
                 tenantId, entry.getKey(), entry.getValue(), fromMonth, throughMonth, null
-            ));
+            );
+            if (source != null) result.put(entry.getKey(), source);
         }
         return Map.copyOf(result);
     }
@@ -2918,9 +2931,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Map<String, CashflowLedgerSource> result = new LinkedHashMap<>();
         for (Map.Entry<String, Integer> entry : weeklyYearsByProject.entrySet()) {
-            result.put(entry.getKey(), cashflowLedgerSource(
+            CashflowLedgerSource source = cashflowLedgerSource(
                 tenantId, entry.getKey(), documentsByProject.get(entry.getKey()), fromMonth, throughMonth, entry.getValue()
-            ));
+            );
+            if (source != null) result.put(entry.getKey(), source);
         }
         return Map.copyOf(result);
     }
@@ -2970,6 +2984,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 }
             }
         }
+        if (documents.isEmpty()) return null;
         return new CashflowLedgerSource(
             projection,
             actual,
@@ -3210,8 +3225,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private boolean isCumulativeClosed(String tenantId, String projectId, String yearMonth) {
         Map<String, Object> head = cumulativeCloseHead(tenantId, projectId);
         YearMonth target = YearMonth.parse(yearMonth);
+        YearMonth settlementMonth = YearMonth.parse(text(head.get("settlementMonth"), ""));
         YearMonth closedThrough = YearMonth.parse(text(head.get("closedThrough"), ""));
-        return target.getYear() == closedThrough.getYear() && !target.isAfter(closedThrough);
+        return target.getYear() == settlementMonth.getYear() && !target.isAfter(closedThrough);
     }
 
     private Map<String, Object> cumulativeCloseHead(String tenantId, String projectId) {
@@ -3250,8 +3266,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             return false;
         }
         try {
+            YearMonth settlementMonth = requireYearMonth(text(head.get("settlementMonth"), ""));
             YearMonth closedThrough = requireYearMonth(text(head.get("closedThrough"), ""));
-            if (closedThrough.isBefore(CASHFLOW_CUMULATIVE_BASELINE)) return false;
+            if (closedThrough.isBefore(CASHFLOW_CUMULATIVE_BASELINE)
+                || !closedThrough.equals(settlementMonth.minusMonths(1))) return false;
             Object value = head.get("revision");
             if (!(value instanceof Number number) || !isFinite(number)) return false;
             long revision = new BigDecimal(number.toString()).longValueExact();
@@ -3339,14 +3357,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String yearMonth,
         Map<String, Object> close
     ) {
-        canonicalMonthStatus(close, tenantId, projectId, yearMonth);
-        return toMonthCloseRecord(
-            tenantId,
-            projectId,
-            yearMonth,
-            readableMonthClose(close, tenantId, projectId, yearMonth),
-            0
-        ).isPristineOpen();
+        try {
+            return toMonthCloseRecord(
+                tenantId,
+                projectId,
+                yearMonth,
+                readableMonthClose(close, tenantId, projectId, yearMonth),
+                0
+            ).isPristineOpen();
+        } catch (WeeklyExpenseConflictException error) {
+            return false;
+        }
     }
 
     private void requireMutableMonthStatus(String status) {
@@ -4172,8 +4193,24 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(reopenDecision.get("decision"), ""),
             text(reopenDecision.get("reason"), ""),
             text(reopenDecision.get("decidedAt"), ""),
-            text(reopenDecision.get("decidedByUid"), "")
+            text(reopenDecision.get("decidedByUid"), ""),
+            hasAdditionalMonthCloseHistoricalEvidence(document)
         );
+    }
+
+    private boolean hasAdditionalMonthCloseHistoricalEvidence(Map<String, Object> document) {
+        for (String field : CASHFLOW_MONTH_CLOSE_MAP_EVIDENCE_FIELDS) {
+            if (!document.containsKey(field)) continue;
+            Object value = document.get(field);
+            if (!(value instanceof Map<?, ?> evidence) || !evidence.isEmpty()) return true;
+        }
+        for (String field : CASHFLOW_MONTH_CLOSE_TEXT_EVIDENCE_FIELDS) {
+            if (!document.containsKey(field)) continue;
+            Object value = document.get(field);
+            if (!(value instanceof String evidence) || !evidence.isBlank()) return true;
+        }
+        return document.containsKey("lastAmendmentPostDeadline")
+            && !Boolean.FALSE.equals(document.get("lastAmendmentPostDeadline"));
     }
 
     private LocalDate monthCloseDeadline(YearMonth cycleOrTargetMonth, boolean cumulative) {

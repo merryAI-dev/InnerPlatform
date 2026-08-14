@@ -1733,6 +1733,8 @@ class WeeklyExpenseControllerTest {
             .isEqualTo("MONTH_CLOSE_HISTORY_STATUS_DIFFERS_FROM_CUMULATIVE_AUTHORITY");
         assertThat(json.path("monthStatusEvidence").path("closedThrough").asText())
             .isEqualTo("2026-07");
+        assertThat(json.path("cumulativeClose").path("settlementMonth").asText())
+            .isEqualTo("2026-08");
         assertThat(json.path("reopenRequest").path("enabled").asBoolean()).isTrue();
     }
 
@@ -3425,7 +3427,7 @@ class WeeklyExpenseControllerTest {
             response.evaluatedBusinessDate(), response.closeDeadline(), response.late(),
             response.closedAt(), response.closedByUid(), response.closedByName(), response.reopenReason(),
             response.reopenRequestedAt(), response.reopenRequestedByUid(), response.reopenDecision(),
-            response.reopenDecisionReason(), response.reopenDecidedAt(), response.reopenDecidedByUid()
+            response.reopenDecisionReason(), response.reopenDecidedAt(), response.reopenDecidedByUid(), false
         );
     }
 

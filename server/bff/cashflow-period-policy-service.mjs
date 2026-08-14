@@ -950,21 +950,14 @@ function buildIdentityIssue(projectId, identity) {
 
 async function assertRuntimeSuperadmin(db, tenantId, actorId) {
   try {
-    const snapshot = await db.doc(`orgs/${tenantId}/members/${actorId}`).get();
-    const member = snapshot.exists ? snapshot.data() || {} : null;
-    if (
-      !member
-      || readOptionalText(member.uid) !== actorId
-      || normalizeRole(member.role) !== 'admin'
-      || readOptionalText(member.status).toUpperCase() !== ACTIVE_MEMBER_STATUS
-    ) {
+    await assertLinkedActivePeopleUid({ db, tenantId, peopleUid: actorId });
+  } catch (error) {
+    if (readOptionalText(error?.message).includes('--people-uid')) {
       throw applicationError(
         'runtime_superadmin_required',
-        'Runtime superadmin member 권한이 필요합니다.',
+        'People UID가 정확히 연결된 ACTIVE runtime admin 권한이 필요합니다.',
       );
     }
-  } catch (error) {
-    if (error instanceof CashflowPeriodPolicyApplicationError) throw error;
     throw applicationError(
       'runtime_superadmin_store_unavailable',
       'Runtime superadmin 권한 저장소를 확인할 수 없습니다.',
