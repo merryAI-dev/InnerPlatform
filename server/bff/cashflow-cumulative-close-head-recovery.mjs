@@ -10,6 +10,7 @@ import { readCashflowCumulativeCloseAuthority } from './cashflow-close-calendar.
 
 const RECOVERY_EVIDENCE_CONTRACT = 'cashflow-cumulative-close-head-recovery-evidence-v1';
 const RESET_TO_RECLOSE_EVIDENCE_CONTRACT = 'cashflow-cumulative-close-reset-to-reclose-evidence-v1';
+const RECOVERY_EVIDENCE_QUERY_LIMIT = 250;
 const WRITABLE_PLAN_STATUSES = new Set(['READY', 'REPAIR_READY', 'AUTHORITY_PRESENT']);
 const HEAD_FIELDS = [
   'contractVersion',
@@ -767,11 +768,14 @@ export async function applyCumulativeCloseHeadPlan({ db, tenantId, plan, options
     const refs = rows.map((row) => ({
       head: db.doc(`orgs/${normalizedTenantId}/cashflow_cumulative_close_heads/${row.projectId}`),
       monthlyCloses: db.collection(`orgs/${normalizedTenantId}/monthly_closes`)
-        .where('projectId', '==', row.projectId),
+        .where('projectId', '==', row.projectId)
+        .limit(RECOVERY_EVIDENCE_QUERY_LIMIT + 1),
       monthlyCloseVersions: db.collection(`orgs/${normalizedTenantId}/monthly_close_versions`)
-        .where('projectId', '==', row.projectId),
+        .where('projectId', '==', row.projectId)
+        .limit(RECOVERY_EVIDENCE_QUERY_LIMIT + 1),
       requests: db.collection(`orgs/${normalizedTenantId}/cashflow_month_close_requests`)
-        .where('projectId', '==', row.projectId),
+        .where('projectId', '==', row.projectId)
+        .limit(RECOVERY_EVIDENCE_QUERY_LIMIT + 1),
     }));
     const snapshots = await Promise.all(refs.map(async (rowRefs) => {
       const [head, monthlyCloses, monthlyCloseVersions, requests] = await Promise.all([
@@ -780,6 +784,13 @@ export async function applyCumulativeCloseHeadPlan({ db, tenantId, plan, options
         transaction.get(rowRefs.monthlyCloseVersions),
         transaction.get(rowRefs.requests),
       ]);
+      if (
+        monthlyCloses.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
+        || monthlyCloseVersions.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
+        || requests.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
+      ) {
+        throw new Error('cashflow recovery evidence query limit exceeded');
+      }
       return { head, monthlyCloses, monthlyCloseVersions, requests };
     }));
     const toWrite = [];
@@ -909,15 +920,23 @@ export async function applyCumulativeCloseResetToReclose({
     const headRef = db.doc(`${basePath}/cashflow_cumulative_close_heads/${normalizedProjectId}`);
     const monthlyCloseRef = db.doc(`${basePath}/monthly_closes/${monthlyCloseId}`);
     const versionsQuery = db.collection(`${basePath}/monthly_close_versions`)
-      .where('projectId', '==', normalizedProjectId);
+      .where('projectId', '==', normalizedProjectId)
+      .limit(RECOVERY_EVIDENCE_QUERY_LIMIT + 1);
     const requestsQuery = db.collection(`${basePath}/cashflow_month_close_requests`)
-      .where('projectId', '==', normalizedProjectId);
+      .where('projectId', '==', normalizedProjectId)
+      .limit(RECOVERY_EVIDENCE_QUERY_LIMIT + 1);
     const [headSnapshot, monthlyCloseSnapshot, versionsSnapshot, requestsSnapshot] = await Promise.all([
       transaction.get(headRef),
       transaction.get(monthlyCloseRef),
       transaction.get(versionsQuery),
       transaction.get(requestsQuery),
     ]);
+    if (
+      versionsSnapshot.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
+      || requestsSnapshot.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
+    ) {
+      throw new Error('cashflow reset evidence query limit exceeded');
+    }
     const rawHead = headSnapshot.exists ? headSnapshot.data() || {} : null;
     const rawMonthlyClose = monthlyCloseSnapshot.exists ? monthlyCloseSnapshot.data() || {} : null;
     const [plannedLiveRow] = buildCumulativeCloseResetToReclosePlan({

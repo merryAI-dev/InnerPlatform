@@ -12,7 +12,7 @@ import {
   mergeAuthGovernanceDirectory,
   parseBootstrapAdminEmails,
 } from '../auth-governance.mjs';
-import { buildRequestFingerprint } from '../utils.mjs';
+import { buildRequestFingerprint, stableStringify } from '../utils.mjs';
 
 async function listAllAuthUsers(authAdminService) {
   if (!authAdminService || typeof authAdminService.listUsers !== 'function') {
@@ -123,6 +123,9 @@ function bulkDeepSyncFailure(error) {
     forbidden: '이 권한을 지정할 수 없습니다. 관리자 권한을 확인해 주세요.',
     member_authority_required: '현재 관리자 권한을 확인할 수 없습니다. 다시 로그인한 뒤 시도해 주세요.',
     last_admin_lockout: '마지막 관리자의 권한은 변경할 수 없습니다.',
+    people_uid_unlinked: '대상 구성원이 People 명부의 UID와 연결되지 않았습니다.',
+    people_uid_ambiguous: '대상 UID에 둘 이상의 People 레코드가 연결되어 있습니다.',
+    auth_governance_target_changed: '대상 구성원 정보가 방금 변경되었습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.',
     not_found: '대상 구성원을 찾지 못했습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.',
   };
   return {
@@ -185,7 +188,24 @@ export function mountMemberRoutes(app, {
     const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
     const canonicalRef = db.doc(`orgs/${tenantId}/members/${plan.canonicalDocId}`);
     const actorRef = db.doc(`orgs/${tenantId}/members/${actorId}`);
+    const targetPeopleQuery = db.collection(`orgs/${tenantId}/persons`)
+      .where('uid', '==', plan.canonicalPatch.uid)
+      .limit(2);
     const adminsQuery = db.collection(`orgs/${tenantId}/members`).where('role', '==', 'admin');
+    const expectedTargetDocs = new Map(
+      (entry.allMemberDocs || []).map((member) => [
+        readOptionalText(member.docId),
+        stableStringify(member.data || {}),
+      ]).filter(([docId]) => docId),
+    );
+    if (!expectedTargetDocs.has(plan.canonicalDocId)) {
+      expectedTargetDocs.set(plan.canonicalDocId, null);
+    }
+    const targetDocEntries = [...expectedTargetDocs.entries()].map(([docId, fingerprint]) => ({
+      docId,
+      fingerprint,
+      ref: db.doc(`orgs/${tenantId}/members/${docId}`),
+    }));
     const claimsPending = Boolean(plan.claims && entry.authUid);
     const authClaimsSync = claimsPending ? {
       status: 'PENDING',
@@ -224,9 +244,11 @@ export function mountMemberRoutes(app, {
       if (idempotency.mode === 'conflict' || idempotency.mode === 'in_progress') {
         throw createHttpError(409, idempotency.reason, `idempotency_${idempotency.mode}`);
       }
-      const [actorSnapshot, adminsSnapshot] = await Promise.all([
+      const [actorSnapshot, adminsSnapshot, targetPeopleSnapshot, ...targetSnapshots] = await Promise.all([
         tx.get(actorRef),
         tx.get(adminsQuery),
+        tx.get(targetPeopleQuery),
+        ...targetDocEntries.map(({ ref }) => tx.get(ref)),
       ]);
       const actor = actorSnapshot.exists ? actorSnapshot.data() || {} : {};
       if (
@@ -235,6 +257,25 @@ export function mountMemberRoutes(app, {
         || normalizeRole(actor.role) !== 'admin'
       ) {
         throw createHttpError(403, 'Exact active member authority is required', 'member_authority_required');
+      }
+      if (targetPeopleSnapshot.size !== 1) {
+        throw createHttpError(
+          409,
+          targetPeopleSnapshot.size > 1 ? 'People UID is ambiguous' : 'People UID is not linked',
+          targetPeopleSnapshot.size > 1 ? 'people_uid_ambiguous' : 'people_uid_unlinked',
+        );
+      }
+      const targetChanged = targetDocEntries.some(({ fingerprint }, index) => {
+        const snapshot = targetSnapshots[index];
+        const currentFingerprint = snapshot.exists ? stableStringify(snapshot.data() || {}) : null;
+        return currentFingerprint !== fingerprint;
+      });
+      if (targetChanged) {
+        throw createHttpError(
+          409,
+          'Auth governance target changed after it was loaded',
+          'auth_governance_target_changed',
+        );
       }
       if (targetRole !== 'admin') {
         const changedDocIds = new Set([plan.canonicalDocId, ...plan.legacyPatches.map((legacy) => legacy.docId)]);

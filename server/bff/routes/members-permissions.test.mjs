@@ -83,7 +83,7 @@ describe('member permission overview', () => {
 
 function createRoleHarness({
   patch = {}, failAudit = false, failAuditEntityId = '', failClaims = false, extraAuthUsers = [],
-  failOuterCompleteOnce = false,
+  failOuterCompleteOnce = false, beforeTransaction = null,
 } = {}) {
   const store = new Map(Object.entries({
     'orgs/tenant-a/members/admin-1': {
@@ -92,6 +92,7 @@ function createRoleHarness({
     'orgs/tenant-a/members/target-1': {
       uid: 'target-1', email: 'target@example.com', role: 'pm', status: 'ACTIVE',
     },
+    'orgs/tenant-a/persons/person-admin-1': { personId: 'person-admin-1', uid: 'admin-1' },
     'orgs/tenant-a/persons/person-target-1': { personId: 'person-target-1', uid: 'target-1' },
     ...patch,
   }));
@@ -134,6 +135,7 @@ function createRoleHarness({
     doc,
     collection,
     async runTransaction(handler) {
+      if (beforeTransaction) await beforeTransaction({ store });
       const writes = [];
       const result = await handler({
         get: (ref) => ref.get(),
@@ -283,6 +285,69 @@ describe('member role authority', () => {
     expect(harness.claimsCalls).toHaveLength(0);
   });
 
+  it('rejects deep sync when the target UID is not linked to exactly one People record', async () => {
+    const unlinked = createRoleHarness({
+      patch: {
+        'orgs/tenant-a/persons/person-target-1': { personId: 'person-target-1', uid: 'other-target' },
+      },
+    });
+    const unlinkedResponse = await request(unlinked.app)
+      .post('/api/v1/admin/auth-governance/users/target%40example.com/deep-sync')
+      .send({ role: 'admin', reason: 'People UID 연결 검증' });
+
+    expect(unlinkedResponse.status).toBe(409);
+    expect(unlinkedResponse.body.error).toBe('people_uid_unlinked');
+    expect(unlinked.store.get('orgs/tenant-a/members/target-1')).toMatchObject({ role: 'pm' });
+    expect(unlinked.audits).toHaveLength(0);
+    expect(unlinked.claimsCalls).toHaveLength(0);
+
+    const ambiguous = createRoleHarness({
+      patch: {
+        'orgs/tenant-a/persons/person-target-2': { personId: 'person-target-2', uid: 'target-1' },
+      },
+    });
+    const ambiguousResponse = await request(ambiguous.app)
+      .post('/api/v1/admin/auth-governance/users/target%40example.com/deep-sync')
+      .send({ role: 'admin', reason: 'People UID 중복 검증' });
+
+    expect(ambiguousResponse.status).toBe(409);
+    expect(ambiguousResponse.body.error).toBe('people_uid_ambiguous');
+    expect(ambiguous.store.get('orgs/tenant-a/members/target-1')).toMatchObject({ role: 'pm' });
+    expect(ambiguous.audits).toHaveLength(0);
+    expect(ambiguous.claimsCalls).toHaveLength(0);
+  });
+
+  it('rejects a stale deep sync plan without overwriting a concurrent member change', async () => {
+    const harness = createRoleHarness({
+      patch: {
+        'orgs/tenant-a/members/target-1': {
+          uid: 'target-1', email: 'target@example.com', role: 'pm', status: 'ACTIVE', projectIds: ['project-before'],
+        },
+      },
+      beforeTransaction({ store }) {
+        store.set('orgs/tenant-a/members/target-1', {
+          ...store.get('orgs/tenant-a/members/target-1'),
+          status: 'INACTIVE',
+          projectIds: ['project-concurrent'],
+          updatedAt: '2026-08-14T01:02:02.000Z',
+        });
+      },
+    });
+    const response = await request(harness.app)
+      .post('/api/v1/admin/auth-governance/users/target%40example.com/deep-sync')
+      .send({ role: 'finance', reason: '동시 변경 보호' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('auth_governance_target_changed');
+    expect(harness.store.get('orgs/tenant-a/members/target-1')).toMatchObject({
+      role: 'pm',
+      status: 'INACTIVE',
+      projectIds: ['project-concurrent'],
+    });
+    expect(harness.audits).toHaveLength(0);
+    expect(harness.claimsCalls).toHaveLength(0);
+  });
+
   it('checks the last exact active admin inside deep sync transaction', async () => {
     const harness = createRoleHarness({
       patch: {
@@ -349,6 +414,7 @@ describe('member role authority', () => {
         'orgs/tenant-a/members/target-2': {
           uid: 'target-2', email: 'target2@example.com', role: 'pm', status: 'ACTIVE',
         },
+        'orgs/tenant-a/persons/person-target-2': { personId: 'person-target-2', uid: 'target-2' },
       },
       extraAuthUsers: [{
         uid: 'target-2', email: 'target2@example.com', customClaims: { role: 'pm', tenantId: 'tenant-a' },
@@ -407,6 +473,7 @@ describe('member role authority', () => {
         'orgs/tenant-a/members/target-2': {
           uid: 'target-2', email: 'target2@example.com', role: 'pm', status: 'ACTIVE',
         },
+        'orgs/tenant-a/persons/person-target-2': { personId: 'person-target-2', uid: 'target-2' },
       },
       extraAuthUsers: [{
         uid: 'target-2', email: 'target2@example.com', customClaims: { role: 'pm', tenantId: 'tenant-a' },

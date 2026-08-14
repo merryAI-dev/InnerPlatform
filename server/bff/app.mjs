@@ -111,6 +111,8 @@ import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
 import { mountCashflowSheetLabRoutes } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountCashflowPeriodPolicyRoutes } from './routes/cashflow-period-policy.mjs';
+import { createCashflowPeriodPolicyService } from './cashflow-period-policy-service.mjs';
+import { createCashflowPeriodPolicyFirestoreAdapter } from './cashflow-period-policy-firestore-adapter.mjs';
 import { mountParticipationDashboardRoutes } from './routes/participation-dashboard.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
@@ -1592,11 +1594,16 @@ export function createBffApp(options = {}) {
     db,
     now,
   });
+  const cashflowPeriodPolicyPersistencePort = options.cashflowPeriodPolicyPersistencePort
+    || createCashflowPeriodPolicyFirestoreAdapter({ db, auditChainService });
+  const cashflowPeriodPolicyService = options.cashflowPeriodPolicyService
+    || createCashflowPeriodPolicyService({
+      persistencePort: cashflowPeriodPolicyPersistencePort,
+      now,
+    });
   mountCashflowPeriodPolicyRoutes(app, {
-    db,
-    now,
+    service: cashflowPeriodPolicyService,
     idempotencyService,
-    auditChainService,
   });
   mountParticipationDashboardRoutes(app, { db, now, idempotencyService });
   mountJvmWeeklyApiRoutes(app, {

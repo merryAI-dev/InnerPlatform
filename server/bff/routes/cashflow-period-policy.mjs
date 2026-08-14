@@ -6,7 +6,6 @@ import {
 } from '../bff-utils.mjs';
 import {
   CashflowPeriodPolicyApplicationError,
-  createCashflowPeriodPolicyService,
 } from '../cashflow-period-policy-service.mjs';
 
 const APPLICATION_ERROR_STATUS = Object.freeze({
@@ -27,6 +26,7 @@ const APPLICATION_ERROR_STATUS = Object.freeze({
   cashflow_executive_approver_member_inactive: 409,
   cashflow_executive_approver_people_uid_ambiguous: 409,
   cashflow_executive_approver_people_uid_unlinked: 409,
+  cashflow_executive_approver_store_unavailable: 503,
   cashflow_project_identity_mismatch: 409,
   not_found: 404,
   runtime_superadmin_required: 403,
@@ -60,12 +60,10 @@ function validEvidence(value) {
 }
 
 export function mountCashflowPeriodPolicyRoutes(app, {
-  db,
-  now,
+  service,
   idempotencyService,
-  auditChainService,
 }) {
-  const service = createCashflowPeriodPolicyService({ db, now, auditChainService });
+  if (!service) throw new TypeError('cashflow period policy service is required');
 
   app.get('/api/v1/admin/cashflow-period-policy', asyncHandler(async (req, res) => {
     const body = await callApplication(() => service.readPolicy(req.context));

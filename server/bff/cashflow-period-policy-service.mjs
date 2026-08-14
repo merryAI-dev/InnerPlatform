@@ -5,12 +5,13 @@ import {
 } from './cashflow-forecast-variance.mjs';
 import { readCashflowCumulativeCloseAuthority } from './cashflow-close-calendar.mjs';
 import {
-  applyCumulativeCloseHeadPlan,
-  applyCumulativeCloseResetToReclose,
-  assertLinkedActivePeopleUid,
   buildCumulativeCloseHeadPlan,
   buildCumulativeCloseResetToReclosePlan,
 } from './cashflow-cumulative-close-head-recovery.mjs';
+import {
+  assertCashflowPeriodPolicyPersistencePort,
+  CashflowPeriodPolicyPersistenceError,
+} from './cashflow-period-policy-port.mjs';
 import { stableStringify } from './utils.mjs';
 
 const ACTIVE_MEMBER_STATUS = 'ACTIVE';
@@ -18,6 +19,18 @@ const ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'REOPEN_REQUESTED', 'A
 const YEAR_MONTH_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 const POSITIVE_STATUSES = new Set(['OK', 'AVAILABLE', 'ACTIVE', 'CLOSED', 'LINKED', 'MATCHED', 'ALIGNED', 'COMPLETE', 'COMPLETED']);
 const CRITICAL_STATUSES = new Set(['UNAVAILABLE', 'ERROR', 'INVALID', 'MISMATCH', 'BLOCKED', 'CRITICAL']);
+const POLICY_STORE_ISSUES = Object.freeze({
+  projects: ['PROJECT_STORE_UNAVAILABLE', 'PROJECT_STORE_TRUNCATED', '프로젝트 저장소 조회 불가'],
+  heads: ['CUMULATIVE_CLOSE_HEAD_STORE_UNAVAILABLE', 'CUMULATIVE_CLOSE_HEAD_STORE_TRUNCATED', '누적 마감 권한 저장소 조회 불가'],
+  closes: ['MONTHLY_CLOSE_STORE_UNAVAILABLE', 'MONTHLY_CLOSE_STORE_TRUNCATED', '월 결산 확정 저장소 조회 불가'],
+  runs: ['MONTHLY_CLOSE_VERSION_STORE_UNAVAILABLE', 'MONTHLY_CLOSE_VERSION_STORE_TRUNCATED', '월 결산 실행 이력 저장소 조회 불가'],
+  requests: ['MONTH_CLOSE_REQUEST_STORE_UNAVAILABLE', 'MONTH_CLOSE_REQUEST_STORE_TRUNCATED', '월 결산 요청 저장소 조회 불가'],
+  mirrors: ['SHEET_MIRROR_STORE_UNAVAILABLE', 'SHEET_MIRROR_STORE_TRUNCATED', 'Sheet mirror 저장소 조회 불가'],
+  completions: ['WEEKLY_COMPLETION_STORE_UNAVAILABLE', 'WEEKLY_COMPLETION_STORE_TRUNCATED', '주간 완료 이력 저장소 조회 불가'],
+  amendments: ['CASHFLOW_MONTH_AMENDMENT_STORE_UNAVAILABLE', 'CASHFLOW_MONTH_AMENDMENT_STORE_TRUNCATED', '닫힌 월 수정 이력 저장소 조회 불가'],
+  people: ['PEOPLE_STORE_UNAVAILABLE', 'PEOPLE_STORE_TRUNCATED', 'People 저장소 조회 불가'],
+  members: ['MEMBER_STORE_UNAVAILABLE', 'MEMBER_STORE_TRUNCATED', '멤버 저장소 조회 불가'],
+});
 
 export class CashflowPeriodPolicyApplicationError extends Error {
   constructor(code, message) {
@@ -123,26 +136,33 @@ function issue(code, label, detail, severity = 'WARNING') {
   return { code, severity, label, detail };
 }
 
-async function readCollection(db, path, unavailableCode, unavailableLabel) {
-  try {
-    const snapshot = await db.collection(path).get();
-    return {
-      available: true,
-      records: snapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
-      issues: [],
-    };
-  } catch {
-    return {
-      available: false,
-      records: [],
-      issues: [issue(
-        unavailableCode,
-        unavailableLabel,
-        '현금흐름 정책 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.',
-        'ERROR',
-      )],
-    };
+function policyStore(raw, key) {
+  const [unavailableCode, truncatedCode, label] = POLICY_STORE_ISSUES[key];
+  const available = raw?.available === true;
+  const truncated = available && raw?.truncated === true;
+  const issues = [];
+  if (!available) {
+    issues.push(issue(
+      unavailableCode,
+      label,
+      '현금흐름 정책 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.',
+      'ERROR',
+    ));
+  } else if (truncated) {
+    issues.push(issue(
+      truncatedCode,
+      `${label} 범위 초과`,
+      '안전 조회 한도를 넘어 일부만 표시합니다. 누락된 항목은 0이나 정상으로 간주하지 않습니다.',
+      'WARNING',
+    ));
   }
+  return {
+    available,
+    complete: available && !truncated,
+    truncated,
+    records: available && Array.isArray(raw.records) ? raw.records : [],
+    issues,
+  };
 }
 
 function indexByProject(records) {
@@ -604,7 +624,7 @@ function asPlanDocuments(store) {
 }
 
 function recoveryPlanByProject({ tenantId, closesStore, versionsStore, requestsStore, headsStore }) {
-  if (!closesStore.available || !versionsStore.available || !requestsStore.available || !headsStore.available) {
+  if (!closesStore.complete || !versionsStore.complete || !requestsStore.complete || !headsStore.complete) {
     return new Map();
   }
   return new Map(buildCumulativeCloseHeadPlan({
@@ -624,7 +644,7 @@ function resetToReclosePlanByProject({
   requestsStore,
   headsStore,
 }) {
-  if (!closesStore.available || !versionsStore.available || !requestsStore.available || !headsStore.available) {
+  if (!closesStore.complete || !versionsStore.complete || !requestsStore.complete || !headsStore.complete) {
     return new Map();
   }
   return new Map(buildCumulativeCloseResetToReclosePlan({
@@ -637,21 +657,15 @@ function resetToReclosePlanByProject({
   }).map((row) => [row.projectId, row]));
 }
 
-async function readProjectRecoveryPlan(db, tenantId, projectId) {
-  const basePath = `orgs/${tenantId}`;
+async function readProjectRecoveryPlan(persistencePort, tenantId, projectId) {
   try {
-    const [headSnapshot, closesSnapshot, versionsSnapshot, requestsSnapshot] = await Promise.all([
-      db.doc(`${basePath}/cashflow_cumulative_close_heads/${projectId}`).get(),
-      db.collection(`${basePath}/monthly_closes`).where('projectId', '==', projectId).get(),
-      db.collection(`${basePath}/monthly_close_versions`).where('projectId', '==', projectId).get(),
-      db.collection(`${basePath}/cashflow_month_close_requests`).where('projectId', '==', projectId).get(),
-    ]);
-    const currentHead = headSnapshot.exists ? headSnapshot.data() || {} : null;
+    const evidence = await persistencePort.readProjectRecoveryEvidence({ tenantId, projectId });
+    const currentHead = evidence.head.exists ? evidence.head.data || {} : null;
     const [row] = buildCumulativeCloseHeadPlan({
       tenantId,
-      monthlyCloses: closesSnapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
-      monthlyCloseVersions: versionsSnapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
-      requests: requestsSnapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
+      monthlyCloses: evidence.monthlyCloses,
+      monthlyCloseVersions: evidence.monthlyCloseVersions,
+      requests: evidence.requests,
       heads: currentHead ? [{ id: projectId, data: currentHead }] : [],
     });
     return { row: row || null, currentHead };
@@ -675,7 +689,7 @@ function recoveryOutcomeMatchesExpected(currentEvidence, submittedEvidence) {
   return stableStringify(currentOutcome) === stableStringify(submittedOutcome);
 }
 
-async function readProjectResetToReclosePlan(db, tenantId, projectId, expectedEvidence) {
+async function readProjectResetToReclosePlan(persistencePort, tenantId, projectId, expectedEvidence) {
   const yearMonth = readOptionalText(expectedEvidence?.yearMonth);
   const monthlyCloseId = readOptionalText(expectedEvidence?.monthlyCloseId);
   if (!YEAR_MONTH_PATTERN.test(yearMonth) || monthlyCloseId !== `${projectId}-${yearMonth}`) {
@@ -684,23 +698,21 @@ async function readProjectResetToReclosePlan(db, tenantId, projectId, expectedEv
       '화면에서 확인한 재결산 회차 근거가 올바르지 않습니다. 화면을 다시 불러와 주세요.',
     );
   }
-  const basePath = `orgs/${tenantId}`;
   try {
-    const [headSnapshot, closeSnapshot, versionsSnapshot, requestsSnapshot] = await Promise.all([
-      db.doc(`${basePath}/cashflow_cumulative_close_heads/${projectId}`).get(),
-      db.doc(`${basePath}/monthly_closes/${monthlyCloseId}`).get(),
-      db.collection(`${basePath}/monthly_close_versions`).where('projectId', '==', projectId).get(),
-      db.collection(`${basePath}/cashflow_month_close_requests`).where('projectId', '==', projectId).get(),
-    ]);
+    const evidence = await persistencePort.readProjectResetEvidence({
+      tenantId,
+      projectId,
+      monthlyCloseId,
+    });
     const [row] = buildCumulativeCloseResetToReclosePlan({
       tenantId,
       projectIds: [projectId],
-      monthlyCloses: closeSnapshot.exists
-        ? [{ id: monthlyCloseId, data: closeSnapshot.data() || {} }]
+      monthlyCloses: evidence.monthlyClose.exists
+        ? [{ id: monthlyCloseId, data: evidence.monthlyClose.data || {} }]
         : [],
-      monthlyCloseVersions: versionsSnapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
-      requests: requestsSnapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
-      heads: headSnapshot.exists ? [{ id: projectId, data: headSnapshot.data() || {} }] : [],
+      monthlyCloseVersions: evidence.monthlyCloseVersions,
+      requests: evidence.requests,
+      heads: evidence.head.exists ? [{ id: projectId, data: evidence.head.data || {} }] : [],
     });
     if (row?.status === 'RESET_CYCLE_SELECTION_REQUIRED') {
       const selected = row.cycleCandidates?.find((candidate) => (
@@ -948,11 +960,14 @@ function buildIdentityIssue(projectId, identity) {
   return null;
 }
 
-async function assertRuntimeSuperadmin(db, tenantId, actorId) {
+async function assertRuntimeSuperadmin(persistencePort, tenantId, actorId) {
   try {
-    await assertLinkedActivePeopleUid({ db, tenantId, peopleUid: actorId });
+    await persistencePort.assertRuntimeSuperadmin({ tenantId, actorId });
   } catch (error) {
-    if (readOptionalText(error?.message).includes('--people-uid')) {
+    if (
+      error instanceof CashflowPeriodPolicyPersistenceError
+      && error.code === 'RUNTIME_SUPERADMIN_REQUIRED'
+    ) {
       throw applicationError(
         'runtime_superadmin_required',
         'People UID가 정확히 연결된 ACTIVE runtime admin 권한이 필요합니다.',
@@ -1026,73 +1041,25 @@ function buildExecutiveApproverCandidates(peopleIndex, peopleAvailable, memberIn
 }
 
 export function createCashflowPeriodPolicyService({
-  db,
+  persistencePort,
   now,
-  auditChainService,
 }) {
+  const port = assertCashflowPeriodPolicyPersistencePort(persistencePort);
   return {
     async readPolicy({ tenantId, actorId }) {
-    await assertRuntimeSuperadmin(db, tenantId, actorId);
+    await assertRuntimeSuperadmin(port, tenantId, actorId);
 
-    const basePath = `orgs/${tenantId}`;
-    const [
-      projectsStore,
-      headsStore,
-      closesStore,
-      runsStore,
-      requestsStore,
-      mirrorsStore,
-      completionsStore,
-      amendmentsStore,
-      peopleStore,
-      membersStore,
-    ] = await Promise.all([
-      readCollection(db, `${basePath}/projects`, 'PROJECT_STORE_UNAVAILABLE', '프로젝트 저장소 조회 불가'),
-      readCollection(
-        db,
-        `${basePath}/cashflow_cumulative_close_heads`,
-        'CUMULATIVE_CLOSE_HEAD_STORE_UNAVAILABLE',
-        '누적 마감 권한 저장소 조회 불가',
-      ),
-      readCollection(
-        db,
-        `${basePath}/monthly_closes`,
-        'MONTHLY_CLOSE_STORE_UNAVAILABLE',
-        '월 결산 확정 저장소 조회 불가',
-      ),
-      readCollection(
-        db,
-        `${basePath}/monthly_close_versions`,
-        'MONTHLY_CLOSE_VERSION_STORE_UNAVAILABLE',
-        '월 결산 실행 이력 저장소 조회 불가',
-      ),
-      readCollection(
-        db,
-        `${basePath}/cashflow_month_close_requests`,
-        'MONTH_CLOSE_REQUEST_STORE_UNAVAILABLE',
-        '월 결산 요청 저장소 조회 불가',
-      ),
-      readCollection(
-        db,
-        `${basePath}/cashflow_sheet_mirrors`,
-        'SHEET_MIRROR_STORE_UNAVAILABLE',
-        'Sheet mirror 저장소 조회 불가',
-      ),
-      readCollection(
-        db,
-        `${basePath}/cashflow_weekly_update_completions`,
-        'WEEKLY_COMPLETION_STORE_UNAVAILABLE',
-        '주간 완료 이력 저장소 조회 불가',
-      ),
-      readCollection(
-        db,
-        `${basePath}/cashflow_month_amendments`,
-        'CASHFLOW_MONTH_AMENDMENT_STORE_UNAVAILABLE',
-        '닫힌 월 수정 이력 저장소 조회 불가',
-      ),
-      readCollection(db, `${basePath}/persons`, 'PEOPLE_STORE_UNAVAILABLE', 'People 저장소 조회 불가'),
-      readCollection(db, `${basePath}/members`, 'MEMBER_STORE_UNAVAILABLE', '멤버 저장소 조회 불가'),
-    ]);
+    const evidence = await port.readPolicyEvidence({ tenantId });
+    const projectsStore = policyStore(evidence.projects, 'projects');
+    const headsStore = policyStore(evidence.heads, 'heads');
+    const closesStore = policyStore(evidence.closes, 'closes');
+    const runsStore = policyStore(evidence.runs, 'runs');
+    const requestsStore = policyStore(evidence.requests, 'requests');
+    const mirrorsStore = policyStore(evidence.mirrors, 'mirrors');
+    const completionsStore = policyStore(evidence.completions, 'completions');
+    const amendmentsStore = policyStore(evidence.amendments, 'amendments');
+    const peopleStore = policyStore(evidence.people, 'people');
+    const membersStore = policyStore(evidence.members, 'members');
 
     const stores = [
       projectsStore,
@@ -1123,30 +1090,30 @@ export function createCashflowPeriodPolicyService({
       requestsStore,
       headsStore,
     });
-    const recoveryEvidenceAvailable = closesStore.available
-      && runsStore.available
-      && requestsStore.available
-      && headsStore.available;
+    const recoveryEvidenceAvailable = closesStore.complete
+      && runsStore.complete
+      && requestsStore.complete
+      && headsStore.complete;
     const mirrorIndex = indexByProject(mirrorsStore.records);
     const completionsByProject = groupByProject(completionsStore.records);
     const peopleIndex = indexPeople(peopleStore.records);
     const memberIndex = indexMembers(membersStore.records);
     const amendments = buildAmendments(
       amendmentsStore.records,
-      amendmentsStore.available,
+      amendmentsStore.complete,
       projectNames(projectsStore.records),
     );
     const superadmins = buildRuntimeSuperadmins(
       memberIndex,
-      membersStore.available,
+      membersStore.complete,
       peopleIndex,
-      peopleStore.available,
+      peopleStore.complete,
     );
     const executiveApproverCandidates = buildExecutiveApproverCandidates(
       peopleIndex,
-      peopleStore.available,
+      peopleStore.complete,
       memberIndex,
-      membersStore.available,
+      membersStore.complete,
     );
 
     const items = projectsStore.available
@@ -1159,7 +1126,7 @@ export function createCashflowPeriodPolicyService({
           const projectName = readOptionalText(project.name || project.shortName) || projectId;
           const authority = projectIdentityMismatch
             ? buildAuthority({}, true, { tenantId, projectId })
-            : buildAuthority(headIndex.get(projectId), headsStore.available, { tenantId, projectId });
+            : buildAuthority(headIndex.get(projectId), headsStore.complete, { tenantId, projectId });
           const recovery = projectIdentityMismatch
             ? buildRecovery(null, null, false, projectId)
             : buildRecovery(
@@ -1170,29 +1137,29 @@ export function createCashflowPeriodPolicyService({
             );
           const latestRun = buildLatestRun(
             latestMonthlyRun(runsStore.records, projectId),
-            runsStore.available,
+            runsStore.complete,
             peopleIndex,
-            peopleStore.available,
+            peopleStore.complete,
             memberIndex,
-            membersStore.available,
+            membersStore.complete,
           );
           const mirror = mirrorIndex.get(projectId);
-          const sheet = buildSheet(mirror, mirrorsStore.available);
+          const sheet = buildSheet(mirror, mirrorsStore.complete);
           const forecastVariance = buildCashflowForecastVariance({
             projectId,
             completions: (completionsByProject.get(projectId) || []).filter(
               (completion) => readOptionalText(completion?.status).toUpperCase() === 'LOCKED',
             ),
             mirror,
-            completionsAvailable: completionsStore.available,
-            mirrorAvailable: mirrorsStore.available,
+            completionsAvailable: completionsStore.complete,
+            mirrorAvailable: mirrorsStore.complete,
           });
           const approverIdentity = resolvePeopleIdentity(
             project.executiveApproverId,
             peopleIndex,
-            peopleStore.available,
+            peopleStore.complete,
             memberIndex,
-            membersStore.available,
+            membersStore.complete,
           );
           const itemIssues = [];
           if (projectIdentityMismatch) {
@@ -1237,7 +1204,7 @@ export function createCashflowPeriodPolicyService({
             executiveApprover: buildExecutiveApprover(
               approverIdentity,
               project.version,
-              executiveApproverChangeAction(requestsStore.records, requestsStore.available, projectId),
+              executiveApproverChangeAction(requestsStore.records, requestsStore.complete, projectId),
             ),
             forecastVariance,
             issues: itemIssues,
@@ -1281,127 +1248,123 @@ export function createCashflowPeriodPolicyService({
       expectedVersion,
       reason,
     }) {
-
-      const basePath = `orgs/${tenantId}`;
-      const projectRef = db.doc(`${basePath}/projects/${projectId}`);
-      const approverMemberRef = db.doc(`${basePath}/members/${approverUid}`);
-      const peopleQuery = db.collection(`${basePath}/persons`).where('uid', '==', approverUid).limit(2);
-      const pendingRequestsQuery = db.collection(`${basePath}/cashflow_month_close_requests`)
-        .where('projectId', '==', projectId);
       const timestamp = timestampIso(now());
+      let result;
+      try {
+        result = await port.transactExecutiveApproverChange({
+          tenantId,
+          actorId,
+          projectId,
+          approverUid,
+          decide: async ({ project: projectRecord, member: memberRecord, people, pendingRequests }) => {
+            if (!projectRecord.exists) {
+              throw applicationError('not_found', '프로젝트를 찾을 수 없습니다.');
+            }
+            const member = memberRecord.exists ? memberRecord.data || {} : null;
+            if (
+              !member
+              || readOptionalText(member.uid) !== approverUid
+              || readOptionalText(member.status).toUpperCase() !== ACTIVE_MEMBER_STATUS
+            ) {
+              throw applicationError(
+                'cashflow_executive_approver_member_inactive',
+                'People UID와 같은 활성 멤버가 필요합니다.',
+              );
+            }
+            if (people.length === 0) {
+              throw applicationError(
+                'cashflow_executive_approver_people_uid_unlinked',
+                '선택한 UID가 People 명부와 연결되지 않았습니다.',
+              );
+            }
+            if (people.length > 1) {
+              throw applicationError(
+                'cashflow_executive_approver_people_uid_ambiguous',
+                '선택한 UID가 둘 이상의 People 레코드와 연결되어 있습니다.',
+              );
+            }
+            const changeAction = executiveApproverChangeAction(pendingRequests, true, projectId);
+            if (!changeAction.enabled) {
+              throw applicationError(
+                'cashflow_executive_approver_locked',
+                '승인 대기 중인 월 결산이 있어 조직장을 변경할 수 없습니다.',
+              );
+            }
 
-      const result = await db.runTransaction(async (tx) => {
-        try {
-          await assertLinkedActivePeopleUid({ db, transaction: tx, tenantId, peopleUid: actorId });
-        } catch (error) {
-          if (!readOptionalText(error?.message).includes('--people-uid')) {
-            throw applicationError(
-              'runtime_superadmin_store_unavailable',
-              'Runtime superadmin 권한 저장소를 확인할 수 없습니다.',
-            );
-          }
+            const project = projectRecord.data || {};
+            assertCanonicalProjectIdentity(project, projectId);
+            const currentVersion = safePositiveRevision(project.version);
+            if (expectedVersion !== currentVersion) {
+              throw applicationError(
+                'version_conflict',
+                '프로젝트 정보가 변경되었습니다. 새로고침 후 다시 지정해 주세요.',
+              );
+            }
+            const personRecord = people[0];
+            const person = {
+              ...(personRecord.data || {}),
+              personId: readOptionalText(personRecord.data?.personId) || personRecord.id,
+              uid: approverUid,
+            };
+            if (readOptionalText(project.executiveApproverId) === approverUid) {
+              return {
+                changed: false,
+                project,
+                person,
+                version: currentVersion,
+                auditEntries: [],
+                projectPatch: null,
+              };
+            }
+
+            const nextVersion = currentVersion + 1;
+            const previousApproverUid = readOptionalText(project.executiveApproverId) || null;
+            return {
+              changed: true,
+              project,
+              person,
+              version: nextVersion,
+              auditEntries: [{
+                tenantId,
+                entityType: 'project',
+                entityId: projectId,
+                action: 'EXECUTIVE_APPROVER_CHANGE',
+                actorId,
+                actorRole: 'admin',
+                requestId,
+                details: `현금흐름 조직장 People UID 변경: ${previousApproverUid || '미지정'} -> ${approverUid}`,
+                metadata: {
+                  source: 'cashflow_period_policy',
+                  previousApproverUid,
+                  nextApproverUid: approverUid,
+                  reason: reason || null,
+                  previousVersion: currentVersion,
+                  nextVersion,
+                },
+                timestamp,
+              }],
+              projectPatch: {
+                executiveApproverId: approverUid,
+                version: nextVersion,
+                updatedAt: timestamp,
+                updatedBy: actorId,
+              },
+            };
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof CashflowPeriodPolicyPersistenceError)) throw error;
+        if (error.code === 'RUNTIME_SUPERADMIN_REQUIRED') {
           throw applicationError(
             'runtime_superadmin_required',
             'People UID가 정확히 연결된 ACTIVE runtime admin 권한이 필요합니다.',
           );
         }
-        const [projectSnapshot, memberSnapshot, peopleSnapshot, pendingSnapshot] = await Promise.all([
-          tx.get(projectRef),
-          tx.get(approverMemberRef),
-          tx.get(peopleQuery),
-          tx.get(pendingRequestsQuery),
-        ]);
-        if (!projectSnapshot.exists) {
-          throw applicationError('not_found', '프로젝트를 찾을 수 없습니다.');
-        }
-        const member = memberSnapshot.exists ? memberSnapshot.data() || {} : null;
-        if (
-          !member
-          || readOptionalText(member.uid) !== approverUid
-          || readOptionalText(member.status).toUpperCase() !== ACTIVE_MEMBER_STATUS
-        ) {
-          throw applicationError(
-            'cashflow_executive_approver_member_inactive',
-            'People UID와 같은 활성 멤버가 필요합니다.',
-          );
-        }
-        if (peopleSnapshot.docs.length === 0) {
-          throw applicationError(
-            'cashflow_executive_approver_people_uid_unlinked',
-            '선택한 UID가 People 명부와 연결되지 않았습니다.',
-          );
-        }
-        if (peopleSnapshot.docs.length > 1) {
-          throw applicationError(
-            'cashflow_executive_approver_people_uid_ambiguous',
-            '선택한 UID가 둘 이상의 People 레코드와 연결되어 있습니다.',
-          );
-        }
-        const changeAction = executiveApproverChangeAction(
-          pendingSnapshot.docs.map((doc) => ({ id: readDocumentId(doc), data: doc.data() || {} })),
-          true,
-          projectId,
+        throw applicationError(
+          'cashflow_executive_approver_store_unavailable',
+          '조직장 변경 근거를 안전하게 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
         );
-        if (!changeAction.enabled) {
-          throw applicationError(
-            'cashflow_executive_approver_locked',
-            '승인 대기 중인 월 결산이 있어 조직장을 변경할 수 없습니다.',
-          );
-        }
-
-        const project = projectSnapshot.data() || {};
-        assertCanonicalProjectIdentity(project, projectId);
-        const currentVersion = safePositiveRevision(project.version);
-        if (expectedVersion !== currentVersion) {
-          throw applicationError(
-            'version_conflict',
-            '프로젝트 정보가 변경되었습니다. 새로고침 후 다시 지정해 주세요.',
-          );
-        }
-        const personSnapshot = peopleSnapshot.docs[0];
-        const person = {
-          ...(personSnapshot.data() || {}),
-          personId: readOptionalText(personSnapshot.data()?.personId) || readDocumentId(personSnapshot),
-          uid: approverUid,
-        };
-        if (readOptionalText(project.executiveApproverId) === approverUid) {
-          return {
-            changed: false,
-            project,
-            person,
-            version: currentVersion,
-          };
-        }
-
-        const nextVersion = currentVersion + 1;
-        const previousApproverUid = readOptionalText(project.executiveApproverId) || null;
-        await auditChainService.appendManyInTransaction(tx, [{
-          tenantId,
-          entityType: 'project',
-          entityId: projectId,
-          action: 'EXECUTIVE_APPROVER_CHANGE',
-          actorId,
-          actorRole: 'admin',
-          requestId,
-          details: `현금흐름 조직장 People UID 변경: ${previousApproverUid || '미지정'} -> ${approverUid}`,
-          metadata: {
-            source: 'cashflow_period_policy',
-            previousApproverUid,
-            nextApproverUid: approverUid,
-            reason: reason || null,
-            previousVersion: currentVersion,
-            nextVersion,
-          },
-          timestamp,
-        }]);
-        tx.set(projectRef, {
-          executiveApproverId: approverUid,
-          version: nextVersion,
-          updatedAt: timestamp,
-          updatedBy: actorId,
-        }, { merge: true });
-        return { changed: true, project, person, version: nextVersion };
-      });
+      }
 
       const identity = {
         status: 'LINKED',
@@ -1424,14 +1387,22 @@ export function createCashflowPeriodPolicyService({
 
     async recoverCumulativeCloseHead({ tenantId, actorId, projectId, reason, expectedEvidence }) {
 
-      await assertRuntimeSuperadmin(db, tenantId, actorId);
-      const projectSnapshot = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
-      if (!projectSnapshot.exists) {
+      await assertRuntimeSuperadmin(port, tenantId, actorId);
+      let projectRecord;
+      try {
+        projectRecord = await port.readProject({ tenantId, projectId });
+      } catch {
+        throw applicationError(
+          'cashflow_close_head_recovery_store_unavailable',
+          '복구할 프로젝트를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        );
+      }
+      if (!projectRecord.exists) {
         throw applicationError('not_found', '복구할 프로젝트를 찾을 수 없습니다.');
       }
-      assertCanonicalProjectIdentity(projectSnapshot.data() || {}, projectId);
+      assertCanonicalProjectIdentity(projectRecord.data || {}, projectId);
 
-      const current = await readProjectRecoveryPlan(db, tenantId, projectId);
+      const current = await readProjectRecoveryPlan(port, tenantId, projectId);
       if (current.row?.status === 'AUTHORITY_PRESENT') {
         if (recoveryOutcomeMatchesExpected(current.row.expectedEvidence, expectedEvidence)) {
           return {
@@ -1470,8 +1441,7 @@ export function createCashflowPeriodPolicyService({
 
       let result;
       try {
-        result = await applyCumulativeCloseHeadPlan({
-          db,
+        result = await port.applyCumulativeCloseHeadRecovery({
           tenantId,
           plan: [current.row],
           options: {
@@ -1481,20 +1451,33 @@ export function createCashflowPeriodPolicyService({
             reason,
             tenantId,
           },
-          auditChainService,
         });
       } catch (error) {
-        const message = readOptionalText(error?.message);
-        if (message.includes('ACTIVE runtime admin member') || message.includes('exactly one People record')) {
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RUNTIME_SUPERADMIN_REQUIRED'
+        ) {
           throw applicationError(
             'runtime_superadmin_required',
             'People UID가 연결된 ACTIVE runtime admin 권한이 필요합니다.',
           );
         }
-        if (message.includes('evidence changed')) {
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RECOVERY_EVIDENCE_CHANGED'
+        ) {
           throw applicationError(
             'cashflow_close_head_recovery_evidence_changed',
             '복구 중 원본 근거가 변경되었습니다. 이 화면을 다시 불러온 뒤 최신 근거로 다시 시도해 주세요.',
+          );
+        }
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RECOVERY_EVIDENCE_TRUNCATED'
+        ) {
+          throw applicationError(
+            'cashflow_close_head_recovery_store_unavailable',
+            '복구 근거가 안전 조회 범위를 초과했습니다. AXR팀에서 프로젝트 근거 범위를 확인해 주세요.',
           );
         }
         throw applicationError(
@@ -1518,15 +1501,23 @@ export function createCashflowPeriodPolicyService({
 
     async resetCumulativeCloseToReclose({ tenantId, actorId, projectId, reason, expectedEvidence }) {
 
-      await assertRuntimeSuperadmin(db, tenantId, actorId);
-      const projectSnapshot = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
-      if (!projectSnapshot.exists) {
+      await assertRuntimeSuperadmin(port, tenantId, actorId);
+      let projectRecord;
+      try {
+        projectRecord = await port.readProject({ tenantId, projectId });
+      } catch {
+        throw applicationError(
+          'cashflow_close_reset_to_reclose_store_unavailable',
+          '재결산할 프로젝트를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        );
+      }
+      if (!projectRecord.exists) {
         throw applicationError('not_found', '재결산을 준비할 프로젝트를 찾을 수 없습니다.');
       }
-      assertCanonicalProjectIdentity(projectSnapshot.data() || {}, projectId);
+      assertCanonicalProjectIdentity(projectRecord.data || {}, projectId);
 
       const current = await readProjectResetToReclosePlan(
-        db,
+        port,
         tenantId,
         projectId,
         expectedEvidence,
@@ -1561,39 +1552,57 @@ export function createCashflowPeriodPolicyService({
 
       let result;
       try {
-        result = await applyCumulativeCloseResetToReclose({
-          db,
+        result = await port.applyCumulativeCloseResetToReclose({
           tenantId,
           projectId,
           peopleUid: actorId,
           reason,
           expectedEvidence,
-          auditChainService,
         });
       } catch (error) {
-        const message = readOptionalText(error?.message);
-        if (message.includes('ACTIVE runtime admin member') || message.includes('exactly one People record')) {
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RUNTIME_SUPERADMIN_REQUIRED'
+        ) {
           throw applicationError(
             'runtime_superadmin_required',
             'People UID가 연결된 ACTIVE runtime admin 권한이 필요합니다.',
           );
         }
-        if (message.includes('valid authority requires normal reopen')) {
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RESET_NORMAL_REOPEN_REQUIRED'
+        ) {
           throw applicationError(
             'cashflow_close_reset_to_reclose_normal_reopen_required',
             '유효한 누적 마감 권한은 격리하지 않습니다. 프로젝트의 정상 재오픈 절차를 사용해 주세요.',
           );
         }
-        if (message.includes('exact recovery is available')) {
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RESET_EXACT_RECOVERY_REQUIRED'
+        ) {
           throw applicationError(
             'cashflow_close_reset_to_reclose_exact_recovery_required',
             'immutable evidence가 완전하므로 누적 마감 권한 정확 복구를 먼저 실행해 주세요.',
           );
         }
-        if (message.includes('evidence changed')) {
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RESET_EVIDENCE_CHANGED'
+        ) {
           throw applicationError(
             'cashflow_close_reset_to_reclose_evidence_changed',
             '재결산 준비 중 원본 근거가 변경되었습니다. 화면을 다시 불러온 뒤 최신 근거로 다시 시도해 주세요.',
+          );
+        }
+        if (
+          error instanceof CashflowPeriodPolicyPersistenceError
+          && error.code === 'RESET_EVIDENCE_TRUNCATED'
+        ) {
+          throw applicationError(
+            'cashflow_close_reset_to_reclose_store_unavailable',
+            '재결산 근거가 안전 조회 범위를 초과했습니다. AXR팀에서 프로젝트 근거 범위를 확인해 주세요.',
           );
         }
         throw applicationError(
