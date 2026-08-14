@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { assertCashflowMonthWritable } from '../cashflow-month-state.mjs';
+import { createCashflowPeriodPolicyFirestoreAdapter } from '../cashflow-period-policy-firestore-adapter.mjs';
+import { createCashflowPeriodPolicyService } from '../cashflow-period-policy-service.mjs';
 import { mountCashflowPeriodPolicyRoutes } from './cashflow-period-policy.mjs';
 
 function createHarness({
@@ -108,16 +110,20 @@ function createHarness({
     };
     next();
   });
-  mountCashflowPeriodPolicyRoutes(app, {
-    db,
-    now: () => '2026-08-14T01:02:03.000Z',
-    idempotencyService,
-    auditChainService: {
-      async appendManyInTransaction(_tx, entries) {
-        audit.push(...entries);
-        return entries.map((_entry, index) => ({ id: `audit-${index + 1}` }));
-      },
+  const auditChainService = {
+    async appendManyInTransaction(_tx, entries) {
+      audit.push(...entries);
+      return entries.map((_entry, index) => ({ id: `audit-${index + 1}` }));
     },
+  };
+  const persistencePort = createCashflowPeriodPolicyFirestoreAdapter({ db, auditChainService });
+  const service = createCashflowPeriodPolicyService({
+    persistencePort,
+    now: () => '2026-08-14T01:02:03.000Z',
+  });
+  mountCashflowPeriodPolicyRoutes(app, {
+    service,
+    idempotencyService,
   });
   app.use((error, _req, res, _next) => {
     res.status(error.statusCode || 500).json({ error: error.code || 'internal_error', message: error.message });
@@ -637,6 +643,29 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
     expect(unavailableIssues.every((issue) => issue.detail
       === '현금흐름 정책 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.')).toBe(true);
     expect(JSON.stringify(response.body.issues)).not.toContain('store unavailable:');
+  });
+
+  it('월 결산 요청 저장소만 장애인 경우 조직장 변경만 fail-closed하고 독립 section을 유지한다', async () => {
+    const { app } = createHarness({
+      documents: completeDocuments,
+      failingCollections: ['orgs/tenant-a/cashflow_month_close_requests'],
+    });
+
+    const response = await request(app).get('/api/v1/admin/cashflow-period-policy');
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('PARTIAL');
+    expect(response.body.items[0]).toMatchObject({
+      authority: { status: 'CLOSED' },
+      sheet: { status: 'FRESH' },
+      executiveApprover: {
+        changeAction: { enabled: false, status: 'UNAVAILABLE' },
+      },
+    });
+    expect(response.body.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'MONTH_CLOSE_REQUEST_STORE_UNAVAILABLE' }),
+    ]));
+    expect(JSON.stringify(response.body)).not.toContain('store unavailable:');
   });
 
   it('CLOSED run이 있어도 cumulative head가 없으면 closedThrough를 추론하지 않는다', async () => {
@@ -1354,5 +1383,85 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
     expect(validResponse.body.message).toContain('정상 재오픈');
     expect(valid.store.get('orgs/tenant-a/cashflow_cumulative_close_heads/project-a')).toEqual(validFixture.canonicalHead);
     expect(valid.audit).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'cumulative-close-head-recovery',
+      'cashflow_close_head_recovery_payload_invalid',
+    ],
+    [
+      'cumulative-close-reset-to-reclose',
+      'cashflow_close_reset_to_reclose_payload_invalid',
+    ],
+  ])('%s의 잘못된 evidence를 application 실행 전에 차단한다', async (operation, errorCode) => {
+    const harness = createHarness({ documents: completeDocuments });
+    const before = new Map(harness.store);
+
+    const response = await request(harness.app)
+      .post(`/api/v1/admin/cashflow-period-policy/projects/project-a/${operation}`)
+      .set('x-idempotency-key', `invalid-${operation}`)
+      .send({ reason: '검증', expectedEvidence: [] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe(errorCode);
+    expect(harness.store).toEqual(before);
+    expect(harness.audit).toHaveLength(0);
+  });
+
+  it('runtime admin 저장소 장애를 기술 예외 대신 안전한 503으로 반환하고 쓰지 않는다', async () => {
+    const fixture = strictRecoveryDocuments({ head: 'missing' });
+    const harness = createHarness({
+      documents: fixture.documents,
+      failingCollections: ['orgs/tenant-a/persons'],
+    });
+
+    const response = await request(harness.app)
+      .post('/api/v1/admin/cashflow-period-policy/projects/project-a/cumulative-close-head-recovery')
+      .set('x-idempotency-key', 'recovery-admin-store-unavailable')
+      .send({ reason: '누락 권한 복구', expectedEvidence: {} });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ error: 'runtime_superadmin_store_unavailable' });
+    expect(response.body.message).not.toContain('store unavailable:');
+    expect(harness.store.has('orgs/tenant-a/cashflow_cumulative_close_heads/project-a')).toBe(false);
+    expect(harness.audit).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'cumulative-close-head-recovery',
+      'cashflow_close_head_recovery_store_unavailable',
+      'recovery',
+    ],
+    [
+      'cumulative-close-reset-to-reclose',
+      'cashflow_close_reset_to_reclose_store_unavailable',
+      'resetToReclose',
+    ],
+  ])('%s 근거 저장소 장애를 안전한 503과 무쓰기로 격리한다', async (operation, errorCode, evidenceKey) => {
+    const fixture = strictRecoveryDocuments({ head: evidenceKey === 'recovery' ? 'missing' : 'invalid', complete: evidenceKey === 'recovery' });
+    const healthy = createHarness({ documents: fixture.documents });
+    const read = await request(healthy.app).get('/api/v1/admin/cashflow-period-policy').expect(200);
+    const recovery = read.body.items.find((item) => item.project.id === 'project-a').recovery;
+    const expectedEvidence = evidenceKey === 'recovery'
+      ? recovery.expectedEvidence
+      : recovery.resetToReclose.expectedEvidence;
+    const harness = createHarness({
+      documents: fixture.documents,
+      failingCollections: ['orgs/tenant-a/monthly_close_versions'],
+    });
+    const before = new Map(harness.store);
+
+    const response = await request(harness.app)
+      .post(`/api/v1/admin/cashflow-period-policy/projects/project-a/${operation}`)
+      .set('x-idempotency-key', `store-unavailable-${operation}`)
+      .send({ reason: '근거 저장소 장애 검증', expectedEvidence });
+
+    expect(response.status).toBe(503);
+    expect(response.body.error).toBe(errorCode);
+    expect(response.body.message).not.toContain('store unavailable:');
+    expect(harness.store).toEqual(before);
+    expect(harness.audit).toHaveLength(0);
   });
 });

@@ -2293,6 +2293,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       status: 'ACTIVE',
       projectIds: ['p-sync-1'],
     });
+    await db.doc(`orgs/${tenantId}/persons/person-jhsong`).set({
+      personId: 'person-jhsong', uid: 'u-jhsong', name: '송지현',
+    });
 
     const setCustomUserClaims = vi.fn(async () => {});
     const governanceApi = request(createBffApp({
