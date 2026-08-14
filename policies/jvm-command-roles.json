@@ -156,7 +156,13 @@
       "command": "cashflowMonth.decideReopen",
       "roles": [
         "admin",
-        "finance"
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
       ]
     },
     "READ_CASHFLOW_WEEKLY_UPDATE_COMMAND": {

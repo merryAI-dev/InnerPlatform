@@ -114,7 +114,7 @@ class CashflowMonthReopenPolicyTest {
         assertThat(transition.nextHeadState()).isEqualTo(CashflowMonthReopenPolicy.State.CLOSED);
         assertThat(transition.nextHeadRevision()).isEqualTo(6);
         assertThat(transition.nextClosedThrough()).isEqualTo("2026-06");
-        assertThat(transition.nextSettlementMonth()).isEmpty();
+        assertThat(transition.nextSettlementMonth()).isEqualTo("2026-07");
         assertThat(transition.legacyRequesterMissing()).isFalse();
         assertThat(transition.updatesHeadAuthority()).isTrue();
     }

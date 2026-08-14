@@ -186,10 +186,13 @@ function monthDashboardSource(
 }
 
 function closedCumulativeAuthority(closedThrough, headRevision = 1) {
+  const settlement = new Date(`${closedThrough}-01T00:00:00Z`);
+  settlement.setUTCMonth(settlement.getUTCMonth() + 1);
   return {
     availability: 'AVAILABLE',
     status: 'CLOSED',
     fromMonth: '2023-01',
+    settlementMonth: settlement.toISOString().slice(0, 7),
     closedThrough,
     rootHash: `sha256:${'a'.repeat(64)}`,
     headRevision,

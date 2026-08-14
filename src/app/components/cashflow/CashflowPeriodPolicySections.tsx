@@ -96,6 +96,7 @@ function ExecutiveApproverEditor({
       className="min-w-[320px] space-y-2"
       onSubmit={(event) => {
         event.preventDefault();
+        if (!item.executiveApprover.changeAction.enabled) return;
         void onUpdate(item, uid, reason);
       }}
     >
@@ -105,7 +106,7 @@ function ExecutiveApproverEditor({
           id={inputId}
           value={uid}
           onChange={(event) => setUid(event.target.value)}
-          disabled={saving}
+          disabled={saving || !item.executiveApprover.changeAction.enabled}
           className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <option value="">후보 선택</option>
@@ -115,7 +116,7 @@ function ExecutiveApproverEditor({
             </option>
           ))}
         </select>
-        <Button type="submit" size="sm" disabled={saving || !uid.trim() || !reason.trim()}>{saving ? '연결 중' : '연결'}</Button>
+        <Button type="submit" size="sm" disabled={saving || !item.executiveApprover.changeAction.enabled || !uid.trim() || !reason.trim()}>{saving ? '연결 중' : '연결'}</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={snapshot.executiveApproverCandidates.status} label={snapshot.executiveApproverCandidates.statusLabel} tone={snapshot.executiveApproverCandidates.tone} />
@@ -126,12 +127,15 @@ function ExecutiveApproverEditor({
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           placeholder="People UID 연결 근거"
-          disabled={saving}
+          disabled={saving || !item.executiveApprover.changeAction.enabled}
           required
           maxLength={500}
           className="mt-1 h-8 text-xs"
         />
       </label>
+      {item.executiveApprover.changeAction.guide ? (
+        <p className="text-[11px] text-muted-foreground">{item.executiveApprover.changeAction.guide}</p>
+      ) : null}
       <p className="text-[11px] text-muted-foreground">{item.executiveApprover.expectedVersionLabel}</p>
     </form>
   );

@@ -93,6 +93,7 @@ describe('cashflow period policy client', () => {
       executiveApprover: {
         status: 'LINKED', statusLabel: 'People UID 연결됨', tone: 'positive', uid: 'people-uid-a',
         personId: 'person-a', displayName: '김조직장', expectedVersion: 8, expectedVersionLabel: '프로젝트 리비전 8',
+        changeAction: { enabled: true, status: 'AVAILABLE', tone: 'positive', guide: '' },
       },
       updatedAt: '2026-08-14T03:00:00.000Z',
       updatedAtLabel: '2026년 8월 14일 12:00',

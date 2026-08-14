@@ -129,12 +129,20 @@ export interface CashflowPeriodPolicySheet extends CashflowPeriodPolicyStatusBlo
   capturedAtLabel: string;
 }
 
+export interface CashflowPeriodPolicyChangeAction {
+  enabled: boolean;
+  status: string;
+  tone: CashflowPeriodPolicyTone;
+  guide: string;
+}
+
 export interface CashflowPeriodPolicyExecutiveApprover extends CashflowPeriodPolicyStatusBlock {
   uid: string | null;
   personId: string | null;
   displayName: string;
   expectedVersion: number;
   expectedVersionLabel: string;
+  changeAction: CashflowPeriodPolicyChangeAction;
 }
 
 export interface CashflowPeriodPolicyAmendment {

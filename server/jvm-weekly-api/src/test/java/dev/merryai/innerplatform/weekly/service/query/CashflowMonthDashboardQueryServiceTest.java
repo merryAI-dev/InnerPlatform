@@ -326,7 +326,7 @@ class CashflowMonthDashboardQueryServiceTest {
             null, null, null, null, null, false, Map.of(),
             snapshotHash, null, Map.of(), Map.of(), false,
             "2026-08-14", "2026-09-10", false,
-            closedAt, null, null, null, null, null, null, null, null, null
+            closedAt, null, null, null, null, null, null, null, null, null, false
         );
     }
 
@@ -339,7 +339,7 @@ class CashflowMonthDashboardQueryServiceTest {
             null, null, null, null, null, false, Map.of(),
             null, null, snapshot, Map.of(), false,
             "2026-08-14", "2026-09-10", false,
-            null, null, null, null, null, null, null, null, null, null
+            null, null, null, null, null, null, null, null, null, null, false
         );
     }
 

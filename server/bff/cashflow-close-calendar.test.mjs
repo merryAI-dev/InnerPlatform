@@ -52,13 +52,16 @@ describe('cashflow close calendar', () => {
       projectId: 'project-a',
       status: 'CLOSED',
       fromMonth: '2023-01',
+      settlementMonth: '2026-08',
       closedThrough: '2026-07',
       rootHash: `sha256:${'a'.repeat(64)}`,
       revision: 1,
     };
     expect(readCashflowCumulativeCloseAuthority(head, {
       tenantId: 'tenant-a', projectId: 'project-a',
-    })).toMatchObject({ status: 'CLOSED', closedThrough: '2026-07', revision: 1 });
+    })).toMatchObject({
+      status: 'CLOSED', settlementMonth: '2026-08', closedThrough: '2026-07', revision: 1,
+    });
     expect(readCashflowCumulativeCloseAuthority({ ...head, status: 'REOPEN_REQUESTED', revision: 2 }, {
       tenantId: 'tenant-a', projectId: 'project-a',
     })).toMatchObject({ status: 'REOPEN_REQUESTED', closedThrough: '2026-07', revision: 2 });
@@ -76,5 +79,26 @@ describe('cashflow close calendar', () => {
     expect(readCashflowCumulativeCloseAuthority({ ...head, status: 'closed' }, {
       tenantId: 'tenant-a', projectId: 'project-a',
     })).toBeNull();
+    for (const settlementMonth of [undefined, '2026-8', '2026-09']) {
+      expect(readCashflowCumulativeCloseAuthority({ ...head, settlementMonth }, {
+        tenantId: 'tenant-a', projectId: 'project-a',
+      })).toBeNull();
+    }
+  });
+
+  it('keeps a January settlement in the new weekly year', () => {
+    const authority = readCashflowCumulativeCloseAuthority({
+      contractVersion: 'cashflow-cumulative-close-v2',
+      tenantId: 'tenant-a',
+      projectId: 'project-a',
+      status: 'CLOSED',
+      fromMonth: '2023-01',
+      settlementMonth: '2026-01',
+      closedThrough: '2025-12',
+      rootHash: `sha256:${'a'.repeat(64)}`,
+      revision: 1,
+    }, { tenantId: 'tenant-a', projectId: 'project-a' });
+
+    expect(authority).toMatchObject({ settlementMonth: '2026-01', closedThrough: '2025-12' });
   });
 });

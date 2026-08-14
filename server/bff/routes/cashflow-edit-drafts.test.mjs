@@ -376,11 +376,29 @@ describe('cashflow private edit drafts', () => {
     })).resolves.toMatchObject({ status: 200 });
   });
 
+  it('keeps a January settlement from turning the previous annual year into monthly authority', async () => {
+    const h = harness();
+    h.db.documents.set(
+      'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
+      cumulativeCloseHead({ settlementMonth: '2026-01', closedThrough: '2025-12' }),
+    );
+
+    await expect(h.service.open({
+      ...h.base,
+      idempotencyKey: 'january-settlement-does-not-lock-annual-year',
+      baseSnapshot,
+      payload: { monthClose: { yearMonth: '2025-12' } },
+    })).resolves.toMatchObject({ status: 200 });
+  });
+
   it.each([
     ['contractVersion', { contractVersion: 'legacy' }],
     ['tenantId', { tenantId: 'tenant-b' }],
     ['projectId', { projectId: 'project-b' }],
     ['status', { status: 'OPEN' }],
+    ['settlementMonth missing', { settlementMonth: '' }],
+    ['settlementMonth malformed', { settlementMonth: '2026-8' }],
+    ['settlementMonth mismatch', { settlementMonth: '2026-09' }],
     ['closedThrough', { closedThrough: '2026-13' }],
     ['rootHash', { rootHash: 'sha256:broken' }],
     ['revision', { revision: 0 }],
@@ -454,6 +472,12 @@ describe('cashflow private edit drafts', () => {
     ['snapshot', { snapshot: { version: 1 } }],
     ['closed', { closedAt: '2026-07-31T15:00:00Z' }],
     ['amendment', { lastAmendmentEvidence: { sourceRevision: 'sha256:legacy' } }],
+    ['reopen reason', { reopenReason: '다시 확인이 필요합니다.' }],
+    ['reopen requested at', { reopenRequestedAt: '2026-08-14T10:00:00Z' }],
+    ['reopen requester', { reopenRequestedByUid: 'people-a' }],
+    ['reopen decision reason', { reopenDecisionReason: '수정 후 재결산' }],
+    ['reopen decided at', { reopenDecidedAt: '2026-08-14T11:00:00Z' }],
+    ['reopen decider', { reopenDecidedByUid: 'people-admin' }],
   ])('requires migration when an OPEN run retains %s evidence without authority', async (_kind, evidence) => {
     const h = harness();
     h.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {

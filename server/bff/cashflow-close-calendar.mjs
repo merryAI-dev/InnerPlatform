@@ -24,6 +24,7 @@ export function readCashflowCumulativeCloseAuthority(
   const record = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const status = text(record.status);
   const revision = record.revision;
+  const settlementMonth = text(record.settlementMonth);
   const closedThrough = text(record.closedThrough);
   const rootHash = text(record.rootHash);
   const commonValid = text(record.contractVersion) === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
@@ -36,12 +37,14 @@ export function readCashflowCumulativeCloseAuthority(
   }
   if (!commonValid
     || !['CLOSED', 'REOPEN_REQUESTED'].includes(status)
+    || !/^\d{4}-(0[1-9]|1[0-2])$/.test(settlementMonth)
     || !/^\d{4}-(0[1-9]|1[0-2])$/.test(closedThrough)
+    || previousYearMonth(settlementMonth) !== closedThrough
     || closedThrough < CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
     || !SHA256_PATTERN.test(rootHash)
     || !Number.isSafeInteger(revision)
     || revision < 1) return null;
-  return { status, closedThrough, rootHash, revision };
+  return { status, settlementMonth, closedThrough, rootHash, revision };
 }
 
 export function monthsBetween(startYearMonth, endYearMonth) {

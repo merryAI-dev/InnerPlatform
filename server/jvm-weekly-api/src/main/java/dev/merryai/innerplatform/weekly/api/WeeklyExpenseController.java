@@ -544,6 +544,7 @@ public class WeeklyExpenseController {
                 "AVAILABLE",
                 authority.head().status(),
                 authority.head().fromMonth(),
+                authority.head().settlementMonth(),
                 authority.head().closedThrough(),
                 authority.head().rootHash(),
                 authority.head().headRevision()

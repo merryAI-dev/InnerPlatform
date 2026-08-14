@@ -141,6 +141,7 @@ const completeDocuments = {
     projectId: 'project-a',
     status: 'CLOSED',
     fromMonth: '2023-01',
+    settlementMonth: '2026-08',
     closedThrough: '2026-07',
     revision: 3,
     rootHash: `sha256:${'a'.repeat(64)}`,
@@ -1219,6 +1220,31 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
       actorId: 'admin-uid',
       metadata: { before: { exists: false }, after: fixture.canonicalHead },
     });
+  });
+
+  it('semantic replay도 actor가 정확히 한 People UID에 연결된 ACTIVE runtime admin이 아니면 거절한다', async () => {
+    const fixture = strictRecoveryDocuments({ head: 'missing' });
+    const { app, store, audit } = createHarness({ documents: fixture.documents });
+    const read = await request(app).get('/api/v1/admin/cashflow-period-policy');
+    const expectedEvidence = read.body.items.find((item) => item.project.id === 'project-a').recovery.expectedEvidence;
+
+    await request(app)
+      .post('/api/v1/admin/cashflow-period-policy/projects/project-a/cumulative-close-head-recovery')
+      .set('x-idempotency-key', 'recover-before-identity-drift')
+      .send({ reason: '누락된 누적 마감 권한 복구', expectedEvidence })
+      .expect(200);
+    store.set('orgs/tenant-a/persons/person-admin-duplicate', {
+      personId: 'person-admin-duplicate', uid: 'admin-uid', name: '중복 관리자',
+    });
+
+    const response = await request(app)
+      .post('/api/v1/admin/cashflow-period-policy/projects/project-a/cumulative-close-head-recovery')
+      .set('x-idempotency-key', 'recover-replay-after-identity-drift')
+      .send({ reason: '응답 유실 후 재확인', expectedEvidence });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('runtime_superadmin_required');
+    expect(audit).toHaveLength(1);
   });
 
   it('완전한 immutable evidence로 손상 head를 exact overwrite하고 full before/after audit을 남긴다', async () => {
