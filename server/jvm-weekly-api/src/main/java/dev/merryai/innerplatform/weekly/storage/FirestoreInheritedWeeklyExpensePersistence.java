@@ -356,6 +356,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "orgs/" + actor.tenantId() + "/members/" + actor.id()
             ));
             Map<String, Object> member = memberSnapshot.exists() ? data(memberSnapshot) : Map.of();
+            QuerySnapshot peopleSnapshot = query(db.collection(
+                "orgs/" + actor.tenantId() + "/persons"
+            ).whereEqualTo("uid", actor.id()).limit(2));
             String projectTenantId = text(project.get("tenantId"), "");
             String storedProjectId = text(project.get("id"), "");
             return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
@@ -368,7 +371,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(member.get("uid"), ""),
                 text(member.get("status"), ""),
                 text(member.get("role"), ""),
-                text(project.get("executiveApproverId"), "")
+                text(project.get("executiveApproverId"), ""),
+                peopleSnapshot.getDocuments().size()
             );
         } catch (CashflowMonthReopenPort.DecisionAuthorityUnavailable error) {
             throw error;

@@ -115,7 +115,7 @@ class WeeklyExpenseControllerTest {
             String projectId = invocation.getArgument(1);
             return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
                 actor.tenantId(), actor.id(), projectId, true, actor.tenantId(), projectId,
-                actor.id(), "ACTIVE", "organization_head", actor.id()
+                actor.id(), "ACTIVE", "organization_head", actor.id(), 1
             );
         }).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
         doNothing().when(weeklyExpensePersistence).bindCashflowMonthReopenDecisionAuthority(any());
@@ -2571,7 +2571,7 @@ class WeeklyExpenseControllerTest {
             return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
                 actor.tenantId(), actor.id(), projectId, true, actor.tenantId(), projectId,
                 actor.id(), "ACTIVE", runtimeAdmin ? "admin" : "viewer",
-                runtimeAdmin ? "another-head" : actor.id()
+                runtimeAdmin ? "another-head" : actor.id(), 1
             );
         }).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
 
@@ -2597,17 +2597,17 @@ class WeeklyExpenseControllerTest {
             new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
                 "tenant-month-close", "head-month-close", "project-month-close",
                 true, "tenant-month-close", "project-month-close",
-                "head-month-close", "INACTIVE", "viewer", "head-month-close"
+                "head-month-close", "INACTIVE", "viewer", "head-month-close", 1
             ),
             new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
                 "tenant-month-close", "head-month-close", "project-month-close",
                 true, "tenant-month-close", "project-month-close",
-                "head-month-close", "ACTIVE", "viewer", "another-head"
+                "head-month-close", "ACTIVE", "viewer", "another-head", 1
             ),
             new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
                 "tenant-month-close", "head-month-close", "project-month-close",
                 true, "tenant-month-close", "another-project",
-                "head-month-close", "ACTIVE", "viewer", "head-month-close"
+                "head-month-close", "ACTIVE", "viewer", "head-month-close", 1
             )
         );
 

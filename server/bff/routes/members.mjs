@@ -135,6 +135,39 @@ function bulkDeepSyncFailure(error) {
   };
 }
 
+function activeCanonicalAdminUids(adminsSnapshot) {
+  return Array.from(new Set((adminsSnapshot?.docs || []).flatMap((doc) => {
+    const admin = doc.data() || {};
+    const uid = readOptionalText(admin.uid);
+    return doc.id === uid && readOptionalText(admin.status).toUpperCase() === 'ACTIVE'
+      ? [uid]
+      : [];
+  })));
+}
+
+function requireActorPeopleAuthority(actorPeopleSnapshot) {
+  if (actorPeopleSnapshot?.size !== 1) {
+    throw createHttpError(403, '현재 관리자 권한을 확인할 수 없습니다. 다시 로그인한 뒤 시도해 주세요.', 'member_authority_required');
+  }
+}
+
+async function exactPeopleLinkedUidsInTransaction({
+  db,
+  tx,
+  tenantId,
+  uids,
+  prefetched = new Map(),
+}) {
+  const uniqueUids = Array.from(new Set(uids.filter(Boolean)));
+  const missingUids = uniqueUids.filter((uid) => !prefetched.has(uid));
+  const missingSnapshots = await Promise.all(missingUids.map((uid) => tx.get(
+    db.collection(`orgs/${tenantId}/persons`).where('uid', '==', uid).limit(2),
+  )));
+  const snapshotsByUid = new Map(prefetched);
+  missingUids.forEach((uid, index) => snapshotsByUid.set(uid, missingSnapshots[index]));
+  return new Set(uniqueUids.filter((uid) => snapshotsByUid.get(uid)?.size === 1));
+}
+
 export function mountMemberRoutes(app, {
   db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, authAdminService,
 }) {
@@ -188,6 +221,9 @@ export function mountMemberRoutes(app, {
     const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
     const canonicalRef = db.doc(`orgs/${tenantId}/members/${plan.canonicalDocId}`);
     const actorRef = db.doc(`orgs/${tenantId}/members/${actorId}`);
+    const actorPeopleQuery = db.collection(`orgs/${tenantId}/persons`)
+      .where('uid', '==', actorId)
+      .limit(2);
     const targetPeopleQuery = db.collection(`orgs/${tenantId}/persons`)
       .where('uid', '==', plan.canonicalPatch.uid)
       .limit(2);
@@ -244,8 +280,9 @@ export function mountMemberRoutes(app, {
       if (idempotency.mode === 'conflict' || idempotency.mode === 'in_progress') {
         throw createHttpError(409, idempotency.reason, `idempotency_${idempotency.mode}`);
       }
-      const [actorSnapshot, adminsSnapshot, targetPeopleSnapshot, ...targetSnapshots] = await Promise.all([
+      const [actorSnapshot, actorPeopleSnapshot, adminsSnapshot, targetPeopleSnapshot, ...targetSnapshots] = await Promise.all([
         tx.get(actorRef),
+        tx.get(actorPeopleQuery),
         tx.get(adminsQuery),
         tx.get(targetPeopleQuery),
         ...targetDocEntries.map(({ ref }) => tx.get(ref)),
@@ -256,8 +293,9 @@ export function mountMemberRoutes(app, {
         || readOptionalText(actor.status).toUpperCase() !== 'ACTIVE'
         || normalizeRole(actor.role) !== 'admin'
       ) {
-        throw createHttpError(403, 'Exact active member authority is required', 'member_authority_required');
+        throw createHttpError(403, '현재 관리자 권한을 확인할 수 없습니다. 다시 로그인한 뒤 시도해 주세요.', 'member_authority_required');
       }
+      requireActorPeopleAuthority(actorPeopleSnapshot);
       if (targetPeopleSnapshot.size !== 1) {
         throw createHttpError(
           409,
@@ -279,18 +317,20 @@ export function mountMemberRoutes(app, {
       }
       if (targetRole !== 'admin') {
         const changedDocIds = new Set([plan.canonicalDocId, ...plan.legacyPatches.map((legacy) => legacy.docId)]);
-        const remainingAdmins = adminsSnapshot.docs.filter((doc) => {
-          const admin = doc.data() || {};
-          return doc.id === readOptionalText(admin.uid)
-            && readOptionalText(admin.status).toUpperCase() === 'ACTIVE'
-            && !changedDocIds.has(doc.id);
+        const activeAdminUids = activeCanonicalAdminUids(adminsSnapshot);
+        const peopleLinkedAdminUids = await exactPeopleLinkedUidsInTransaction({
+          db,
+          tx,
+          tenantId,
+          uids: activeAdminUids,
+          prefetched: new Map([
+            [actorId, actorPeopleSnapshot],
+            [plan.canonicalPatch.uid, targetPeopleSnapshot],
+          ]),
         });
-        const changesActiveAdmin = adminsSnapshot.docs.some((doc) => {
-          const admin = doc.data() || {};
-          return changedDocIds.has(doc.id)
-            && doc.id === readOptionalText(admin.uid)
-            && readOptionalText(admin.status).toUpperCase() === 'ACTIVE';
-        });
+        const exactActiveAdminUids = activeAdminUids.filter((uid) => peopleLinkedAdminUids.has(uid));
+        const changesActiveAdmin = exactActiveAdminUids.some((uid) => changedDocIds.has(uid));
+        const remainingAdmins = exactActiveAdminUids.filter((uid) => !changedDocIds.has(uid));
         if (changesActiveAdmin && remainingAdmins.length === 0) {
           throw createHttpError(409, 'Cannot remove the last remaining admin', 'last_admin_lockout');
         }
@@ -421,6 +461,7 @@ export function mountMemberRoutes(app, {
 
     const memberRef = db.doc(`orgs/${tenantId}/members/${memberId}`);
     const actorRef = db.doc(`orgs/${tenantId}/members/${actorId}`);
+    const actorPeopleQuery = db.collection(`orgs/${tenantId}/persons`).where('uid', '==', actorId).limit(2);
     const peopleQuery = db.collection(`orgs/${tenantId}/persons`).where('uid', '==', memberId).limit(2);
     const adminsQuery = db.collection(`orgs/${tenantId}/members`).where('role', '==', 'admin');
     const outboxEvent = createOutboxEvent({
@@ -439,9 +480,10 @@ export function mountMemberRoutes(app, {
     const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
 
     const result = await db.runTransaction(async (tx) => {
-      const [snap, actorSnap, peopleSnap, adminsSnap] = await Promise.all([
+      const [snap, actorSnap, actorPeopleSnap, peopleSnap, adminsSnap] = await Promise.all([
         tx.get(memberRef),
         tx.get(actorRef),
+        tx.get(actorPeopleQuery),
         tx.get(peopleQuery),
         tx.get(adminsQuery),
       ]);
@@ -456,13 +498,14 @@ export function mountMemberRoutes(app, {
         || readOptionalText(actor.status).toUpperCase() !== 'ACTIVE'
         || normalizeRole(actor.role) !== normalizeRole(actorRole)
       ) {
-        throw createHttpError(403, 'Exact active member authority is required', 'member_authority_required');
+        throw createHttpError(403, '현재 관리자 권한을 확인할 수 없습니다. 다시 로그인한 뒤 시도해 주세요.', 'member_authority_required');
       }
+      requireActorPeopleAuthority(actorPeopleSnap);
       if (
         readOptionalText(current.uid) !== memberId
         || readOptionalText(current.status).toUpperCase() !== 'ACTIVE'
       ) {
-        throw createHttpError(409, 'Role changes require an exact ACTIVE member UID', 'member_uid_invalid');
+        throw createHttpError(409, '대상 구성원의 활성 People UID 연결을 확인할 수 없습니다.', 'member_uid_invalid');
       }
       if (peopleSnap.size !== 1) {
         throw createHttpError(
@@ -479,12 +522,19 @@ export function mountMemberRoutes(app, {
       }
 
       if (previousRole === 'admin' && targetRole !== 'admin') {
-        const activeExactAdmins = adminsSnap.docs.filter((doc) => {
-          const admin = doc.data() || {};
-          return doc.id === readOptionalText(admin.uid)
-            && readOptionalText(admin.status).toUpperCase() === 'ACTIVE';
+        const activeAdminUids = activeCanonicalAdminUids(adminsSnap);
+        const peopleLinkedAdminUids = await exactPeopleLinkedUidsInTransaction({
+          db,
+          tx,
+          tenantId,
+          uids: activeAdminUids,
+          prefetched: new Map([
+            [actorId, actorPeopleSnap],
+            [memberId, peopleSnap],
+          ]),
         });
-        if (activeExactAdmins.length <= 1) {
+        const activeExactAdminCount = activeAdminUids.filter((uid) => peopleLinkedAdminUids.has(uid)).length;
+        if (activeExactAdminCount <= 1) {
           throw createHttpError(409, 'Cannot remove the last remaining admin', 'last_admin_lockout');
         }
       }

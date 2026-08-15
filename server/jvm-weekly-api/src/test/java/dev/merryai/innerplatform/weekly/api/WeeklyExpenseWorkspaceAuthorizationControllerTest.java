@@ -57,7 +57,7 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
             String projectId = invocation.getArgument(1);
             return new CashflowMonthReopenPolicy.DecisionAuthorityFacts(
                 actor.tenantId(), actor.id(), projectId, true, actor.tenantId(), projectId,
-                actor.id(), "ACTIVE", "organization_head", actor.id()
+                actor.id(), "ACTIVE", "organization_head", actor.id(), 1
             );
         }).when(weeklyExpensePersistence).findCashflowMonthReopenDecisionAuthorityFacts(any(), any());
         doNothing().when(weeklyExpensePersistence).bindCashflowMonthReopenDecisionAuthority(any());

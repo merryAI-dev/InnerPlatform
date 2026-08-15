@@ -168,6 +168,15 @@ describe('CashflowPeriodPolicyView', () => {
     expect(html).not.toContain('정책 스냅샷 생성');
   });
 
+  it('uses an h1 page title, h2 section titles, and h3 nested titles', () => {
+    const html = render({ kind: 'ready', snapshot });
+
+    expect(html).toMatch(/<h1[^>]*>현금흐름 기간·마감 정책<\/h1>/);
+    expect(html).toMatch(/<h2[^>]*>정책 \/ 권한<\/h2>/);
+    expect(html).toMatch(/<h3[^>]*>상위 슈퍼관리자<\/h3>/);
+    expect(html).not.toContain('<h4');
+  });
+
   it('renders an accessible loading state', () => {
     const html = render({ kind: 'loading' });
     expect(html).toContain('aria-busy="true"');

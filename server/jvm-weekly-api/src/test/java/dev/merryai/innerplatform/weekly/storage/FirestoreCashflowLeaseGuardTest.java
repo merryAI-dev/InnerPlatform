@@ -805,6 +805,37 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void reopenDecisionRejectsAdminWithoutExactlyOneCanonicalPeopleUid() {
+        Fixture unlinked = fixture(member(Map.of("role", "admin", "projectIds", List.of())), Map.of());
+        unlinked.documents.remove("orgs/tenant-a/persons/person-pm-1");
+        unlinked.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "someone-else"
+        ));
+
+        assertThatThrownBy(() -> unlinked.persistence.runCommandTransaction(() ->
+            authorizeMonthReopenDecision(unlinked.persistence, ACTOR, "project-a")
+        ))
+            .isInstanceOfSatisfying(CashflowMonthReopenPolicy.Violation.class, error ->
+                assertThat(error.reason()).isEqualTo(
+                    CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN
+                ));
+
+        Fixture ambiguous = fixture(member(Map.of("role", "admin", "projectIds", List.of())), Map.of());
+        ambiguous.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "someone-else"
+        ));
+        ambiguous.documents.put("orgs/tenant-a/persons/person-pm-1-duplicate", Map.of("uid", "pm-1"));
+
+        assertThatThrownBy(() -> ambiguous.persistence.runCommandTransaction(() ->
+            authorizeMonthReopenDecision(ambiguous.persistence, ACTOR, "project-a")
+        ))
+            .isInstanceOfSatisfying(CashflowMonthReopenPolicy.Violation.class, error ->
+                assertThat(error.reason()).isEqualTo(
+                    CashflowMonthReopenPolicy.ViolationReason.DECISION_FORBIDDEN
+                ));
+    }
+
+    @Test
     void usesStoredRoleForCrossProjectAccessAndRequiresCanonicalProjectInTransaction() {
         Fixture finance = fixture(member(Map.of("role", "finance", "projectIds", List.of())), activeLease());
         assertThatCode(() -> finance.persistence.runCommandTransaction(() -> {
@@ -5922,6 +5953,7 @@ class FirestoreCashflowLeaseGuardTest {
         List<Integer> getAllSizes = new ArrayList<>();
         List<Integer> queryReadSizes = new ArrayList<>();
         docs.put("orgs/tenant-a/members/pm-1", member);
+        docs.put("orgs/tenant-a/persons/person-pm-1", Map.of("uid", "pm-1"));
         docs.put(leasePath("project-a"), lease);
         docs.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
             "projectId", "project-a", "weeklyYear", 2026
