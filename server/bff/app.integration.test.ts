@@ -107,6 +107,11 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       role: 'admin',
       status: 'ACTIVE',
     });
+    await db.doc(`orgs/${tenantId}/persons/person-${actorId}`).set({
+      personId: `person-${actorId}`,
+      uid: actorId,
+      name: 'Integration Admin',
+    });
   });
 
   afterAll(async () => {
@@ -2149,6 +2154,41 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(ambiguous.body.error).toBe('people_uid_ambiguous');
   });
 
+  it('rejects role mutation when the acting admin People UID is absent or ambiguous', async () => {
+    await db.doc(`orgs/${tenantId}/members/actor-people-target`).set({
+      uid: 'actor-people-target', tenantId, role: 'pm', status: 'ACTIVE',
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-actor-people-target`).set({
+      personId: 'person-actor-people-target', uid: 'actor-people-target', name: 'Actor People Target',
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-${actorId}`).delete();
+
+    const absent = await api
+      .patch('/api/v1/members/actor-people-target/role')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-role-actor-people-absent' })
+      .send({ role: 'finance', reason: 'actor People UID required' });
+
+    expect(absent.status).toBe(403);
+    expect(absent.body.error).toBe('member_authority_required');
+
+    await db.doc(`orgs/${tenantId}/persons/person-actor-a`).set({
+      personId: 'person-actor-a', uid: actorId, name: 'Actor A',
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-actor-b`).set({
+      personId: 'person-actor-b', uid: actorId, name: 'Actor B',
+    });
+
+    const ambiguousActor = await api
+      .patch('/api/v1/members/actor-people-target/role')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-role-actor-people-ambiguous' })
+      .send({ role: 'finance', reason: 'actor People UID must be unique' });
+
+    expect(ambiguousActor.status).toBe(403);
+    expect(ambiguousActor.body.error).toBe('member_authority_required');
+    const target = await db.doc(`orgs/${tenantId}/members/actor-people-target`).get();
+    expect(target.data()?.role).toBe('pm');
+  });
+
   it('uses member fallback for firebase auth when token role is missing and ignores spoofed header role', async () => {
     await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
       uid: 'u-firebase-roleless',
@@ -2157,6 +2197,11 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       status: 'ACTIVE',
       email: 'roleless@mysc.co.kr',
       updatedAt: new Date().toISOString(),
+    });
+    await db.doc(`orgs/${tenantId}/persons/person-firebase-roleless`).set({
+      personId: 'person-firebase-roleless',
+      uid: 'u-firebase-roleless',
+      name: 'Firebase Roleless User',
     });
 
     await db.doc(`orgs/${tenantId}/members/u-target`).set({
