@@ -230,6 +230,77 @@ function createRoleHarness({
 }
 
 describe('member role authority', () => {
+  it('rejects direct and deep-sync role mutations unless the acting admin has exactly one canonical People UID', async () => {
+    const direct = createRoleHarness({
+      patch: {
+        'orgs/tenant-a/persons/person-admin-1': { personId: 'person-admin-1', uid: 'someone-else' },
+      },
+    });
+    const directResponse = await request(direct.app)
+      .patch('/api/v1/members/target-1/role')
+      .send({ role: 'finance', reason: '행위자 People UID 검증' });
+
+    expect(directResponse.status).toBe(403);
+    expect(directResponse.body.error).toBe('member_authority_required');
+    expect(direct.store.get('orgs/tenant-a/members/target-1')).toMatchObject({ role: 'pm' });
+    expect(direct.audits).toHaveLength(0);
+
+    const ambiguous = createRoleHarness({
+      patch: {
+        'orgs/tenant-a/persons/person-admin-duplicate': { personId: 'person-admin-duplicate', uid: 'admin-1' },
+      },
+    });
+    const ambiguousResponse = await request(ambiguous.app)
+      .patch('/api/v1/members/target-1/role')
+      .send({ role: 'finance', reason: '행위자 People UID 중복 검증' });
+
+    expect(ambiguousResponse.status).toBe(403);
+    expect(ambiguousResponse.body.error).toBe('member_authority_required');
+    expect(ambiguous.store.get('orgs/tenant-a/members/target-1')).toMatchObject({ role: 'pm' });
+    expect(ambiguous.audits).toHaveLength(0);
+
+    const deepSync = createRoleHarness({
+      patch: {
+        'orgs/tenant-a/persons/person-admin-1': { personId: 'person-admin-1', uid: 'someone-else' },
+      },
+    });
+    const deepSyncResponse = await request(deepSync.app)
+      .post('/api/v1/admin/auth-governance/users/target%40example.com/deep-sync')
+      .send({ role: 'finance', reason: '행위자 People UID 검증' });
+
+    expect(deepSyncResponse.status).toBe(403);
+    expect(deepSyncResponse.body.error).toBe('member_authority_required');
+    expect(deepSync.store.get('orgs/tenant-a/members/target-1')).toMatchObject({ role: 'pm' });
+    expect(deepSync.audits).toHaveLength(0);
+    expect(deepSync.claimsCalls).toHaveLength(0);
+  });
+
+  it('does not count an orphan admin member as last-admin quorum in direct or deep-sync mutations', async () => {
+    const patch = {
+      'orgs/tenant-a/members/orphan-admin': {
+        uid: 'orphan-admin', email: 'orphan@example.com', role: 'admin', status: 'ACTIVE',
+      },
+    };
+    const direct = createRoleHarness({ patch });
+    const directResponse = await request(direct.app)
+      .patch('/api/v1/members/admin-1/role')
+      .send({ role: 'pm', reason: 'People 연결 관리자 정족수 확인' });
+
+    expect(directResponse.status).toBe(409);
+    expect(directResponse.body.error).toBe('last_admin_lockout');
+    expect(direct.store.get('orgs/tenant-a/members/admin-1')).toMatchObject({ role: 'admin' });
+
+    const deepSync = createRoleHarness({ patch });
+    const deepSyncResponse = await request(deepSync.app)
+      .post('/api/v1/admin/auth-governance/users/admin%40example.com/deep-sync')
+      .send({ role: 'pm', reason: 'People 연결 관리자 정족수 확인' });
+
+    expect(deepSyncResponse.status).toBe(409);
+    expect(deepSyncResponse.body.error).toBe('last_admin_lockout');
+    expect(deepSync.store.get('orgs/tenant-a/members/admin-1')).toMatchObject({ role: 'admin' });
+    expect(deepSync.audits).toHaveLength(0);
+  });
+
   it('writes the exact People-linked member, audit, and outbox together', async () => {
     const harness = createRoleHarness();
     const response = await request(harness.app)

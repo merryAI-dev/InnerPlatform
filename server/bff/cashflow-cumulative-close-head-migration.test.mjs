@@ -1044,7 +1044,10 @@ describe('cashflow cumulative close head migration', () => {
       db: { ...db, collection: () => query([{ id: 'person-1' }, { id: 'person-2' }]) },
       tenantId: 'tenant-a',
       peopleUid: 'operator-uid',
-    })).rejects.toThrow(/exactly one People record/);
+    })).rejects.toMatchObject({
+      code: 'RUNTIME_SUPERADMIN_REQUIRED',
+      message: expect.stringMatching(/exactly one People record/),
+    });
 
     await expect(assertLinkedActivePeopleUid({
       db: {
@@ -1058,7 +1061,10 @@ describe('cashflow cumulative close head migration', () => {
       },
       tenantId: 'tenant-a',
       peopleUid: 'operator-uid',
-    })).rejects.toThrow(/ACTIVE runtime admin member/);
+    })).rejects.toMatchObject({
+      code: 'RUNTIME_SUPERADMIN_REQUIRED',
+      message: expect.stringMatching(/ACTIVE runtime admin member/),
+    });
   });
 
   it('refuses an ACTIVE non-admin operator at the execute boundary without writing a head', async () => {

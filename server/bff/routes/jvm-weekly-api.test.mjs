@@ -265,6 +265,7 @@ function fullMonthCloseSource({
   mirrorStatus = 'FRESH', controlMatches = true, calculationMismatch = false,
   contractAmount = 1000, explicitZero = false, explicitEmpty = false,
 } = {}) {
+  const monthCloseRequestQueries = [];
   const sourceRevision = `sha256:${'c'.repeat(64)}`;
   const targetRevision = `sha256:${'d'.repeat(64)}`;
   const cells = [];
@@ -374,22 +375,42 @@ function fullMonthCloseSource({
     db: {
       doc: (path) => memoryDoc(documents, path),
       runTransaction: memoryTransaction(documents),
-      collection: (path) => ({
-        where: (field, _operator, expected) => {
-          const docs = () => [...documents.entries()]
-            .filter(([documentPath, value]) => documentPath.startsWith(`${path}/`) && value[field] === expected)
-            .map(([documentPath, value]) => ({ id: documentPath.split('/').at(-1), data: () => value }));
+      collection: (path) => {
+        function query(filters = [], limitValue = null) {
           return {
-            get: async () => ({ docs: docs() }),
-            limit: (count) => ({ get: async () => ({ docs: docs().slice(0, count) }) }),
+            where: (field, operator, expected) => {
+              if (path.endsWith('/cashflow_month_close_requests')) {
+                monthCloseRequestQueries.push({ kind: 'where', field, operator, expected });
+              }
+              return query([...filters, { field, operator, expected }], limitValue);
+            },
+            limit: (count) => {
+              if (path.endsWith('/cashflow_month_close_requests')) {
+                monthCloseRequestQueries.push({ kind: 'limit', count });
+              }
+              return query(filters, count);
+            },
+            get: async () => {
+              const docs = [...documents.entries()]
+                .filter(([documentPath, value]) => (
+                  documentPath.startsWith(`${path}/`)
+                  && filters.every(({ field, operator, expected }) => (
+                    operator === 'in' ? expected.includes(value[field]) : value[field] === expected
+                  ))
+                ))
+                .map(([documentPath, value]) => ({ id: documentPath.split('/').at(-1), data: () => value }));
+              return { docs: Number.isSafeInteger(limitValue) ? docs.slice(0, limitValue) : docs };
+            },
           };
-        },
-      }),
+        }
+        return query();
+      },
     },
     documents,
     sourceRevision,
     targetRevision,
     closeInput,
+    monthCloseRequestQueries,
   };
 }
 
@@ -5847,6 +5868,15 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ approverUid: 'finance-2', yearMonth: '2026-07', expectedVersion: 2 })
       .expect(409)
       .expect((response) => expect(response.body.code).toBe('cashflow_month_close_approver_locked'));
+
+    const statusFilters = source.monthCloseRequestQueries.filter((entry) => entry.field === 'status');
+    expect(statusFilters).toHaveLength(2);
+    expect(statusFilters.every((entry) => (
+      entry.operator === 'in'
+      && entry.expected.toSorted().join(',') === ['APPROVING', 'PENDING', 'REOPEN_REQUESTED', 'UNCERTAIN'].join(',')
+    ))).toBe(true);
+    expect(source.monthCloseRequestQueries.filter((entry) => entry.kind === 'limit' && entry.count === 1))
+      .toEqual([{ kind: 'limit', count: 1 }, { kind: 'limit', count: 1 }]);
   });
 
   it('rejects inactive approvers and unassigned actors when designating an approver', async () => {

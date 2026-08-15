@@ -39,6 +39,18 @@ const SOURCE_FIELDS = [
   'snapshotHash',
 ];
 
+export class CashflowCumulativeCloseRecoveryError extends Error {
+  constructor(code, message, cause) {
+    super(message, cause ? { cause } : undefined);
+    this.name = 'CashflowCumulativeCloseRecoveryError';
+    this.code = code;
+  }
+}
+
+function recoveryError(code, message, cause) {
+  return new CashflowCumulativeCloseRecoveryError(code, message, cause);
+}
+
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -730,19 +742,32 @@ function allowedPlanRows(plan, allowedProjectIds) {
 }
 
 export async function assertLinkedActivePeopleUid({ db, transaction, tenantId, peopleUid }) {
-  if (!db?.collection || !db?.doc) throw new Error('Firestore is required to validate People UID');
+  if (!db?.collection || !db?.doc) {
+    throw recoveryError(
+      'RUNTIME_SUPERADMIN_STORE_UNAVAILABLE',
+      'Firestore is required to validate People UID',
+    );
+  }
   const peopleQuery = db.collection(`orgs/${tenantId}/persons`).where('uid', '==', peopleUid).limit(2);
   const memberRef = db.doc(`orgs/${tenantId}/members/${peopleUid}`);
   const read = (target) => (transaction ? transaction.get(target) : target.get());
   const [snapshot, memberSnapshot] = await Promise.all([read(peopleQuery), read(memberRef)]);
-  if (snapshot.size !== 1) throw new Error(`--people-uid must match exactly one People record: ${peopleUid}`);
+  if (snapshot.size !== 1) {
+    throw recoveryError(
+      'RUNTIME_SUPERADMIN_REQUIRED',
+      `--people-uid must match exactly one People record: ${peopleUid}`,
+    );
+  }
   const member = memberSnapshot.exists ? memberSnapshot.data() || {} : {};
   if (
     text(member.uid) !== peopleUid
     || text(member.status).toUpperCase() !== 'ACTIVE'
     || text(member.role).toLowerCase() !== 'admin'
   ) {
-    throw new Error(`--people-uid must be an ACTIVE runtime admin member: ${peopleUid}`);
+    throw recoveryError(
+      'RUNTIME_SUPERADMIN_REQUIRED',
+      `--people-uid must be an ACTIVE runtime admin member: ${peopleUid}`,
+    );
   }
   return { personId: snapshot.docs[0].id, peopleUid };
 }
@@ -789,7 +814,10 @@ export async function applyCumulativeCloseHeadPlan({ db, tenantId, plan, options
         || monthlyCloseVersions.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
         || requests.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
       ) {
-        throw new Error('cashflow recovery evidence query limit exceeded');
+        throw recoveryError(
+          'RECOVERY_EVIDENCE_TRUNCATED',
+          'cashflow recovery evidence query limit exceeded',
+        );
       }
       return { head, monthlyCloses, monthlyCloseVersions, requests };
     }));
@@ -812,7 +840,10 @@ export async function applyCumulativeCloseHeadPlan({ db, tenantId, plan, options
         || !matchingHead(liveRow.head, row.head)
         || !matchingSource(liveRow.source, row.source)
       ) {
-        throw new Error(`${row.projectId}: canonical source evidence changed during apply transaction`);
+        throw recoveryError(
+          'RECOVERY_EVIDENCE_CHANGED',
+          `${row.projectId}: canonical source evidence changed during apply transaction`,
+        );
       }
       const currentHead = current.head.exists ? current.head.data() || {} : null;
       if (matchingHead(currentHead, row.head)) {
@@ -822,7 +853,10 @@ export async function applyCumulativeCloseHeadPlan({ db, tenantId, plan, options
       if (
         !matchingRecoveryEvidence(row.expectedEvidence, recoveryEvidence(liveRow, currentHead))
       ) {
-        throw new Error(`${row.projectId}: authority evidence changed during apply transaction`);
+        throw recoveryError(
+          'RECOVERY_EVIDENCE_CHANGED',
+          `${row.projectId}: authority evidence changed during apply transaction`,
+        );
       }
       toWrite.push({
         row,
@@ -935,7 +969,10 @@ export async function applyCumulativeCloseResetToReclose({
       versionsSnapshot.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
       || requestsSnapshot.docs.length > RECOVERY_EVIDENCE_QUERY_LIMIT
     ) {
-      throw new Error('cashflow reset evidence query limit exceeded');
+      throw recoveryError(
+        'RESET_EVIDENCE_TRUNCATED',
+        'cashflow reset evidence query limit exceeded',
+      );
     }
     const rawHead = headSnapshot.exists ? headSnapshot.data() || {} : null;
     const rawMonthlyClose = monthlyCloseSnapshot.exists ? monthlyCloseSnapshot.data() || {} : null;
@@ -951,7 +988,10 @@ export async function applyCumulativeCloseResetToReclose({
         matchingResetOutcomeEvidence(candidate.expectedEvidence, expected)
       ));
       if (!replayCandidate) {
-        throw new Error(`${normalizedProjectId}: reset-to-reclose evidence changed`);
+        throw recoveryError(
+          'RESET_EVIDENCE_CHANGED',
+          `${normalizedProjectId}: reset-to-reclose evidence changed`,
+        );
       }
       return {
         status: 'RESET_TO_RECLOSE_REPLAYED',
@@ -974,16 +1014,28 @@ export async function applyCumulativeCloseResetToReclose({
       }
       : plannedLiveRow;
     if (!livePlan || livePlan.projectId !== normalizedProjectId) {
-      throw new Error(`${normalizedProjectId}: reset-to-reclose evidence changed`);
+      throw recoveryError(
+        'RESET_EVIDENCE_CHANGED',
+        `${normalizedProjectId}: reset-to-reclose evidence changed`,
+      );
     }
     if (livePlan.status === 'NORMAL_REOPEN_REQUIRED') {
-      throw new Error(`${normalizedProjectId}: valid authority requires normal reopen`);
+      throw recoveryError(
+        'RESET_NORMAL_REOPEN_REQUIRED',
+        `${normalizedProjectId}: valid authority requires normal reopen`,
+      );
     }
     if (livePlan.status !== 'RESET_TO_RECLOSE_READY') {
-      throw new Error(`${normalizedProjectId}: exact recovery is available`);
+      throw recoveryError(
+        'RESET_EXACT_RECOVERY_REQUIRED',
+        `${normalizedProjectId}: exact recovery is available`,
+      );
     }
     if (!matchingRecoveryEvidence(expected, livePlan.expectedEvidence)) {
-      throw new Error(`${normalizedProjectId}: reset-to-reclose evidence changed`);
+      throw recoveryError(
+        'RESET_EVIDENCE_CHANGED',
+        `${normalizedProjectId}: reset-to-reclose evidence changed`,
+      );
     }
 
     const before = {

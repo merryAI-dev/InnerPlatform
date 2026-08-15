@@ -10,7 +10,7 @@ import type {
 } from '../../lib/cashflow-period-policy-client';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent, CardHeader } from '../ui/card';
 import { Input } from '../ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 
@@ -60,7 +60,7 @@ function SectionCard({
               <Icon className="h-4 w-4" />
             </div>
             <div>
-              <CardTitle id={`section-${title.replaceAll(' ', '-')}`} className="text-sm">{title}</CardTitle>
+              <h2 id={`section-${title.replaceAll(' ', '-')}`} className="text-sm leading-none">{title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             </div>
           </div>

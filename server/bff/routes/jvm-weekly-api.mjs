@@ -71,7 +71,9 @@ const CASHFLOW_APPROVER_LOCKED_REQUEST_STATUSES = ['PENDING', 'REOPEN_REQUESTED'
 function cashflowProjectMonthCloseRequestsQuery(db, tenantId, projectId) {
   if (!db?.collection) throw new Error('cashflow month-close request store unavailable');
   return db.collection(`orgs/${tenantId}/cashflow_month_close_requests`)
-    .where('projectId', '==', projectId);
+    .where('projectId', '==', projectId)
+    .where('status', 'in', CASHFLOW_APPROVER_LOCKED_REQUEST_STATUSES)
+    .limit(1);
 }
 
 function hasCashflowApproverLockedRequest(snapshot) {

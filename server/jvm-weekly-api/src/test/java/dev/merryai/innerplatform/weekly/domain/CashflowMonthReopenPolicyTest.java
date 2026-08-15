@@ -230,7 +230,8 @@ class CashflowMonthReopenPolicyTest {
             memberUid,
             memberStatus,
             storedRole,
-            executiveApproverUid
+            executiveApproverUid,
+            1
         );
     }
 

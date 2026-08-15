@@ -18,9 +18,10 @@ public final class CashflowMonthReopenPolicy {
         boolean exactProject = facts.projectExists()
             && facts.actorTenantId().equals(facts.projectTenantId())
             && facts.requestedProjectId().equals(facts.storedProjectId());
+        boolean exactPeopleUid = facts.peopleUidMatchCount() == 1;
         boolean designatedApprover = facts.actorUid().equals(facts.executiveApproverUid());
         boolean runtimeAdmin = "admin".equals(facts.storedRole());
-        if (!exactActiveMember || !exactProject || facts.storedRole().isBlank()
+        if (!exactActiveMember || !exactProject || !exactPeopleUid || facts.storedRole().isBlank()
             || !(runtimeAdmin || designatedApprover)) {
             throw violation(ViolationReason.DECISION_FORBIDDEN);
         }
@@ -159,7 +160,8 @@ public final class CashflowMonthReopenPolicy {
         String memberUid,
         String memberStatus,
         String storedRole,
-        String executiveApproverUid
+        String executiveApproverUid,
+        int peopleUidMatchCount
     ) {
         public DecisionAuthorityFacts {
             actorTenantId = normalized(actorTenantId);

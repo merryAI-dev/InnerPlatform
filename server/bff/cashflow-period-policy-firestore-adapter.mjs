@@ -73,10 +73,15 @@ function isApplicationError(error) {
 }
 
 function runtimeAdminError(error) {
-  const message = readOptionalText(error?.message);
-  return message.includes('--people-uid')
+  return error?.code === 'RUNTIME_SUPERADMIN_REQUIRED'
     ? persistenceError('RUNTIME_SUPERADMIN_REQUIRED', error)
     : persistenceError('RUNTIME_SUPERADMIN_STORE_UNAVAILABLE', error);
+}
+
+function codedPersistenceError(error, acceptedCodes, fallbackCode) {
+  return acceptedCodes.includes(error?.code)
+    ? persistenceError(error.code, error)
+    : persistenceError(fallbackCode, error);
 }
 
 export function createCashflowPeriodPolicyFirestoreAdapter({
@@ -224,17 +229,11 @@ export function createCashflowPeriodPolicyFirestoreAdapter({
           ...args,
         });
       } catch (error) {
-        const message = readOptionalText(error?.message);
-        if (message.includes('ACTIVE runtime admin member') || message.includes('exactly one People record')) {
-          throw persistenceError('RUNTIME_SUPERADMIN_REQUIRED', error);
-        }
-        if (message.includes('evidence changed')) {
-          throw persistenceError('RECOVERY_EVIDENCE_CHANGED', error);
-        }
-        if (message.includes('query limit exceeded')) {
-          throw persistenceError('RECOVERY_EVIDENCE_TRUNCATED', error);
-        }
-        throw persistenceError('RECOVERY_UNAVAILABLE', error);
+        throw codedPersistenceError(error, [
+          'RUNTIME_SUPERADMIN_REQUIRED',
+          'RECOVERY_EVIDENCE_CHANGED',
+          'RECOVERY_EVIDENCE_TRUNCATED',
+        ], 'RECOVERY_UNAVAILABLE');
       }
     },
 
@@ -246,23 +245,13 @@ export function createCashflowPeriodPolicyFirestoreAdapter({
           ...args,
         });
       } catch (error) {
-        const message = readOptionalText(error?.message);
-        if (message.includes('ACTIVE runtime admin member') || message.includes('exactly one People record')) {
-          throw persistenceError('RUNTIME_SUPERADMIN_REQUIRED', error);
-        }
-        if (message.includes('valid authority requires normal reopen')) {
-          throw persistenceError('RESET_NORMAL_REOPEN_REQUIRED', error);
-        }
-        if (message.includes('exact recovery is available')) {
-          throw persistenceError('RESET_EXACT_RECOVERY_REQUIRED', error);
-        }
-        if (message.includes('evidence changed')) {
-          throw persistenceError('RESET_EVIDENCE_CHANGED', error);
-        }
-        if (message.includes('query limit exceeded')) {
-          throw persistenceError('RESET_EVIDENCE_TRUNCATED', error);
-        }
-        throw persistenceError('RESET_UNAVAILABLE', error);
+        throw codedPersistenceError(error, [
+          'RUNTIME_SUPERADMIN_REQUIRED',
+          'RESET_NORMAL_REOPEN_REQUIRED',
+          'RESET_EXACT_RECOVERY_REQUIRED',
+          'RESET_EVIDENCE_CHANGED',
+          'RESET_EVIDENCE_TRUNCATED',
+        ], 'RESET_UNAVAILABLE');
       }
     },
   };
