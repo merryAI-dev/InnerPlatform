@@ -187,8 +187,8 @@ describe('benchmark: fixed-template index vs sequential find-chains', () => {
 
     expect(indexedSum).toBe(naiveSum);
     const speedup = naiveMs / indexedMs;
+    // 속도는 로그로만 남긴다. 벽시계 단언은 러너 부하에 따라 뒤집혀 무관한 PR 을 빨갛게 만들었다.
     console.log(`[bench] 50k lookups — find-chain: ${naiveMs.toFixed(1)}ms, indexed: ${indexedMs.toFixed(1)}ms, speedup: ${speedup.toFixed(1)}x`);
-    expect(indexedMs).toBeLessThan(naiveMs);
   });
 
   it('reports the measured speedup for the polling pipeline (rebuild-per-request vs revision cache)', () => {
@@ -248,6 +248,5 @@ describe('benchmark: fixed-template index vs sequential find-chains', () => {
 
     expect(cachedLast).toBe(naiveLast);
     console.log(`[bench] ${REQUESTS} polling requests — rebuild: ${naiveMs.toFixed(1)}ms, cached: ${cachedMs.toFixed(2)}ms, speedup: ${(naiveMs / cachedMs).toFixed(0)}x`);
-    expect(cachedMs).toBeLessThan(naiveMs);
   });
 });
