@@ -27,6 +27,8 @@ import { cashflowCloseHash } from '../cashflow-close-hash.mjs';
 import {
   CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
   CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
+  cashflowCumulativeMonthLocked,
+  readCashflowCumulativeCloseAuthority,
   readCashflowCumulativeCloseScope,
   monthsBetween,
   previousYearMonth,
@@ -1772,9 +1774,16 @@ async function readCanonicalClosedCashflowMonths({ db, tenantId, projectId, year
   )) {
     throw createHttpError(409, '누적 월 결산 범위가 표준 계약과 다릅니다.', 'cashflow_month_close_contract_invalid');
   }
-  for (const yearMonth of yearMonths || []) {
-    if (closedThrough && yearMonth <= closedThrough) closedMonths.add(yearMonth);
+  // 누적 head 가 있으면 그것이 잠금의 유일한 권위다. 월별 문서를 합집합으로 더하면
+  // 회차 이름표(회차 월)가 데이터 월로 오해되어 아직 열린 달까지 잠긴다.
+  if (headSnap.exists) {
+    const authority = readCashflowCumulativeCloseAuthority(head, { tenantId, projectId });
+    for (const yearMonth of yearMonths || []) {
+      if (cashflowCumulativeMonthLocked(authority, yearMonth)) closedMonths.add(yearMonth);
+    }
+    return closedMonths;
   }
+  // head 가 없는 레거시 프로젝트만 월별 문서로 판정한다.
   await Promise.all((yearMonths || []).map(async (yearMonth) => {
     const snap = await db.doc(`orgs/${tenantId}/monthly_closes/${projectId}-${yearMonth}`).get();
     if (!snap.exists) return;

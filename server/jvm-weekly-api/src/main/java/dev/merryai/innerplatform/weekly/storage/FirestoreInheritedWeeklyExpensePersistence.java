@@ -5,6 +5,7 @@ import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApply
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthLock;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
@@ -3231,7 +3232,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         YearMonth target = YearMonth.parse(yearMonth);
         YearMonth settlementMonth = YearMonth.parse(text(head.get("settlementMonth"), ""));
         YearMonth closedThrough = YearMonth.parse(text(head.get("closedThrough"), ""));
-        return target.getYear() == settlementMonth.getYear() && !target.isAfter(closedThrough);
+        return CashflowMonthLock.isLocked(target, settlementMonth, closedThrough);
     }
 
     private Map<String, Object> cumulativeCloseHead(String tenantId, String projectId) {
