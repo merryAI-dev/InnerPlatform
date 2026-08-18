@@ -388,7 +388,9 @@ function cashflowMonthPresentation(entry, available) {
 
 export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, isCurrent }) {
   if (month.tone === 'unavailable') return 'unavailable';
-  if (month.tone !== 'default') return month.tone;
+  // 월 결산 기한 초과는 배경이 아니라 테두리로 그린다 (week.overdue). 배경 빨강은 주간 놓침만.
+  // 같은 빨강 하나로 둘을 그리니 무엇이 늦었는지 화면에서 구분이 안 됐다.
+  if (month.tone !== 'default' && month.tone !== 'danger') return month.tone;
   if (!weeklyAvailable) return 'unavailable';
   if (weeklyStatus === 'ON_TIME' || weeklyStatus === 'COMPLETED_LATE') return 'success';
   if (weeklyStatus === 'MISSED') return 'danger';
@@ -482,6 +484,7 @@ function buildCashflowMonthClosePresentation({
       isCurrent,
       monthStatus: month.status,
       monthStatusLabel: month.statusLabel,
+      overdue: month.overdue,
       weeklyStatus,
       weeklyStatusLabel,
       statusLabel,

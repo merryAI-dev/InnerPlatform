@@ -1445,10 +1445,12 @@ export interface CashflowMonthClosePresentationWeek {
   isCurrent: boolean;
   monthStatus: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | null;
   monthStatusLabel: string;
-  weeklyStatus: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING' | null;
+  weeklyStatus: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING' | null;
   weeklyStatusLabel: string;
   statusLabel: string;
   surfaceTone: 'unavailable' | 'closed' | 'danger' | 'warning' | 'success' | 'current' | 'default';
+  // 월 결산 기한 초과. 배경(주간 상태)과 별개로 테두리로 그린다.
+  overdue: boolean;
 }
 
 export interface CashflowMonthClosePresentation {
