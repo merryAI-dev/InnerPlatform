@@ -70,7 +70,7 @@ export function CashflowFormulaMismatchDialog({
   const first = issues[0];
   return (
     <AlertDialog open={issues.length > 0}>
-      <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[520px]">
+      <AlertDialogContent className="sm:max-w-[520px]">
         <AlertDialogHeader>
           <AlertDialogTitle>시트 계산값을 확인해 주세요</AlertDialogTitle>
           <AlertDialogDescription className="leading-5">

@@ -1528,7 +1528,7 @@ export interface CashflowMonthCloseResult {
   blockers?: Array<{ code: string; message: string; details?: unknown }>;
   // 본체(dashboard-source)는 성공했지만 부가 조회가 실패해 일부 섹션이 비었을 때.
   // 화면은 그대로 그리되 이 목록으로 사용자에게 알리고 재시도 경로를 준다.
-  sectionErrors?: Array<{ section: 'sheetPublication' | 'deadlineSummary' | string; code: string; label: string }>;
+  sectionErrors?: Array<{ section: 'sheetPublication' | 'deadlineSummary' | string; code: string; label: string; cause?: string }>;
 }
 
 export interface CashflowWeeklyUpdateCompletionResult {
