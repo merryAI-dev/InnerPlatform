@@ -386,11 +386,11 @@ function cashflowMonthPresentation(entry, available) {
   };
 }
 
-function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, isCurrent }) {
+export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, isCurrent }) {
   if (month.tone === 'unavailable') return 'unavailable';
   if (month.tone !== 'default') return month.tone;
   if (!weeklyAvailable) return 'unavailable';
-  if (weeklyStatus === 'COMPLETED' || weeklyStatus === 'COMPLETED_LATE') return 'success';
+  if (weeklyStatus === 'ON_TIME' || weeklyStatus === 'COMPLETED_LATE') return 'success';
   if (weeklyStatus === 'MISSED') return 'danger';
   if (weeklyStatus === 'PENDING') return 'warning';
   if (weeklyStatus) return 'unavailable';
