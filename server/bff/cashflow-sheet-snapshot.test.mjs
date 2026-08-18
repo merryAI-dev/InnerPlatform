@@ -36,9 +36,10 @@ describe('annual cashflow coordinate contract', () => {
     expect(totals.find(({ year }) => year === 2025).actual.totalIn).toBe(317_449_417);
   });
 
-  it('T3 returns only the years declared by the coordinate contract', () => {
+  it('T3 returns only the annual years declared by the coordinate contract', () => {
     const totals = buildAnnualCashflowTotals(annualAccidentFixture());
-    expect(totals.map(({ year }) => year)).toEqual([2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032]);
+    // 주차 연도(2026)는 연간 열이 없으므로 여기 없다. 그 해의 합계는 Total 열이 든다.
+    expect(totals.map(({ year }) => year)).toEqual([2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]);
   });
 
   it('T4 preserves an empty declared total as null', () => {
@@ -48,16 +49,21 @@ describe('annual cashflow coordinate contract', () => {
     expect(totals.find(({ year }) => year === 2025).actual.totalIn).toBeNull();
   });
 
-  it('T6 sums only weekly coordinates for the weekly year', () => {
-    const fixture = annualAccidentFixture({
-      cells: [
-        { yearMonth: '2026-01', weekNo: 1, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 100 },
-        { yearMonth: '2026-01', weekNo: 2, mode: 'actual', lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 200 },
-      ],
-    });
-    const actual = buildAnnualCashflowTotals(fixture).find(({ year }) => year === 2026).actual;
-    expect(actual.totalIn).toBe(300);
+  it('T6 passes each annual line state through instead of counting it away', () => {
+    // 항목별 상태가 살아 있어야 화면이 "빈 칸" 과 "값 있는 칸" 을 구분해 그린다.
+    // 세기만 하고 버리면 둘 다 확인 불가가 된다 - 라이브 JLIN 2024·2025 증상.
+    const fixture = annualAccidentFixture();
+    const actual = buildAnnualCashflowTotals(fixture).find(({ year }) => year === 2025).actual;
+    expect(actual.lineStates.SALES_IN).toBe('VALUE');
+    expect(actual.lineAmounts.SALES_IN).toBe(317_449_417);
     expect(actual.reconciliation.status).toBe('NOT_APPLICABLE');
+  });
+
+  it('T7 does not synthesize an annual entry for the weekly year from weekly cells', () => {
+    // 예전에는 60개 주차 셀을 더해 주차 연도의 가짜 연간 항목을 만들었다.
+    // 화면은 그 열을 그리지 않고 시트에도 없다.
+    const totals = buildAnnualCashflowTotals(annualAccidentFixture());
+    expect(totals.find(({ year }) => year === 2026)).toBeUndefined();
   });
 
   it('T7 excludes cells outside the coordinate years', () => {
@@ -92,6 +98,26 @@ describe('annual cashflow coordinate contract', () => {
 });
 
 describe('cashflow sheet pinned snapshot', () => {
+  it('carries annual line states and amounts through sheet facts without a weekly-year entry', () => {
+    // 시트가 SSOT 다. 연간 항목은 셀 상태·금액을 그대로 전달하고, 주차 연도는 항목을 만들지 않는다.
+    const facts = extractCashflowSheetFacts({
+      weeklyYear: 2026,
+      cells: [
+        { mode: 'projection', yearMonth: '2026-01', weekNo: 1, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 100 },
+      ],
+      annualCells: [
+        { mode: 'projection', year: 2025, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 500, periodKind: 'ANNUAL' },
+        { mode: 'projection', year: 2025, lineId: 'DIRECT_COST_OUT', direction: 'OUT', state: 'EMPTY', periodKind: 'ANNUAL' },
+      ],
+    });
+
+    const annual2025 = facts.annualCashflowTotals.find(({ year }) => year === 2025).projection;
+    expect(annual2025.source).toBe('ANNUAL');
+    expect(annual2025.lineStates).toMatchObject({ SALES_IN: 'VALUE', DIRECT_COST_OUT: 'EMPTY' });
+    expect(annual2025.lineAmounts).toEqual({ SALES_IN: 500 });
+    expect(facts.annualCashflowTotals.find(({ year }) => year === 2026)).toBeUndefined();
+  });
+
   it.each(['', '  ', '-', '―', '–'])('classifies %j as an empty cell', (rawValue) => {
     expect(classifyCashflowSheetCell(rawValue)).toEqual({ state: 'EMPTY' });
   });
@@ -471,98 +497,6 @@ describe('cashflow sheet pinned snapshot', () => {
       { year: 2025, contractAmount: 100, salesVatAmount: 10, totalRevenueAmount: 30, supportAmount: 50 },
       { year: 2026, contractAmount: 200, salesVatAmount: 20, totalRevenueAmount: 40, supportAmount: 60 },
     ]);
-  });
-
-  it('sums repeated weekly line values and marks an incomplete year as partial', () => {
-    const facts = extractCashflowSheetFacts({
-      weeklyYear: 2026,
-      cells: [
-        { mode: 'projection', yearMonth: '2026-01', weekNo: 1, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 100 },
-        { mode: 'projection', yearMonth: '2026-01', weekNo: 2, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 200 },
-        { mode: 'projection', yearMonth: '2026-01', weekNo: 2, lineId: 'DIRECT_COST_OUT', direction: 'OUT', state: 'VALUE', amount: 40 },
-      ],
-    });
-
-    expect(facts.annualCashflowTotals).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        year: 2026,
-        projection: expect.objectContaining({
-          source: 'WEEKLY',
-          lineAmounts: { SALES_IN: 300, DIRECT_COST_OUT: 40 },
-          totalIn: 300,
-          totalOut: 40,
-          net: 260,
-          coverage: {
-            status: 'PARTIAL',
-            weekCount: 2,
-            expectedWeekCount: 60,
-            monthCount: 1,
-            expectedMonthCount: 12,
-          },
-        }),
-      }),
-    ]));
-  });
-
-  it('keeps the workbook 2,300,000 won prepayment separate by mode', () => {
-    const facts = extractCashflowSheetFacts({
-      weeklyYear: 2026,
-      cells: [
-        { mode: 'projection', yearMonth: '2026-01', weekNo: 3, lineId: 'MYSC_PREPAY_IN', direction: 'IN', state: 'VALUE', amount: 2_300_000 },
-        { mode: 'actual', yearMonth: '2026-01', weekNo: 3, lineId: 'MYSC_PREPAY_IN', direction: 'IN', state: 'VALUE', amount: 2_300_000 },
-      ],
-    });
-
-    const totals2026 = facts.annualCashflowTotals.find(({ year }) => year === 2026);
-    expect(totals2026.projection.totalIn).toBe(2_300_000);
-    expect(totals2026.actual.totalIn).toBe(2_300_000);
-  });
-
-  it('keeps annual-only values distinct from weekly coverage', () => {
-    const facts = extractCashflowSheetFacts({
-      weeklyYear: 2026,
-      annualCells: [
-        { mode: 'actual', year: 2025, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 500 },
-      ],
-    });
-
-    expect(facts.annualCashflowTotals.find(({ year }) => year === 2025).actual).toMatchObject({
-      source: 'ANNUAL',
-      lineAmounts: { SALES_IN: 500 },
-      coverage: {
-        status: 'ANNUAL_ONLY',
-        weekCount: 0,
-        expectedWeekCount: 60,
-        monthCount: 0,
-        expectedMonthCount: 12,
-      },
-    });
-  });
-
-  it('does not reconcile the weekly year against a non-annual total column', () => {
-    const cells = Array.from({ length: 60 }, (_, index) => ({
-      mode: 'projection',
-      yearMonth: `2026-${String(Math.floor(index / 5) + 1).padStart(2, '0')}`,
-      weekNo: (index % 5) + 1,
-      lineId: 'SALES_IN',
-      direction: 'IN',
-      state: 'VALUE',
-      amount: 10,
-    }));
-    const facts = extractCashflowSheetFacts({
-      weeklyYear: 2026,
-      cells,
-      annualCells: [
-        { mode: 'projection', year: 2026, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 599 },
-      ],
-    });
-
-    expect(facts.annualCashflowTotals[0].projection).toMatchObject({
-      source: 'ANNUAL',
-    });
-    expect(facts.annualCashflowTotals.find(({ year }) => year === 2026).projection).toMatchObject({
-      source: 'WEEKLY', totalIn: 600, reconciliation: { status: 'NOT_APPLICABLE' },
-    });
   });
 
   it('computes the same target revision regardless of Firestore map and week order', () => {

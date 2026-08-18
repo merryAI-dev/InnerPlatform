@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { toA1 } from './cashflow-sheet-template.mjs';
-import { annualYearsFor, requireWeeklyYear, weekOrdinal } from './cashflow-coordinates.mjs';
+import { annualYearsFor, requireWeeklyYear } from './cashflow-coordinates.mjs';
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -159,70 +159,31 @@ function compareAnnualCells(left, right) {
     || String(left.lineId).localeCompare(String(right.lineId));
 }
 
-function annualCoverage(cells, source) {
-  const weeks = new Set();
-  const months = new Set();
-  for (const cell of cells) {
-    const yearMonth = normalizedText(cell?.yearMonth);
-    const weekNo = Number(cell?.weekNo);
-    if (!yearMonth || !Number.isSafeInteger(weekNo)) continue;
-    months.add(yearMonth);
-    weeks.add(`${yearMonth}:${weekNo}`);
-  }
-  return {
-    status: source === 'WEEKLY'
-      ? (weeks.size === 60 && months.size === 12 ? 'COMPLETE' : 'PARTIAL')
-      : source === 'ANNUAL' ? 'ANNUAL_ONLY' : 'NONE',
-    weekCount: weeks.size,
-    expectedWeekCount: 60,
-    monthCount: months.size,
-    expectedMonthCount: 12,
-  };
-}
-
 function addWholeWon(left, right) {
   const sum = left + right;
   if (!Number.isSafeInteger(sum)) throw new RangeError('Cashflow annual total exceeds the safe whole-won range.');
   return sum;
 }
 
-function summarizeAnnualMode(cells, source) {
+// 셀을 항목별로 줄 세운다. 계산하지 않는다.
+//
+// 시트가 SSOT 이므로 항목별 상태와 금액은 셀 그대로 전달하고, 합계는 시트가 선언한
+// 값(declaredAnnualTotals)을 쓴다. 예전에는 여기서 금액을 더해 totalIn/totalOut 을
+// 만들었지만 호출부가 곧바로 시트 선언값으로 덮어써 왔다 - 계산해 놓고 버리는 코드였다.
+// 그리고 항목별 상태를 세기만 하고 버려서, 화면이 "값이 있는 칸" 과 "빈 칸" 을 구분하지
+// 못해 둘 다 확인 불가로 그렸다.
+function annualLinesFromCells(cells) {
   const lineAmounts = {};
-  let totalIn = 0;
-  let totalOut = 0;
-  let valueCellCount = 0;
-  let emptyCellCount = 0;
-  let invalidCellCount = 0;
+  const lineStates = {};
   for (const cell of cells) {
-    if (cell.state === 'EMPTY') {
-      emptyCellCount += 1;
-      continue;
+    if (!cell?.lineId) continue;
+    lineStates[cell.lineId] = cell.state;
+    if (cell.state === 'VALUE' || cell.state === 'ZERO') {
+      const amount = Number(cell.amount);
+      if (Number.isSafeInteger(amount)) lineAmounts[cell.lineId] = amount;
     }
-    if (cell.state === 'INVALID') {
-      invalidCellCount += 1;
-      continue;
-    }
-    const amount = Number(cell.amount);
-    if (!Number.isSafeInteger(amount)) {
-      invalidCellCount += 1;
-      continue;
-    }
-    valueCellCount += 1;
-    lineAmounts[cell.lineId] = addWholeWon(lineAmounts[cell.lineId] || 0, amount);
-    if (cell.direction === 'IN') totalIn = addWholeWon(totalIn, amount);
-    if (cell.direction === 'OUT') totalOut = addWholeWon(totalOut, amount);
   }
-  return {
-    source,
-    coverage: annualCoverage(cells, source),
-    valueCellCount,
-    emptyCellCount,
-    invalidCellCount,
-    lineAmounts,
-    totalIn,
-    totalOut,
-    net: addWholeWon(totalIn, -totalOut),
-  };
+  return { lineAmounts, lineStates };
 }
 
 const DERIVED_FIELD_BY_KIND = {
@@ -250,40 +211,27 @@ function declaredAnnualTotals(annualDerivedCells, year, mode) {
 // 좌표 계약상 한 연도가 주별과 연간을 겸할 수 없으므로 둘을 대조할 일이 없다.
 const NO_RECONCILIATION = Object.freeze({ status: 'NOT_APPLICABLE', mismatchedLineIds: [] });
 
-export function buildAnnualCashflowTotals({ cells = [], annualCells = [], annualDerivedCells = [], weeklyYear }) {
+export function buildAnnualCashflowTotals({ annualCells = [], annualDerivedCells = [], weeklyYear }) {
   const year0 = requireWeeklyYear(weeklyYear);
-  const years = [...annualYearsFor(year0), year0].sort((left, right) => left - right);
-  return years
-    .map((year) => {
-      const modeTotals = {};
-      for (const mode of ['projection', 'actual']) {
-        if (year === year0) {
-          // 주별 연도: 주차 그리드가 그 해의 유일한 소스. 연간 열이 존재하지 않는다.
-          modeTotals[mode] = {
-            ...summarizeAnnualMode(
-              cells.filter((cell) => cell.mode === mode && weekOrdinal(year0, cell?.yearMonth, cell?.weekNo) !== -1),
-              'WEEKLY',
-            ),
-            reconciliation: NO_RECONCILIATION,
-          };
-          continue;
-        }
-        // 연 단위 연도: 연간 열 좌표가 유일한 소스. 주차 셀은 보지 않는다.
-        const annual = summarizeAnnualMode(
-          annualCells.filter((cell) => cell.mode === mode && Number(cell.year) === year && cell?.periodKind !== 'GRAND_TOTAL'),
-          'ANNUAL',
-        );
-        const declared = declaredAnnualTotals(annualDerivedCells, year, mode);
-        modeTotals[mode] = {
-          ...annual,
-          totalIn: declared.depositTotal,
-          totalOut: declared.withdrawalTotal,
-          net: declared.balance,
-          reconciliation: NO_RECONCILIATION,
-        };
-      }
-      return { year, ...modeTotals };
-    });
+  // 주차 연도는 연간 열이 없다. 그 해의 합계는 Total 열이 따로 들고 있고, 화면도 주차
+  // 연도의 연간 열을 그리지 않는다. 예전에는 60개 주차 셀을 더해 가짜 연간 항목을 만들었다.
+  return annualYearsFor(year0).map((year) => {
+    const modeTotals = {};
+    for (const mode of ['projection', 'actual']) {
+      const declared = declaredAnnualTotals(annualDerivedCells, year, mode);
+      modeTotals[mode] = {
+        source: 'ANNUAL',
+        ...annualLinesFromCells(annualCells.filter((cell) => (
+          cell.mode === mode && Number(cell.year) === year && cell?.periodKind !== 'GRAND_TOTAL'
+        ))),
+        totalIn: declared.depositTotal,
+        totalOut: declared.withdrawalTotal,
+        net: declared.balance,
+        reconciliation: NO_RECONCILIATION,
+      };
+    }
+    return { year, ...modeTotals };
+  });
 }
 
 function buildCashflowSheetTotal(totalCells, mode) {
@@ -578,7 +526,7 @@ export function extractCashflowSheetFacts({
     depositScheduleRows,
     annualFinancialTotals: annualSheetFinancialTotals({ depositScheduleRows, projectionControls }),
     annualCashflowTotals: cells.length || annualCells.length || annualDerivedCells.length
-      ? buildAnnualCashflowTotals({ cells, annualCells, annualDerivedCells, weeklyYear })
+      ? buildAnnualCashflowTotals({ annualCells, annualDerivedCells, weeklyYear })
       : [],
     ...(weeklyCalculationChecks.length > 0 ? { weeklyCalculationChecks } : {}),
     ...(projectionActualDifferences.some((value) => value.amount !== null) ? { projectionActualDifferences } : {}),
