@@ -1802,6 +1802,8 @@ export function CashflowProjectSheet({
         return;
       }
       if (result.stagedLineCount <= 0) {
+        // 없으면 없다고 말한다. 조용히 끝나면 반영이 중간에 멈춘 것처럼 보인다.
+        toast.success('시트 값을 확인했습니다. 반영할 변경이 없습니다.');
         return;
       }
       if (result.pendingApprovalDifferences?.length) {
