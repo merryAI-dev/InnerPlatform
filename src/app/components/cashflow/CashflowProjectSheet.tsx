@@ -2957,7 +2957,7 @@ export function CashflowProjectSheet({
           </div>
           <div className="mb-2 grid gap-2 sm:grid-cols-3">
             <Input aria-label="실제 반영 기록 검색" value={cashflowEventQuery} onChange={(event) => setCashflowEventQuery(event.target.value)} placeholder="항목·담당자 검색" />
-            <select aria-label="실제 반영 mode 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
+            <select aria-label="실제 반영 구분 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 구분</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
             <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].sort((left, right) => left.localeCompare(right)).map((month) => <option key={month} value={month}>{month}</option>)}</select>
           </div>
           {cashflowEventErrors.map((failure) => (
@@ -3442,7 +3442,7 @@ export function CashflowProjectSheet({
           }
         }}
       >
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[560px]">
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[960px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{sheetApplyResumeRequired ? '시트 반영 이어서 완료' : '마감 후 시트값 변경'}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -3456,22 +3456,25 @@ export function CashflowProjectSheet({
               {!sheetApplyResumeRequired && (
                 <>
                   <div className={`rounded-md border px-3 py-2 text-[12px] ${lateSheetDiffComplete ? 'border-slate-300 bg-slate-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-800'}`} role={lateSheetDiffComplete ? 'status' : 'alert'}>
-                    {lateSheetDiffComplete ? `검토본 manifest와 일치하는 전체 ${lateSheetDiffRows.length.toLocaleString()}건입니다.` : '변경 목록의 manifest 또는 건수가 일치하지 않아 반영할 수 없습니다. 다시 비교해 주세요.'}
-                    <span className="ml-2 break-all text-[12px]">{lateSheetApply.closedMonthDifferenceManifestHash || 'manifest 없음'}</span>
+                    {lateSheetDiffComplete ? `검토본과 일치하는 변경 ${lateSheetDiffRows.length.toLocaleString()}건입니다.` : '변경 목록이 검토본과 일치하지 않아 반영할 수 없습니다. 시트 값을 다시 불러온 뒤 비교해 주세요.'}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-4">
                     <Input aria-label="변경 이력 검색" placeholder="월·주·항목 검색" value={lateSheetDiffQuery} onChange={(event) => setLateSheetDiffQuery(event.target.value)} />
-                    <select aria-label="Projection Actual 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffMode} onChange={(event) => setLateSheetDiffMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
+                    <select aria-label="Projection Actual 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffMode} onChange={(event) => setLateSheetDiffMode(event.target.value)}><option value="ALL">전체 구분</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
                     <select aria-label="월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffMonth} onChange={(event) => setLateSheetDiffMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(lateSheetDiffRows.map((row) => row.yearMonth))].map((month) => <option key={month} value={month}>{month}</option>)}</select>
                     <select aria-label="주차 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffWeek} onChange={(event) => setLateSheetDiffWeek(event.target.value)}><option value="ALL">전체 주차</option>{[1, 2, 3, 4, 5].map((weekNo) => <option key={weekNo} value={weekNo}>{weekNo}주차</option>)}</select>
                   </div>
-                  <div className="max-h-[300px] overflow-auto rounded-md border border-slate-200 bg-slate-50" role="region" aria-label="마감 후 변경 후보 전체 목록" tabIndex={0}>
+                  <div className="max-h-[min(60dvh,720px)] overflow-auto rounded-md border border-slate-200 bg-slate-50" role="region" aria-label="마감 후 변경 후보 전체 목록" tabIndex={0}>
                     <table className="w-full min-w-[620px] border-collapse text-[12px] leading-4 text-slate-700">
-                      <caption className="sr-only">월, 주차, mode, 항목별 이전값과 변경값</caption>
-                      <thead className="sticky top-0 bg-slate-100"><tr><th className="px-2 py-2 text-left">월·주차</th><th className="px-2 py-2 text-left">mode</th><th className="px-2 py-2 text-left">항목</th><th className="px-2 py-2 text-right">이전값 → 변경값</th></tr></thead>
-                      <tbody>{filteredLateSheetDiffRows.map((change) => <tr key={`${change.yearMonth}:${change.mode}:${change.weekNo}:${change.lineId}`} className="border-t border-slate-200"><th className="px-2 py-1.5 text-left">{change.yearMonth} {change.weekNo}주차</th><td className="px-2 py-1.5">{change.mode === 'projection' ? 'Projection' : 'Actual'}</td><td className="px-2 py-1.5">{CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}</td><td className="px-2 py-1.5 text-right tabular-nums"><span className={change.beforeHadValue ? 'text-slate-500' : 'text-slate-400'}>{change.beforeHadValue ? formatCashflowAmount(change.beforeAmount) : 'EMPTY'}</span><span className="px-1 text-slate-400">→</span><strong>{change.afterHadValue ? formatCashflowAmount(change.afterAmount) : 'EMPTY'}</strong></td></tr>)}</tbody>
+                      <caption className="sr-only">월, 주차, 구분, 항목별 이전값과 변경값</caption>
+                      <thead className="sticky top-0 bg-slate-100"><tr><th className="px-2 py-2 text-left">월·주차</th><th className="px-2 py-2 text-left">구분</th><th className="px-2 py-2 text-left">항목</th><th className="px-2 py-2 text-right">이전값 → 변경값</th></tr></thead>
+                      <tbody>{filteredLateSheetDiffRows.map((change) => <tr key={`${change.yearMonth}:${change.mode}:${change.weekNo}:${change.lineId}`} className="border-t border-slate-200"><th className="px-2 py-1.5 text-left">{change.yearMonth} {change.weekNo}주차</th><td className="px-2 py-1.5">{change.mode === 'projection' ? 'Projection' : 'Actual'}</td><td className="px-2 py-1.5">{CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}</td><td className="px-2 py-1.5 text-right tabular-nums"><span className={change.beforeHadValue ? 'text-slate-500' : 'text-slate-400'}>{change.beforeHadValue ? formatCashflowAmount(change.beforeAmount) : '빈칸'}</span><span className="px-1 text-slate-400">→</span><strong>{change.afterHadValue ? formatCashflowAmount(change.afterAmount) : '빈칸'}</strong></td></tr>)}</tbody>
                     </table>
-                    {filteredLateSheetDiffRows.length === 0 ? <p className="p-5 text-center text-[12px] text-slate-500">필터와 일치하는 변경 후보가 없습니다.</p> : null}
+                    {filteredLateSheetDiffRows.length === 0
+                      ? <p className="p-5 text-center text-[12px] text-slate-500">필터와 일치하는 변경 후보가 없습니다.</p>
+                      : filteredLateSheetDiffRows.length !== lateSheetDiffRows.length
+                        ? <p className="px-3 py-2 text-right text-[12px] text-slate-500">전체 {lateSheetDiffRows.length.toLocaleString()}건 중 {filteredLateSheetDiffRows.length.toLocaleString()}건 표시</p>
+                        : null}
                   </div>
                   <label className="block text-[12px] font-semibold text-slate-800" htmlFor="late-sheet-change-reason">
                     변경 사유
