@@ -327,10 +327,13 @@ function cashflowSectionErrorsForResponse(sectionErrors) {
   }));
 }
 
-function cashflowWeeklyStatusLabel(status, available) {
+// JVM 이 내는 주간 준수 상태는 ON_TIME · COMPLETED_LATE · MISSED · PENDING 넷이다
+// (FirestoreInheritedWeeklyExpensePersistence). 예전 이 표는 존재하지 않는 COMPLETED 를
+// 기다리고 ON_TIME 을 몰라서, 기한 내 완료한 주차를 "확인 필요" 로 그렸다.
+export function cashflowWeeklyStatusLabel(status, available) {
   if (!available) return '주간 정산 상태 확인 필요';
   if (!status) return '';
-  if (status === 'COMPLETED') return '기한 내 완료';
+  if (status === 'ON_TIME') return '기한 내 완료';
   if (status === 'COMPLETED_LATE') return '기한 후 완료';
   if (status === 'MISSED') return '기한 지남';
   if (status === 'PENDING') return '완료 대기';

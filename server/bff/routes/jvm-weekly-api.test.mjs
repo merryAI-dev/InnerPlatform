@@ -31,6 +31,24 @@ describe('cashflow section error presentation', () => {
   it('does not expose an unknown raw section identifier as its label', () => {
     expect(jvmWeeklyApiModule.cashflowSectionErrorLabel?.('vendorRawSection')).toBe('일부 정보');
   });
+
+  // PARITY TABLE — JVM FirestoreInheritedWeeklyExpensePersistence 가 내는 주간 준수 상태와 같은 표다.
+  // BFF 가 존재하지 않는 COMPLETED 를 기다리고 ON_TIME 을 몰라서, 기한 내 완료한 주차가
+  // 라이브에서 "주간 정산 상태 확인 필요" 로 그려졌다. 한쪽 어휘를 바꾸면 여기서 깨진다.
+  it.each([
+    ['ON_TIME', '기한 내 완료'],
+    ['COMPLETED_LATE', '기한 후 완료'],
+    ['MISSED', '기한 지남'],
+    ['PENDING', '완료 대기'],
+  ])('labels JVM weekly status %s as %s', (status, label) => {
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel(status, true)).toBe(label);
+  });
+
+  it('never labels a known JVM weekly status as 확인 필요', () => {
+    for (const status of ['ON_TIME', 'COMPLETED_LATE', 'MISSED', 'PENDING']) {
+      expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel(status, true)).not.toBe('주간 정산 상태 확인 필요');
+    }
+  });
 });
 
 describe('cashflow month-close revision diff', () => {
