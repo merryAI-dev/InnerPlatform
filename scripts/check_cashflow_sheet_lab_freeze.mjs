@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 
-export const CASHFLOW_SHEET_LAB_FREEZE_APPROVER = 'merryAI-dev';
+// 구현하는 계정(merryAI-dev)과 승인하는 계정을 분리한다. 같은 계정이면 GitHub 이
+// 자기 PR 승인을 거부하기도 하고, 게이트가 형식이 된다.
+export const CASHFLOW_SHEET_LAB_FREEZE_APPROVER = 'Minwook-Byun';
 export const CASHFLOW_SHEET_LAB_FREEZE_MARKER = 'CASHFLOW_SHEET_LAB_FREEZE_APPROVED';
 
 export const CASHFLOW_SHEET_LAB_FREEZE_PATHS = [

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error The guard is intentionally plain Node ESM and exercised here by Vitest.
 import * as freeze from '../../../scripts/check_cashflow_sheet_lab_freeze.mjs';
 
-const { CASHFLOW_SHEET_LAB_FREEZE_MARKER, evaluateCashflowSheetLabFreeze } = freeze;
+const { CASHFLOW_SHEET_LAB_FREEZE_APPROVER, CASHFLOW_SHEET_LAB_FREEZE_MARKER, evaluateCashflowSheetLabFreeze } = freeze;
 
 const headSha = 'head-123';
 const protectedFile = 'server/bff/routes/cashflow-sheet-lab.mjs';
@@ -19,7 +19,19 @@ describe('cashflow sheet-lab one-way freeze', () => {
       changedFiles: [protectedFile],
       headSha,
       reviews: [{
-        user: { login: 'merryAI-dev' }, state: 'APPROVED', commit_id: 'older-head',
+        user: { login: CASHFLOW_SHEET_LAB_FREEZE_APPROVER }, state: 'APPROVED', commit_id: 'older-head',
+        body: CASHFLOW_SHEET_LAB_FREEZE_MARKER, submitted_at: '2026-08-10T00:00:00Z',
+      }],
+    }).ok).toBe(false);
+  });
+
+  it('rejects an approval from any account other than the designated approver', () => {
+    // 구현 계정이 스스로 승인해도 통과하지 않는다. 게이트는 두 계정을 전제로 한다.
+    expect(evaluateCashflowSheetLabFreeze({
+      changedFiles: [protectedFile],
+      headSha,
+      reviews: [{
+        user: { login: 'merryAI-dev' }, state: 'APPROVED', commit_id: headSha,
         body: CASHFLOW_SHEET_LAB_FREEZE_MARKER, submitted_at: '2026-08-10T00:00:00Z',
       }],
     }).ok).toBe(false);
@@ -30,7 +42,7 @@ describe('cashflow sheet-lab one-way freeze', () => {
       changedFiles: [protectedFile],
       headSha,
       reviews: [{
-        user: { login: 'merryAI-dev' }, state: 'APPROVED', commit_id: headSha,
+        user: { login: CASHFLOW_SHEET_LAB_FREEZE_APPROVER }, state: 'APPROVED', commit_id: headSha,
         body: CASHFLOW_SHEET_LAB_FREEZE_MARKER, submitted_at: '2026-08-10T00:00:00Z',
       }],
     }).ok).toBe(true);
