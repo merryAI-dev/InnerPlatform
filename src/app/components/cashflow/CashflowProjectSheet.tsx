@@ -166,14 +166,16 @@ function decodeActivityActor(value?: string): string {
   }
 }
 
-function cashflowSurfaceClass(tone?: CashflowMonthClosePresentationWeek['surfaceTone']): string {
-  if (tone === 'closed') return 'bg-slate-200';
-  if (tone === 'danger') return 'bg-red-100';
-  if (tone === 'warning') return 'bg-yellow-50';
-  if (tone === 'success') return 'bg-emerald-50';
-  if (tone === 'current') return 'bg-[#EAF0F5]';
-  if (tone === 'unavailable') return 'bg-red-50';
-  return '';
+// 배경은 주간 정산 상태, 테두리는 월 결산 기한 초과. 둘은 다른 사실이라 다른 자리에 그린다.
+function cashflowSurfaceClass(tone?: CashflowMonthClosePresentationWeek['surfaceTone'], overdue = false): string {
+  const bg = tone === 'closed' ? 'bg-slate-200'
+    : tone === 'danger' ? 'bg-red-100'
+      : tone === 'warning' ? 'bg-yellow-50'
+        : tone === 'success' ? 'bg-emerald-50'
+          : tone === 'current' ? 'bg-[#EAF0F5]'
+            : tone === 'unavailable' ? 'bg-red-50'
+              : '';
+  return overdue ? `${bg} ring-2 ring-inset ring-red-400`.trim() : bg;
 }
 
 function logCashflowSettlement(input: {
@@ -1965,10 +1967,11 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
     isAltRow: boolean;
     surfaceTone?: CashflowMonthClosePresentationWeek['surfaceTone'];
+    overdue?: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'projection' });
     const shouldHighlightMismatch = persisted.mismatch;
-    const bgClass = cashflowSurfaceClass(input.surfaceTone) || (input.isAltRow ? 'bg-slate-50' : 'bg-white');
+    const bgClass = cashflowSurfaceClass(input.surfaceTone, input.overdue) || (input.isAltRow ? 'bg-slate-50' : 'bg-white');
 
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
@@ -1991,9 +1994,10 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
     isAltRow: boolean;
     surfaceTone?: CashflowMonthClosePresentationWeek['surfaceTone'];
+    overdue?: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'actual' });
-    const bgClass = cashflowSurfaceClass(input.surfaceTone) || (input.isAltRow ? 'bg-slate-50' : 'bg-white');
+    const bgClass = cashflowSurfaceClass(input.surfaceTone, input.overdue) || (input.isAltRow ? 'bg-slate-50' : 'bg-white');
 
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-a`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
@@ -2016,11 +2020,12 @@ export function CashflowProjectSheet({
     mode: 'projection' | 'actual';
     isAltRow?: boolean;
     surfaceTone?: CashflowMonthClosePresentationWeek['surfaceTone'];
+    overdue?: boolean;
     emphasis?: 'income' | 'expense' | 'balance';
     stickyRight?: boolean;
     rowTone?: 'income' | 'expense';
   }) {
-    const bgClass = cashflowSurfaceClass(input.surfaceTone) || (input.emphasis
+    const bgClass = cashflowSurfaceClass(input.surfaceTone, input.overdue) || (input.emphasis
       ? 'bg-[#EAF0F5]'
       : input.isAltRow
           ? 'bg-slate-50'
@@ -2156,8 +2161,8 @@ export function CashflowProjectSheet({
           </td>
           {previousAnnualYears.map((annual) => renderAnnualLineCell(mode, lineId, annual.year, rowIndex % 2 === 1))}
           {visibleWeeks.map((week) => mode === 'projection'
-            ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isAltRow: rowIndex % 2 === 1, surfaceTone: week.surfaceTone })
-            : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isAltRow: rowIndex % 2 === 1, surfaceTone: week.surfaceTone }))}
+            ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isAltRow: rowIndex % 2 === 1, surfaceTone: week.surfaceTone, overdue: week.overdue })
+            : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isAltRow: rowIndex % 2 === 1, surfaceTone: week.surfaceTone, overdue: week.overdue }))}
           {followingAnnualYears.map((annual) => renderAnnualLineCell(mode, lineId, annual.year, rowIndex % 2 === 1))}
           {renderSummaryCell({
             keyName: `${mode}-${lineId}-range`,
@@ -2189,6 +2194,7 @@ export function CashflowProjectSheet({
             value: sheetDerivedAmount(mode, week.yearMonth, week.weekNo, kind),
             mode,
             surfaceTone: week.surfaceTone,
+            overdue: week.overdue,
             emphasis,
             rowTone,
           }))}
@@ -2247,7 +2253,7 @@ export function CashflowProjectSheet({
           </tr>
           <tr>
             {visibleWeeks.map((week) => (
-                <th key={`${mode}-${week.yearMonth}-${week.weekNo}-weekly-close`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-center align-middle ${cashflowSurfaceClass(week.surfaceTone) || 'bg-white'}`}>
+                <th key={`${mode}-${week.yearMonth}-${week.weekNo}-weekly-close`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-center align-middle ${cashflowSurfaceClass(week.surfaceTone, week.overdue) || 'bg-white'}`}>
                   <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[12px] font-semibold ${week.surfaceTone === 'danger' || week.surfaceTone === 'unavailable' ? 'text-red-700' : week.statusLabel ? 'text-slate-700' : 'text-slate-300'}`}>
                     {week.surfaceTone === 'closed' ? <LockKeyhole className="h-3 w-3" aria-hidden="true" /> : <CheckCircle2 className="h-3 w-3" />}
                     {week.statusLabel}

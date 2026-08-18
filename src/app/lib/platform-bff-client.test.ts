@@ -260,7 +260,7 @@ describe('platform-bff-client', () => {
       weeks: [{
         yearMonth: '2026-08', weekNo: 3, weekStart: '2026-08-10', weekEnd: '2026-08-16',
         label: '26-8-3', isCurrent: true, monthStatus: 'OPEN' as const, monthStatusLabel: '결산 전',
-        weeklyStatus: 'COMPLETED_LATE' as const, weeklyStatusLabel: '기한 후 완료',
+        weeklyStatus: 'COMPLETED_LATE' as const, weeklyStatusLabel: '기한 후 완료', overdue: false,
         statusLabel: '기한 후 완료', surfaceTone: 'success' as const,
       }],
       months: [{
