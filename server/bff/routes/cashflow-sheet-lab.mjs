@@ -58,6 +58,12 @@ const CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID = 'cashflow_sheet_stage_months';
 const CASHFLOW_SHEET_STAGE_YEARS_COLLECTION_ID = 'cashflow_sheet_stage_years';
 const CASHFLOW_MODES = ['projection', 'actual'];
 const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
+// 미러 본체(sheetFacts 포함)의 형태 버전. 형태를 바꾸는 코드 변경마다 올린다.
+// refresh 는 시트 modifiedTime 이 같으면 저장된 미러를 그대로 돌려주는데, 그 최적화는
+// "시트가 같으면 결과도 같다" 를 전제한다. 코드가 바뀌면 전제가 깨지므로 버전이 다른
+// 미러는 시트가 안 바뀌었어도 한 번 다시 읽는다. 다시 만들어지면 최적화가 다시 돈다.
+//   2 → 3: annualCashflowTotals 가 항목별 lineStates 를 담고 주차 연도 항목을 만들지 않는다.
+const CASHFLOW_SHEET_MIRROR_SCHEMA_VERSION = 3;
 const CASHFLOW_SHEET_APPLY_COMMAND = 'weeklyExpense.cashflowSheetLab.apply';
 const CASHFLOW_ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'APPROVING', 'UNCERTAIN']);
 const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
@@ -774,7 +780,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
 
   return stripUndefinedDeep({
     ...next,
-    schemaVersion: 2,
+    schemaVersion: CASHFLOW_SHEET_MIRROR_SCHEMA_VERSION,
     sourceYear,
     sources,
     sourceRevision,
@@ -4335,6 +4341,7 @@ export function mountCashflowSheetLabRoutes(app, {
     let freshness = null;
     if (
       previousMirror?.status === 'FRESH'
+      && Number(previousMirror?.schemaVersion) === CASHFLOW_SHEET_MIRROR_SCHEMA_VERSION
       && readOptionalText(previousMirror?.sourceFileModifiedTime)
       && readOptionalText(previousMirror?.lastRefreshRequestHash) === refreshRequestHash
     ) {

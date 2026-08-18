@@ -3789,6 +3789,75 @@ describe('cashflow sheet lab route', () => {
     expect(editLeaseService.release).not.toHaveBeenCalled();
   });
 
+  it('rebuilds a mirror written by an older schema even when the sheet has not changed', async () => {
+    // 라이브 AXR 재현. 연간 열의 항목별 상태를 담도록 코드를 고쳐 배포했는데, refresh 는
+    // 시트 modifiedTime 이 같다는 이유로 옛 미러를 그대로 돌려줬다. 시트를 안 건드린 47개
+    // 프로젝트가 영원히 옛 형태로 남는다. "시트가 같으면 결과도 같다" 는 코드가 같을 때만 참이다.
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2024-01-01',
+        contractEnd: '2028-12-31',
+        cashflowSheetLab: {
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const modifiedTime = '2026-08-09T10:00:00.000Z';
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: 'Cashflow workbook',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const getSpreadsheetFreshness = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a', modifiedTime, version: '7',
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet, getSpreadsheetFreshness } });
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'schema-001' })
+      .expect(200);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    const mirrorPath = 'orgs/tenant-a/cashflow_sheet_mirrors/project-a';
+    const currentSchema = db.__getDocument(mirrorPath).schemaVersion;
+    expect(currentSchema).toBeGreaterThanOrEqual(3);
+
+    // 같은 시트, 같은 코드 → 건너뜀 (기존 fast-path 유지)
+    const second = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'schema-002' })
+      .expect(200);
+    expect(second.body.unchanged).toBe(true);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+
+    // 배포 전 코드가 남긴 미러로 되돌린다: 형태 버전만 낮춘다.
+    const stored = db.__getDocument(mirrorPath);
+    db.__setDocument?.(mirrorPath, { ...stored, schemaVersion: currentSchema - 1 })
+      ?? Object.assign(stored, { schemaVersion: currentSchema - 1 });
+
+    // 시트는 그대로인데 형태가 옛것 → 다시 읽어서 새 형태로 만든다.
+    const third = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'schema-003' })
+      .expect(200);
+    expect(third.body.unchanged).toBeUndefined();
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
+    expect(db.__getDocument(mirrorPath).schemaVersion).toBe(currentSchema);
+    // 새로 읽었으니 다시 형태 버전이 맞고, 그 다음 refresh 는 다시 fast-path 를 탄다.
+    const fourth = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'schema-004' })
+      .expect(200);
+    expect(fourth.body.unchanged).toBe(true);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
+  });
+
   it('includes unchanged bridge months for explicit month replacement without applying them', async () => {
     const lineAmounts = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 999]));
     const db = createDb({
