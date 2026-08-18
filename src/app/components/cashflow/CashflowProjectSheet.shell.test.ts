@@ -452,7 +452,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('fetchCashflowSnapshotViaBff');
     expect(source).not.toContain('resolveCashflowEvidenceScope({');
     expect(source).toContain("cashflowPresentation?.evidenceSource === 'DASHBOARD'");
-    expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
     expect(source).not.toContain('data-cashflow-block="multi-year-view"');
     expect(source).not.toContain('data-cashflow-year-view');
     expect(source).toContain('monthCloseResult?.dashboard?.sheetMetadata as CashflowSheetDashboardMetadata');
@@ -650,7 +649,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps the selected-year board self-contained', () => {
-    expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
     expect(source).not.toContain('cashflowYearView');
     expect(source).not.toContain('data-cashflow-block="multi-year-view"');
     expect(source).not.toContain('data-cashflow-year-view');

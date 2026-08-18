@@ -170,25 +170,6 @@ function readSelectedYear(value) {
   return year;
 }
 
-function cashflowAvailableYears(mirror, project, selectedYear) {
-  const registeredYears = projectCashflowYears(project);
-  return [...new Set([
-    ...(registeredYears.length > 0 ? registeredYears : [selectedYear - 1, selectedYear, selectedYear + 1]),
-    ...(Array.isArray(project?.financialYears) ? project.financialYears.map((row) => Number(row?.year)) : []),
-    ...(Array.isArray(mirror?.years) ? mirror.years.map(Number) : []),
-    ...(Array.isArray(mirror?.appliedAnnualYears) ? mirror.appliedAnnualYears.map(Number) : []),
-    ...(Array.isArray(mirror?.appliedWeeklyYears) ? mirror.appliedWeeklyYears.map(Number) : []),
-    ...(mirror?.sheetFacts?.annualCashflowTotals || []).map((row) => Number(row?.year)),
-  ].filter(Number.isSafeInteger))].sort((left, right) => left - right);
-}
-
-function cashflowNavigationYears(availableYears, selectedYear) {
-  if (availableYears.length <= 3) return availableYears;
-  const selectedIndex = Math.max(0, availableYears.indexOf(selectedYear));
-  const start = Math.min(Math.max(0, selectedIndex - 1), availableYears.length - 3);
-  return availableYears.slice(start, start + 3);
-}
-
 async function readCanonicalAnnualTotal(db, tenantId, projectId, year) {
   const snap = await db.doc(cashflowAnnualTotalDocPath(tenantId, projectId, year)).get();
   if (!snap.exists) return null;
@@ -202,110 +183,6 @@ async function readCanonicalAnnualTotal(db, tenantId, projectId, year) {
     updatedAt: readOptionalText(value.updatedAt),
     projection: summarizeCashflowAnnualMode(value, 'projection'),
     actual: summarizeCashflowAnnualMode(value, 'actual'),
-  };
-}
-
-function cashflowReadModelHash(value) {
-  const canonicalize = (item) => {
-    if (Array.isArray(item)) return item.map(canonicalize);
-    if (!item || typeof item !== 'object') return item;
-    return Object.fromEntries(Object.keys(item)
-      .sort()
-      .map((key) => [key, canonicalize(item[key])]));
-  };
-  return stableHash(canonicalize(value));
-}
-
-async function readCashflowSheetYearView({ db, tenantId, projectId, project, selectedYear }) {
-  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-  const availableYears = cashflowAvailableYears(mirror, project, selectedYear);
-  const navigationYears = cashflowNavigationYears(availableYears, selectedYear);
-  // The ledger renders every project year around the selected year's weekly columns.
-  // Keep the compact navigation separately, but load all annual totals in one read model.
-  const ledgerYears = availableYears;
-  const canonicalAnnualDocs = await Promise.all(ledgerYears.map((year) => (
-    readCanonicalAnnualTotal(db, tenantId, projectId, year)
-  )));
-  const hasAppliedSourceMarkers = Array.isArray(mirror?.appliedAnnualYears) || Array.isArray(mirror?.appliedWeeklyYears);
-  const activeAnnualYears = new Set((mirror?.appliedAnnualYears || []).map(Number));
-  const canonicalAnnualYears = canonicalAnnualDocs
-    .filter(Boolean)
-    .filter((row) => !hasAppliedSourceMarkers || activeAnnualYears.has(row.year));
-  if (!mirror?.sourceRevision) {
-    return {
-      projectId,
-      status: canonicalAnnualYears.length > 0 ? 'FRESH' : 'EMPTY',
-      selectedYear,
-      availableYears,
-      navigationYears,
-      years: [],
-      canonicalAnnualYears,
-      readModelStatus: canonicalAnnualYears.length > 0 ? 'CURRENT' : 'EMPTY',
-      fallbackYears: [],
-      mismatchYears: [],
-    };
-  }
-
-  const snapshotId = readOptionalText(mirror.snapshotId);
-  const mirrorTotals = new Map((mirror.sheetFacts?.annualCashflowTotals || [])
-    .filter((row) => Number.isSafeInteger(row?.year))
-    .map((row) => [row.year, row]));
-  const snapshotEnabled = /^cfsnap_[a-f0-9]{32}$/.test(snapshotId);
-  const snapshotDocs = snapshotEnabled
-    ? await Promise.all(ledgerYears.map(async (year) => {
-      const snap = await db.doc(cashflowSheetSnapshotYearDocPath(tenantId, snapshotId, year)).get();
-      return [year, snap.exists ? snap.data() || {} : null];
-    }))
-    : [];
-  const snapshotTotals = new Map(snapshotDocs);
-  const fallbackYears = [];
-  const mismatchYears = [];
-  const years = ledgerYears.flatMap((year) => {
-    const mirrorTotal = mirrorTotals.get(year);
-    const snapshotTotal = snapshotTotals.get(year);
-    const snapshotCurrent = snapshotTotal
-      && readOptionalText(snapshotTotal.snapshotId) === snapshotId
-      && readOptionalText(snapshotTotal.projectId) === projectId
-      && readOptionalText(snapshotTotal.sourceRevision) === readOptionalText(mirror.sourceRevision)
-      && Number(snapshotTotal.year) === year;
-    if (snapshotCurrent) {
-      if (mirrorTotal && cashflowReadModelHash({ projection: snapshotTotal.projection, actual: snapshotTotal.actual })
-        !== cashflowReadModelHash({ projection: mirrorTotal.projection, actual: mirrorTotal.actual })) {
-        mismatchYears.push(year);
-      }
-      return [{
-        year,
-        projection: snapshotTotal.projection,
-        actual: snapshotTotal.actual,
-        sourceRevision: snapshotTotal.sourceRevision,
-        capturedAt: snapshotTotal.capturedAt,
-        storage: 'SNAPSHOT',
-      }];
-    }
-    if (!mirrorTotal) return [];
-    fallbackYears.push(year);
-    return [{
-      ...mirrorTotal,
-      sourceRevision: mirror.sourceRevision,
-      capturedAt: mirror.capturedAt,
-      storage: 'MIRROR_FALLBACK',
-    }];
-  });
-
-  return {
-    projectId,
-    status: readOptionalText(mirror.status) || 'FRESH',
-    selectedYear,
-    availableYears,
-    navigationYears,
-    snapshotId: snapshotEnabled ? snapshotId : undefined,
-    sourceRevision: mirror.sourceRevision,
-    capturedAt: mirror.capturedAt,
-    years,
-    canonicalAnnualYears,
-    readModelStatus: mismatchYears.length > 0 ? 'MISMATCH' : fallbackYears.length > 0 ? 'FALLBACK' : 'CURRENT',
-    fallbackYears,
-    mismatchYears,
   };
 }
 
@@ -4273,21 +4150,6 @@ export function mountCashflowSheetLabRoutes(app, {
       stagedRunId: result.stagedRunId || '',
       releasedAt: result.releasedAt || '',
     });
-  }));
-
-  app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/years', asyncHandler(async (req, res) => {
-    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
-    const { tenantId } = req.context;
-    const { projectId } = req.params;
-    const selectedYear = readSelectedYear(req.query.selectedYear);
-    const project = await readProjectDocument(db, tenantId, projectId);
-    res.status(200).json(await readCashflowSheetYearView({
-      db,
-      tenantId,
-      projectId,
-      project,
-      selectedYear,
-    }));
   }));
 
   const executeCashflowSheetMirrorRefresh = async (req) => {
