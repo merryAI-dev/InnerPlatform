@@ -106,6 +106,22 @@ node scripts/audit-cashflow-close-horizons.mjs --project inner-platform-live-202
 6. **`cashflow-month-state.mjs` 에 테스트가 없다.** 113줄에 잠금 판정의 정답이 들어 있는데 테스트 파일이 없어 조용히 깨질 수 있다. 기한 규칙이 쓰는 짝 테이블 패턴(`DEADLINE_PARITY` ↔ `CashflowCloseDeadlineTest.java`)을 잠금 규칙에도 적용한다.
 7. **직접 접근이 35곳이다.** `cashflow_month_close_requests` 15곳, `monthly_closes` 12곳, `cashflow_cumulative_close_heads` 8곳이 도메인 모듈을 우회해 컬렉션을 직접 읽는다. 판정에 쓰이는 접근만이라도 도메인 경유로 바꾼다.
 
+## 범위 결정 — 시트 손상 진단 (2026-08-18)
+
+현금흐름 시트는 조직의 확정된 양식이고 변경이 불가능하다. 시트 값을 신뢰하며, **양식 손상까지 시스템이 잡아내는 것은 개발 범위 밖으로 결정했다.** 좌표 계약도 같은 입장이다 - "양식이 다르면 적응하지 않고 거부한다. 폴백 체인·보정·추론으로 메우지 않는다."
+
+유지하는 것:
+
+- `controlTotals` 합계 대조. 시트가 자기 수식으로 만든 19개 합계행(항목 16 + 입금합계·출금합계·잔액)에 `matches` 불리언이 붙는다. 어긋나면 `SHEET_CONTROL_TOTAL_MISMATCH` 경고, 구조가 깨졌으면 blocker다. 진단이 아니라 거부이므로 계약과 일치한다.
+- 수식 깨짐 감지 (`#REF!`, `#N/A`, `#VALUE!` 등, `src/app/platform/google-sheet-workbook-audit.ts`).
+- 값은 재계산하지 않는다. 결산은 반입 때 저장된 검증 결과를 확인할 뿐 다시 검증하지 않는다.
+
+하지 않는 것:
+
+- 밀린 행 감지, 원인 칸 지목, 재정렬 시도. `spec-09-a-fleet-forensics.md` 와 `spec-09-b-failure-taxonomy.md` 가 그 설계이며 **문서만 있고 구현하지 않는다.** 두 문서 상단에 같은 표시를 달아 두었다.
+
+한편 지금 코드가 `settlementMonth` 에서 주차 연도를 역산하는 것은 오히려 시트를 신뢰하지 않는 쪽이다. 시트 미러에 `sourceYear` 가 이미 있는데 쓰지 않는다. 선언된 사실을 저장해 읽는 방향이 이 결정과 같은 방향이다.
+
 ## 이 조사에서 하지 않은 것
 
 - 라이브 데이터에 쓰기 작업을 하지 않았다. 조회만 했다.
