@@ -1815,7 +1815,7 @@ function sortMonthDifferenceChanges(changes) {
   ));
 }
 
-function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, closedMonths = new Set(), context, now, forceFullReplacement = false }) {
+function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, closedMonths = new Set(), context, now }) {
   const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
   const weekIndex = new Map((cashflowSnapshot?.weeks || []).map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
   const blockedMonths = new Set((mirror?.cells || [])
@@ -1896,7 +1896,10 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       const beforeAmount = beforeHadValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping)) : null;
       const proposedHadValue = ['VALUE', 'ZERO'].includes(cell.state);
       const proposedAmount = proposedHadValue ? normalizeAppliedAmount(cell.amount) : null;
-      if (!forceFullReplacement && beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) return null;
+      // 값이 같으면 후보가 아니다. 전체 교체 모드여도 마찬가지다 - 바뀌지 않은 셀을
+      // JVM 에 쓰면 잠긴 달에서 사유를 요구받고, 그 사유는 조직에 경고로 기록된다.
+      // 바뀐 것이 없는데 경고가 남으면 담당자가 하지 않은 일을 한 것으로 남는다.
+      if (beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) return null;
 
       const week = weekIndex.get(`${cell.yearMonth}:${cell.weekNo}`);
       const riskFlags = closedMonths.has(readOptionalText(cell.yearMonth)) ? ['closed_month_change'] : [];
@@ -1977,7 +1980,6 @@ async function buildPinnedAnnualChangeCandidates({
   mirror,
   context,
   now,
-  forceFullReplacement = false,
 }) {
   const weeklyYear = Number(mirror?.sheetContract?.weeklyYear ?? mirror?.weeklyYear);
   const contractAnnualYears = Array.isArray(mirror?.sheetContract?.annualYears)
@@ -2010,7 +2012,8 @@ async function buildPinnedAnnualChangeCandidates({
         : null;
       const proposedHadValue = ['VALUE', 'ZERO'].includes(cell.cellState);
       const proposedAmount = proposedHadValue ? normalizeAppliedAmount(cell.amount) : null;
-      if (!forceFullReplacement && beforeState === cell.cellState && (!proposedHadValue || beforeAmount === proposedAmount)) {
+      // 위와 같다. 연간 셀도 값이 같으면 후보가 아니다.
+      if (beforeState === cell.cellState && (!proposedHadValue || beforeAmount === proposedAmount)) {
         return null;
       }
       return {
@@ -3887,7 +3890,6 @@ async function stagePinnedCashflowSheetLab({
     closedMonths,
     context,
     now,
-    forceFullReplacement: Boolean(parsed.replaceAllActualSources),
   });
   const annual = parsed.yearMonth ? { candidates: [], documents: [], stagedYears: [] } : await buildPinnedAnnualChangeCandidates({
     db,
@@ -3897,7 +3899,6 @@ async function stagePinnedCashflowSheetLab({
     mirror,
     context,
     now,
-    forceFullReplacement: Boolean(parsed.replaceAllActualSources),
   });
   const candidates = [...weekly.candidates, ...annual.candidates];
   const pendingApproval = parsed.replaceAllActualSources

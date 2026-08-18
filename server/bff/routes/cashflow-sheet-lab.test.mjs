@@ -4361,6 +4361,113 @@ describe('cashflow sheet lab route', () => {
     }));
   });
 
+  it('stages no candidates when closed-month cells already equal the sheet, even in full-replacement mode', async () => {
+    // 라이브 AXR 재현. 1~7월이 결산돼 있고 시트 값이 DB 와 같을 때 "전체 교체" 로 반영하면
+    // 값이 같은 잠긴 셀 1,120개가 후보로 들어가 JVM 이 사유를 요구했고, 에러 표는 0원→0원 으로
+    // 채워졌으며, 화면 manifest 와 서버 manifest 가 어긋나 반영이 막혔다.
+    // 바뀐 것이 없으면 후보가 아니어야 한다. 그 사유는 조직에 경고로 남기 때문이다.
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      initialDocuments: {
+        'orgs/tenant-a/monthly_closes/project-a-2026-01': {
+          contractVersion: 'cashflow-month-close-v1',
+          tenantId: 'tenant-a',
+          projectId: 'project-a',
+          yearMonth: '2026-01',
+          status: 'CLOSED',
+        },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+    }));
+    const applyCashflowSheetBatch = vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'5'.repeat(64)}`));
+    const app = createApp({
+      db,
+      googleSheetsService: { previewSpreadsheet },
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient: { applyCashflowSheetBatch } },
+    });
+
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-same-values' })
+      .expect(200);
+
+    // DB 를 시트와 완전히 같게 만든다 - 첫 미러의 셀을 그대로 cashflow_weeks 로 옮겨
+    // 같은 결산 상태의 두 번째 앱을 세운다.
+    const weeksByKey = new Map();
+    for (const cell of mirror.body.cells) {
+      if (!['VALUE', 'ZERO'].includes(cell.state)) continue;
+      const key = `${cell.yearMonth}-w${cell.weekNo}`;
+      const week = weeksByKey.get(key) || {
+        id: `project-a-${key}`, projectId: 'project-a', tenantId: 'tenant-a',
+        yearMonth: cell.yearMonth, weekNo: cell.weekNo,
+        projection: {}, weeklyExpenseActualBySheet: { 'cashflow-sheet-lab': {} },
+      };
+      if (cell.mode === 'projection') week.projection[cell.lineId] = Number(cell.amount);
+      else week.weeklyExpenseActualBySheet['cashflow-sheet-lab'][cell.lineId] = Number(cell.amount);
+      weeksByKey.set(key, week);
+    }
+    const sameDb = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      weeks: [...weeksByKey.values()],
+      initialDocuments: {
+        'orgs/tenant-a/monthly_closes/project-a-2026-01': {
+          contractVersion: 'cashflow-month-close-v1',
+          tenantId: 'tenant-a',
+          projectId: 'project-a',
+          yearMonth: '2026-01',
+          status: 'CLOSED',
+        },
+      },
+    });
+    const sameApp = createApp({
+      db: sameDb,
+      googleSheetsService: { previewSpreadsheet },
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient: { applyCashflowSheetBatch } },
+    });
+    const refreshed = await request(sameApp)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-same-values-2' })
+      .expect(200);
+
+    const stage = await request(sameApp)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: refreshed.body.sourceRevision,
+        replaceAllActualSources: true,
+        idempotencyKey: 'stage-same-values',
+      })
+      .expect(200);
+
+    // 전체 교체 모드여도 값이 같으면 후보가 아니다.
+    expect(stage.body.status).toBe('NO_CHANGES');
+    expect(stage.body.stagedLineCount).toBe(0);
+    expect(stage.body.closedMonthDifferenceCount).toBe(0);
+    expect(stage.body.closedMonthDifferences).toEqual([]);
+    // JVM 은 호출조차 되지 않는다 - 사유를 요구할 기회가 없다.
+    expect(applyCashflowSheetBatch).not.toHaveBeenCalled();
+  });
+
   it('retries the same staged run with a reason after the JVM rejects a late closed-month change', async () => {
     const twoFullMonths = [
       ...JANUARY_FINANCE_WEEKS,
