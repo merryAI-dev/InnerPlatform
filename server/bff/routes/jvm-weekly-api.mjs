@@ -2718,6 +2718,8 @@ async function composeCashflowMonthDashboard({
   const tenantId = readOptionalText(req.context?.tenantId);
   const businessDate = readOptionalText(close?.evaluatedBusinessDate);
   const selectedYear = Number(yearMonth.slice(0, 4));
+  // 읽기는 두 라운드다. 1: 프로젝트·미러 (서로 독립). 2: 월 상태·연간 문서 (weeklyYear 가
+  // 미러에서 나오므로 미러 뒤, 둘은 서로 독립이라 함께). 예전엔 넷을 순차 네 라운드로 읽었다.
   const [projectRead, mirrorRead] = await Promise.all([
     closedSnapshot
       ? Promise.resolve({ available: true, value: null })
@@ -2741,9 +2743,12 @@ async function composeCashflowMonthDashboard({
   const weeklyYear = closedSnapshot
     ? readWeeklyYear(closedSnapshot.weeklyYear) ?? readWeeklyYear(selectedYear)
     : readWeeklyYear(mirror?.weeklyYear);
-  const monthCloseStatusRead = await readCashflowMonthCloseStatuses({
-    db, tenantId, projectId, selectedYear, weeklyYear, cumulativeAuthority, businessDate,
-  });
+  const [monthCloseStatusRead, annualTotals] = await Promise.all([
+    readCashflowMonthCloseStatuses({
+      db, tenantId, projectId, selectedYear, weeklyYear, cumulativeAuthority, businessDate,
+    }),
+    readAnnualTotals({ db, tenantId, projectId, weeklyYear }),
+  ]);
   monthCloseStatusRead.sectionErrors.forEach((entry) => {
     if (!sectionErrors.some((current) => current.section === entry.section && current.code === entry.code)) {
       sectionErrors.push(entry);
@@ -2794,12 +2799,6 @@ async function composeCashflowMonthDashboard({
     canonicalSource,
     weeklyYear,
   );
-  const annualTotals = await readAnnualTotals({
-    db,
-    tenantId,
-    projectId,
-    weeklyYear,
-  });
   const monthCellsAvailable = Boolean(closedSnapshot || mirror);
   const projectionMode = monthCellsAvailable ? buildMonthModeReadModel(cells, 'projection') : null;
   const actualMode = monthCellsAvailable ? buildMonthModeReadModel(cells, 'actual') : null;

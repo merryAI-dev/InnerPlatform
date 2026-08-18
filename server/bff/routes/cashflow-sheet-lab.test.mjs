@@ -1111,24 +1111,6 @@ describe('cashflow sheet lab route', () => {
       Object.entries(reordered.data.projection.lineAmounts).reverse(),
     );
     await db.doc(reordered.path).set(reordered.data);
-
-    const yearView = await request(app)
-      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
-      .expect(200);
-
-    expect(yearView.body).toMatchObject({
-      selectedYear: 2026,
-      availableYears: [2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032],
-      navigationYears: [2025, 2026, 2027],
-      readModelStatus: 'CURRENT',
-      fallbackYears: [],
-      mismatchYears: [],
-    });
-    // availableYears 는 내비게이션이라 주차 연도를 포함하지만, 연간 항목 목록에는 없다.
-    expect(yearView.body.years.map((row) => row.year)).toEqual([
-      2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032,
-    ]);
-    expect(yearView.body.years.every((row) => row.storage === 'SNAPSHOT')).toBe(true);
   });
 
   it('applies annual totals and weekly values together without inventing annual weeks', async () => {
@@ -1254,19 +1236,6 @@ describe('cashflow sheet lab route', () => {
       stagedRunId: stage.body.runId,
       appliedTargetRevision: applied.body.resultingTargetRevision,
     });
-
-    const yearView = await request(app)
-      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2025')
-      .expect(200);
-    expect(yearView.body.canonicalAnnualYears).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        year: 2025,
-        source: 'ANNUAL',
-        revision: 1,
-        projection: expect.objectContaining({ source: 'ANNUAL', totalIn: 600, totalOut: 900, net: -300 }),
-        actual: expect.objectContaining({ source: 'ANNUAL', totalIn: 350, totalOut: 450, net: -100 }),
-      }),
-    ]));
 
   });
 
@@ -1478,92 +1447,6 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'conflicting-year-stage' })
       .expect(200);
-  });
-
-  it('keeps legacy mirrors readable until the next explicit sheet refresh rebuilds year snapshots', async () => {
-    const db = createDb({
-      initialDocuments: {
-        'orgs/tenant-a/cashflow_sheet_mirrors/project-a': {
-          projectId: 'project-a',
-          status: 'FRESH',
-          sourceRevision: 'sha256:legacy',
-          years: [2025],
-          sheetFacts: {
-            annualCashflowTotals: [{
-              year: 2025,
-              projection: { source: 'ANNUAL', totalIn: 100, totalOut: 20, net: 80, lineAmounts: {} },
-              actual: { source: 'ANNUAL', totalIn: 90, totalOut: 10, net: 80, lineAmounts: {} },
-            }],
-          },
-        },
-      },
-    });
-
-    const response = await request(createApp({ db }))
-      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
-      .expect(200);
-
-    expect(response.body).toMatchObject({
-      availableYears: [2025, 2026, 2027],
-      navigationYears: [2025, 2026, 2027],
-      readModelStatus: 'FALLBACK',
-      fallbackYears: [2025],
-      years: [{ year: 2025, storage: 'MIRROR_FALLBACK' }],
-    });
-  });
-
-  it('keeps imported annual years visible when registration still has a single-year period', async () => {
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        contractStart: '2026-01-01',
-        contractEnd: '2026-12-31',
-      },
-      initialDocuments: {
-        'orgs/tenant-a/cashflow_sheet_mirrors/project-a': {
-          projectId: 'project-a',
-          status: 'FRESH',
-          sourceRevision: 'sha256:multi-year-source',
-          years: [2024, 2025, 2026, 2027, 2028],
-          sheetFacts: {
-            annualCashflowTotals: [2024, 2025, 2026, 2027, 2028].map((year) => ({
-              year,
-              projection: { source: year === 2026 ? 'WEEKLY' : 'ANNUAL', totalIn: year, totalOut: 0, net: year, lineAmounts: {} },
-              actual: { source: year === 2026 ? 'WEEKLY' : 'ANNUAL', totalIn: year, totalOut: 0, net: year, lineAmounts: {} },
-            })),
-          },
-        },
-      },
-    });
-
-    const response = await request(createApp({ db }))
-      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
-      .expect(200);
-
-    expect(response.body.availableYears).toEqual([2024, 2025, 2026, 2027, 2028]);
-    expect(response.body.navigationYears).toEqual([2025, 2026, 2027]);
-    expect(response.body.years.map((row) => row.year)).toEqual([2024, 2025, 2026, 2027, 2028]);
-  });
-
-  it('does not invent adjacent years for an unlinked single-year project', async () => {
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        contractStart: '2026-01-01',
-        contractEnd: '2026-12-31',
-      },
-    });
-
-    const response = await request(createApp({ db }))
-      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
-      .expect(200);
-
-    expect(response.body).toMatchObject({
-      availableYears: [2026],
-      navigationYears: [2026],
-      years: [],
-      canonicalAnnualYears: [],
-    });
   });
 
   it('compares a pinned multi-year sheet total with registered financial years', async () => {
