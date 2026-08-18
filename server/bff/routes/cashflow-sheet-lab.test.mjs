@@ -1092,10 +1092,11 @@ describe('cashflow sheet lab route', () => {
     expect(refreshed.body.sheetFacts.annualCashflowTotals).toEqual(expect.arrayContaining([
       expect.objectContaining({ year: 2024, projection: expect.objectContaining({ source: 'ANNUAL' }) }),
       expect.objectContaining({ year: 2025, actual: expect.objectContaining({ source: 'ANNUAL' }) }),
-      expect.objectContaining({ year: 2026, projection: expect.objectContaining({ source: 'WEEKLY' }) }),
-      expect.objectContaining({ year: 2027, projection: expect.objectContaining({ source: 'ANNUAL', valueCellCount: 0 }) }),
+      expect.objectContaining({ year: 2027, projection: expect.objectContaining({ source: 'ANNUAL', lineAmounts: {} }) }),
       expect.objectContaining({ year: 2028, actual: expect.objectContaining({ source: 'ANNUAL' }) }),
     ]));
+    // 주차 연도는 연간 항목이 없다. 주차 값은 cells 에, 그 해 합계는 Total 열에 있다.
+    expect(refreshed.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2026)).toBeUndefined();
     const mirror = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_mirrors/');
     const snapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshots/');
     expect(mirror[0].data).toMatchObject({ projectId: 'project-a', status: 'FRESH', snapshotSchemaVersion: 2 });
@@ -1103,7 +1104,8 @@ describe('cashflow sheet lab route', () => {
     expect(snapshots).toHaveLength(1);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_months/')).toHaveLength(12);
     const yearSnapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_years/');
-    expect(yearSnapshots).toHaveLength(9);
+    // 연간 8개 연도만 스냅샷된다. 주차 연도는 연간 항목이 없으니 스냅샷도 없다.
+    expect(yearSnapshots).toHaveLength(8);
     const reordered = yearSnapshots.find(({ data }) => data.year === 2025);
     reordered.data.projection.lineAmounts = Object.fromEntries(
       Object.entries(reordered.data.projection.lineAmounts).reverse(),
@@ -1122,8 +1124,9 @@ describe('cashflow sheet lab route', () => {
       fallbackYears: [],
       mismatchYears: [],
     });
+    // availableYears 는 내비게이션이라 주차 연도를 포함하지만, 연간 항목 목록에는 없다.
     expect(yearView.body.years.map((row) => row.year)).toEqual([
-      2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032,
+      2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032,
     ]);
     expect(yearView.body.years.every((row) => row.storage === 'SNAPSHOT')).toBe(true);
   });
@@ -1461,9 +1464,10 @@ describe('cashflow sheet lab route', () => {
 
     // 좌표 계약: 주별 블록은 E:BL 하나뿐이고 연간 열은 그 해를 포함하지 않는다.
     // 따라서 2026 은 주차 그리드에만 존재하고, 주차합과 연간값이 어긋날 자리가 없다.
-    const totals2026 = mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2026);
-    expect(totals2026.projection.source).toBe('WEEKLY');
-    expect(totals2026.projection.reconciliation.status).toBe('NOT_APPLICABLE');
+    // 주차 연도는 연간 항목 자체를 만들지 않는다 - 주차 셀을 더한 가짜 연간값이 없으니
+    // 주차합과 연간값이 어긋날 자리가 처음부터 없다.
+    expect(mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2026)).toBeUndefined();
+    expect(mirror.body.sheetFacts.annualCashflowTotals.map((row) => row.year)).not.toContain(2026);
     // 2026 으로 태깅된 셀은 Total 열(BS)의 GRAND_TOTAL 뿐이며 연간 열이 아니다.
     expect(mirror.body.annualCells.some((cell) => (
       Number(cell.year) === 2026 && cell.periodKind !== 'GRAND_TOTAL'
@@ -2106,7 +2110,7 @@ describe('cashflow sheet lab route', () => {
     expect(cells2025).toHaveLength(32);
     expect(new Set(cells2025.map((cell) => cell.sourceYear))).toEqual(new Set([2026]));
     const totals2025 = mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2025).projection;
-    expect(totals2025.valueCellCount).toBe(16);
+    expect(Object.values(totals2025.lineStates).filter((state) => state === 'VALUE')).toHaveLength(16);
     expect(totals2025.lineAmounts.SALES_IN).toBe(100);
     // 합계는 시트의 입금 합계 행 좌표에서만 온다. 이 fixture 는 그 칸이 비어 있으므로
     // 라인 합(700)으로 대체하지 않고 값이 없는 채로 둔다.
