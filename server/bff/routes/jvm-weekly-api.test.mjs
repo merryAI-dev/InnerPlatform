@@ -44,6 +44,18 @@ describe('cashflow section error presentation', () => {
     expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel(status, true)).toBe(label);
   });
 
+  // 색도 같은 표를 따른다. 라벨만 고치고 색을 빠뜨려 기한 내 완료가 회색으로 남았었다.
+  it.each([
+    ['ON_TIME', 'success'],
+    ['COMPLETED_LATE', 'success'],
+    ['MISSED', 'danger'],
+    ['PENDING', 'warning'],
+  ])('colours JVM weekly status %s as %s', (weeklyStatus, tone) => {
+    expect(jvmWeeklyApiModule.cashflowWeekSurfaceTone({
+      month: { tone: 'default' }, weeklyStatus, weeklyAvailable: true, isCurrent: false,
+    })).toBe(tone);
+  });
+
   it('never labels a known JVM weekly status as 확인 필요', () => {
     for (const status of ['ON_TIME', 'COMPLETED_LATE', 'MISSED', 'PENDING']) {
       expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel(status, true)).not.toBe('주간 정산 상태 확인 필요');
