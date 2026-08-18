@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8');
+// 마감 후 변경 다이얼로그는 별도 파일이다. 사유·필터 입력이 부모 state 였을 때 글자 하나에 3,500줄이
+// 다시 그려졌다. 셸 검사는 두 파일을 하나의 소스로 본다.
+const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8')
+  + readFileSync(resolve(import.meta.dirname, 'CashflowLateSheetChangeDialog.tsx'), 'utf8');
 
 describe('CashflowProjectSheet monthly close shell', () => {
   it('uses the server month-close guide instead of rebuilding a target-month deadline label', () => {
@@ -41,13 +44,16 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
-  it('shows submission success only after the BFF persists a pending request', () => {
+  it('treats a submission as done only after the BFF persists a pending request', () => {
+    // 성공 토스트는 없앴다. 요청 상태가 화면에 바로 반영되므로 따로 말할 필요가 없다.
+    // 대신 상태 갱신이 PENDING 검사 뒤에 온다는 순서는 유지한다.
     const pendingGuard = source.indexOf("if (request.status !== 'PENDING')");
-    const successToast = source.indexOf("toast.success('월결산 결재 요청을 제출했습니다.');");
+    const applied = source.indexOf('setMonthCloseRequest(request);', pendingGuard);
 
     expect(pendingGuard).toBeGreaterThan(-1);
-    expect(successToast).toBeGreaterThan(pendingGuard);
+    expect(applied).toBeGreaterThan(pendingGuard);
     expect(source).not.toContain('월 결산 승인을 요청했습니다.');
+    expect(source).not.toContain("toast.success('월결산 결재 요청을 제출했습니다.');");
   });
 
   it('drops delayed mutation responses after the selected project or month changes', () => {
@@ -409,7 +415,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('reuses the staged run when a closed-month change needs a reason', () => {
     expect(source).toContain("bffErrorCode(finalError) === 'cashflow_closed_month_reason_required'");
-    expect(source).toContain('lateSheetChangeReason.trim(),');
+    expect(source).toContain("onSubmit((resumeRequired ? resumeReason : reason).trim())");
     expect(source).toContain('lateSheetFormulaAccepted,');
     expect(source).toContain('closedMonthChangeReason');
     expect(source).toContain('마감 후 시트값 변경');
@@ -559,8 +565,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('setLateSheetApply(stage)');
     expect(source).toContain('setSheetApplyResumeRequired(true)');
     expect(source).toContain('같은 작업 이어서 완료');
-    expect(source).toContain('!sheetStageApplyLoading && !sheetApplyResumeRequired');
-    expect(source).toContain('!sheetApplyResumeRequired && (');
+    // 전송 중이거나 이어서 완료 중이면 닫기가 무시된다.
+    expect(source).toContain('if (sheetStageApplyLoading || sheetApplyResumeRequired) return;');
+    expect(source).toContain('!resumeRequired && (');
   });
 
   it('uses the sheets-lab one-way apply contract and does not turn post-apply reads into a failed save', () => {
@@ -590,10 +597,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(stageFlow.indexOf('setLateSheetApply(result)')).toBeLessThan(stageFlow.indexOf('handleApplyStagedSheetValues(result)'));
     expect(source).toContain('이미 결산이 완료된 월의 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?');
     expect(source).not.toContain('결산 마감일이 지난 값');
-    expect(source).toContain('!lateSheetChangeReason.trim() || !lateSheetDiffComplete');
+    expect(source).toContain('!reason.trim() || !complete');
     expect(source).toContain('closedMonthDifferenceManifestHash');
     expect(source).toContain('closedMonthDifferenceCount');
-    expect(source).toContain('lateSheetChangeReason.trim(),');
+    expect(source).toContain("onSubmit((resumeRequired ? resumeReason : reason).trim())");
   });
 
   it('runs the same main-page sheet action in refresh, stage, then apply order', () => {
