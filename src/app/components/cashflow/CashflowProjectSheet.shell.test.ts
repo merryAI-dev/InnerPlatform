@@ -9,7 +9,7 @@ const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.t
 
 describe('CashflowProjectSheet monthly close shell', () => {
   it('uses the server month-close guide instead of rebuilding a target-month deadline label', () => {
-    expect(source).toContain('monthCloseActions?.requestMonthClose.guide || cashflowPresentation?.monthClose.statusLabel');
+    expect(source).toContain('monthCloseActions?.requestMonthClose.guide ? (');
     expect(source).not.toContain('monthCloseResult.dashboard.summary.targetYearMonth}월 결산');
   });
 
@@ -138,7 +138,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('monthCloseActions.requestMonthClose.guide');
     expect(source).not.toContain('dashboard?.validation?.canClose');
     expect(source).not.toContain('dashboard?.validation?.blockers?.[0]?.message');
-    expect(source).toContain('monthCloseSectionErrors.map((entry) => entry.label)');
+    expect(source).toContain('monthCloseSectionErrors.map((entry) => entry.cause ? `${entry.label}: ${entry.cause}` : entry.label)');
     expect(source).not.toContain("entry.section === 'monthCloseStatuses'");
   });
 
@@ -150,7 +150,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('cashflowPresentation?.comparison.cells || []');
     expect(source).toContain('cashflowPresentation?.comparison.periodLabel || \'확인 불가\'');
     expect(source).toContain('cashflowPresentation?.monthClose.statusLabel || \'확인 불가\'');
-    expect(source).toContain('monthCloseSectionErrors.map((entry) => entry.label)');
+    expect(source).toContain('monthCloseSectionErrors.map((entry) => entry.cause ? `${entry.label}: ${entry.cause}` : entry.label)');
 
     expect(source).not.toContain('getSeoulTodayIso');
     expect(source).not.toContain('getMonthMondayWeeks');

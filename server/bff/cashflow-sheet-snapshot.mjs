@@ -445,14 +445,12 @@ export function extractCashflowSheetFacts({
   const depositControlColumnIndex = 70; // BS
   const unpaidControlColumnIndex = 71; // BT
   const depositScheduleRows = weekColumns.map((week) => {
+    // 6·7행(세금계산서 발행일·예정입금일)은 좌표 계약 밖이다. 누적 결산은 이 값을 쓰지 않는데
+    // (JVM: cumulative 면 depositScheduleRows = List.of()), 날짜 형식이 어긋났다고 issue 를 내면
+    // 그 issue 가 SHEET_VALUE_INVALID blocker 가 되어 쓰지도 않을 값 때문에 결산이 막힌다.
+    // 라이브 2026전남글로벌이 그 상태였다. 읽히면 쓰고, 안 읽히면 빈 값이다 - 거부하지 않는다.
     const taxInvoiceIssuedDate = normalizeDateCell(matrix?.[6]?.[week.columnIndex]);
     const expectedDepositDate = normalizeDateCell(matrix?.[7]?.[week.columnIndex]);
-    if (taxInvoiceIssuedDate === null) {
-      issues.push({ code: 'sheet_date_invalid', field: 'taxInvoiceIssuedDate', sourceCell: toA1(6, week.columnIndex) });
-    }
-    if (expectedDepositDate === null) {
-      issues.push({ code: 'sheet_date_invalid', field: 'expectedDepositDate', sourceCell: toA1(7, week.columnIndex) });
-    }
     return {
       yearMonth: week.yearMonth,
       weekNo: week.weekNo,

@@ -312,6 +312,14 @@ export function cashflowSectionErrorLabel(section) {
   return CASHFLOW_SECTION_ERROR_LABELS.get(readOptionalText(section)) || '일부 정보';
 }
 
+// 조회 부가 기능이 실패하면 그 section 만 비우고 나머지는 그린다 (계약). 다만 왜 실패했는지는
+// 남겨야 한다 - 화면에 "확인 필요" 만 뜨고 이유가 없으면 진단하려고 소스와 Firestore 를 뒤져야 했다.
+// 실는 것은 안정된 error code 뿐이다. 예외 메시지는 사용자 화면에 나가면 안 된다 (계약).
+function sectionUnavailable(section, code, error) {
+  const cause = readOptionalText(error?.code);
+  return cause ? { section, code, cause } : { section, code };
+}
+
 function cashflowSectionErrorsForResponse(sectionErrors) {
   return (Array.isArray(sectionErrors) ? sectionErrors : []).map((entry) => ({
     ...entry,
@@ -3673,8 +3681,8 @@ export function mountJvmWeeklyApiRoutes(app, {
               tenantId: req.context.tenantId,
               projectId: rawProjectId,
               nowMs: currentNow.getTime(),
-            }).catch(() => {
-              sectionErrors.push({ section: 'sheetPublication', code: 'sheet_publication_state_unavailable' });
+            }).catch((error) => {
+              sectionErrors.push(sectionUnavailable('sheetPublication', 'sheet_publication_state_unavailable', error));
               return { blocked: false, fingerprint: null, unavailable: true };
             }),
             { attempt: traceAttempt },
@@ -3693,8 +3701,8 @@ export function mountJvmWeeklyApiRoutes(app, {
           ),
           trace.measure(
             'jvm_compliance',
-            () => readWeeklyCompliance(req.context, rawProjectId).catch(() => {
-              sectionErrors.push({ section: 'deadlineSummary', code: 'weekly_compliance_unavailable' });
+            () => readWeeklyCompliance(req.context, rawProjectId).catch((error) => {
+              sectionErrors.push(sectionUnavailable('deadlineSummary', 'weekly_compliance_unavailable', error));
               return null;
             }),
             { attempt: traceAttempt },
@@ -3704,29 +3712,23 @@ export function mountJvmWeeklyApiRoutes(app, {
             tenantId: req.context.tenantId,
             projectId: rawProjectId,
             yearMonth,
-          }).then((record) => ({ available: true, record })).catch(() => {
-            sectionErrors.push({
-              section: 'monthCloseRequest', code: 'cashflow_month_close_request_unavailable',
-            });
+          }).then((record) => ({ available: true, record })).catch((error) => {
+            sectionErrors.push(sectionUnavailable('monthCloseRequest', 'cashflow_month_close_request_unavailable', error));
             return { available: false, record: null };
           }),
           readCashflowProjectApproverLock({
             db,
             tenantId: req.context.tenantId,
             projectId: rawProjectId,
-          }).then((locked) => ({ available: true, locked })).catch(() => {
-            sectionErrors.push({
-              section: 'monthCloseApproverLock', code: 'cashflow_month_close_approver_lock_unavailable',
-            });
+          }).then((locked) => ({ available: true, locked })).catch((error) => {
+            sectionErrors.push(sectionUnavailable('monthCloseApproverLock', 'cashflow_month_close_approver_lock_unavailable', error));
             return { available: false, locked: true };
           }),
           assertCashflowMonthActionAccess({
             db, req, projectId: rawProjectId, authMode, workspaceEmailDomain,
           }).then(() => ({ available: true, allowed: true })).catch((error) => {
             if (!['cashflow_month_close_member_inactive', 'cashflow_project_forbidden'].includes(readOptionalText(error?.code))) {
-              sectionErrors.push({
-                section: 'monthCloseActionAccess', code: 'cashflow_month_close_action_access_unavailable',
-              });
+              sectionErrors.push(sectionUnavailable('monthCloseActionAccess', 'cashflow_month_close_action_access_unavailable', error));
               return { available: false, allowed: false };
             }
             return { available: true, allowed: false };

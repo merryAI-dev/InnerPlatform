@@ -2665,7 +2665,7 @@ export function CashflowProjectSheet({
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     일부 정보를 불러오지 못했습니다
-                    {` (${monthCloseSectionErrors.map((entry) => entry.label).join(', ')})`}
+                    {` (${monthCloseSectionErrors.map((entry) => entry.cause ? `${entry.label}: ${entry.cause}` : entry.label).join(', ')})`}
                     . 불러오지 못한 항목은 표시하지 않으며, 다시 조회하기 전까지 관련 판정은 차단됩니다.
                   </span>
                   <button
@@ -2685,9 +2685,11 @@ export function CashflowProjectSheet({
                       <div className="text-[13px] font-bold text-card-foreground">월 결산</div>
                       <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
                     </div>
-                    <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
-                      {cashflowPresentation?.monthClose.statusLabel || '확인 불가'}
-                    </div>
+                    {monthCloseActions?.requestMonthClose.guide ? (
+                      <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
+                        {monthCloseActions.requestMonthClose.guide}
+                      </div>
+                    ) : null}
                     {monthCloseRequestError ? (
                       <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-red-700">
                         <span>{monthCloseRequestError}</span>
@@ -2738,9 +2740,6 @@ export function CashflowProjectSheet({
                       </>
                     ) : null}
                   </div>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-                  <span>{monthCloseActions?.requestMonthClose.guide || cashflowPresentation?.monthClose.statusLabel || '확인 불가'}</span>
                 </div>
               </div>
           </section>
@@ -3041,7 +3040,7 @@ export function CashflowProjectSheet({
           if (!open) setWeeklyProjectionWarning(null);
         }
       }}>
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[620px]">
+        <AlertDialogContent className="sm:max-w-[620px]">
           <AlertDialogHeader>
             <AlertDialogTitle>주간 정산 완료</AlertDialogTitle>
             <AlertDialogDescription>대상 주차와 그 이후 15개 재무주차(총 16주·256칸)의 JVM 저장 Projection 값을 확인합니다.</AlertDialogDescription>
@@ -3077,7 +3076,7 @@ export function CashflowProjectSheet({
       </AlertDialog>
 
       <AlertDialog open={weeklyHistoryOpen} onOpenChange={setWeeklyHistoryOpen}>
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[860px]">
+        <AlertDialogContent className="sm:max-w-[860px]">
           <AlertDialogHeader>
             <AlertDialogTitle>주간 정산 준수 이력</AlertDialogTitle>
             <AlertDialogDescription>JVM 프로젝트 원장의 연월·주차별 전체 준수 이력입니다.</AlertDialogDescription>
@@ -3102,7 +3101,7 @@ export function CashflowProjectSheet({
           if (!monthCloseBusy) setMonthCloseReviewOpen(open);
         }}
       >
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[620px]">
+        <AlertDialogContent className="sm:max-w-[620px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{yearMonth} 누적 월결산 승인 요청</AlertDialogTitle>
             <AlertDialogDescription>
@@ -3304,7 +3303,7 @@ export function CashflowProjectSheet({
         open={sheetReviewDialogOpen}
         onOpenChange={(open) => setSheetReviewDialogOpen(open)}
       >
-        <AlertDialogContent className="max-w-[760px]">
+        <AlertDialogContent className="sm:max-w-[760px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{cashflowSheetConfig ? '시트 업데이트 반영' : '캐시플로우 시트 연동 시작하기'}</AlertDialogTitle>
             <AlertDialogDescription>

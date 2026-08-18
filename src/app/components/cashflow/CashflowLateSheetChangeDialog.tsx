@@ -61,7 +61,7 @@ export function CashflowLateSheetChangeDialog({
       open={Boolean(stage)}
       onOpenChange={(open) => { if (!open) onCancel(); }}
     >
-      <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[960px]">
+      <AlertDialogContent className="sm:max-w-[960px]">
         <AlertDialogHeader>
           <AlertDialogTitle>{resumeRequired ? '시트 반영 이어서 완료' : '마감 후 시트값 변경'}</AlertDialogTitle>
           <AlertDialogDescription>

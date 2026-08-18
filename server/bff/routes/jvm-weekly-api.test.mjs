@@ -1263,11 +1263,11 @@ describe('JVM weekly API BFF proxy', () => {
         // 판정 불능을 "지각 0회" 로 그리지 않도록 요약 자체를 비운다.
         expect(response.body.dashboard.deadlineSummary).toBeNull();
         expect(response.body.sectionErrors).toEqual(expect.arrayContaining([
-          {
+          expect.objectContaining({
             section: 'deadlineSummary',
             code: 'weekly_compliance_unavailable',
             label: '주간 정산 이력',
-          },
+          }),
         ]));
       });
   });
@@ -1306,11 +1306,11 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.pendingApply).toBeNull();
         expect(response.body.publicationChangedDuringRead).toBe(false);
         expect(response.body.sectionErrors).toEqual(expect.arrayContaining([
-          {
+          expect.objectContaining({
             section: 'sheetPublication',
             code: 'sheet_publication_state_unavailable',
             label: '시트 반영 상태',
-          },
+          }),
         ]));
       });
     // 확인 재읽기(publication_after)까지 실패해도 요청당 한 번만 알린다.
@@ -1348,11 +1348,11 @@ describe('JVM weekly API BFF proxy', () => {
           code: 'PROJECT_SOURCE_UNAVAILABLE',
           message: '프로젝트 등록 정보를 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.',
         });
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'projectMetadata',
           code: 'cashflow_project_metadata_unavailable',
           label: '프로젝트 등록 정보',
-        });
+        }));
       });
   });
 
@@ -1395,11 +1395,11 @@ describe('JVM weekly API BFF proxy', () => {
           code: 'SHEET_SOURCE_UNAVAILABLE',
           message: '시트 기준값을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.',
         });
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'sheetMirror',
           code: 'cashflow_sheet_mirror_unavailable',
           label: '시트 기준값',
-        });
+        }));
       });
   });
 
@@ -1561,11 +1561,11 @@ describe('JVM weekly API BFF proxy', () => {
           code: 'CASHFLOW_SOURCE_UNAVAILABLE',
           message: '현금흐름 원장을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.',
         });
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'cashflow',
           code: 'cashflow_ledger_source_unavailable',
           label: '현금흐름 원장',
-        });
+        }));
         expect(JSON.stringify(response.body)).not.toContain('raw datastore');
       });
   });
@@ -1811,11 +1811,11 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.validation.blockers).toContainEqual(expect.objectContaining({
           code: 'CUMULATIVE_CLOSE_MIGRATION_REQUIRED',
         }));
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'monthCloseStatuses',
           code: 'cashflow_month_close_migration_required',
           label: '월 결산 상태',
-        });
+        }));
       });
   });
 
@@ -1857,11 +1857,11 @@ describe('JVM weekly API BFF proxy', () => {
         expect(statuses.get('2026-06')).toMatchObject({ status: 'OPEN', sheetCalculationChecks: null });
         expect(response.body.dashboard.validation.blockers.map((blocker) => blocker.code))
           .not.toContain('CUMULATIVE_CLOSE_AUTHORITY_UNAVAILABLE');
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'monthCloseHistory',
           code: 'cashflow_month_close_history_unavailable',
           label: '월 결산 이력',
-        });
+        }));
       });
   });
 
@@ -2179,11 +2179,11 @@ describe('JVM weekly API BFF proxy', () => {
           enabled: false,
           guide: expect.stringContaining('다시 불러온 뒤'),
         });
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'monthCloseReopenCapability',
           code: 'cashflow_month_reopen_capability_unavailable',
           label: '월 결산 재오픈 가능 여부',
-        });
+        }));
       });
   });
 
@@ -2212,11 +2212,11 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => {
         expect(response.body.dashboard.cells).toHaveLength(160);
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'monthCloseRequest',
           code: 'cashflow_month_close_request_unavailable',
           label: '월 결산 승인 요청',
-        });
+        }));
         for (const action of ['changeExecutiveApprover', 'requestMonthClose', 'withdrawMonthClose', 'requestMonthReopen']) {
           expect(response.body.actions[action]).toMatchObject({
             enabled: false,
@@ -4072,11 +4072,11 @@ describe('JVM weekly API BFF proxy', () => {
           code: 'SHEET_SOURCE_REQUIRED',
           message: '시트에서 주별 관리 연도를 확인하지 못했습니다. 표준 양식으로 다시 불러와 주세요.',
         });
-        expect(response.body.sectionErrors).toContainEqual({
+        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
           section: 'monthCloseStatuses',
           code: 'cashflow_month_close_period_contract_unavailable',
           label: '월 결산 상태',
-        });
+        }));
       });
   });
 
