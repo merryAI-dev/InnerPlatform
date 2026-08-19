@@ -424,10 +424,6 @@ export function CashflowProjectSheet({
   } | null>(null);
   const [pendingApprovalStage, setPendingApprovalStage] = useState<CashflowSheetLabStageResult | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
-  const pendingApprovalChangeRows = (pendingApprovalStage?.pendingApprovalDifferences || []).flatMap((month) => month.changes || []);
-  const pendingApprovalManifestComplete = Boolean(pendingApprovalStage?.pendingApprovalDifferenceManifestHash)
-    && pendingApprovalStage?.pendingApprovalDifferenceCount === pendingApprovalChangeRows.length
-    && (pendingApprovalStage?.pendingApprovalDifferences || []).every((month) => !month.truncatedChangeCount);
   // 조직장은 로그인해서 승인해야 하므로 계정이 필수지만, 명부에 없는 사람(퇴사 후 계정이
   // 남은 경우)은 후보에서 빠져야 한다. 명부는 문지기로만 쓴다.
   const approverRoster = usePersonRoster();
@@ -3233,33 +3229,17 @@ export function CashflowProjectSheet({
         }}
       />
 
-      <AlertDialog open={Boolean(pendingApprovalStage)} onOpenChange={(open) => { if (!open) setPendingApprovalStage(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>결재 중인 누적 결산과 값이 달라요</AlertDialogTitle>
-            <AlertDialogDescription>
-              그대로 반영하면 결재 중인 자료와 차이가 기록됩니다. 확인한 시트 값으로 계속 반영할까요?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div role={pendingApprovalManifestComplete ? 'status' : 'alert'} className={`rounded-md border px-3 py-2 text-[12px] ${pendingApprovalManifestComplete ? 'border-slate-300 bg-slate-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-800'}`}>
-            {pendingApprovalManifestComplete
-              ? `결재 중 변경 후보 전체 ${pendingApprovalChangeRows.length.toLocaleString()}건을 확인했습니다.`
-              : '변경 후보를 완전하게 확인하지 못해 반영할 수 없습니다.'}
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!pendingApprovalStage || !pendingApprovalManifestComplete || sheetStageApplyLoading}
-              onClick={(event) => {
-                event.preventDefault();
-                const stage = pendingApprovalStage;
-                setPendingApprovalStage(null);
-                if (stage) void handleApplyStagedSheetValues(stage, '', false, true);
-              }}
-            >반영</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <CashflowLateSheetChangeDialog
+        kind="pendingApproval"
+        stage={pendingApprovalStage}
+        submitting={sheetStageApplyLoading}
+        onCancel={() => { if (!sheetStageApplyLoading) setPendingApprovalStage(null); }}
+        onSubmit={() => {
+          const stage = pendingApprovalStage;
+          setPendingApprovalStage(null);
+          if (stage) void handleApplyStagedSheetValues(stage, '', false, true);
+        }}
+      />
 
       <AlertDialog
         open={monthCloseWithdrawOpen}
