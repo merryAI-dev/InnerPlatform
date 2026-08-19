@@ -19,7 +19,7 @@ type CheckField = keyof Pick<
   | 'usbEvidenceSubmitted' | 'evidenceDeletedAfterUsb'
 >;
 type CheckItem = { field: CheckField; label: string; done: boolean; note?: string };
-type UploadItem = { label: string; attached: boolean; note?: string };
+type UploadItem = { kind: string; label: string; attached: boolean; note?: string };
 
 function readChecklist(project: Project): CheckItem[] {
   const checkout = project.checkout;
@@ -39,21 +39,25 @@ function readUploads(project: Project): UploadItem[] {
   const checkout = project.checkout;
   return [
     {
+      kind: 'final_report',
       label: '최종 결과보고서 (원본)',
       attached: Boolean(project.finalReportDocument?.path),
       note: '종료사업은 결과보고서 원본을 제출합니다.',
     },
     {
+      kind: 'tax_invoice',
       label: '사업 관련 발행 세금계산서 PDF',
       attached: Boolean(project.taxInvoiceDocument?.path),
       note: checkout?.taxInvoiceEvidenceConfirmed ? '해당 사업으로 표시됨' : '해당 시에만 제출합니다.',
     },
     {
+      kind: 'performance_certificate',
       label: '고객사 용역수행실적증명서 PDF',
       attached: Boolean(project.performanceCertificateDocument?.path),
       note: checkout?.performanceCertificateDocumentApplicable ? '해당 사업으로 표시됨' : '해당 시에만 제출합니다.',
     },
     {
+      kind: 'final_settlement_report',
       label: '회계사 최종 정산리포트',
       attached: Boolean(project.finalSettlementReportDocument?.path),
       note: checkout?.finalSettlementReportConfirmed ? '해당 사업으로 표시됨' : '회계사 정산 사업만 해당합니다.',
@@ -62,7 +66,7 @@ function readUploads(project: Project): UploadItem[] {
 }
 
 export function PortalProjectCheckout() {
-  const { activeProjectId, projects, updateProjectCheckout } = usePortalStore();
+  const { activeProjectId, projects, updateProjectCheckout, uploadProjectCheckoutDocument } = usePortalStore();
   const project = useMemo(
     () => projects.find((candidate) => candidate.id === activeProjectId) || null,
     [activeProjectId, projects],
@@ -133,12 +137,25 @@ export function PortalProjectCheckout() {
         <h2 className="border-b border-slate-200 pb-2 text-[12px] font-semibold text-slate-700">업로드</h2>
         <ul className="space-y-2">
           {uploads.map((item) => (
-            <li key={item.label} className="flex items-start gap-2 text-[13px]">
+            <li key={item.kind} className="flex items-start gap-2 text-[13px]">
               <FileText aria-hidden className={`mt-0.5 h-4 w-4 shrink-0 ${item.attached ? 'text-[#047857]' : 'text-slate-300'}`} />
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className={item.attached ? 'text-slate-900' : 'text-slate-600'}>{item.label}</span>
                 <span className="ml-2 text-[12px] text-slate-500">{item.attached ? '첨부됨' : '미첨부'}</span>
                 {item.note ? <span className="mt-0.5 block text-[12px] text-slate-500">{item.note}</span> : null}
+                <label className="mt-1 inline-flex cursor-pointer items-center gap-1 text-[12px] text-[#0176D3] underline underline-offset-2">
+                  {item.attached ? 'PDF 교체' : 'PDF 올리기'}
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      if (file) void uploadProjectCheckoutDocument(project.id, item.kind, file);
+                    }}
+                  />
+                </label>
               </span>
             </li>
           ))}
@@ -169,7 +186,7 @@ export function PortalProjectCheckout() {
       </section>
 
       <p className="text-[13px] text-slate-600">
-        체크는 이 화면에서 바로 저장됩니다. 증빙 업로드는{' '}
+        체크와 증빙 모두 이 화면에서 바로 저장되며, 조직장 결재는 다시 열리지 않습니다. 사업 내용을 고치려면{' '}
         <Link className="font-medium text-[#0176D3] underline underline-offset-2" to={`/portal/edit-project/${project.id}`}>
           프로젝트 수정
         </Link>

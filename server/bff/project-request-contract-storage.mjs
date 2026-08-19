@@ -150,6 +150,46 @@ export function createProjectRequestContractStorageService(options = {}) {
       };
     },
 
+    /**
+     * 종료사업 체크아웃 증빙을 프로젝트 문서 자리에 바로 올린다.
+     *
+     * 등록 초안을 거치지 않는다. 이미 승인이 끝난 사업의 마무리 증빙이라 초안으로 올리고
+     * 제출하면 조직장 결재가 다시 열린다(projects.mjs 의 executiveReviewReopens).
+     * 결재를 건드리지 않는 것이 이 경로의 존재 이유다.
+     */
+    async uploadProjectRegistrationAttachment(input) {
+      const tenantId = requireStoragePathSegment(input?.tenantId, 'tenantId');
+      const projectId = requireStoragePathSegment(input?.projectId, 'projectId');
+      const attachmentId = requireStoragePathSegment(input?.attachmentId, 'attachmentId');
+      const fileName = normalizeSafeFileName(input?.fileName);
+      const mimeType = readOptionalText(input?.mimeType) || 'application/octet-stream';
+      const buffer = input?.buffer instanceof Uint8Array
+        ? Buffer.from(input.buffer)
+        : Buffer.isBuffer(input?.buffer)
+          ? input.buffer
+          : null;
+      if (!buffer) throw new Error('buffer is required');
+
+      const uploadedAt = new Date().toISOString();
+      // 다운로드 라우트가 prefix 바로 아래 한 칸만 허용하므로 하위 경로를 만들지 않는다.
+      const path = `${projectRegistrationAttachmentPrefix(tenantId, projectId)}${attachmentId}-${fileName}`;
+      await bucket.file(path).save(buffer, {
+        resumable: false,
+        metadata: {
+          contentType: mimeType,
+          metadata: { tenantId, projectId, attachmentId },
+        },
+      });
+
+      return {
+        path,
+        name: readOptionalText(input?.fileName) || fileName,
+        size: buffer.byteLength,
+        contentType: mimeType,
+        uploadedAt,
+      };
+    },
+
     async deleteDraftAttachment(input) {
       const prefix = draftAttachmentPrefix(input?.tenantId, input?.draftId);
       const { path } = objectNameWithinPrefix(

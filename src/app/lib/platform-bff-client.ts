@@ -2275,6 +2275,38 @@ export async function upsertProjectViaBff(params: {
   return response.data;
 }
 
+/**
+ * 종료사업 체크아웃 증빙 업로드.
+ *
+ * 수정 초안을 거치지 않는다. 이미 승인이 끝난 사업이라 초안으로 올리고 제출하면 조직장
+ * 결재가 다시 열린다. 이 경로는 문서 칸과 version 만 올린다.
+ */
+export async function uploadProjectCheckoutAttachmentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  documentKind: string;
+  file: { name: string; size: number; type?: string; contentBase64: string };
+  client?: PlatformApiClientLike;
+}): Promise<{ id: string; version: number; updatedAt: string; documentKind: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{ id: string; version: number; updatedAt: string; documentKind: string }>(
+    `/api/v1/projects/${params.projectId}/checkout-attachments/${params.documentKind}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        fileName: params.file.name,
+        fileSize: params.file.size,
+        mimeType: params.file.type || 'application/pdf',
+        contentBase64: params.file.contentBase64,
+      },
+    },
+  );
+
+  return response.data;
+}
+
 export async function trashProjectViaBff(params: {
   tenantId: string;
   actor: ActorLike;
