@@ -83,6 +83,7 @@ const PortalPersonnel = lazyRoute(() => import('./components/portal/PortalPerson
 const PortalChangeRequests = lazyRoute(() => import('./components/portal/PortalChangeRequests'), 'PortalChangeRequests');
 const PortalProjectRegister = lazyRoute(() => import('./components/portal/PortalProjectRegister'), 'PortalProjectRegister');
 const PortalProjectEdit = lazyRoute(() => import('./components/portal/PortalProjectEdit'), 'PortalProjectEdit');
+const PortalProjectCheckout = lazyRoute(() => import('./components/portal/PortalProjectCheckout'), 'PortalProjectCheckout');
 const PortalPayrollPage = lazyRoute(() => import('./components/portal/PortalPayrollPage'), 'PortalPayrollPage');
 const PortalCashflowPage = lazyRoute(() => import('./components/portal/PortalCashflowPage'), 'PortalCashflowPage');
 const CashflowSheetLabPage = lazyRoute(() => import('./features/cashflow-sheet-compare/CashflowSheetLabPage'), 'CashflowSheetLabPage');
@@ -212,6 +213,7 @@ export const router = createBrowserRouter([
       { path: 'register-project/:draftId', element: <S C={PortalProjectRegister} /> },
       { path: 'edit-project', element: <S C={PortalProjectEdit} /> },
       { path: 'edit-project/:projectId', element: <S C={PortalProjectEdit} /> },
+      { path: 'project-checkout', element: <S C={PortalProjectCheckout} /> },
       { path: 'training', element: <S C={PortalTrainingPage} /> },
       { path: 'career-profile', element: <S C={CareerProfilePage} /> },
       { path: 'guide-chat', element: <S C={GuideChatPage} /> },

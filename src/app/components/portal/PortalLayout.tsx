@@ -118,6 +118,7 @@ const NAV_SECTIONS: PortalNavSection[] = [
     title: '프로젝트 배정 및 등록',
     items: [
       { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 수정' },
+      { to: '/portal/project-checkout', icon: ClipboardCheck, label: '종료사업 체크아웃' },
       { to: '/portal/register-project', icon: Plus, label: '프로젝트 등록 요청', accent: true },
       { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
     ],
