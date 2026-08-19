@@ -22,7 +22,7 @@ describe('CashflowProjectSheet staged loading', () => {
   });
   it('loads the activity timeline only when it scrolls into view, and the roster after month-close', () => {
     expect(source).toContain('new IntersectionObserver(');
-    expect(source).toContain('if (!opsTimelineVisible) return;\n    void loadCashflowEvents();');
+    expect(source).toContain('if (!opsTimelineVisible || !monthCloseSettled) return;\n    void loadCashflowEvents();');
     expect(source).toContain('<div ref={opsTimelineRef} className="min-w-0">{renderOpsTimeline()}</div>');
     expect(source).toContain('usePersonRoster(monthCloseSettled)');
   });
