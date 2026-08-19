@@ -100,6 +100,7 @@ const PROJECT_INFO_PREVIEW_FIELDS: Array<{
   { documentKind: 'performance_certificate', field: 'performanceCertificateDocument' },
   { documentKind: 'tax_invoice', field: 'taxInvoiceDocument' },
   { documentKind: 'final_settlement_report', field: 'finalSettlementReportDocument' },
+  { documentKind: 'final_report', field: 'finalReportDocument' },
 ];
 
 function resolveExecutiveBanner(project: Project) {
@@ -202,6 +203,9 @@ function editorDraftFromPrivate(record: ProjectInfoDraft): ProjectEditorDraft {
       ? { performanceCertificateDocument: documents.performance_certificate }
       : {}),
     ...(documents.tax_invoice ? { taxInvoiceDocument: documents.tax_invoice } : {}),
+    ...(documents.final_report
+      ? { finalReportDocument: documents.final_report }
+      : {}),
     ...(documents.final_settlement_report
       ? { finalSettlementReportDocument: documents.final_settlement_report }
       : {}),

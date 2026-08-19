@@ -750,6 +750,7 @@ export interface Project {
   performanceCertificateDocument?: FileAttachment | null;
   taxInvoiceDocument?: FileAttachment | null;
   finalSettlementReportDocument?: FileAttachment | null;
+  finalReportDocument?: FileAttachment | null;
   contractAnalysis?: ProjectRequestContractAnalysis | null;
   // 팀/담당자
   department: string;            // 담당조직
@@ -969,6 +970,7 @@ export interface ProjectRequestPayload {
   performanceCertificateDocument?: FileAttachment | null;
   taxInvoiceDocument?: FileAttachment | null;
   finalSettlementReportDocument?: FileAttachment | null;
+  finalReportDocument?: FileAttachment | null;
   contractAnalysis?: ProjectRequestContractAnalysis | null;
 }
 

@@ -39,6 +39,11 @@ function readUploads(project: Project): UploadItem[] {
   const checkout = project.checkout;
   return [
     {
+      label: '최종 결과보고서 (원본)',
+      attached: Boolean(project.finalReportDocument?.path),
+      note: '종료사업은 결과보고서 원본을 제출합니다.',
+    },
+    {
       label: '사업 관련 발행 세금계산서 PDF',
       attached: Boolean(project.taxInvoiceDocument?.path),
       note: checkout?.taxInvoiceEvidenceConfirmed ? '해당 사업으로 표시됨' : '해당 시에만 제출합니다.',

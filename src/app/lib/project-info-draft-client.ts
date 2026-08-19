@@ -19,7 +19,8 @@ export type ProjectInfoDocumentKind =
   | 'rfp_request_evidence'
   | 'performance_certificate'
   | 'tax_invoice'
-  | 'final_settlement_report';
+  | 'final_settlement_report'
+  | 'final_report';
 
 export interface ProjectInfoAttachment {
   attachmentId?: string;
