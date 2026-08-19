@@ -32,6 +32,8 @@ export function createCashflowPerformanceTrace({
   now = () => performance.now(),
 } = {}) {
   const startedAt = now();
+  // 응답 헤더(Server-Timing)로 내보낼 span 기록. 로그를 못 보는 자리(브라우저)에서도 분해가 보이게.
+  const spans = [];
 
   const emit = (phase, details = {}) => {
     const payload = {
@@ -52,6 +54,7 @@ export function createCashflowPerformanceTrace({
       durationMs: safeDuration(details.durationMs),
       totalMs: safeDuration(now() - startedAt),
     };
+    if (details.outcome) spans.push({ phase: payload.phase, attempt: payload.attempt, durationMs: payload.durationMs, outcome: payload.outcome });
     if (logger === defaultLogger && process.env.NODE_ENV === 'test') return;
     if (logger === defaultLogger) {
       try {
@@ -106,5 +109,16 @@ export function createCashflowPerformanceTrace({
     }
   };
 
-  return { emit, measure, measureSync };
+  // RFC 9297 Server-Timing. 이름은 phase(재시도면 phase.2), dur 은 ms 정수. 값 없는 진단은 넣지 않는다.
+  const serverTiming = () => {
+    const entries = spans.map((span) => {
+      const name = span.attempt && span.attempt > 1 ? `${span.phase}.${span.attempt}` : span.phase;
+      const desc = span.outcome === 'error' ? ';desc="error"' : '';
+      return `${name};dur=${span.durationMs}${desc}`;
+    });
+    entries.push(`total;dur=${safeDuration(now() - startedAt)}`);
+    return entries.join(', ');
+  };
+
+  return { emit, measure, measureSync, serverTiming };
 }
