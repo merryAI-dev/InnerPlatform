@@ -186,6 +186,13 @@ function ReviewMessage({ label, by, at, message }: { label: string; by: string; 
   );
 }
 
+/** 예 / 아니오 / 미입력. 결재 문서에서 빈칸과 "아니오" 는 뜻이 다르므로 뭉개지 않는다. */
+function formatConfirmation(value: boolean | null | undefined): string {
+  if (value === true) return '예';
+  if (value === false) return '아니오';
+  return '미입력';
+}
+
 export function MigrationAuditDocumentDialog({
   open,
   record,
@@ -225,6 +232,10 @@ export function MigrationAuditDocumentDialog({
   const financialYears = requestPayload?.financialYears ?? record.project.financialYears;
   const interestRefundPolicy = requestPayload?.interestRefundPolicy ?? record.project.interestRefundPolicy;
   const registrationNote = requestPayload?.note ?? record.project.note;
+  // 등록 확인 사항은 요청 payload 를 먼저 보고 없으면 저장된 프로젝트에서 읽는다(문서 슬롯과 같은 원천).
+  const confirmations = requestPayload?.registrationConfirmations ?? record.project.registrationConfirmations;
+  const checkout = requestPayload?.checkout ?? record.project.checkout;
+  const checkoutVisible = record.project.status === 'COMPLETED' || record.project.status === 'COMPLETED_PENDING_PAYMENT';
   const quoteDocument = requestPayload?.quoteDocument !== undefined ? requestPayload.quoteDocument : record.project.quoteDocument;
   const quoteSubmissionDeferred = requestPayload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
   const designatedApproverName = requestPayload?.executiveApproverName || record.project.executiveApproverName || '';
@@ -325,11 +336,42 @@ export function MigrationAuditDocumentDialog({
           </section>
 
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">기본정보</h3><dl className="border border-t-0 border-slate-400">
-            <DocumentCell label="프로젝트명" value={dossier.headerTitle} /><DocumentCell label="공식 계약명" value={dossier.identity.officialContractName} /><DocumentCell label="계약 대상" value={dossier.identity.clientOrg} /><DocumentCell label="담당조직(CIC)" value={dossier.identity.cic} /><DocumentCell label="사업 담당자" value={dossier.identity.pmName} /><DocumentCell label="프로젝트 코드" value={managementReview.projectCode || '부여 대기'} />
+            <DocumentCell label="프로젝트명" value={dossier.headerTitle} /><DocumentCell label="공식 계약명" value={dossier.identity.officialContractName} /><DocumentCell label="계약 대상" value={dossier.identity.clientOrg} /><DocumentCell label="담당조직(CIC)" value={dossier.identity.cic} /><DocumentCell label="사업 담당자" value={dossier.identity.pmName} /><DocumentCell label="프로젝트 코드" value={managementReview.projectCode || '부여 대기'} /><DocumentCell label="담당 부서" value={dossier.identity.department} /><DocumentCell label="그룹웨어명" value={dossier.identity.groupwareName} /><DocumentCell label="프로젝트 유형" value={dossier.contract.projectTypeLabel} />
           </dl></section>
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">계약/재무</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
-            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} className="md:border-r md:border-slate-400" /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} /><DocumentCell label="연도별 계약/재무" value={formatFinancialYears(financialYears)} className="md:col-span-2" /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" /><DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
+            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약서 유형" value={dossier.contract.contractType} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 기준" value={dossier.contract.basisLabel} /><DocumentCell label="통장 유형" value={dossier.contract.accountTypeLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="사업비 입력 방식" value={dossier.contract.fundInputModeLabel} /><DocumentCell label="통화" value={dossier.budget.currencyLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} /><DocumentCell label="총매출부가세" value={dossier.budget.salesVatAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} className="md:border-r md:border-slate-400" /><DocumentCell label="총지원금" value={dossier.budget.supportAmountLabel} /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} className="md:border-r md:border-slate-400" /><DocumentCell label="선금·중도금·잔금" value={dossier.budget.paymentPlanSplitLabel} /><DocumentCell label="잔금 메모" value={dossier.budget.finalPaymentNote} className="md:col-span-2" /><DocumentCell label="연도별 계약/재무" value={formatFinancialYears(financialYears)} className="md:col-span-2" /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" /><DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
           </dl></section>
+          {/*
+            팀/인력은 dossier 가 늘 담고 있었는데 결재 문서에 그리지 않아, 누가 투입되는지
+            모르는 채로 결재가 이뤄졌다. 판단에 필요한 값은 빠짐없이 문서에 남긴다.
+          */}
+          <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">팀/인력</h3><dl className="border border-t-0 border-slate-400">
+            <DocumentCell label="팀 이름" value={dossier.people.teamName} />
+            <DocumentCell
+              label="참여인력"
+              value={dossier.people.members.length > 0 ? dossier.people.members.join('\n') : '-'}
+            />
+          </dl></section>
+          {/* 등록 확인 사항도 읽어만 두고 링크 두 개 말고는 그리지 않고 있었다. */}
+          <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 확인 사항</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
+            <DocumentCell label="인건비 4대보험 포함" value={formatConfirmation(confirmations?.laborIncludesFourInsurance)} className="md:border-r md:border-slate-400" />
+            <DocumentCell label="인건비 퇴직금 포함" value={formatConfirmation(confirmations?.laborIncludesRetirementPay)} />
+            <DocumentCell label="고객사 정산 기준 확인" value={confirmations?.customerSettlementBasisConfirmed === true ? '확인함' : '미확인'} className="md:border-r md:border-slate-400" />
+            <DocumentCell label="모두싸인으로 진행" value={formatConfirmation(confirmations?.modusignContractUsed)} />
+            <DocumentCell label="계약서 원본 제출" value={formatConfirmation(confirmations?.originalContractSubmitted)} className="md:col-span-2" />
+          </dl></section>
+          {/* 종료사업 체크아웃. 종료 단계 사업만 뜻이 있으므로 그때만 그린다. */}
+          {checkoutVisible ? (
+            <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">종료사업 체크아웃</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
+              <DocumentCell label="잔금 입금 완료" value={formatConfirmation(checkout?.finalPaymentReceived)} className="md:border-r md:border-slate-400" />
+              <DocumentCell label="사업비 통장 0원" value={formatConfirmation(checkout?.bankBalanceZero)} />
+              <DocumentCell label="실적증명서 원본 제출" value={formatConfirmation(checkout?.performanceCertificateReceived)} className="md:border-r md:border-slate-400" />
+              <DocumentCell label="세금계산서 증빙 확인" value={formatConfirmation(checkout?.taxInvoiceEvidenceConfirmed)} />
+              <DocumentCell label="최종 정산리포트 확인" value={formatConfirmation(checkout?.finalSettlementReportConfirmed)} className="md:border-r md:border-slate-400" />
+              <DocumentCell label="USB 재경팀 제출" value={formatConfirmation(checkout?.usbEvidenceSubmitted)} />
+              <DocumentCell label="증빙자료 삭제" value={formatConfirmation(checkout?.evidenceDeletedAfterUsb)} className="md:col-span-2" />
+            </dl></section>
+          ) : null}
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 내용</h3><dl className="border border-t-0 border-slate-400">
             <DocumentCell label="프로젝트 목적" value={dossier.notes.projectPurpose} /><DocumentCell label="상세 설명" value={dossier.notes.description} /><DocumentCell label="참여 조건" value={dossier.notes.participantCondition} /><DocumentCell label="등록 메모" value={registrationNote || '-'} />
           </dl></section>
