@@ -58,6 +58,7 @@ import dev.merryai.innerplatform.weekly.api.RowDeleteRequest;
 import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
 import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
@@ -1297,9 +1298,16 @@ public class WeeklyExpenseCommandService {
         String cursor
     ) {
         authorizationService.requireProjectAllowed(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, actor, projectId);
-        WeeklyExpensePersistence.CashflowWeeklyCompliancePage page = persistence.findCashflowWeeklyComplianceHistory(
-            actor.tenantId(), projectId, limit, cursor
-        );
+        // C 단계 측정: 대시보드가 부르는 두 번째 JVM 읽기. 읽기 수·소요를 같은 형식으로.
+        WeeklyExpensePersistence.CashflowWeeklyCompliancePage page;
+        try (CashflowReadMetrics.Scope scope = CashflowReadMetrics.begin("cashflow.weekly_compliance", "", projectId)) {
+            try {
+                page = persistence.findCashflowWeeklyComplianceHistory(actor.tenantId(), projectId, limit, cursor);
+            } catch (RuntimeException error) {
+                scope.failed(error);
+                throw error;
+            }
+        }
         return new CashflowWeeklyComplianceHistoryResponse(
             page.items().stream().map(item -> new CashflowWeeklyComplianceHistoryResponse.Item(
                 item.yearMonth(), item.weekNo(), item.deadline(), item.status(), item.completedAt(),
