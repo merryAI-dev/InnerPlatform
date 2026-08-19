@@ -996,7 +996,7 @@ export interface CashflowDeadlineSummary {
   weeklyStatuses?: Array<{
     yearMonth: string;
     weekNo: number;
-    status: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
+    status: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
     deadline?: string | null;
     completedAt?: string | null;
     completedBy?: string | null;
@@ -1008,7 +1008,7 @@ export interface CashflowDeadlineSummary {
     deadline: string;
     completedAt: string | null;
     completedBy?: string | null;
-    status: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
+    status: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
   } | null;
 }
 
@@ -1563,6 +1563,7 @@ export interface CashflowWeeklyComplianceItem {
   weekNo: number;
   deadline: string;
   status: 'PENDING' | 'MISSED' | 'ON_TIME' | 'COMPLETED_LATE';
+  statusLabel: string;
   completedAt: string | null;
   completedBy: string | null;
   operationId: string | null;
