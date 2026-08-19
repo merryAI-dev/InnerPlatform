@@ -4145,13 +4145,16 @@ export function mountCashflowSheetLabRoutes(app, {
     });
   }));
 
-  const executeCashflowSheetMirrorRefresh = async (req) => {
+  // traceRef 는 라우트가 구간 기록을 응답 헤더로 내보내기 위한 통로다. 내부 호출(비교 관측)은
+  // 넘기지 않으므로 헤더도 붙지 않는다.
+  const executeCashflowSheetMirrorRefresh = async (req, traceRef) => {
     const trace = createCashflowPerformanceTrace({
       requestId: req.context?.requestId || req.requestId,
       operation: 'cashflow.sheet_mirror.refresh',
       ...(performanceLogger ? { logger: performanceLogger } : {}),
       ...(performanceNow ? { now: performanceNow } : {}),
     });
+    if (traceRef) traceRef.trace = trace;
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(
@@ -4395,7 +4398,11 @@ export function mountCashflowSheetLabRoutes(app, {
 
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror/refresh', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
-    res.status(200).json(await executeCashflowSheetMirrorRefresh(req));
+    const traceRef = {};
+    const mirror = await executeCashflowSheetMirrorRefresh(req, traceRef);
+    // 불러오기가 20초씩 걸릴 때 구글 왕복인지 파싱인지 Firestore 쓰기인지 브라우저에서 바로 갈린다.
+    if (traceRef.trace) res.set('Server-Timing', traceRef.trace.serverTiming());
+    res.status(200).json(mirror);
   }));
 
   const compareCashflowSheetProject = async ({ tenantId, projectId, runId, context } = {}) => {

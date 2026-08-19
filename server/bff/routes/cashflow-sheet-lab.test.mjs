@@ -914,6 +914,11 @@ describe('cashflow sheet lab route', () => {
     expect(first.body.status).toBe('FRESH');
     expect(first.body.unchanged).toBeUndefined();
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    // 불러오기가 느릴 때 어느 구간인지 브라우저에서 바로 갈리도록 구간 기록을 헤더로 낸다.
+    expect(first.headers['server-timing']).toMatch(/google_sheet_fetch;dur=\d+/);
+    expect(first.headers['server-timing']).toMatch(/sheet_parse_validate;dur=\d+/);
+    expect(first.headers['server-timing']).toMatch(/mirror_publish;dur=\d+/);
+    expect(first.headers['server-timing']).toMatch(/total;dur=\d+/);
     expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a').sourceFileModifiedTime)
       .toBe(modifiedTime);
 
@@ -924,6 +929,9 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(second.body.unchanged).toBe(true);
     expect(second.body.sourceRevision).toBe(first.body.sourceRevision);
+    // 변경 없음 경로도 헤더가 나온다 - freshness 확인에만 시간이 갔다는 것이 보여야 한다.
+    expect(second.headers['server-timing']).toMatch(/freshness_probe;dur=\d+/);
+    expect(second.headers['server-timing']).not.toMatch(/google_sheet_fetch/);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(getSpreadsheetFreshness).toHaveBeenCalledTimes(2);
 
