@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CONTRACT_AMOUNT_ITEM_FIELDS,
+  deriveContractAmountFromItems,
   formatStoredProjectAmount,
   formatProjectAmountInput,
   hasExplicitProjectAmountInput,
@@ -38,5 +40,35 @@ describe('project-contract-amount', () => {
       financialInputFlags: { contractAmount: false },
     } as any)).toBe(false);
     expect(formatStoredProjectAmount(0, false)).toBe('-');
+  });
+});
+
+describe('deriveContractAmountFromItems', () => {
+  it('sums the four items that make up a contract amount', () => {
+    expect(deriveContractAmountFromItems({
+      salesVatAmount: 12_000,
+      totalRevenueAmount: 90_000,
+      totalActualCost: 13_000,
+      supportAmount: 5_000,
+    })).toBe(120_000);
+  });
+
+  it('treats a missing or non-numeric item as zero rather than NaN', () => {
+    // 실비(원가)는 2026-08 프로덕션 69건 전부 비어 있다. 빈 항목이 합계를 통째로
+    // NaN 으로 만들면 계약금액이 화면에서 사라진다.
+    expect(deriveContractAmountFromItems({ totalRevenueAmount: 90_000 })).toBe(90_000);
+    expect(deriveContractAmountFromItems({
+      salesVatAmount: Number.NaN,
+      totalRevenueAmount: 90_000,
+    })).toBe(90_000);
+    expect(deriveContractAmountFromItems({})).toBe(0);
+  });
+
+  it('ignores the contract amount itself so the derivation cannot feed on its own output', () => {
+    expect(CONTRACT_AMOUNT_ITEM_FIELDS).not.toContain('contractAmount');
+    expect(deriveContractAmountFromItems({
+      contractAmount: 999_999,
+      totalRevenueAmount: 10_000,
+    } as Parameters<typeof deriveContractAmountFromItems>[0])).toBe(10_000);
   });
 });
