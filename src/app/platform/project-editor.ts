@@ -151,6 +151,7 @@ export interface ProjectEditorDraft {
   performanceCertificateDocument: FileAttachment | null;
   taxInvoiceDocument: FileAttachment | null;
   finalSettlementReportDocument: FileAttachment | null;
+  finalReportDocument: FileAttachment | null;
   contractAnalysis: ProjectRequestContractAnalysis | null;
 }
 
@@ -257,6 +258,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   performanceCertificateDocument: null,
   taxInvoiceDocument: null,
   finalSettlementReportDocument: null,
+  finalReportDocument: null,
   contractAnalysis: null,
 };
 
@@ -528,6 +530,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'performanceCertificateDocument', label: '수행확인서 PDF', before: (project) => normalizeChangeValue(project.performanceCertificateDocument?.name), after: (draft) => normalizeChangeValue(draft.performanceCertificateDocument?.name) },
   { key: 'taxInvoiceDocument', label: '세금계산서 PDF', before: (project) => normalizeChangeValue(project.taxInvoiceDocument?.name), after: (draft) => normalizeChangeValue(draft.taxInvoiceDocument?.name) },
   { key: 'finalSettlementReportDocument', label: '최종 정산보고서 PDF', before: (project) => normalizeChangeValue(project.finalSettlementReportDocument?.name), after: (draft) => normalizeChangeValue(draft.finalSettlementReportDocument?.name) },
+  { key: 'finalReportDocument', label: '최종 결과보고서 PDF', before: (project) => normalizeChangeValue(project.finalReportDocument?.name), after: (draft) => normalizeChangeValue(draft.finalReportDocument?.name) },
 ];
 
 export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
@@ -646,6 +649,9 @@ export function buildProjectEditorDraftFromProject(
     ?? payload?.performanceCertificateDocument
     ?? null;
   const taxInvoiceDocument = normalizedProject.taxInvoiceDocument ?? payload?.taxInvoiceDocument ?? null;
+  const finalReportDocument = normalizedProject.finalReportDocument
+    ?? payload?.finalReportDocument
+    ?? null;
   const finalSettlementReportDocument = normalizedProject.finalSettlementReportDocument
     ?? payload?.finalSettlementReportDocument
     ?? null;
@@ -757,6 +763,7 @@ export function buildProjectEditorDraftFromProject(
     performanceCertificateDocument,
     taxInvoiceDocument,
     finalSettlementReportDocument,
+    finalReportDocument,
     contractAnalysis: normalizedProject.contractAnalysis ?? payload?.contractAnalysis ?? null,
   });
 }

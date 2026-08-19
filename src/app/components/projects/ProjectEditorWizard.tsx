@@ -230,6 +230,7 @@ const PROJECT_DOCUMENT_LABELS: Record<ProjectRequestDocumentKind, string> = {
   performance_certificate: '수행확인서 PDF',
   tax_invoice: '세금계산서 PDF',
   final_settlement_report: '최종 정산보고서 PDF',
+  final_report: '최종 결과보고서',
 };
 const PROJECT_DOCUMENT_BUTTON_LABELS: Record<ProjectRequestDocumentKind, string> = {
   contract: '계약서',
@@ -243,6 +244,7 @@ const PROJECT_DOCUMENT_BUTTON_LABELS: Record<ProjectRequestDocumentKind, string>
   performance_certificate: '수행확인서',
   tax_invoice: '세금계산서',
   final_settlement_report: '최종 정산보고서',
+  final_report: '최종 결과보고서',
 };
 const PROJECT_DOCUMENT_FIELD: Record<ProjectRequestDocumentKind, keyof ProjectEditorDraft> = {
   contract: 'contractDocument',
@@ -256,6 +258,7 @@ const PROJECT_DOCUMENT_FIELD: Record<ProjectRequestDocumentKind, keyof ProjectEd
   performance_certificate: 'performanceCertificateDocument',
   tax_invoice: 'taxInvoiceDocument',
   final_settlement_report: 'finalSettlementReportDocument',
+  final_report: 'finalReportDocument',
 };
 const OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD = {
   proposal_word_original: 'proposalWordOriginal',
@@ -856,6 +859,7 @@ export function ProjectEditorWizard({
     performance_certificate: 'idle',
     tax_invoice: 'idle',
     final_settlement_report: 'idle',
+    final_report: 'idle',
   });
   const [documentUploadError, setDocumentUploadError] = useState<Record<ProjectRequestDocumentKind, string>>({
     contract: '',
@@ -869,6 +873,7 @@ export function ProjectEditorWizard({
     performance_certificate: '',
     tax_invoice: '',
     final_settlement_report: '',
+    final_report: '',
   });
   const [restoreCandidate, setRestoreCandidate] = useState<StoredProjectEditorDraft | null>(null);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
@@ -889,6 +894,7 @@ export function ProjectEditorWizard({
   const performanceCertificateUploadInputRef = useRef<HTMLInputElement | null>(null);
   const taxInvoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const finalSettlementReportUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const finalReportUploadInputRef = useRef<HTMLInputElement | null>(null);
   const retryDocumentFileRef = useRef<Partial<Record<ProjectRequestDocumentKind, File>>>({});
   /**
    * Bumped when an upload is cancelled. The request itself cannot be recalled, so a run
@@ -975,6 +981,7 @@ export function ProjectEditorWizard({
       performance_certificate: 'idle',
       tax_invoice: 'idle',
       final_settlement_report: 'idle',
+      final_report: 'idle',
     });
     setDocumentUploadError({
       contract: '',
@@ -988,6 +995,7 @@ export function ProjectEditorWizard({
       performance_certificate: '',
       tax_invoice: '',
       final_settlement_report: '',
+      final_report: '',
     });
     setAutosaveState('idle');
     setLastAutosavedAt('');
@@ -1418,6 +1426,7 @@ export function ProjectEditorWizard({
     performance_certificate: performanceCertificateUploadInputRef,
     tax_invoice: taxInvoiceUploadInputRef,
     final_settlement_report: finalSettlementReportUploadInputRef,
+    final_report: finalReportUploadInputRef,
   }[kind]);
 
   const uploadProjectDocument = async (kind: ProjectRequestDocumentKind, file: File) => {
@@ -3524,6 +3533,21 @@ export function ProjectEditorWizard({
               onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('final_settlement_report') : undefined}
               title="최종 정산보고서 원문"
               description="종료사업 최종 정산보고서 증빙입니다."
+            />
+          </div>
+        ) : null}
+        {showProjectCheckout && draft.finalReportDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={{
+                ...draft.finalReportDocument,
+                downloadURL: documentPreviewUrls?.final_report || draft.finalReportDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.final_report) && !(documentPreviewUrls?.final_report || draft.finalReportDocument.downloadURL)}
+              previewState={documentPreviewStates?.final_report}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('final_report') : undefined}
+              title="최종 결과보고서 원문"
+              description="종료사업 최종 결과보고서(원본) 증빙입니다."
             />
           </div>
         ) : null}

@@ -14,7 +14,8 @@ export type ProjectRequestDocumentKind =
   | 'rfp_request_evidence'
   | 'performance_certificate'
   | 'tax_invoice'
-  | 'final_settlement_report';
+  | 'final_settlement_report'
+  | 'final_report';
 
 export const PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES = 1024 * 1024 * 1024;
 export const PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL = '1GB';
@@ -25,7 +26,7 @@ const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const PDF_ONLY_KINDS = new Set<ProjectRequestDocumentKind>([
   'contract', 'customer_business_registration', 'quote', 'proposal',
-  'performance_certificate', 'tax_invoice', 'final_settlement_report',
+  'performance_certificate', 'tax_invoice', 'final_settlement_report', 'final_report',
 ]);
 
 export function getProjectDocumentUploadAccept(kind: ProjectRequestDocumentKind): string {

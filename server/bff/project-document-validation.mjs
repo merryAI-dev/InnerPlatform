@@ -29,6 +29,7 @@ export const PROJECT_INFO_DOCUMENT_KINDS = Object.freeze([
   'performance_certificate',
   'tax_invoice',
   'final_settlement_report',
+  'final_report',
 ]);
 
 const PDF_ONLY_KINDS = new Set([
@@ -39,6 +40,7 @@ const PDF_ONLY_KINDS = new Set([
   'performance_certificate',
   'tax_invoice',
   'final_settlement_report',
+  'final_report',
 ]);
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
