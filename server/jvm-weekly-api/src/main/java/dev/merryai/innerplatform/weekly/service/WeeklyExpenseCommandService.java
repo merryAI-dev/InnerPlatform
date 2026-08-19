@@ -56,7 +56,9 @@ import dev.merryai.innerplatform.weekly.api.PasteCellsRequest;
 import dev.merryai.innerplatform.weekly.api.RowCommandResponse;
 import dev.merryai.innerplatform.weekly.api.RowDeleteRequest;
 import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
+import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
@@ -149,6 +151,7 @@ public class WeeklyExpenseCommandService {
     public static final String READ_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.read";
     public static final String COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.complete";
     public static final String REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.reopen";
+    public static final String CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.confirm";
     public static final String REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.requestReopen";
     public static final String DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.decideReopen";
     public static final String READ_CASHFLOW_MONTH_REOPEN_AUTHORITY_COMMAND = "cashflowMonth.readReopenAuthority";
@@ -1295,13 +1298,20 @@ public class WeeklyExpenseCommandService {
         String cursor
     ) {
         authorizationService.requireProjectAllowed(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, actor, projectId);
-        WeeklyExpensePersistence.CashflowWeeklyCompliancePage page = persistence.findCashflowWeeklyComplianceHistory(
-            actor.tenantId(), projectId, limit, cursor
-        );
+        // C 단계 측정: 대시보드가 부르는 두 번째 JVM 읽기. 읽기 수·소요를 같은 형식으로.
+        WeeklyExpensePersistence.CashflowWeeklyCompliancePage page;
+        try (CashflowReadMetrics.Scope scope = CashflowReadMetrics.begin("cashflow.weekly_compliance", "", projectId)) {
+            try {
+                page = persistence.findCashflowWeeklyComplianceHistory(actor.tenantId(), projectId, limit, cursor);
+            } catch (RuntimeException error) {
+                scope.failed(error);
+                throw error;
+            }
+        }
         return new CashflowWeeklyComplianceHistoryResponse(
             page.items().stream().map(item -> new CashflowWeeklyComplianceHistoryResponse.Item(
                 item.yearMonth(), item.weekNo(), item.deadline(), item.status(), item.completedAt(),
-                item.completedBy(), item.operationId(), item.auditId(), item.updateResult()
+                item.completedBy(), item.operationId(), item.auditId(), item.updateResult(), item.lockState()
             )).toList(),
             page.nextCursor(),
             page.onTimeCount(),
@@ -1489,6 +1499,63 @@ public class WeeklyExpenseCommandService {
     }
 
     private record AppliedCellChangeCandidate(CashflowAppliedCellChangesResponse.Item item, int ordinal) {
+    }
+
+    // 주정산 확정: 완료 요청된 주를 프로젝트 조직장이 잠금으로 확정한다. 조직장 검사는 저장소에서 프로젝트 문서로.
+    public CashflowWeeklyUpdateCompletionResponse confirmCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        ConfirmCashflowWeeklyUpdateRequest request
+    ) {
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            actor,
+            projectId
+        );
+        String requestHash = hashJson(request);
+        Optional<CashflowWeeklyUpdateCompletionResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowWeeklyUpdateCompletionResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowWeeklyUpdateCompletionRecord saved = persistence.confirmCashflowWeeklyUpdate(
+            writer,
+            projectId,
+            request
+        );
+        persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(),
+            projectId,
+            projectId + "-" + saved.yearMonth() + "-w" + saved.weekNo(),
+            CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            writer.id(),
+            normalizeRole(writer.role()),
+            request.idempotencyKey(),
+            writeJson(Map.of(
+                "yearMonth", saved.yearMonth(),
+                "weekNo", saved.weekNo(),
+                "revision", saved.revision(),
+                "snapshotHash", saved.snapshotHash()
+            ))
+        ));
+        CashflowWeeklyUpdateCompletionResponse response = weeklyCompletionResponse(
+            CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            saved
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
     }
 
     public CashflowWeeklyUpdateCompletionResponse reopenCashflowWeeklyUpdate(

@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.service.query;
 
+import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
@@ -50,11 +51,20 @@ public class CashflowMonthDashboardQueryService {
 
     public Result read(String tenantId, String projectId, String yearMonth, String requestId) {
         YearMonth.parse(yearMonth);
-        for (int attempt = 1; attempt <= 2; attempt += 1) {
-            Result result = readAttempt(tenantId, projectId, yearMonth, requestId, attempt);
-            if (result != null) return result;
+        // Stage-C measurement: one summary line per request (Firestore reads, phases, instance). No logic change.
+        try (CashflowReadMetrics.Scope scope = CashflowReadMetrics.begin("cashflow.dashboard_source", requestId, projectId)) {
+            try {
+                for (int attempt = 1; attempt <= 2; attempt += 1) {
+                    CashflowReadMetrics.recordPhase("attempts", 1);
+                    Result result = readAttempt(tenantId, projectId, yearMonth, requestId, attempt);
+                    if (result != null) return result;
+                }
+                throw new UnstableRead();
+            } catch (RuntimeException error) {
+                scope.failed(error);
+                throw error;
+            }
         }
-        throw new UnstableRead();
     }
 
     private Result readAttempt(
@@ -355,7 +365,7 @@ public class CashflowMonthDashboardQueryService {
         Supplier<T> operation
     ) {
         return CompletableFuture.supplyAsync(
-            () -> measuredRead(requestId, projectId, attempt, phase, operation)
+            CashflowReadMetrics.propagate(() -> measuredRead(requestId, projectId, attempt, phase, operation))
         );
     }
 
@@ -402,6 +412,7 @@ public class CashflowMonthDashboardQueryService {
     }
 
     private void log(String requestId, String projectId, int attempt, String phase, long durationMs) {
+        CashflowReadMetrics.recordPhase(phase, durationMs);
         LOGGER.log(
             System.Logger.Level.INFO,
             "cashflow_dashboard_source requestId={0} projectId={1} attempt={2} phase={3} durationMs={4}",

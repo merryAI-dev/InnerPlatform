@@ -997,6 +997,7 @@ export interface CashflowDeadlineSummary {
     yearMonth: string;
     weekNo: number;
     status: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
+    lockState?: 'SUBMITTED' | 'LOCKED' | null;
     deadline?: string | null;
     completedAt?: string | null;
     completedBy?: string | null;
@@ -1009,6 +1010,8 @@ export interface CashflowDeadlineSummary {
     completedAt: string | null;
     completedBy?: string | null;
     status: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
+    // SUBMITTED = 완료 요청됨(조직장 확정 대기), LOCKED = 확정, 없음 = 완료 요청 전
+    lockState?: 'SUBMITTED' | 'LOCKED' | null;
   } | null;
 }
 
@@ -1404,6 +1407,7 @@ export interface CashflowMonthCloseActionDecision {
 export interface CashflowMonthCloseActions {
   completeWeekly: CashflowMonthCloseActionDecision;
   reopenWeekly: CashflowMonthCloseActionDecision;
+  confirmWeekly: CashflowMonthCloseActionDecision;
   changeExecutiveApprover: CashflowMonthCloseActionDecision;
   requestMonthClose: CashflowMonthCloseActionDecision & { label: string };
   withdrawMonthClose: CashflowMonthCloseActionDecision;
@@ -1447,6 +1451,7 @@ export interface CashflowMonthClosePresentationWeek {
   monthStatus: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | null;
   monthStatusLabel: string;
   weeklyStatus: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING' | null;
+  weeklyLockState?: 'SUBMITTED' | 'LOCKED' | null;
   weeklyStatusLabel: string;
   statusLabel: string;
   surfaceTone: 'unavailable' | 'closed' | 'danger' | 'warning' | 'success' | 'current' | 'default';
@@ -1543,7 +1548,7 @@ export interface CashflowWeeklyUpdateCompletionResult {
   completedAt: string;
   completedBy: string | null;
   alreadyCompleted: boolean;
-  status: 'LOCKED' | 'OPEN';
+  status: 'SUBMITTED' | 'LOCKED' | 'OPEN';
   revision: number;
   reopenCount: number;
   snapshotHash: string;
@@ -1564,6 +1569,7 @@ export interface CashflowWeeklyComplianceItem {
   weekNo: number;
   deadline: string;
   status: 'PENDING' | 'MISSED' | 'ON_TIME' | 'COMPLETED_LATE';
+  lockState?: 'SUBMITTED' | 'LOCKED' | '' | null;
   statusLabel: string;
   completedAt: string | null;
   completedBy: string | null;
@@ -3505,7 +3511,29 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
   return result;
 }
 
-// 주정산 회수: 사유 없이 즉시. 현재 revision 은 BFF 가 잠금 기록에서 읽는다.
+// 주정산 확정: 완료 요청된 주를 프로젝트 조직장이 잠금으로 확정. revision 은 BFF 가 읽는다.
+export async function confirmCashflowWeeklyUpdateViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeeklyUpdateCompletionResult> {
+  const response = await resolveClient(params.client).post<CashflowWeeklyUpdateCompletionResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-complete/confirm`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { yearMonth: params.yearMonth, weekNo: params.weekNo },
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+// 주정산 회수: 완료 요청 상태에서 사유 없이 즉시. 현재 revision 은 BFF 가 완료 기록에서 읽는다.
 export async function reopenCashflowWeeklyUpdateViaBff(params: {
   tenantId: string;
   actor: ActorLike;

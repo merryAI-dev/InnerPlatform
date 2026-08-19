@@ -738,6 +738,22 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/{projectId}/weekly-update-complete/confirm")
+    public CashflowWeeklyUpdateCompletionResponse confirmCashflowWeeklyUpdate(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody ConfirmCashflowWeeklyUpdateRequest request
+    ) {
+        return commandService.confirmCashflowWeeklyUpdate(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            request
+        );
+    }
+
     @PostMapping("/cashflow/{projectId}/weekly-update-complete/reopen")
     public CashflowWeeklyUpdateCompletionResponse reopenCashflowWeeklyUpdate(
         @PathVariable String projectId,

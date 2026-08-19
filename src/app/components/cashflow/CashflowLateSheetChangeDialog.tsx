@@ -14,37 +14,48 @@ import {
 import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
 import type { CashflowSheetLabStageResult } from '../../lib/sheets-cashflow-readonly-client';
 
-// 마감 후 시트값 변경 확인. 사유·필터 입력은 이 컴포넌트 안에서만 산다.
-// 부모(CashflowProjectSheet, 3,500줄·보드 1,920셀)에 두면 글자 하나에 화면 전체가 다시 그려진다.
+// 시트값 변경 확인 팝업. 두 경우를 같은 표로 보여준다:
+//  - closedMonth: 결산이 끝난 달의 값이 바뀜 → 사유 필수 (변경 이력·경고 횟수에 기록)
+//  - pendingApproval: 결재 중인 누적 결산과 값이 다름 → 사유 없이 확인만
+// 사유·필터 입력은 이 컴포넌트 안에서만 산다. 부모(CashflowProjectSheet, 3,500줄·보드 1,920셀)에 두면
+// 글자 하나에 화면 전체가 다시 그려진다.
+export type CashflowSheetChangeDialogKind = 'closedMonth' | 'pendingApproval';
+
 export function CashflowLateSheetChangeDialog({
+  kind = 'closedMonth',
   stage,
-  resumeRequired,
+  resumeRequired = false,
   resumeReason = '',
   submitting,
   onCancel,
   onSubmit,
 }: {
+  kind?: CashflowSheetChangeDialogKind;
   stage: CashflowSheetLabStageResult | null;
-  resumeRequired: boolean;
+  resumeRequired?: boolean;
   // 이어서 완료할 때는 이전 반영이 남긴 사유를 그대로 쓴다.
   resumeReason?: string;
   submitting: boolean;
   onCancel: () => void;
   onSubmit: (reason: string) => void;
 }) {
+  const needsReason = kind === 'closedMonth';
   const [reason, setReason] = useState('');
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState('ALL');
   const [month, setMonth] = useState('ALL');
   const [week, setWeek] = useState('ALL');
 
-  const rows = useMemo(() => (stage?.closedMonthDifferences || []).flatMap((entry) => (
+  const differences = (kind === 'pendingApproval' ? stage?.pendingApprovalDifferences : stage?.closedMonthDifferences) || [];
+  const manifestHash = kind === 'pendingApproval' ? stage?.pendingApprovalDifferenceManifestHash : stage?.closedMonthDifferenceManifestHash;
+  const differenceCount = kind === 'pendingApproval' ? stage?.pendingApprovalDifferenceCount : stage?.closedMonthDifferenceCount;
+  const rows = useMemo(() => differences.flatMap((entry) => (
     (entry.changes || []).map((change) => ({ ...change, yearMonth: entry.yearMonth }))
-  )), [stage]);
-  const complete = Boolean(stage?.closedMonthDifferenceManifestHash)
-    && Number.isSafeInteger(stage?.closedMonthDifferenceCount)
-    && stage?.closedMonthDifferenceCount === rows.length
-    && (stage?.closedMonthDifferences || []).every((entry) => !entry.truncatedChangeCount);
+  )), [differences]);
+  const complete = Boolean(manifestHash)
+    && Number.isSafeInteger(differenceCount)
+    && differenceCount === rows.length
+    && differences.every((entry) => !entry.truncatedChangeCount);
   const filtered = rows.filter((change) => {
     const label = CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId;
     const needle = query.trim().toLocaleLowerCase('ko-KR');
@@ -63,11 +74,15 @@ export function CashflowLateSheetChangeDialog({
     >
       <AlertDialogContent className="sm:max-w-[960px]">
         <AlertDialogHeader>
-          <AlertDialogTitle>{resumeRequired ? '시트 반영 이어서 완료' : '마감 후 시트값 변경'}</AlertDialogTitle>
+          <AlertDialogTitle>
+            {resumeRequired ? '시트 반영 이어서 완료' : kind === 'pendingApproval' ? '결재 중인 누적 결산과 값이 달라요' : '마감 후 시트값 변경'}
+          </AlertDialogTitle>
           <AlertDialogDescription>
             {resumeRequired
               ? '이전 반영의 응답을 확인하지 못했습니다. 같은 검토본으로 안전하게 이어서 완료해 주세요.'
-              : '이미 결산이 완료된 월의 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?'}
+              : kind === 'pendingApproval'
+                ? '조직장 결재 중인 누적 결산 자료와 시트 값이 다릅니다. 그대로 반영하면 결재 자료와의 차이가 기록됩니다. 아래 변경 내용을 확인한 뒤 계속 반영할까요?'
+                : '이미 결산이 완료된 월의 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?'}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {stage && !resumeRequired && (
@@ -114,16 +129,20 @@ export function CashflowLateSheetChangeDialog({
                   ? <p className="px-3 py-2 text-right text-[12px] text-slate-500">전체 {rows.length.toLocaleString()}건 중 {filtered.length.toLocaleString()}건 표시</p>
                   : null}
             </div>
-            <label className="block text-[12px] font-semibold text-slate-800" htmlFor="late-sheet-change-reason">변경 사유</label>
-            <textarea
-              id="late-sheet-change-reason"
-              value={reason}
-              onChange={(event) => setReason(event.target.value.slice(0, 1000))}
-              placeholder="예: 결산 후 확인된 실제 입금액을 시트 기준으로 정정"
-              className="min-h-[96px] w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] leading-5 text-slate-900 outline-none focus:border-[#17324D] focus:ring-2 focus:ring-[#17324D]/10"
-              disabled={submitting}
-            />
-            <div className="text-right text-[12px] text-slate-400">{reason.length}/1000</div>
+            {needsReason ? (
+              <>
+                <label className="block text-[12px] font-semibold text-slate-800" htmlFor="late-sheet-change-reason">변경 사유</label>
+                <textarea
+                  id="late-sheet-change-reason"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value.slice(0, 1000))}
+                  placeholder="예: 결산 후 확인된 실제 입금액을 시트 기준으로 정정"
+                  className="min-h-[96px] w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] leading-5 text-slate-900 outline-none focus:border-[#17324D] focus:ring-2 focus:ring-[#17324D]/10"
+                  disabled={submitting}
+                />
+                <div className="text-right text-[12px] text-slate-400">{reason.length}/1000</div>
+              </>
+            ) : null}
           </div>
         )}
         <AlertDialogFooter>
@@ -131,11 +150,11 @@ export function CashflowLateSheetChangeDialog({
           <Button
             type="button"
             className="bg-[#17324D] hover:bg-slate-800"
-            disabled={submitting || !stage || (!resumeRequired && (!reason.trim() || !complete))}
-            onClick={() => onSubmit((resumeRequired ? resumeReason : reason).trim())}
+            disabled={submitting || !stage || (!resumeRequired && ((needsReason && !reason.trim()) || !complete))}
+            onClick={() => onSubmit((resumeRequired ? resumeReason : needsReason ? reason : '').trim())}
           >
             {submitting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-            {resumeRequired ? '같은 작업 이어서 완료' : '사유와 함께 반영'}
+            {resumeRequired ? '같은 작업 이어서 완료' : needsReason ? '사유와 함께 반영' : '확인한 값으로 반영'}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -53,7 +53,9 @@ export function resolvePortalProjectCandidates(input: {
   projects: Project[];
 }): PortalProjectCandidateSet {
   const role = normalizeRole(input.role);
-  const projects = dedupeProjects(sortProjects(input.projects || []));
+  // 휴지통에 넣은 사업은 후보가 아니다. 관리자 화면은 store 에서 걸러 주지만 포털은
+  // BFF 목록 조회도 Firestore 리스너도 trashedAt 을 보지 않아 그대로 흘러든다.
+  const projects = dedupeProjects(sortProjects((input.projects || []).filter((project) => !project.trashedAt)));
 
   if (!role) {
     return {

@@ -86,3 +86,31 @@ export function hasStoredProjectContractAmount(project: Partial<Project>): boole
     project.financialInputFlags?.contractAmount,
   );
 }
+
+/** 계약금액을 이루는 네 항목. 단년도에서 계약금액은 이 넷의 합이다. */
+export const CONTRACT_AMOUNT_ITEM_FIELDS = [
+  'salesVatAmount',
+  'totalRevenueAmount',
+  'totalActualCost',
+  'supportAmount',
+] as const;
+
+export type ContractAmountItemField = typeof CONTRACT_AMOUNT_ITEM_FIELDS[number];
+
+/**
+ * 단년도 계약금액을 항목 합계로 계산한다.
+ *
+ * 연도가 하나뿐이면 "총 계약금액"과 "그 해의 계약금액"이 같은 값이라 사람이 둘을 따로
+ * 넣을 이유가 없다. 다년도는 연도마다 계약금액이 따로 있으므로 이 함수를 쓰지 않는다.
+ *
+ * 이 계산은 사람이 금액을 고칠 때만 부른다. 불러오기만으로 저장된 값을 덮어쓰면
+ * 항목이 덜 채워진 기존 사업의 계약금액이 조용히 줄어든다.
+ */
+export function deriveContractAmountFromItems(
+  items: Partial<Record<ContractAmountItemField, number>>,
+): number {
+  return CONTRACT_AMOUNT_ITEM_FIELDS.reduce((sum, field) => {
+    const value = Number(items[field]);
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+}

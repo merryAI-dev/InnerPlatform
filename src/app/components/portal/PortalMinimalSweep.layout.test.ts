@@ -78,10 +78,13 @@ describe('portal minimal sweep', () => {
     expect(projectEditSource).not.toContain('현재 프로젝트:');
   });
 
-  it('allows PM project edit to change the project status through the shared editor', () => {
+  it('derives the project status from the contract period instead of letting anyone pick it', () => {
+    // 예전에는 PM 이 공유 편집기에서 진행 상태를 직접 골랐다. 손으로 고르게 두니 계약이
+    // 끝난 사업이 "진행 중" 으로 남아, 기한에서 따라 나오게 바꿨다.
     expect(projectEditorWizardSource).toContain("mode === 'admin' || mode === 'portal-edit'");
-    expect(projectEditorWizardSource).toContain('프로젝트 진행 상태');
-    expect(projectEditorWizardSource).toContain("update('status', value as ProjectStatus)");
+    expect(projectEditorWizardSource).not.toContain("update('status', value as ProjectStatus)");
+    expect(projectEditorWizardSource).toContain('deriveProjectStatusFromContractPeriod');
+    expect(projectEditorWizardSource).toContain('updateContractPeriod');
   });
 
   it('removes dash placeholders and review coaching from project register summaries', () => {
