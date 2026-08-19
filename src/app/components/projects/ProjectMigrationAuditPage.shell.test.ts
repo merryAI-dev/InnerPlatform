@@ -203,8 +203,17 @@ describe('ProjectMigrationAuditPage review flow', () => {
     expect(documentSource).toContain('이후 제출 예정');
     expect(documentSource).toContain('선택 · 미제출');
     expect(documentSource).not.toContain('최종 입금 메모');
-    expect(documentSource).not.toContain('등록 전 확인사항');
-    expect(documentSource).not.toContain('모두싸인');
+    // 2026-08-19: 등록 확인 사항을 결재 문서에서 감추던 규칙을 뒤집는다. 이 값들은 지금도
+    // 등록 폼에서 필수로 수집되는데(ProjectEditorWizard 의 submitIssues) 결재자에게는
+    // 보이지 않아, 임원이 값을 못 보고 결재하는 상태가 이어졌다. 판단에 쓰는 값은 문서에 남긴다.
+    expect(documentSource).toContain('등록 확인 사항');
+    expect(documentSource).toContain('모두싸인으로 진행');
+    expect(documentSource).toContain('인건비 4대보험 포함');
+    // 팀/인력은 dossier 가 늘 담고 있었으나 문서에 그리지 않았다.
+    expect(documentSource).toContain('label="참여인력"');
+    // 금액 5종이 모두 보여야 합계가 맞아 보인다.
+    expect(documentSource).toContain('label="총매출부가세"');
+    expect(documentSource).toContain('label="총지원금"');
     expect(documentSource).not.toContain('label="비고"');
   });
 });
