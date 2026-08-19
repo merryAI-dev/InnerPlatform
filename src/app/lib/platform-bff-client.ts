@@ -1403,6 +1403,7 @@ export interface CashflowMonthCloseActionDecision {
 
 export interface CashflowMonthCloseActions {
   completeWeekly: CashflowMonthCloseActionDecision;
+  reopenWeekly: CashflowMonthCloseActionDecision;
   changeExecutiveApprover: CashflowMonthCloseActionDecision;
   requestMonthClose: CashflowMonthCloseActionDecision & { label: string };
   withdrawMonthClose: CashflowMonthCloseActionDecision;
@@ -3504,14 +3505,13 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
   return result;
 }
 
+// 주정산 회수: 사유 없이 즉시. 현재 revision 은 BFF 가 잠금 기록에서 읽는다.
 export async function reopenCashflowWeeklyUpdateViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
   yearMonth: string;
   weekNo: number;
-  expectedRevision: number;
-  reason: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowWeeklyUpdateCompletionResult> {
   const response = await resolveClient(params.client).post<CashflowWeeklyUpdateCompletionResult>(
@@ -3522,8 +3522,6 @@ export async function reopenCashflowWeeklyUpdateViaBff(params: {
       body: {
         yearMonth: params.yearMonth,
         weekNo: params.weekNo,
-        expectedRevision: params.expectedRevision,
-        reason: params.reason,
       },
       retries: 0,
       timeoutMs: 12000,

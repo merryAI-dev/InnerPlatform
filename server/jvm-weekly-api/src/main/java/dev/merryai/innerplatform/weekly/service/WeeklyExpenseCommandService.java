@@ -1496,9 +1496,6 @@ public class WeeklyExpenseCommandService {
         String projectId,
         ReopenCashflowWeeklyUpdateRequest request
     ) {
-        if (request.reason().isBlank()) {
-            throw new IllegalArgumentException("A reason is required to reopen a cashflow week.");
-        }
         TrustedActorContext writer = requireCashflowMonthClosePermission(
             REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND,
             actor,
@@ -1534,7 +1531,7 @@ public class WeeklyExpenseCommandService {
                 "revision", saved.revision(),
                 "reopenedAt", saved.reopenedAt(),
                 "reopenedBy", saved.reopenedBy(),
-                "reason", saved.reopenReason(),
+                "reason", saved.reopenReason() == null ? "" : saved.reopenReason(),
                 "previousSnapshotHash", saved.snapshotHash()
             ))
         ));

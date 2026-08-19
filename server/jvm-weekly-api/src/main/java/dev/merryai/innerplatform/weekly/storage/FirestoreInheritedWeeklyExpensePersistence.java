@@ -2049,9 +2049,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     ) {
         requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
         requireYearMonth(request.yearMonth());
-        if (request.reason() == null || request.reason().isBlank()) {
-            throw new IllegalArgumentException("A reason is required to reopen a cashflow week.");
-        }
         requireCashflowMonthsOpen(actor.tenantId(), projectId, List.of(request.yearMonth()));
         String documentId = projectId + "-" + request.yearMonth() + "-w" + request.weekNo();
         DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(actor.tenantId(), documentId));
@@ -2080,7 +2077,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("reopenedAt", reopenedAt.toString());
         patch.put("reopenedByUid", actor.id());
         patch.put("reopenedByName", actor.name());
-        patch.put("reopenReason", request.reason().trim());
+        patch.put("reopenReason", request.reason() == null ? "" : request.reason().trim());
         patch.put("updatedAt", reopenedAt.toString());
         set(ref, patch);
         return toWeeklyCompletionRecord(

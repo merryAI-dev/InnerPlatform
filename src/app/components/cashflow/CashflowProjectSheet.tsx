@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save, Undo2 } from 'lucide-react';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -44,6 +44,7 @@ import {
   withdrawCashflowMonthCloseRequestViaBff,
   saveCashflowMonthCloseApproverViaBff,
   completeCashflowWeeklyUpdateViaBff,
+  reopenCashflowWeeklyUpdateViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
   fetchCurrentCashflowMonthCloseRequestViaBff,
@@ -390,6 +391,8 @@ export function CashflowProjectSheet({
   const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
   const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
   const [weeklyCompletionError, setWeeklyCompletionError] = useState('');
+  const [weeklyWithdrawBusy, setWeeklyWithdrawBusy] = useState(false);
+  const [weeklyWithdrawError, setWeeklyWithdrawError] = useState('');
   const [weeklyProjectionWarning, setWeeklyProjectionWarning] = useState<WeeklyProjectionValidation | null>(null);
   const [weeklyHistoryOpen, setWeeklyHistoryOpen] = useState(false);
   const [weeklyComplianceHistory, setWeeklyComplianceHistory] = useState<CashflowWeeklyComplianceItem[]>([]);
@@ -917,6 +920,51 @@ export function CashflowProjectSheet({
       setWeeklyCompletionBusy(false);
     }
   }, [loadCashflowMonthClose, monthCloseActions?.completeWeekly, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, savedExecutiveApproverId, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
+
+  // 주정산 회수: 사유·결재 없이 즉시. revision 은 BFF 가 잠금 기록에서 읽는다. 되돌리려면 다시 완료하면 된다.
+  const handleWithdrawWeeklyUpdate = useCallback(async (): Promise<void> => {
+    if (monthCloseActions?.reopenWeekly.enabled !== true) return;
+    const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
+    if (!currentDeadline) return;
+    if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) return;
+    setWeeklyWithdrawBusy(true);
+    setWeeklyWithdrawError('');
+    const startedAt = Date.now();
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const result = await reopenCashflowWeeklyUpdateViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        yearMonth: currentDeadline.yearMonth,
+        weekNo: currentDeadline.weekNo,
+      });
+      await loadCashflowMonthClose();
+      logCashflowSettlement({
+        phase: 'success',
+        operation: 'cashflow.weekly_settlement.withdraw',
+        projectId,
+        yearMonth: result.yearMonth,
+        weekNo: result.weekNo,
+        durationMs: Date.now() - startedAt,
+        summary: { revision: result.revision },
+      });
+    } catch (error) {
+      logCashflowSettlement({
+        phase: 'error',
+        operation: 'cashflow.weekly_settlement.withdraw',
+        projectId,
+        yearMonth: currentDeadline.yearMonth,
+        weekNo: currentDeadline.weekNo,
+        durationMs: Date.now() - startedAt,
+        error,
+      });
+      setWeeklyWithdrawError(resolveApiErrorMessage(error, '주간 정산을 회수하지 못했습니다. 화면을 다시 불러온 뒤 시도해 주세요.'));
+    } finally {
+      setWeeklyWithdrawBusy(false);
+    }
+  }, [loadCashflowMonthClose, monthCloseActions?.reopenWeekly, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, yearMonth]);
 
   const loadWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
     setWeeklyComplianceHistoryLoading(true);
@@ -2638,7 +2686,21 @@ export function CashflowProjectSheet({
                       주간 정산 완료
                     </Button>
                   ) : null}
+                  {monthCloseActions?.reopenWeekly.enabled ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0 rounded-md border-slate-300 bg-white px-3 text-[12px] font-semibold text-slate-700"
+                      disabled={weeklyWithdrawBusy || monthCloseLoading}
+                      onClick={() => void handleWithdrawWeeklyUpdate()}
+                    >
+                      {weeklyWithdrawBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Undo2 className="mr-1 h-3 w-3" />}
+                      주간 정산 회수
+                    </Button>
+                  ) : null}
                 </div>
+                {weeklyWithdrawError ? <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800">{weeklyWithdrawError}</div> : null}
                 <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
                   <span>누적 미준수 <strong className="ml-1 text-red-700">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.missedCount, '회')}</strong></span>
                   <span>기한 내 완료 <strong className="ml-1 text-primary">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.completedCount, '회')}</strong></span>
