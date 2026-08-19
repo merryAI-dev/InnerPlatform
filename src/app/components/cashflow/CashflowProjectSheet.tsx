@@ -384,6 +384,10 @@ export function CashflowProjectSheet({
   const [monthCloseRequestError, setMonthCloseRequestError] = useState<string | null>(null);
   const canReviewReopen = monthCloseRequest?.canDecideReopen === true;
   const [monthCloseLoading, setMonthCloseLoading] = useState(false);
+  // 화면 열 때 요청 12개가 동시에 나가면 Vercel 인스턴스가 늘어나는 동안 제일 중요한 month-close 가
+  // 제일 늦게 끝났다(2026-08-19, 2.6초 vs 7.8초). 첫 화면은 config + month-close 둘로 그리고,
+  // 나머지는 그 뒤(보조 정보) 또는 보일 때(이력·명부)만 읽는다. 데이터·자리는 그대로, 순서만 바뀐다.
+  const [monthCloseSettled, setMonthCloseSettled] = useState(false);
   const [monthCloseError, setMonthCloseError] = useState<string | null>(null);
   const [monthCloseErrorPresentation, setMonthCloseErrorPresentation] = useState<(ApiErrorPresentation & {
     code: string;
@@ -436,7 +440,7 @@ export function CashflowProjectSheet({
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   // 조직장은 로그인해서 승인해야 하므로 계정이 필수지만, 명부에 없는 사람(퇴사 후 계정이
   // 남은 경우)은 후보에서 빠져야 한다. 명부는 문지기로만 쓴다.
-  const approverRoster = usePersonRoster();
+  const approverRoster = usePersonRoster(monthCloseSettled);
   const executiveApproverOptions = useMemo(
     () => buildOrgMemberPickerOptions(members || [], approverRoster),
     [members, approverRoster],
@@ -591,7 +595,7 @@ export function CashflowProjectSheet({
   useEffect(() => {
     let cancelled = false;
     setCashflowSheetFreshness(null);
-    if (!cashflowSheetConfigLoaded || !cashflowSheetConfig?.value || !projectId || !orgId || !user?.uid) {
+    if (!monthCloseSettled || !cashflowSheetConfigLoaded || !cashflowSheetConfig?.value || !projectId || !orgId || !user?.uid) {
       return () => { cancelled = true; };
     }
 
@@ -625,6 +629,7 @@ export function CashflowProjectSheet({
     cashflowSheetConfig?.sourceYear,
     cashflowSheetConfig?.value,
     cashflowSheetConfigLoaded,
+    monthCloseSettled,
     orgId,
     projectId,
     resolveBffActor,
@@ -644,15 +649,20 @@ export function CashflowProjectSheet({
     setSheetReviewDialogOpen(true);
   }, [cashflowSheetConfig, cashflowSheetConfigLoaded, projectId]);
 
+  const [cashflowSheetMirrorLoading, setCashflowSheetMirrorLoading] = useState(false);
+  const mirrorNeeded = sheetReviewDialogOpen
+    || (monthCloseSettled && !(monthCloseResult?.dashboard?.source && Array.isArray(monthCloseResult?.dashboard?.cells)));
   useEffect(() => {
     let cancelled = false;
-    setCashflowSheetMirror(null);
-    if (!projectId || !orgId || !user?.uid) return () => { cancelled = true; };
+    if (!projectId || !orgId || !user?.uid) { setCashflowSheetMirror(null); return () => { cancelled = true; }; }
+    // 미러(약 1MB)는 보드를 그리는 데 쓰이지 않는다 - 대시보드가 있으면. 폴백이거나 검토 다이얼로그일 때만 읽는다.
+    if (!mirrorNeeded) return () => { cancelled = true; };
 
     const readMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
       getCashflowSheetLabMirrorViaBff({ tenantId: orgId, actor, projectId })
     );
     const loadPinnedMirror = async (): Promise<void> => {
+      setCashflowSheetMirrorLoading(true);
       try {
         const actor = await resolveBffActor();
         if (!actor?.idToken) return;
@@ -668,11 +678,16 @@ export function CashflowProjectSheet({
         if (!cancelled) setCashflowSheetMirror(mirror);
       } catch {
         if (!cancelled) setCashflowSheetMirror(null);
+      } finally {
+        if (!cancelled) setCashflowSheetMirrorLoading(false);
       }
     };
     void loadPinnedMirror();
     return () => { cancelled = true; };
-  }, [orgId, projectId, resolveBffActor, user?.uid]);
+  }, [mirrorNeeded, orgId, projectId, resolveBffActor, user?.uid]);
+
+  // 프로젝트가 바뀌면 이전 프로젝트의 미러를 들고 있지 않는다.
+  useEffect(() => { setCashflowSheetMirror(null); }, [projectId]);
 
   const loadCashflowMonthClose = useCallback(async (): Promise<void> => {
     const requestGeneration = ++monthCloseRequestGenerationRef.current;
@@ -776,11 +791,15 @@ export function CashflowProjectSheet({
         error,
       });
     } finally {
-      if (isCurrentRequest()) setMonthCloseLoading(false);
+      if (isCurrentRequest()) {
+        setMonthCloseLoading(false);
+        setMonthCloseSettled(true);
+      }
     }
   }, [orgId, projectId, resolveBffActor, selectedYear, user?.uid, yearMonth]);
 
   useEffect(() => {
+    setMonthCloseSettled(false);
     void loadCashflowMonthClose();
   }, [loadCashflowMonthClose]);
 
@@ -838,8 +857,9 @@ export function CashflowProjectSheet({
   }, [orgId, projectId, resolveBffActor, user?.uid, yearMonth]);
 
   useEffect(() => {
+    if (!monthCloseSettled) return;
     void loadMonthCloseRequest();
-  }, [loadMonthCloseRequest]);
+  }, [loadMonthCloseRequest, monthCloseSettled]);
 
   useEffect(() => {
     if (!weeklyActionNotice) return;
@@ -1119,10 +1139,27 @@ export function CashflowProjectSheet({
     });
   }, [loadCashflowEventSource]);
 
+  // 이력 타임라인은 화면 오른쪽/아래에 있다. 들어올 때 읽는다. 한 번 보이면 이후 갱신은 기존 경로대로.
+  const opsTimelineRef = useRef<HTMLDivElement | null>(null);
+  const [opsTimelineVisible, setOpsTimelineVisible] = useState(false);
+  useEffect(() => {
+    const node = opsTimelineRef.current;
+    if (!node) return undefined;
+    if (typeof IntersectionObserver === 'undefined') { setOpsTimelineVisible(true); return undefined; }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setOpsTimelineVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     setCashflowEvents([]);
+    if (!opsTimelineVisible) return;
     void loadCashflowEvents();
-  }, [loadCashflowEvents]);
+  }, [loadCashflowEvents, opsTimelineVisible]);
 
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;
@@ -1860,7 +1897,7 @@ export function CashflowProjectSheet({
 
   useEffect(() => {
     let cancelled = false;
-    if (!projectId || !orgId || !user?.uid) return () => { cancelled = true; };
+    if (!monthCloseSettled || !projectId || !orgId || !user?.uid) return () => { cancelled = true; };
     const loadApplyStatus = async (): Promise<void> => {
       try {
         const actor = await resolveBffActor();
@@ -1879,7 +1916,7 @@ export function CashflowProjectSheet({
     return () => {
       cancelled = true;
     };
-  }, [orgId, projectId, resolveBffActor, user?.uid]);
+  }, [monthCloseSettled, orgId, projectId, resolveBffActor, user?.uid]);
 
   const handleStagePinnedSheetValues = useCallback(async (
     replaceAllActualSources = true,
@@ -3203,7 +3240,7 @@ export function CashflowProjectSheet({
       ) : null}
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
         {renderOperationsPanel()}
-        {renderOpsTimeline()}
+        <div ref={opsTimelineRef} className="min-w-0">{renderOpsTimeline()}</div>
       </section>
 
       <section id="projection-actual-comparison" data-cashflow-block="comparison" className="scroll-mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -3508,7 +3545,7 @@ export function CashflowProjectSheet({
                 </div>
               </div>
               <Badge className={`w-fit rounded-md border px-2.5 py-1 text-[12px] ${sheetMirrorStatus === 'FRESH' ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
-                {cashflowSheetConfig ? sheetMirrorStatus : '선택 설정'}
+                {cashflowSheetConfig ? (cashflowSheetMirrorLoading ? '확인 중' : sheetMirrorStatus) : '선택 설정'}
               </Badge>
             </div>
             <div className="flex items-start gap-2 rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-3 py-2 text-[12px] leading-5 text-slate-800">
