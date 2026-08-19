@@ -1157,9 +1157,11 @@ export function CashflowProjectSheet({
   }, []);
   useEffect(() => {
     setCashflowEvents([]);
-    if (!opsTimelineVisible) return;
+    // 넓은 화면에선 타임라인이 처음부터 보여서 "보이면 읽는다"가 첫 발사에 끼었다(2026-08-19).
+    // 보조 정보이니 month-close 가 끝난 뒤에만 읽는다.
+    if (!opsTimelineVisible || !monthCloseSettled) return;
     void loadCashflowEvents();
-  }, [loadCashflowEvents, opsTimelineVisible]);
+  }, [loadCashflowEvents, monthCloseSettled, opsTimelineVisible]);
 
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;
