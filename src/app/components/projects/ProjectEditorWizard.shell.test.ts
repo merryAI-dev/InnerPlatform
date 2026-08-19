@@ -161,7 +161,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
     expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
     // 라벨은 이제 ProjectFormRow 의 라벨 열이 그린다. 개별 <Label className="text-xs"> 는 사라졌다.
-    expect(source).toContain('<ProjectFormRow label="통화">');
+    // 통화는 별도 폼 행이 아니라 계약금액 옆 열의 드롭다운이다. 금액과 떨어지면 단위가 멀어진다.
+    expect(source).not.toContain('<ProjectFormRow label="통화">');
+    expect(source).toContain('aria-label="통화"');
     expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
   });
 
@@ -436,7 +438,10 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('{slot.description}');
     expect(source).toContain('isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)');
     expect(source).toMatch(/number: 7,\s+label: 'RFP'/);
-    expect(source).toContain('title="연도별 계약·재무"');
+    // 연도별 표는 이제 독립 섹션이 아니라 「계약 정보」 안에 있다. 통화·기간과 떨어지면
+    // 무엇의 금액인지 멀어지기 때문이다.
+    expect(source).toContain('title="계약 정보"');
+    expect(source).not.toContain('title="연도별 계약·재무"');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
     expect(source).not.toContain('4대보험 포함 확인');
     expect(source).not.toContain('퇴직급여 포함 확인');
@@ -657,7 +662,12 @@ describe('ProjectEditorWizard form skeleton contract', () => {
     expect(source).toContain("'px-3 py-2.5 text-right font-semibold text-[#0176D3]'");
     // 총계 입력칸 5개는 v1 등록에만 남는다.
     expect(source).toContain('formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)');
-    expect(source).toContain('금액을 계약서와 대조하여 확인했습니다.');
+    // 계약서 대조 체크는 걷어냈다. 체크박스를 지우면서 그것을 요구하던 제출 검증도 함께 지웠다.
+    expect(source).not.toContain('금액을 계약서와 대조하여 확인했습니다.');
+    expect(source).not.toContain('row.year === year && row.confirmed');
+    // 진행 상태는 사람이 고르지 않고 계약 기간에서 나온다.
+    expect(source).not.toContain('<ProjectFormRow label="프로젝트 진행 상태">');
+    expect(source).toContain('deriveProjectStatusFromContractPeriod');
     // 입금 계획은 금액 표와 다른 경로다. 연도별로 쪼개는 것은 다년도뿐이다.
     expect(source).toContain('{annualTotalsOwnAmounts && hasMultiYearContract ? (');
   });
