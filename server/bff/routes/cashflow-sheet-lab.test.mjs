@@ -3310,8 +3310,10 @@ describe('cashflow sheet lab route', () => {
       sourceRevision: mirror.body.sourceRevision,
       targetRevisionAtFetch: mirror.body.targetRevisionAtFetch,
       appliedSourceRevision: mirror.body.sourceRevision,
+      // 바뀐 것 없음 = 이 시점의 시트와 결산이 같다. target 을 같이 기록해야 다음 결산 뒤 불러오기가
+      // 영원한 리비전 불일치(편차·수정 스냅샷 UNAVAILABLE, 정책 화면 확인 필요)로 남지 않는다.
+      appliedTargetRevision: mirror.body.targetRevisionAtFetch,
     });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).not.toHaveProperty('appliedTargetRevision');
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`)).toMatchObject({
       status: 'APPLIED',
       response: stage.body,
@@ -3399,6 +3401,8 @@ describe('cashflow sheet lab route', () => {
       });
       expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({
         appliedSourceRevision: mirror.body.sourceRevision,
+        // 바뀐 것 없음도 반영이다. target 이 안 올라가면 다음 결산 뒤 영원히 리비전 불일치.
+        appliedTargetRevision: mirror.body.targetRevisionAtFetch,
         lastAppliedBy: { uid: 'current-worker' },
       });
     } finally {

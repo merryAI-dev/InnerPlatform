@@ -3953,8 +3953,11 @@ async function stagePinnedCashflowSheetLab({
           appliedAt: now,
           response,
         }), { merge: true });
+        // 바뀐 것이 없다 = 이 시점의 시트와 결산이 같다. source 만 올리고 target 을 안 올리면
+        // 월결산·주정산 뒤 첫 불러오기부터 영원히 리비전 불일치로 남는다.
         transaction.set(mirrorRef, {
           appliedSourceRevision: mirror.sourceRevision,
+          appliedTargetRevision: mirror.targetRevisionAtFetch,
           lastAppliedAt: now,
           lastAppliedBy: response.lastStagedBy,
         }, { merge: true });

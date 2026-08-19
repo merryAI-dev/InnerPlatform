@@ -25,7 +25,7 @@ const POLICY_STORE_ISSUES = Object.freeze({
   closes: ['MONTHLY_CLOSE_STORE_UNAVAILABLE', 'MONTHLY_CLOSE_STORE_TRUNCATED', '월 결산 확정 저장소 조회 불가'],
   runs: ['MONTHLY_CLOSE_VERSION_STORE_UNAVAILABLE', 'MONTHLY_CLOSE_VERSION_STORE_TRUNCATED', '월 결산 실행 이력 저장소 조회 불가'],
   requests: ['MONTH_CLOSE_REQUEST_STORE_UNAVAILABLE', 'MONTH_CLOSE_REQUEST_STORE_TRUNCATED', '월 결산 요청 저장소 조회 불가'],
-  mirrors: ['SHEET_MIRROR_STORE_UNAVAILABLE', 'SHEET_MIRROR_STORE_TRUNCATED', 'Sheet mirror 저장소 조회 불가'],
+  mirrors: ['SHEET_MIRROR_STORE_UNAVAILABLE', 'SHEET_MIRROR_STORE_TRUNCATED', '시트 원본 저장소 조회 불가'],
   completions: ['WEEKLY_COMPLETION_STORE_UNAVAILABLE', 'WEEKLY_COMPLETION_STORE_TRUNCATED', '주간 완료 이력 저장소 조회 불가'],
   amendments: ['CASHFLOW_MONTH_AMENDMENT_STORE_UNAVAILABLE', 'CASHFLOW_MONTH_AMENDMENT_STORE_TRUNCATED', '닫힌 월 수정 이력 저장소 조회 불가'],
   people: ['PEOPLE_STORE_UNAVAILABLE', 'PEOPLE_STORE_TRUNCATED', 'People 저장소 조회 불가'],
@@ -332,10 +332,10 @@ function resolvePeopleIdentity(uid, peopleIndex, peopleAvailable, memberIndex, m
   if (!peopleAvailable || !membersAvailable) {
     return {
       status: 'UNAVAILABLE',
-      statusLabel: 'People 연결 확인 불가',
+      statusLabel: '인력 명부 연결 확인 불가',
       uid: normalizedUid,
       personId: null,
-      displayName: 'People UID 확인 불가',
+      displayName: '인력 명부 확인 불가',
       person: null,
     };
   }
@@ -343,20 +343,20 @@ function resolvePeopleIdentity(uid, peopleIndex, peopleAvailable, memberIndex, m
   if (matches.length === 0) {
     return {
       status: 'UNLINKED',
-      statusLabel: 'People UID 연결 필요',
+      statusLabel: '인력 명부 연결 필요',
       uid: normalizedUid,
       personId: null,
-      displayName: `People UID 연결 필요 (${normalizedUid})`,
+      displayName: `인력 명부 연결 필요 (${normalizedUid})`,
       person: null,
     };
   }
   if (matches.length > 1) {
     return {
       status: 'AMBIGUOUS',
-      statusLabel: 'People UID 중복',
+      statusLabel: '인력 명부에 같은 계정이 둘 이상',
       uid: normalizedUid,
       personId: null,
-      displayName: `People UID 중복 (${normalizedUid})`,
+      displayName: `인력 명부에 같은 계정이 둘 이상 (${normalizedUid})`,
       person: null,
     };
   }
@@ -374,7 +374,7 @@ function resolvePeopleIdentity(uid, peopleIndex, peopleAvailable, memberIndex, m
   }
   return {
     status: 'LINKED',
-    statusLabel: 'People UID 연결됨',
+    statusLabel: '인력 명부 연결됨',
     uid: normalizedUid,
     personId: person.personId,
     displayName: personDisplayName(person),
@@ -389,6 +389,8 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
       statusLabel: '누적 마감 권한 조회 불가',
       closedThrough: null,
       closedThroughLabel: '조회 불가',
+      settlementMonth: null,
+      settlementMonthLabel: '조회 불가',
       revision: null,
       revisionLabel: '조회 불가',
       rootHash: null,
@@ -403,6 +405,8 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
       statusLabel: '누적 마감 없음',
       closedThrough: null,
       closedThroughLabel: '누적 마감 없음',
+      settlementMonth: null,
+      settlementMonthLabel: '결산 회차 없음',
       revision: null,
       revisionLabel: '리비전 없음',
       rootHash: null,
@@ -422,6 +426,8 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
       statusLabel: '누적 마감 권한 오류',
       closedThrough: null,
       closedThroughLabel: '계약 오류',
+      settlementMonth: null,
+      settlementMonthLabel: '계약 오류',
       revision: null,
       revisionLabel: '계약 오류',
       rootHash: null,
@@ -431,6 +437,7 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
     };
   }
   const { status, closedThrough, revision, rootHash } = authority;
+  const settlementMonth = authority.settlementMonth || null;
   const closedAt = timestampIso(head.closedAt);
   return {
     status,
@@ -438,7 +445,12 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
     closedThrough,
     closedThroughLabel: closedThrough
       ? formatYearMonthLabel(closedThrough, '까지 마감')
-      : 'closedThrough 미기록',
+      : '마감 범위 없음',
+    // 잠금은 결산 회차 연도 안에서 closedThrough 이하 월만 (cashflowCumulativeMonthLocked). 회차가 없으면 잠금도 없다.
+    settlementMonth,
+    settlementMonthLabel: settlementMonth
+      ? formatYearMonthLabel(settlementMonth, ' 회차')
+      : '결산 회차 없음',
     revision,
     revisionLabel: formatRevisionLabel(revision),
     rootHash,
@@ -493,11 +505,11 @@ function buildResetToReclose(resetRow, evidenceAvailable) {
       selectionAllowed: false,
       expectedEvidence: resetRow.expectedEvidence,
       warning: preserveMutableHeader
-        ? '손상된 누적 authority만 제거하는 되돌리기 어려운 작업입니다. 정상 OPEN/재오픈 진행 header는 보존되고 변경 전 authority는 append-only 감사 사본에 남습니다.'
-        : '현재 누적 authority와 선택한 월결산 header를 제거하는 되돌리기 어려운 작업입니다. 변경 전 전체 값은 append-only 감사 사본에 보존됩니다.',
+        ? '손상된 잠금 권한만 걷어내는 되돌리기 어려운 작업입니다. 진행 중인 결산·재오픈 기록은 그대로 두고, 걷어낸 값은 append-only 감사 사본에 남습니다.'
+        : '현재 잠금 권한과 선택한 회차의 결산 기록을 걷어내는 되돌리기 어려운 작업입니다. 변경 전 전체 값은 append-only 감사 사본에 보존됩니다.',
       guide: preserveMutableHeader
-        ? `${formatYearMonthLabel(resetRow.yearMonth, ' 회차')}의 정상 mutable header는 유지하고 손상 authority만 감사 격리합니다.`
-        : `${formatYearMonthLabel(resetRow.yearMonth, ' 회차')}를 감사 격리한 뒤 시트 검증본 검토와 정상 월결산을 다시 진행합니다. immutable version·request·Sheet 값은 변경하지 않습니다.`,
+        ? `${formatYearMonthLabel(resetRow.yearMonth, ' 회차')}의 결산 기록은 유지하고 손상된 잠금 권한만 감사 사본으로 옮깁니다.`
+        : `${formatYearMonthLabel(resetRow.yearMonth, ' 회차')}를 감사 사본으로 옮긴 뒤 시트 검증본을 검토하고 월 결산을 다시 진행합니다. 확정된 결산 이력·요청·시트 값은 건드리지 않습니다.`,
       cycleCandidates: [],
     };
   }
@@ -509,7 +521,7 @@ function buildResetToReclose(resetRow, evidenceAvailable) {
       selectionAllowed: false,
       expectedEvidence: null,
       warning: null,
-      guide: '누적 authority와 mutable 월결산 header가 이미 없어 추가 격리가 필요하지 않습니다. 시트 검증본을 확인한 뒤 정상 월결산을 진행해 주세요.',
+      guide: '잠금 권한과 진행 중인 결산 기록이 이미 없어 따로 정리할 것이 없습니다. 시트 검증본을 확인한 뒤 평소처럼 월 결산을 진행해 주세요.',
       cycleCandidates: [],
     };
   }
@@ -521,7 +533,7 @@ function buildResetToReclose(resetRow, evidenceAvailable) {
       selectionAllowed: false,
       expectedEvidence: null,
       warning: null,
-      guide: '유효한 누적 마감 권한은 격리하지 않고 정상 재오픈 절차를 사용합니다.',
+      guide: '잠금 권한이 정상이라 여기서 손대지 않습니다. 결산을 되돌리려면 프로젝트 화면의 재오픈 절차를 사용해 주세요.',
       cycleCandidates: [],
     };
   }
@@ -533,7 +545,7 @@ function buildResetToReclose(resetRow, evidenceAvailable) {
       selectionAllowed: false,
       expectedEvidence: null,
       warning: null,
-      guide: 'immutable evidence가 완전하므로 authority 정확 복구를 먼저 사용합니다.',
+      guide: '원본 기록이 온전해서 그대로 되살릴 수 있습니다. 위의 권한 복구를 먼저 실행해 주세요.',
       cycleCandidates: [],
     };
   }
@@ -544,8 +556,8 @@ function buildResetToReclose(resetRow, evidenceAvailable) {
       actionAllowed: false,
       selectionAllowed: true,
       expectedEvidence: null,
-      warning: '선택한 회차의 현재 mutable header와 손상 authority만 감사 격리합니다. immutable version·request·Sheet 값은 변경하지 않습니다.',
-      guide: '서버가 확인한 회차 중 실제로 다시 결산할 회차를 선택해 주세요. 선택한 근거는 실행 직전 transaction에서 다시 검증합니다.',
+      warning: '선택한 회차의 진행 중 결산 기록과 손상된 잠금 권한만 감사 사본으로 옮깁니다. 확정된 결산 이력·요청·시트 값은 건드리지 않습니다.',
+      guide: '다시 결산할 회차를 선택해 주세요. 실행 직전에 서버가 선택한 회차의 상태를 한 번 더 확인합니다.',
       cycleCandidates,
     };
   }
@@ -556,7 +568,7 @@ function buildResetToReclose(resetRow, evidenceAvailable) {
     selectionAllowed: false,
     expectedEvidence: null,
     warning: null,
-    guide: '격리할 exact 월결산 회차를 확인할 수 없습니다. 최신 정책 상태를 다시 불러와 주세요.',
+    guide: '재결산할 회차를 특정할 수 없습니다. 화면을 다시 불러와 주세요.',
     cycleCandidates: [],
   };
 }
@@ -596,7 +608,7 @@ function buildRecovery(planRow, resetRow, evidenceAvailable, projectId) {
       actionAllowed: true,
       expectedEvidence: planRow.expectedEvidence,
       reasons: planRow.reasons || [],
-      warning: '되돌리기 어려운 권한 복구입니다. 현재 head와 복구 후 head의 전체 값은 append-only 감사 사본으로 보존됩니다.',
+      warning: '되돌리기 어려운 권한 복구입니다. 복구 전·후 잠금 권한 전체 값은 append-only 감사 사본으로 보존됩니다.',
       guide: planRow.status === 'READY'
         ? '서버가 확정 월결산·버전·요청 증거를 다시 검증한 뒤 누락된 권한만 생성합니다.'
         : '서버가 손상 head를 제외하고 확정 월결산·버전·요청 증거로 canonical head를 다시 계산합니다.',
@@ -612,8 +624,8 @@ function buildRecovery(planRow, resetRow, evidenceAvailable, projectId) {
     reasons: planRow?.reasons?.length ? planRow.reasons : ['IMMUTABLE_CLOSE_EVIDENCE_MISSING'],
     warning: null,
     guide: resetToReclose.actionAllowed
-      ? '권한 값을 추측해 만들 수 없습니다. 현재 authority와 월결산 header를 감사 격리한 뒤 시트 검증본을 검토하고 정상 월결산으로 immutable close evidence를 다시 생성해 주세요.'
-      : '권한 값을 추측해 만들 수 없습니다. 프로젝트의 최신 시트 검증본을 다시 검토·반영한 뒤 정상 월결산으로 immutable close evidence를 다시 생성해 주세요.',
+      ? '남은 기록으로는 잠금 권한을 되살릴 수 없습니다. 아래 재결산 준비로 현재 기록을 감사 사본으로 옮긴 뒤, 시트 검증본을 검토하고 월 결산을 다시 실행해 주세요.'
+      : '남은 기록으로는 잠금 권한을 되살릴 수 없습니다. 프로젝트의 최신 시트 검증본을 다시 검토·반영한 뒤 월 결산을 다시 실행해 주세요.',
     nextAction: resetToReclose.actionAllowed ? null : recoveryNextAction(projectId),
     resetToReclose,
   };
@@ -797,25 +809,25 @@ function buildLatestRun(run, storeAvailable, peopleIndex, peopleAvailable, membe
 function buildSheet(mirror, storeAvailable) {
   if (!storeAvailable) {
     return {
-      status: 'UNAVAILABLE', statusLabel: 'Sheet mirror 조회 불가',
+      status: 'UNAVAILABLE', statusLabel: '시트 원본 조회 불가',
       weeklyYear: null, weeklyYearLabel: '조회 불가', annualYears: [], annualYearsLabel: '조회 불가',
       sourceRevision: null, sourceRevisionLabel: '조회 불가',
       appliedSourceRevision: null, appliedSourceRevisionLabel: '조회 불가',
       targetRevisionAtFetch: null, targetRevisionAtFetchLabel: '조회 불가',
       appliedTargetRevision: null, appliedTargetRevisionLabel: '조회 불가',
-      revisionStatus: 'UNAVAILABLE', revisionStatusLabel: '리비전 조회 불가',
+      revisionStatus: 'UNAVAILABLE', revisionStatusLabel: '조회 불가',
       capturedAt: null, capturedAtLabel: '조회 불가',
     };
   }
   if (!mirror) {
     return {
-      status: 'MISSING', statusLabel: 'Sheet mirror 없음',
-      weeklyYear: null, weeklyYearLabel: '주차형 계약 없음', annualYears: [], annualYearsLabel: '연간형 계약 없음',
-      sourceRevision: null, sourceRevisionLabel: '원본 리비전 없음',
-      appliedSourceRevision: null, appliedSourceRevisionLabel: '반영 리비전 없음',
-      targetRevisionAtFetch: null, targetRevisionAtFetchLabel: '대상 리비전 없음',
-      appliedTargetRevision: null, appliedTargetRevisionLabel: '반영 대상 리비전 없음',
-      revisionStatus: 'MISSING', revisionStatusLabel: '리비전 없음',
+      status: 'MISSING', statusLabel: '시트를 아직 불러오지 않음',
+      weeklyYear: null, weeklyYearLabel: '주차 결산 연도 없음', annualYears: [], annualYearsLabel: '연간 결산 연도 없음',
+      sourceRevision: null, sourceRevisionLabel: '불러온 값 없음',
+      appliedSourceRevision: null, appliedSourceRevisionLabel: '반영 기록 없음',
+      targetRevisionAtFetch: null, targetRevisionAtFetchLabel: '기록 없음',
+      appliedTargetRevision: null, appliedTargetRevisionLabel: '기록 없음',
+      revisionStatus: 'MISSING', revisionStatusLabel: '반영 기록 없음',
       capturedAt: null, capturedAtLabel: '수집 기록 없음',
     };
   }
@@ -832,44 +844,44 @@ function buildSheet(mirror, storeAvailable) {
   const targetRevisionAtFetch = readOptionalText(mirror.targetRevisionAtFetch) || null;
   const appliedTargetRevision = readOptionalText(mirror.appliedTargetRevision) || null;
   let revisionStatus = 'ALIGNED';
-  let revisionStatusLabel = 'Source/target 리비전 일치';
+  let revisionStatusLabel = '불러온 값이 결산에 반영됨';
   if (!sourceRevision) {
     revisionStatus = 'SOURCE_MISSING';
-    revisionStatusLabel = '원본 리비전 없음';
+    revisionStatusLabel = '불러온 값 없음';
   } else if (!appliedSourceRevision) {
     revisionStatus = 'SOURCE_NOT_APPLIED';
-    revisionStatusLabel = '원본 미반영';
+    revisionStatusLabel = '불러온 값을 아직 반영하지 않음';
   } else if (sourceRevision !== appliedSourceRevision) {
     revisionStatus = 'SOURCE_DRIFT';
-    revisionStatusLabel = '원본·반영 리비전 불일치';
+    revisionStatusLabel = '시트가 바뀐 뒤 아직 반영하지 않음';
   } else if (!targetRevisionAtFetch) {
     revisionStatus = 'TARGET_MISSING';
-    revisionStatusLabel = '대상 리비전 없음';
+    revisionStatusLabel = '불러올 때 결산 상태 기록 없음';
   } else if (!appliedTargetRevision) {
     revisionStatus = 'TARGET_NOT_APPLIED';
-    revisionStatusLabel = '대상 리비전 미반영';
+    revisionStatusLabel = '반영 후 결산 상태 기록 없음';
   } else if (targetRevisionAtFetch !== appliedTargetRevision) {
     revisionStatus = 'TARGET_DRIFT';
-    revisionStatusLabel = '대상·반영 대상 리비전 불일치';
+    revisionStatusLabel = '마지막 반영 뒤 결산이 바뀜, 다시 불러오기 필요';
   }
   const capturedAt = timestampIso(mirror.capturedAt);
   return {
     status,
-    statusLabel: status === 'FRESH' ? '최신 mirror' : status === 'STALE' ? '갱신 필요' : `Mirror 상태 ${status}`,
+    statusLabel: status === 'FRESH' ? '최신 값 불러옴' : status === 'STALE' ? '다시 불러오기 필요' : status === 'EMPTY' ? '불러온 값 없음' : `상태 ${status}`,
     weeklyYear,
-    weeklyYearLabel: weeklyYear ? `${weeklyYear}년 주차형` : '주차형 계약 없음',
+    weeklyYearLabel: weeklyYear ? `${weeklyYear}년 주차 결산` : '주차 결산 연도 없음',
     annualYears,
     annualYearsLabel: annualYears.length > 0
-      ? `${annualYears.map((year) => `${year}년`).join(', ')} 연간형`
-      : '연간형 계약 없음',
+      ? `${annualYears.map((year) => `${year}년`).join(', ')} 연간 결산`
+      : '연간 결산 연도 없음',
     sourceRevision,
-    sourceRevisionLabel: sourceRevision || '원본 리비전 없음',
+    sourceRevisionLabel: sourceRevision || '불러온 값 없음',
     appliedSourceRevision,
-    appliedSourceRevisionLabel: appliedSourceRevision || '반영 리비전 없음',
+    appliedSourceRevisionLabel: appliedSourceRevision || '반영 기록 없음',
     targetRevisionAtFetch,
-    targetRevisionAtFetchLabel: targetRevisionAtFetch || '대상 리비전 없음',
+    targetRevisionAtFetchLabel: targetRevisionAtFetch || '기록 없음',
     appliedTargetRevision,
-    appliedTargetRevisionLabel: appliedTargetRevision || '반영 대상 리비전 없음',
+    appliedTargetRevisionLabel: appliedTargetRevision || '기록 없음',
     revisionStatus,
     revisionStatusLabel,
     capturedAt,
@@ -881,33 +893,33 @@ function buildSheetRevisionIssue(projectId, revisionStatus) {
   const issues = {
     SOURCE_MISSING: [
       'SHEET_SOURCE_REVISION_MISSING',
-      'Sheet 원본 리비전 없음',
-      `${projectId}의 sourceRevision이 없습니다.`,
+      '시트 불러온 값 없음',
+      `${projectId} 시트를 아직 불러오지 않았습니다. 프로젝트 시트 화면에서 시트 값 불러오기를 실행해 주세요.`,
     ],
     SOURCE_NOT_APPLIED: [
       'SHEET_SOURCE_REVISION_NOT_APPLIED',
-      'Sheet 원본 미반영',
-      `${projectId}의 appliedSourceRevision이 없습니다.`,
+      '시트 값 미반영',
+      `${projectId} 시트 값을 불러왔지만 결산에 반영한 기록이 없습니다.`,
     ],
     SOURCE_DRIFT: [
       'SHEET_SOURCE_REVISION_DRIFT',
-      'Sheet 원본·반영 리비전 불일치',
-      `${projectId}의 sourceRevision과 appliedSourceRevision이 다릅니다.`,
+      '시트 변경 후 미반영',
+      `${projectId} 시트가 마지막 반영 이후 바뀌었습니다. 변경 내용을 확인하고 반영해 주세요.`,
     ],
     TARGET_MISSING: [
       'SHEET_TARGET_REVISION_MISSING',
-      'Sheet 대상 리비전 없음',
-      `${projectId}의 targetRevisionAtFetch가 없습니다.`,
+      '불러올 때 결산 상태 기록 없음',
+      `${projectId} 시트를 불러올 때의 결산 상태가 기록되지 않았습니다. 다시 불러와 주세요.`,
     ],
     TARGET_NOT_APPLIED: [
       'SHEET_TARGET_REVISION_NOT_APPLIED',
-      'Sheet 대상 리비전 미반영',
-      `${projectId}의 appliedTargetRevision이 없습니다.`,
+      '반영 후 결산 상태 기록 없음',
+      `${projectId} 반영 후 결산 상태가 기록되지 않았습니다. 다시 불러와 주세요.`,
     ],
     TARGET_DRIFT: [
       'SHEET_TARGET_REVISION_DRIFT',
-      'Sheet 대상·반영 대상 리비전 불일치',
-      `${projectId}의 targetRevisionAtFetch와 appliedTargetRevision이 다릅니다.`,
+      '마지막 반영 뒤 결산이 바뀜',
+      `${projectId} 결산이 마지막 시트 반영 이후 바뀌었습니다. 시트 값을 다시 불러오면 정리됩니다.`,
     ],
   };
   const values = issues[revisionStatus];
@@ -936,7 +948,7 @@ function buildIdentityIssue(projectId, identity) {
   if (identity.status === 'UNLINKED') {
     return issue(
       'EXECUTIVE_APPROVER_PEOPLE_UID_UNLINKED',
-      '조직장 People UID 연결 필요',
+      '조직장 인력 명부 연결 필요',
       `${projectId}의 executiveApproverId가 People 명부와 연결되지 않았습니다.`,
       'ERROR',
     );
@@ -944,7 +956,7 @@ function buildIdentityIssue(projectId, identity) {
   if (identity.status === 'AMBIGUOUS') {
     return issue(
       'EXECUTIVE_APPROVER_PEOPLE_UID_AMBIGUOUS',
-      '조직장 People UID 중복',
+      '조직장 계정이 인력 명부에 둘 이상',
       `${projectId}의 executiveApproverId에 둘 이상의 People 레코드가 연결되어 있습니다.`,
       'ERROR',
     );
@@ -984,7 +996,7 @@ function buildRuntimeSuperadmins(memberIndex, membersAvailable, peopleIndex, peo
   if (!membersAvailable || !peopleAvailable) {
     return {
       status: 'UNAVAILABLE',
-      statusLabel: 'Runtime superadmin 조회 불가',
+      statusLabel: '관리자 목록 조회 불가',
       items: [],
     };
   }
@@ -1005,9 +1017,9 @@ function buildRuntimeSuperadmins(memberIndex, membersAvailable, peopleIndex, peo
         return {
           uid: member.uid,
           personId: null,
-          displayName: matches.length > 1 ? 'People UID 중복' : 'People UID 연결 필요',
+          displayName: matches.length > 1 ? '인력 명부에 같은 계정이 둘 이상' : '인력 명부 연결 필요',
           identityStatus: matches.length > 1 ? 'AMBIGUOUS' : 'UNLINKED',
-          identityStatusLabel: matches.length > 1 ? 'People UID 중복' : 'People UID 연결 필요',
+          identityStatusLabel: matches.length > 1 ? '인력 명부에 같은 계정이 둘 이상' : '인력 명부 연결 필요',
         };
       }
       return {
@@ -1015,11 +1027,11 @@ function buildRuntimeSuperadmins(memberIndex, membersAvailable, peopleIndex, peo
         personId: matches[0].personId,
         displayName: personDisplayName(matches[0]),
         identityStatus: 'LINKED',
-        identityStatusLabel: 'People UID 연결됨',
+        identityStatusLabel: '인력 명부 연결됨',
       };
     })
     .sort((left, right) => left.displayName.localeCompare(right.displayName, 'ko'));
-  return { status: 'AVAILABLE', statusLabel: 'Runtime member.role=admin 기준', items };
+  return { status: 'AVAILABLE', statusLabel: '활성 관리자 멤버', items };
 }
 
 function buildExecutiveApproverCandidates(peopleIndex, peopleAvailable, memberIndex, membersAvailable) {
@@ -1037,7 +1049,7 @@ function buildExecutiveApproverCandidates(peopleIndex, peopleAvailable, memberIn
     items.push({ uid, personId: matches[0].personId, displayName: personDisplayName(matches[0]) });
   }
   items.sort((left, right) => left.displayName.localeCompare(right.displayName, 'ko'));
-  return { status: 'AVAILABLE', statusLabel: 'People UID 연결 활성 멤버', items };
+  return { status: 'AVAILABLE', statusLabel: '조직장 후보 조회 완료', items };
 }
 
 export function createCashflowPeriodPolicyService({
@@ -1368,7 +1380,7 @@ export function createCashflowPeriodPolicyService({
 
       const identity = {
         status: 'LINKED',
-        statusLabel: 'People UID 연결됨',
+        statusLabel: '인력 명부 연결됨',
         uid: approverUid,
         personId: result.person.personId,
         displayName: personDisplayName(result.person),
@@ -1412,7 +1424,7 @@ export function createCashflowPeriodPolicyService({
             recoveryAction: 'VERIFIED',
             changed: false,
             replayed: true,
-            guide: '같은 원본 근거로 canonical 누적 마감 권한이 이미 복구되어 있습니다. 이후 변경이 필요하면 프로젝트의 정상 재오픈 절차를 사용해 주세요.',
+            guide: '같은 근거로 잠금 권한이 이미 복구되어 있습니다. 이후 변경이 필요하면 프로젝트의 재오픈 절차를 사용해 주세요.',
           };
         }
         throw applicationError(
@@ -1531,7 +1543,7 @@ export function createCashflowPeriodPolicyService({
       if (current?.status === 'EXACT_REPAIR_REQUIRED') {
         throw applicationError(
           'cashflow_close_reset_to_reclose_exact_recovery_required',
-          'immutable evidence가 완전하므로 누적 마감 권한 정확 복구를 먼저 실행해 주세요.',
+          '원본 기록이 온전해서 그대로 되살릴 수 있습니다. 누적 마감 권한 복구를 먼저 실행해 주세요.',
         );
       }
       if (!current || !['RESET_TO_RECLOSE_READY', 'RECLOSE_READY'].includes(current.status)) {
@@ -1584,7 +1596,7 @@ export function createCashflowPeriodPolicyService({
         ) {
           throw applicationError(
             'cashflow_close_reset_to_reclose_exact_recovery_required',
-            'immutable evidence가 완전하므로 누적 마감 권한 정확 복구를 먼저 실행해 주세요.',
+            '원본 기록이 온전해서 그대로 되살릴 수 있습니다. 누적 마감 권한 복구를 먼저 실행해 주세요.',
           );
         }
         if (
@@ -1616,8 +1628,8 @@ export function createCashflowPeriodPolicyService({
         ...result,
         statusLabel: replayed ? '재결산 준비 상태 확인' : '재결산 준비 완료',
         guide: replayed
-          ? '누적 authority와 mutable 월결산 header가 이미 격리된 상태를 확인했습니다. 추가 변경 없이 시트 검증본 확인과 정상 월결산을 계속 진행해 주세요.'
-          : '손상 authority와 현재 mutable 월결산 header의 감사 사본을 남기고 격리했습니다. 시트 검증본을 확인한 뒤 정상 월결산을 다시 진행해 주세요.',
+          ? '이미 정리된 상태입니다. 추가 변경 없이 시트 검증본을 확인하고 월 결산을 계속 진행해 주세요.'
+          : '손상된 잠금 권한과 진행 중 결산 기록을 감사 사본으로 옮겼습니다. 시트 검증본을 확인한 뒤 월 결산을 다시 진행해 주세요.',
         nextAction: recoveryNextAction(projectId),
       };
     },

@@ -458,9 +458,9 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
           revision: 2, closedByUid: 'head-uid', closedByLabel: '고인효(베리)',
         },
         sheet: {
-          status: 'FRESH', weeklyYear: 2026, weeklyYearLabel: '2026년 주차형',
-          annualYears: [2024, 2025], annualYearsLabel: '2024년, 2025년 연간형',
-          revisionStatus: 'ALIGNED', revisionStatusLabel: 'Source/target 리비전 일치', revisionTone: 'positive',
+          status: 'FRESH', weeklyYear: 2026, weeklyYearLabel: '2026년 주차 결산',
+          annualYears: [2024, 2025], annualYearsLabel: '2024년, 2025년 연간 결산',
+          revisionStatus: 'ALIGNED', revisionStatusLabel: '불러온 값이 결산에 반영됨', revisionTone: 'positive',
         },
         executiveApprover: {
           status: 'LINKED', uid: 'head-uid', personId: 'person-head', displayName: '고인효(베리)',
@@ -587,7 +587,7 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
     expect(driftResponse.status).toBe(200);
     expect(driftResponse.body.items[0].sheet).toMatchObject({
       revisionStatus: 'TARGET_DRIFT',
-      revisionStatusLabel: '대상·반영 대상 리비전 불일치',
+      revisionStatusLabel: '마지막 반영 뒤 결산이 바뀜, 다시 불러오기 필요',
     });
     expect(driftResponse.body.items[0].issues.map((entry) => entry.code))
       .toContain('SHEET_TARGET_REVISION_DRIFT');
@@ -605,7 +605,7 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
     expect(missingResponse.status).toBe(200);
     expect(missingResponse.body.items[0].sheet).toMatchObject({
       revisionStatus: 'TARGET_MISSING',
-      revisionStatusLabel: '대상 리비전 없음',
+      revisionStatusLabel: '불러올 때 결산 상태 기록 없음',
     });
     expect(missingResponse.body.items[0].issues.map((entry) => entry.code))
       .toContain('SHEET_TARGET_REVISION_MISSING');
@@ -968,8 +968,8 @@ describe('AXR 현금흐름 기간·마감 정책 BFF', () => {
         },
       },
     });
-    expect(recovery.guide).toContain('격리');
-    expect(recovery.guide).toContain('정상 월결산');
+    expect(recovery.guide).toContain('재결산 준비');
+    expect(recovery.guide).toContain('월 결산을 다시 실행');
   });
 
   it('authority/header/immutable evidence가 모두 없는 프로젝트는 추가 reset 없이 정상 재결산 가능 상태로 표시한다', async () => {
