@@ -1526,6 +1526,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             long revision = longValue(value.get("revision"), 0);
             if (revision <= evidenceRevisions.getOrDefault(weekKey, -1L)) continue;
             evidenceRevisions.put(weekKey, revision);
+            if ("REOPENED".equals(status)) {
+                // 회수가 최신이면 그 주는 아직 완료 안 된 주다. 근거를 비워 PENDING/MISSED 합성으로 보낸다.
+                evidenceByWeek.remove(weekKey);
+                continue;
+            }
             evidenceByWeek.put(weekKey, new CashflowWeeklyComplianceRecord(
                 weekKey,
                 yearMonth,
@@ -1538,6 +1543,20 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(value.get("auditId"), ""),
                 text(value.get("updateResult"), "")
             ));
+        }
+        // 현재 완료 문서가 OPEN(회수됨) 이면 버전 이력과 무관하게 그 주는 완료가 아니다.
+        // 버전 없이 회수된 기록(REOPENED 버전 도입 이전)도 이걸로 정직하게 보인다.
+        QuerySnapshot completionSnapshot = query(
+            db.collection("orgs/" + tenantId + "/cashflow_weekly_update_completions")
+                .whereEqualTo("projectId", projectId)
+        );
+        for (DocumentSnapshot document : completionSnapshot.getDocuments()) {
+            Map<String, Object> value = data(document);
+            if (!"OPEN".equals(text(value.get("status"), ""))) continue;
+            String yearMonth = text(value.get("yearMonth"), "");
+            int weekNo = intValue(value.get("weekNo"), 0);
+            if (!yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])") || weekNo < 1 || weekNo > 5) continue;
+            evidenceByWeek.remove(yearMonth + "-w" + weekNo);
         }
         java.time.ZonedDateTime now = clock.instant().atZone(java.time.ZoneId.of("Asia/Seoul"));
         CashflowWeekScope currentScope = financeWeekScope(now.toLocalDate());
@@ -2080,6 +2099,30 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("reopenReason", request.reason() == null ? "" : request.reason().trim());
         patch.put("updatedAt", reopenedAt.toString());
         set(ref, patch);
+        // 준수 이력은 버전 문서(불변)에서 최고 revision 을 읽는다. 회수도 버전을 남겨야
+        // 이력이 "완료됨" 에 머물지 않는다 — 안 남기면 회수 뒤에도 대시보드가 완료로 보여 회수 버튼이 다시 뜬다.
+        String versionId = documentId + "-r" + Math.addExact(currentRevision, 1);
+        DocumentReference versionRef = db.document(cashflowWeeklyUpdateCompletionVersionPath(actor.tenantId(), versionId));
+        if (get(versionRef).exists()) {
+            throw new WeeklyExpenseConflictException("Weekly compliance history version already exists and is immutable.");
+        }
+        Map<String, Object> version = new LinkedHashMap<>();
+        version.put("id", versionId);
+        version.put("tenantId", actor.tenantId());
+        version.put("projectId", projectId);
+        version.put("yearMonth", request.yearMonth());
+        version.put("weekNo", request.weekNo());
+        version.put("revision", Math.addExact(currentRevision, 1));
+        version.put("complianceStatus", "REOPENED");
+        version.put("deadline", text(current.get("deadline"), ""));
+        version.put("completedAt", "");
+        version.put("reopenedAt", reopenedAt.toString());
+        version.put("reopenedByUid", actor.id());
+        version.put("reopenedByName", actor.name());
+        version.put("reopenReason", request.reason() == null ? "" : request.reason().trim());
+        version.put("previousSnapshotHash", text(current.get("snapshotHash"), ""));
+        version.put("createdAt", reopenedAt.toString());
+        set(versionRef, version);
         return toWeeklyCompletionRecord(
             projectId,
             request.yearMonth(),
