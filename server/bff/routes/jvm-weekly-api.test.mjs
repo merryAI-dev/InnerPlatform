@@ -3501,7 +3501,11 @@ describe('JVM weekly API BFF proxy', () => {
     await request(app)
       .get('/api/v1/cashflow/project-a/weekly-update-compliance?limit=25&cursor=opaque%2Fcursor')
       .expect(200)
-      .expect((response) => expect(response.body).toEqual(canonical));
+      // 라벨은 BFF 가 붙인다. 화면이 자기 표를 들고 있다가 대시보드와 어긋났던 자리.
+      .expect((response) => expect(response.body).toEqual({
+        ...canonical,
+        items: [{ ...canonical.items[0], statusLabel: '기한 내 완료' }],
+      }));
     await request(app)
       .get('/api/v1/cashflow/project-a/weekly-update-compliance?limit=0')
       .expect(400);
@@ -4458,6 +4462,8 @@ describe('JVM weekly API BFF proxy', () => {
         })),
         sheetFacts: {
           projectionActualDifferences: [{ yearMonth: '2026-06', weekNo: 1, amount: 198 }],
+          annualCashflowTotals: [{ year: 2026, projection: { totalIn: 654 }, actual: { totalIn: 321 } }],
+          cashflowGrandTotals: { projection: { totalIn: 987 }, actual: { totalIn: 654 } },
         },
         depositScheduleRows: [],
         confirmations: [],
@@ -4479,6 +4485,16 @@ describe('JVM weekly API BFF proxy', () => {
         .expect(200)).body.dashboard;
     };
     const baseline = await readDashboard(createMonthCloseDb());
+    // 결산된 회차의 연간 열·총계는 닫힌 스냅샷에서 온다. 미러 상태와 무관하게 AVAILABLE 이어야
+    // 화면이 값을 지우지 않는다 (예전엔 미러를 안 읽었다는 이유로 UNAVAILABLE 을 돌려줬다).
+    expect(baseline.sheetFormulaValues).toMatchObject({
+      status: 'AVAILABLE',
+      reason: null,
+      sourceRevision: `sha256:${'f'.repeat(64)}`,
+      targetRevision: `sha256:${'a'.repeat(64)}`,
+      annual: [{ year: 2026, projection: { totalIn: 654 }, actual: { totalIn: 321 } }],
+      grandTotals: { projection: { totalIn: 987 }, actual: { totalIn: 654 } },
+    });
     const sabotagedDb = createMonthCloseDb();
     sabotageMirror(sabotagedDb, 'orgs/tenant-a/cashflow_sheet_mirrors/project-a');
 

@@ -2828,7 +2828,17 @@ async function composeCashflowMonthDashboard({
   const sourceRows = sourceDepositRows(sheetFacts, yearMonth);
   const formulaSnapshot = amendedCurrent
     ? amendedSheetFormulaSnapshot(mirror, amendmentEvidence)
-    : {
+    : closedSnapshot
+      // 결산된 회차는 미러를 읽지 않는다. 값은 닫힌 스냅샷의 sheetFacts 가 전부이므로 상태도 그것으로 정한다.
+      // 예전엔 "미러를 읽었나"로 정해서, 값이 응답에 다 있는데도 화면이 연간 열·총계를 확인 불가로 지웠다.
+      ? {
+        status: sheetFacts ? 'AVAILABLE' : 'UNAVAILABLE',
+        reason: sheetFacts ? null : 'CLOSED_SNAPSHOT_SHEET_FACTS_MISSING',
+        sourceRevision: readOptionalText(closedSnapshot.sourceFingerprint) || null,
+        targetRevision: readOptionalText(closedSnapshot.targetRevision) || null,
+        sheetFacts,
+      }
+      : {
       status: mirror ? 'AVAILABLE' : 'UNAVAILABLE',
       reason: mirror ? null : mirrorRead.available ? 'SHEET_MIRROR_MISSING' : 'SHEET_MIRROR_UNAVAILABLE',
       sourceRevision: readOptionalText(closedSnapshot?.sourceFingerprint) || readOptionalText(mirror?.sourceRevision) || null,
@@ -3395,7 +3405,14 @@ export function mountJvmWeeklyApiRoutes(app, {
       || !Number.isSafeInteger(Number(result?.missedCount))) {
       throw createHttpError(502, 'JVM 주간 정산 이력을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
     }
-    return result;
+    // 라벨은 여기서 한 번만. 화면이 자기 표를 들고 있으면 대시보드와 어긋난다 (기한 지남 vs 기한 경과·미준수).
+    return {
+      ...result,
+      items: result.items.map((item) => ({
+        ...item,
+        statusLabel: cashflowWeeklyStatusLabel(readOptionalText(item?.status), true),
+      })),
+    };
   }
   const javaWeeklyClient = createJavaWeeklyClient({
     env,

@@ -484,7 +484,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('completeCashflowWeeklyUpdateViaBff');
     expect(source).toContain('주간 정산 완료');
     expect(source).toContain('completedBy');
-    expect(source).toContain('기한 후 완료');
+    // 주간 상태 라벨은 BFF(cashflowWeeklyStatusLabel) 가 준다. 화면이 자기 표를 들면 대시보드와 어긋난다.
+    expect(source).toContain('{week.statusLabel}');
+    expect(source).not.toContain('기한 후 완료·미준수');
     expect(source).toContain("updateResult: weeklyUpdateResult");
     expect(source).toContain("['CHANGED', '변경사항 반영 완료'");
     expect(source).toContain("['NO_CHANGES', '변경사항 없음'");
@@ -498,8 +500,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('weeklyProjectionValidation(error)');
     expect(source).toContain('resolveCashflowWeeklyCompletionErrorMessage(');
     expect(source).toContain('fetchCashflowWeeklyComplianceViaBff');
-    expect(source).toContain("week.status === 'ON_TIME'");
-    expect(source).toContain("week.status === 'COMPLETED_LATE'");
+    expect(source).not.toContain("week.status === 'ON_TIME' ?");
+    expect(source).not.toContain("week.status === 'COMPLETED_LATE' ?");
   });
 
   // 계약 변경(2026-08-09): sticky 는 가장 가까운 스크롤 조상에만 붙는다
