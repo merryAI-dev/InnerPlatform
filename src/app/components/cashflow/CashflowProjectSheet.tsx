@@ -395,6 +395,8 @@ export function CashflowProjectSheet({
   const [weeklyWithdrawBusy, setWeeklyWithdrawBusy] = useState(false);
   const [weeklyWithdrawError, setWeeklyWithdrawError] = useState('');
   const [weeklyConfirmBusy, setWeeklyConfirmBusy] = useState(false);
+  // 완료 요청·회수·확정이 실제로 접수됐다는 확인. 상태 배지만으로는 "내가 누른 것이 먹혔는지" 가 안 보인다.
+  const [weeklyActionNotice, setWeeklyActionNotice] = useState('');
   const [weeklyProjectionWarning, setWeeklyProjectionWarning] = useState<WeeklyProjectionValidation | null>(null);
   const [weeklyHistoryOpen, setWeeklyHistoryOpen] = useState(false);
   const [weeklyComplianceHistory, setWeeklyComplianceHistory] = useState<CashflowWeeklyComplianceItem[]>([]);
@@ -833,6 +835,12 @@ export function CashflowProjectSheet({
     void loadMonthCloseRequest();
   }, [loadMonthCloseRequest]);
 
+  useEffect(() => {
+    if (!weeklyActionNotice) return;
+    const timer = window.setTimeout(() => setWeeklyActionNotice(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [weeklyActionNotice]);
+
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
     if (!weeklyUpdateResult) return;
     if (monthCloseActions?.completeWeekly.enabled !== true) {
@@ -846,6 +854,7 @@ export function CashflowProjectSheet({
       return;
     }
     setWeeklyCompletionBusy(true);
+    setWeeklyActionNotice('');
     const startedAt = Date.now();
     const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
     logCashflowSettlement({
@@ -887,6 +896,9 @@ export function CashflowProjectSheet({
       await loadCashflowMonthClose();
       setWeeklyCompletionOpen(false);
       setWeeklyCompletionError('');
+      setWeeklyActionNotice(result.alreadyCompleted
+        ? '이미 완료 요청된 주입니다. 현재 상태를 다시 불러왔어요.'
+        : '주간 정산 완료 요청을 보냈어요. 조직장 확정을 기다립니다.');
       setWeeklyProjectionWarning(null);
       setWeeklyUpdateResult('');
       logCashflowSettlement({
@@ -927,6 +939,7 @@ export function CashflowProjectSheet({
     if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) return;
     setWeeklyWithdrawBusy(true);
     setWeeklyWithdrawError('');
+    setWeeklyActionNotice('');
     const startedAt = Date.now();
     try {
       const actor = await resolveBffActor();
@@ -939,6 +952,7 @@ export function CashflowProjectSheet({
         weekNo: currentDeadline.weekNo,
       });
       await loadCashflowMonthClose();
+      setWeeklyActionNotice('완료 요청을 회수했어요. 값을 고친 뒤 다시 요청할 수 있어요.');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.weekly_settlement.withdraw',
@@ -972,6 +986,7 @@ export function CashflowProjectSheet({
     if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) return;
     setWeeklyConfirmBusy(true);
     setWeeklyWithdrawError('');
+    setWeeklyActionNotice('');
     const startedAt = Date.now();
     try {
       const actor = await resolveBffActor();
@@ -984,6 +999,7 @@ export function CashflowProjectSheet({
         weekNo: currentDeadline.weekNo,
       });
       await loadCashflowMonthClose();
+      setWeeklyActionNotice('주간 정산을 확정했어요. 이제 이 주는 잠깁니다.');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.weekly_settlement.confirm',
@@ -2756,6 +2772,7 @@ export function CashflowProjectSheet({
                   ) : null}
                 </div>
                 {weeklyWithdrawError ? <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800">{weeklyWithdrawError}</div> : null}
+                {weeklyActionNotice && !weeklyWithdrawError ? <div role="status" className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] leading-5 text-emerald-900">{weeklyActionNotice}</div> : null}
                 <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
                   <span>누적 미준수 <strong className="ml-1 text-red-700">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.missedCount, '회')}</strong></span>
                   <span>기한 내 완료 <strong className="ml-1 text-primary">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.completedCount, '회')}</strong></span>
