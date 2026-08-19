@@ -14,6 +14,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
@@ -224,6 +225,7 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         }
     }
 
+    // lockState: SUBMITTED(완료 요청, 확정 대기) | LOCKED(확정) | ""(완료 아님)
     record CashflowWeeklyComplianceRecord(
         String id,
         String yearMonth,
@@ -234,7 +236,8 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         String completedBy,
         String operationId,
         String auditId,
-        String updateResult
+        String updateResult,
+        String lockState
     ) {}
 
     record CashflowWeeklyCompliancePage(
@@ -467,6 +470,18 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
 
     default CashflowCumulativeCloseHead findCashflowCumulativeCloseHead(String tenantId, String projectId) {
         return null;
+    }
+
+    default CashflowWeeklyUpdateCompletionRecord confirmCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        ConfirmCashflowWeeklyUpdateRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_weekly_confirm_backend_unavailable",
+            "Cashflow weekly confirm requires the Firestore transaction backend."
+        );
     }
 
     default CashflowWeeklyUpdateCompletionRecord reopenCashflowWeeklyUpdate(

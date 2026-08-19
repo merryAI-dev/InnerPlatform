@@ -44,6 +44,7 @@ import {
   withdrawCashflowMonthCloseRequestViaBff,
   saveCashflowMonthCloseApproverViaBff,
   completeCashflowWeeklyUpdateViaBff,
+  confirmCashflowWeeklyUpdateViaBff,
   reopenCashflowWeeklyUpdateViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
@@ -393,6 +394,7 @@ export function CashflowProjectSheet({
   const [weeklyCompletionError, setWeeklyCompletionError] = useState('');
   const [weeklyWithdrawBusy, setWeeklyWithdrawBusy] = useState(false);
   const [weeklyWithdrawError, setWeeklyWithdrawError] = useState('');
+  const [weeklyConfirmBusy, setWeeklyConfirmBusy] = useState(false);
   const [weeklyProjectionWarning, setWeeklyProjectionWarning] = useState<WeeklyProjectionValidation | null>(null);
   const [weeklyHistoryOpen, setWeeklyHistoryOpen] = useState(false);
   const [weeklyComplianceHistory, setWeeklyComplianceHistory] = useState<CashflowWeeklyComplianceItem[]>([]);
@@ -961,6 +963,51 @@ export function CashflowProjectSheet({
       setWeeklyWithdrawBusy(false);
     }
   }, [loadCashflowMonthClose, monthCloseActions?.reopenWeekly, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, yearMonth]);
+
+  // 주정산 확정: 완료 요청된 주를 프로젝트 조직장이 잠근다. 서버(actions.confirmWeekly) 가 조직장인지 판정한다.
+  const handleConfirmWeeklyUpdate = useCallback(async (): Promise<void> => {
+    if (monthCloseActions?.confirmWeekly.enabled !== true) return;
+    const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
+    if (!currentDeadline) return;
+    if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) return;
+    setWeeklyConfirmBusy(true);
+    setWeeklyWithdrawError('');
+    const startedAt = Date.now();
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const result = await confirmCashflowWeeklyUpdateViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        yearMonth: currentDeadline.yearMonth,
+        weekNo: currentDeadline.weekNo,
+      });
+      await loadCashflowMonthClose();
+      logCashflowSettlement({
+        phase: 'success',
+        operation: 'cashflow.weekly_settlement.confirm',
+        projectId,
+        yearMonth: result.yearMonth,
+        weekNo: result.weekNo,
+        durationMs: Date.now() - startedAt,
+        summary: { revision: result.revision },
+      });
+    } catch (error) {
+      logCashflowSettlement({
+        phase: 'error',
+        operation: 'cashflow.weekly_settlement.confirm',
+        projectId,
+        yearMonth: currentDeadline.yearMonth,
+        weekNo: currentDeadline.weekNo,
+        durationMs: Date.now() - startedAt,
+        error,
+      });
+      setWeeklyWithdrawError(resolveApiErrorMessage(error, '주간 정산을 확정하지 못했습니다. 화면을 다시 불러온 뒤 시도해 주세요.'));
+    } finally {
+      setWeeklyConfirmBusy(false);
+    }
+  }, [loadCashflowMonthClose, monthCloseActions?.confirmWeekly, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, yearMonth]);
 
   const loadWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
     setWeeklyComplianceHistoryLoading(true);
@@ -2679,7 +2726,7 @@ export function CashflowProjectSheet({
                       }}
                     >
                       {weeklyCompletionBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
-                      주간 정산 완료
+                      주간 정산 완료 요청
                     </Button>
                   ) : null}
                   {monthCloseActions?.reopenWeekly.enabled ? (
@@ -2692,7 +2739,19 @@ export function CashflowProjectSheet({
                       onClick={() => void handleWithdrawWeeklyUpdate()}
                     >
                       {weeklyWithdrawBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Undo2 className="mr-1 h-3 w-3" />}
-                      주간 정산 회수
+                      요청 회수
+                    </Button>
+                  ) : null}
+                  {monthCloseActions?.confirmWeekly.enabled ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 shrink-0 rounded-md bg-[#17324D] px-3 text-[12px] font-semibold text-white hover:bg-slate-800"
+                      disabled={weeklyConfirmBusy || monthCloseLoading}
+                      onClick={() => void handleConfirmWeeklyUpdate()}
+                    >
+                      {weeklyConfirmBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <CheckCircle2 className="mr-1 h-3 w-3" />}
+                      주간 정산 확정
                     </Button>
                   ) : null}
                 </div>
@@ -3085,7 +3144,7 @@ export function CashflowProjectSheet({
       }}>
         <AlertDialogContent className="sm:max-w-[620px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>주간 정산 완료</AlertDialogTitle>
+            <AlertDialogTitle>주간 정산 완료 요청</AlertDialogTitle>
             <AlertDialogDescription>대상 주차와 그 이후 15개 재무주차(총 16주·256칸)의 JVM 저장 Projection 값을 확인합니다.</AlertDialogDescription>
           </AlertDialogHeader>
           {weeklyCompletionError ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-[12px] leading-5 text-red-800">{weeklyCompletionError}</div> : null}

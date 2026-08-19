@@ -277,6 +277,7 @@ describe('platform-bff-client', () => {
     const actions = {
       completeWeekly: { enabled: false, guide: '주간 가이드' },
       reopenWeekly: { enabled: false, guide: '주간 회수 가이드' },
+      confirmWeekly: { enabled: false, guide: '주간 확정 가이드' },
       changeExecutiveApprover: { enabled: false, guide: '조직장 가이드' },
       requestMonthClose: { enabled: false, guide: '서버 가이드', label: '월 결산 요청' },
       withdrawMonthClose: { enabled: false, guide: '회수 가이드' },

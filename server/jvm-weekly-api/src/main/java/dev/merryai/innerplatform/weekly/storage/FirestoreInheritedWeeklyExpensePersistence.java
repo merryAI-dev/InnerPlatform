@@ -32,6 +32,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
@@ -1060,7 +1061,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 DocumentSnapshot snapshot = get(ref);
                 return snapshot.exists() ? data(snapshot) : Map.of();
             });
-            if ("LOCKED".equals(text(document.get("status"), ""))) {
+            if (isSettledWeeklyStatus(text(document.get("status"), ""))) {
                 locked.add(new CashflowSettledWeekChangeConfirmation.Week(
                     scope.yearMonth(),
                     scope.weekNo(),
@@ -1094,7 +1095,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 DocumentSnapshot snapshot = get(ref);
                 return snapshot.exists() ? data(snapshot) : Map.of();
             });
-            if ("LOCKED".equals(text(document.get("status"), ""))) {
+            if (isSettledWeeklyStatus(text(document.get("status"), ""))) {
                 locked.add(Map.entry(scope, document));
             }
         }
@@ -1541,7 +1542,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(value.get("completedBy"), text(value.get("completedByUid"), "")),
                 text(value.get("operationId"), ""),
                 text(value.get("auditId"), ""),
-                text(value.get("updateResult"), "")
+                text(value.get("updateResult"), ""),
+                // lockState 도입 전 버전(확정 개념 없던 완료) 은 확정으로 본다.
+                text(value.get("lockState"), "LOCKED")
             ));
         }
         // 현재 완료 문서가 OPEN(회수됨) 이면 버전 이력과 무관하게 그 주는 완료가 아니다.
@@ -1595,7 +1598,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     all.add(new CashflowWeeklyComplianceRecord(
                         weekKey, scope.yearMonth(), scope.weekNo(), deadline.toString(),
                         clock.instant().isAfter(deadline) ? "MISSED" : "PENDING",
-                        "", "", "", "", ""
+                        "", "", "", "", "", ""
                     ));
                 }
                 scope = nextFinanceWeek(scope);
@@ -1713,7 +1716,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 || request.weekNo() != intValue(existing.get("weekNo"), 0)) {
                 throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
             }
-            if ("LOCKED".equals(text(existing.get("status"), ""))) {
+            if (isSettledWeeklyStatus(text(existing.get("status"), ""))) {
                 requireWeeklyCompletionIntegrity(existing);
                 lockedCompletion = existing;
             }
@@ -1840,7 +1843,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         completion.put("projectId", projectId);
         completion.put("yearMonth", request.yearMonth());
         completion.put("weekNo", request.weekNo());
-        completion.put("status", "LOCKED");
+        // 완료 요청. 확정(LOCKED) 은 조직장이 별도로 한다. 준수(기한 내/후) 는 이 요청 시각으로 판정한다.
+        completion.put("status", "SUBMITTED");
         completion.put("revision", revision);
         completion.put("reopenCount", reopenCount);
         completion.put("snapshot", lockedSnapshot);
@@ -1877,6 +1881,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         version.put("completedBy", completedBy);
         version.put("deadline", deadline.toString());
         version.put("complianceStatus", weeklyComplianceStatus(request.yearMonth(), request.weekNo(), completedAt, deadline));
+        version.put("lockState", "SUBMITTED");
         version.put("operationId", request.idempotencyKey());
         version.put("auditId", weeklyComplianceAuditId(actor.tenantId(), projectId, request.idempotencyKey()));
         if (!complianceHeadSnapshot.exists()) {
@@ -2081,12 +2086,26 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || request.weekNo() != intValue(current.get("weekNo"), 0)) {
             throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
         }
-        if (!"LOCKED".equals(text(current.get("status"), ""))) {
-            throw new WeeklyExpenseConflictException("Only a locked cashflow week can be reopened.");
+        String currentStatus = text(current.get("status"), "");
+        if (!isSettledWeeklyStatus(currentStatus)) {
+            throw new WeeklyExpenseConflictException("Only a submitted or locked cashflow week can be reopened.");
         }
         long currentRevision = longValue(current.get("revision"), 0);
         if (currentRevision != request.expectedRevision()) {
             throw new WeeklyExpenseConflictException("Cashflow weekly lock revision changed. Reload before reopening.");
+        }
+        if ("LOCKED".equals(currentStatus)) {
+            // 확정된 주를 되돌리는 것은 재오픈: 사유가 있어야 하고 프로젝트 조직장이나 관리자만.
+            if (request.reason() == null || request.reason().isBlank()) {
+                throw new WeeklyExpenseConflictException("A reason is required to reopen a confirmed cashflow week.");
+            }
+            DocumentSnapshot projectSnapshot = get(db.document("orgs/" + actor.tenantId() + "/projects/" + projectId));
+            Map<String, Object> project = projectSnapshot.exists() ? data(projectSnapshot) : Map.of();
+            String role = text(actor.role(), "").trim().toLowerCase(java.util.Locale.ROOT);
+            boolean approver = actor.id().equals(text(project.get("executiveApproverId"), ""));
+            if (!approver && !"admin".equals(role) && !"finance".equals(role) && !"tenant_admin".equals(role)) {
+                throw leaseError(403, "cashflow_weekly_reopen_forbidden", "Only the project approver or an admin can reopen a confirmed cashflow week.");
+            }
         }
         Instant reopenedAt = clock.instant();
         Map<String, Object> patch = new LinkedHashMap<>();
@@ -2130,6 +2149,77 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             merge(current, patch),
             false
         );
+    }
+
+    @Override
+    public CashflowWeeklyUpdateCompletionRecord confirmCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        ConfirmCashflowWeeklyUpdateRequest request
+    ) {
+        requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
+        requireYearMonth(request.yearMonth());
+        requireCashflowMonthsOpen(actor.tenantId(), projectId, List.of(request.yearMonth()));
+        DocumentSnapshot projectSnapshot = get(db.document("orgs/" + actor.tenantId() + "/projects/" + projectId));
+        Map<String, Object> project = projectSnapshot.exists() ? data(projectSnapshot) : Map.of();
+        if (!actor.id().equals(text(project.get("executiveApproverId"), ""))) {
+            throw leaseError(403, "cashflow_weekly_confirm_forbidden", "Only the project approver can confirm a cashflow week.");
+        }
+        String documentId = projectId + "-" + request.yearMonth() + "-w" + request.weekNo();
+        DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(actor.tenantId(), documentId));
+        DocumentSnapshot snapshot = get(ref);
+        if (!snapshot.exists()) {
+            throw new WeeklyExpenseConflictException("Only a submitted cashflow week can be confirmed.");
+        }
+        Map<String, Object> current = data(snapshot);
+        if (!projectId.equals(text(current.get("projectId"), ""))
+            || !request.yearMonth().equals(text(current.get("yearMonth"), ""))
+            || request.weekNo() != intValue(current.get("weekNo"), 0)) {
+            throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
+        }
+        if (!"SUBMITTED".equals(text(current.get("status"), ""))) {
+            throw new WeeklyExpenseConflictException("Only a submitted cashflow week can be confirmed.");
+        }
+        long currentRevision = longValue(current.get("revision"), 0);
+        if (currentRevision != request.expectedRevision()) {
+            throw new WeeklyExpenseConflictException("Cashflow weekly lock revision changed. Reload before confirming.");
+        }
+        Instant confirmedAt = clock.instant();
+        long nextRevision = Math.addExact(currentRevision, 1);
+        Map<String, Object> patch = new LinkedHashMap<>();
+        patch.put("status", "LOCKED");
+        patch.put("revision", nextRevision);
+        patch.put("confirmedAt", confirmedAt.toString());
+        patch.put("confirmedByUid", actor.id());
+        patch.put("confirmedByName", actor.name());
+        patch.put("updatedAt", confirmedAt.toString());
+        set(ref, patch);
+        // 준수 이력 버전: 준수 판정(요청 시각 기준) 은 그대로, 잠금 상태만 LOCKED 로.
+        String versionId = documentId + "-r" + nextRevision;
+        DocumentReference versionRef = db.document(cashflowWeeklyUpdateCompletionVersionPath(actor.tenantId(), versionId));
+        if (get(versionRef).exists()) {
+            throw new WeeklyExpenseConflictException("Weekly compliance history version already exists and is immutable.");
+        }
+        Map<String, Object> version = new LinkedHashMap<>();
+        version.put("id", versionId);
+        version.put("tenantId", actor.tenantId());
+        version.put("projectId", projectId);
+        version.put("yearMonth", request.yearMonth());
+        version.put("weekNo", request.weekNo());
+        version.put("revision", nextRevision);
+        version.put("complianceStatus", text(current.get("complianceStatus"), ""));
+        version.put("lockState", "LOCKED");
+        version.put("deadline", text(current.get("deadline"), ""));
+        version.put("completedAt", text(current.get("completedAt"), ""));
+        version.put("completedBy", text(current.get("completedByName"), text(current.get("completedByUid"), "")));
+        version.put("operationId", text(current.get("operationId"), ""));
+        version.put("auditId", text(current.get("auditId"), ""));
+        version.put("updateResult", text(current.get("updateResult"), ""));
+        version.put("confirmedAt", confirmedAt.toString());
+        version.put("confirmedByUid", actor.id());
+        version.put("createdAt", confirmedAt.toString());
+        set(versionRef, version);
+        return toWeeklyCompletionRecord(projectId, request.yearMonth(), request.weekNo(), merge(current, patch), false);
     }
 
     @Override
@@ -2247,7 +2337,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     || weekNo > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
                     throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
                 }
-                if (!"LOCKED".equals(text(completion.get("status"), ""))) continue;
+                if (!isSettledWeeklyStatus(text(completion.get("status"), ""))) continue;
                 Map<String, Object> weeklyPatch = new LinkedHashMap<>();
                 weeklyPatch.put("status", "OPEN");
                 weeklyPatch.put("revision", Math.addExact(longValue(completion.get("revision"), 0), 1));
@@ -3221,6 +3311,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private String monthlyClosePath(String tenantId, String projectId, String yearMonth) {
         return "orgs/" + tenantId + "/monthly_closes/" + projectId + "-" + yearMonth;
+    }
+
+    // 완료 요청(SUBMITTED) 부터 그 주는 잠긴다. 확정(LOCKED) 은 조직장이 한다. 둘 다 "정산된 주" 로 본다.
+    private static boolean isSettledWeeklyStatus(String status) {
+        return "SUBMITTED".equals(status) || "LOCKED".equals(status);
     }
 
     private String cashflowWeeklyUpdateCompletionPath(String tenantId, String documentId) {
@@ -4320,7 +4415,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private void requireWeeklyCompletionIntegrity(Map<String, Object> completion) {
-        if (!"LOCKED".equals(text(completion.get("status"), ""))) return;
+        if (!isSettledWeeklyStatus(text(completion.get("status"), ""))) return;
         Map<String, Object> lockedSnapshot = nestedMap(completion.get("snapshot"));
         String snapshotHash = text(completion.get("snapshotHash"), "");
         if (lockedSnapshot.isEmpty() || snapshotHash.isBlank() || !snapshotHash.equals(hashCanonicalJson(lockedSnapshot))) {

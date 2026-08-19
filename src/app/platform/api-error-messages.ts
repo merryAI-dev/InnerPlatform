@@ -104,6 +104,26 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '승인 결과를 확인하고 있어요. 잠시 후 월 결산 상태를 확인해 주세요.',
     resolution: 'wait',
   }],
+  ['cashflow_weekly_reopen_not_locked', {
+    guide: '완료 요청되거나 확정된 주간 정산만 되돌릴 수 있어요. 화면을 다시 불러온 뒤 상태를 확인해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_weekly_reopen_reason_required', {
+    guide: '조직장이 확정한 주간 정산은 사유와 함께 재오픈해야 해요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_weekly_reopen_forbidden', {
+    guide: '확정된 주간 정산은 프로젝트 조직장이나 관리자만 되돌릴 수 있어요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_weekly_confirm_not_submitted', {
+    guide: '완료 요청된 주간 정산만 확정할 수 있어요. 화면을 다시 불러온 뒤 상태를 확인해 주세요.',
+    resolution: 'retry',
+  }],
+  ['cashflow_weekly_confirm_forbidden', {
+    guide: '주간 정산 확정은 프로젝트 조직장만 할 수 있어요.',
+    resolution: 'contact',
+  }],
   ['cashflow_month_closed', {
     guide: '이미 누적 결산이 끝난 월이에요. 수정이 필요하면 관리자에게 월 재오픈을 요청해 주세요.',
     resolution: 'contact',
