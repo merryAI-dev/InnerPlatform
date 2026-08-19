@@ -2905,12 +2905,26 @@ describe('cashflow sheet lab route', () => {
         idempotencyKey: 'stage-pending-force',
       })
       .expect(200);
+    // 시트가 진실인 쓰기 모드(replaceAllActualSources)여도 결재 중인 회차의 차이는 그대로 보고되고,
+    // 확인 근거 없이는 반영되지 않는다. 7월엔 이 플래그가 결재 차단까지 같이 껐다.
     expect(forceStage.body.status).toBe('READY');
-    expect(forceStage.body.pendingApprovalDifferenceCount).toBe(0);
-    expect(forceStage.body.pendingApprovalDifferenceManifestHash).toMatch(/^sha256:[a-f0-9]{64}$/);
-    await request(app)
+    expect(forceStage.body.pendingApprovalDifferenceCount).toBe(160);
+    expect(forceStage.body.pendingApprovalDifferenceManifestHash).toBe(stage.body.pendingApprovalDifferenceManifestHash);
+    const forcedWithoutEvidence = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: forceStage.body.runId, replaceAllActualSources: true, idempotencyKey: 'apply-pending-force' })
+      .expect(409);
+    expect(forcedWithoutEvidence.body.code).toBe('cashflow_pending_approval_confirmation_required');
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({
+        stageRunId: forceStage.body.runId,
+        replaceAllActualSources: true,
+        acceptPendingApprovalDifferences: true,
+        pendingApprovalDifferenceCount: forceStage.body.pendingApprovalDifferenceCount,
+        pendingApprovalDifferenceManifestHash: forceStage.body.pendingApprovalDifferenceManifestHash,
+        idempotencyKey: 'apply-pending-force-confirmed',
+      })
       .expect(200);
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
   });
@@ -3445,16 +3459,32 @@ describe('cashflow sheet lab route', () => {
         expect(response.body.code).toBe('cashflow_sheet_target_revision_conflict');
       });
 
-    const overwriteStage = await request(app)
+    // 쓰기 모드는 이 검사를 우회하지 못한다. 팝업의 diff 는 불러온 시점의 결산 기준이라,
+    // 결산이 움직였으면 다시 불러와야 한다.
+    await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({
         expectedMirrorRevision: mirror.body.sourceRevision,
         replaceAllActualSources: true,
         idempotencyKey: 'stage-target-drift-overwrite',
       })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_target_revision_conflict');
+      });
+    const refreshed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-target-drift-again' })
+      .expect(200);
+    const overwriteStage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: refreshed.body.sourceRevision,
+        replaceAllActualSources: true,
+        idempotencyKey: 'stage-target-drift-overwrite-refreshed',
+      })
       .expect(200);
     expect(overwriteStage.body.replaceAllActualSources).toBe(true);
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
   });
 
   it('applies a staged pinned month through JVM without rereading the Google Sheet', async () => {
