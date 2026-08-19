@@ -50,7 +50,17 @@ describe('cashflow action chrome', () => {
     expect(cashflowProjectSheetSource).toContain('월 결산 승인 요청');
     expect(cashflowProjectSheetSource).toContain('monthCloseActions?.requestMonthClose.enabled');
     expect(cashflowProjectSheetSource).toContain('monthCloseActions?.requestMonthClose.guide');
-    expect(cashflowProjectSheetSource).not.toContain('dashboard?.validation?.blockers');
+    // 2026-08-19: 막는 사유를 회색 안내 한 줄로만 보여줘서 경고인지 알 수 없었다. 이제 서버가 준
+    // 블로커를 빨간 경고로 펴고, 어느 칸인지(셀 주소·주차)까지 보여준다. 판정은 서버 그대로 쓴다.
+    expect(cashflowProjectSheetSource).toContain('monthCloseBlockers');
+    expect(cashflowProjectSheetSource).toContain('describeCashflowMonthCloseIssue');
+    expect(cashflowProjectSheetSource).toContain('월 결산을 진행할 수 없어요');
+    expect(cashflowProjectSheetSource).not.toContain('validation.blockers.filter');
+    expect(cashflowProjectSheetSource).not.toContain('validation.blockers.some');
+    // 버튼을 숨기면 "기능이 없다"로 읽힌다. 못 하는 이유(서버 문구)는 남긴다.
+    expect(cashflowProjectSheetSource).toContain('monthCloseActionNotices');
+    expect(cashflowProjectSheetSource).toContain("label: '결재 요청 회수'");
+    expect(cashflowProjectSheetSource).toContain("label: '재오픈 요청'");
     expect(cashflowProjectSheetSource).not.toContain('캐시플로 항목 사람 확인');
     expect(cashflowProjectSheetSource).not.toContain('prepareAuditedWeekAmounts');
     expect(cashflowProjectSheetSource).not.toContain('showAuditBlock');
