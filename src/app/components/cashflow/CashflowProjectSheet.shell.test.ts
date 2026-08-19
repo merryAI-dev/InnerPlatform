@@ -282,7 +282,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('weeklyActionNotice && !weeklyWithdrawError');
     expect(source).toContain("setWeeklyActionNotice(''), 6000");
     expect(source).toContain("import { toast } from 'sonner';");
-    expect(source).toContain('건을 MYSCube에 반영했어요.');
+    // 반영 건수는 다시 쓴 월의 셀 수(appliedLineCount, 월당 160)가 아니라 검토 단계의 변경 후보 수.
+    // 내용(어떤 칸이 얼마→얼마)도 같이 말한다.
+    expect(source).toContain('buildSheetApplyNotice({ stagedLineCount: stage.stagedLineCount, candidates: stage.candidates })');
+    expect(source).not.toContain('result.appliedLineCount.toLocaleString');
     expect(source).toContain("toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.')");
     expect(source).toContain("toast.success('월 결산 요청을 회수했어요.')");
     expect(source).not.toContain('toast.error');
