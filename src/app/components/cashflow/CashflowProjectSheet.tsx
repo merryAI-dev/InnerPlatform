@@ -96,6 +96,7 @@ import { MemberPicker } from '../ui/member-picker';
 import { buildOrgMemberPickerOptions } from '../../data/project-team-member-options';
 import { usePersonRoster } from '../../data/use-person-roster';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
+import { describeCashflowMonthCloseIssue } from './cashflow-month-close-blocker-helpers';
 
 type CashflowOpsTone = 'neutral' | 'info' | 'warning' | 'danger' | 'success';
 
@@ -1174,6 +1175,25 @@ export function CashflowProjectSheet({
       };
     }
   }, [monthClosePinnedSource, yearMonth]);
+
+  // 막는 사유는 서버 판정 그대로 쓰고, 어느 칸인지만 펴서 보여준다. 화면이 다시 판정하지 않는다.
+  const monthCloseBlockers = useMemo(() => (
+    (monthCloseResult?.dashboard?.validation?.blockers || []).map((blocker) => ({
+      code: blocker.code,
+      message: blocker.message,
+      lines: describeCashflowMonthCloseIssue(blocker),
+    }))
+  ), [monthCloseResult?.dashboard?.validation?.blockers]);
+
+  // 버튼을 숨기면 "기능이 없다"로 읽힌다. 서버가 왜 못 하는지 이미 문구로 주므로 그대로 보여준다.
+  // 지금 화면에서 의미가 있는 것만 - 진행 중 요청의 회수, 승인 완료 회차의 재오픈.
+  const monthCloseActionNotices = useMemo(() => ([
+    { key: 'withdrawMonthClose', label: '결재 요청 회수', action: monthCloseActions?.withdrawMonthClose },
+    { key: 'requestMonthReopen', label: '재오픈 요청', action: monthCloseActions?.requestMonthReopen },
+  ] as const)
+    .filter((entry) => entry.action && entry.action.enabled !== true && Boolean(entry.action.guide))
+    .map((entry) => ({ key: entry.key, label: entry.label, guide: entry.action!.guide })),
+  [monthCloseActions?.requestMonthReopen, monthCloseActions?.withdrawMonthClose]);
 
   const monthClosePreparation = useMemo(() => {
     if (monthCloseError) {
@@ -2804,10 +2824,36 @@ export function CashflowProjectSheet({
                       <div className="text-[13px] font-bold text-card-foreground">월 결산</div>
                       <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
                     </div>
-                    {monthCloseActions?.requestMonthClose.guide ? (
+                    {monthCloseBlockers.length > 0 ? (
+                      <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          월 결산을 진행할 수 없어요
+                        </div>
+                        <ul className="mt-1 space-y-0.5">
+                          {monthCloseBlockers.map((blocker) => (
+                            <li key={blocker.code}>
+                              · {blocker.message}
+                              {blocker.lines.length > 0 ? (
+                                <ul className="mt-0.5 ml-3 space-y-0.5 text-red-700">
+                                  {blocker.lines.map((line) => <li key={line}>- {line}</li>)}
+                                </ul>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : monthCloseActions?.requestMonthClose.guide ? (
                       <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
                         {monthCloseActions.requestMonthClose.guide}
                       </div>
+                    ) : null}
+                    {monthCloseActionNotices.length > 0 ? (
+                      <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-muted-foreground">
+                        {monthCloseActionNotices.map((notice) => (
+                          <li key={notice.key}>{notice.label} · {notice.guide}</li>
+                        ))}
+                      </ul>
                     ) : null}
                     {monthCloseRequestError ? (
                       <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-red-700">
@@ -2902,7 +2948,9 @@ export function CashflowProjectSheet({
               </div>
               <div className="space-y-2">
                 {(monthCloseResult?.dashboard?.managementChecks || []).map((check) => {
-                  const tone: CashflowOpsTone = check.status === 'OK' ? 'success' : check.status === 'WARNING' ? 'warning' : 'neutral';
+                  // REVIEW_REQUIRED 가 neutral(회색) 이면 정상보다도 눈에 안 띈다. 확인이 필요한 것은
+                  // 확인이 필요해 보여야 한다.
+                  const tone: CashflowOpsTone = check.status === 'OK' ? 'success' : 'warning';
                   return (
                     <div key={check.id} className="rounded-md border border-border bg-secondary px-3 py-2">
                       <div className="flex items-center gap-2">
@@ -2910,11 +2958,11 @@ export function CashflowProjectSheet({
                         <span className="text-[12px] font-bold text-secondary-foreground">{check.title}</span>
                       </div>
                       {check.findings?.length ? (
-                        <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-muted-foreground">
+                        <ul className={`mt-1 space-y-0.5 text-[12px] leading-4 ${check.status === 'OK' ? 'text-muted-foreground' : 'text-secondary-foreground'}`}>
                           {check.findings.map((finding) => <li key={finding}>· {finding}</li>)}
                         </ul>
                       ) : (
-                        <div className="mt-1 text-[12px] leading-4 text-muted-foreground">{check.detail}</div>
+                        <div className={`mt-1 text-[12px] leading-4 ${check.status === 'OK' ? 'text-muted-foreground' : 'text-secondary-foreground'}`}>{check.detail}</div>
                       )}
                     </div>
                   );
