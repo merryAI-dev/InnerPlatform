@@ -254,7 +254,7 @@ describe('project editor draft mapping', () => {
     });
   });
 
-  it('keeps single-year totals as the source of truth without annual rows', () => {
+  it('gives a single-year contract one annual row so amounts have one home', () => {
     const draft = createProjectEditorDraft({
       registrationRequirementsVersion: 2,
       contractStart: '2026-01-01',
@@ -275,13 +275,40 @@ describe('project editor draft mapping', () => {
       }],
     });
 
-    expect(draft.financialYears).toEqual([]);
+    // 단년도도 표 한 줄을 갖는다. 금액을 넣는 자리가 연도 수와 무관하게 하나다.
+    expect(draft.financialYears).toHaveLength(1);
+    expect(draft.financialYears[0]).toMatchObject({
+      year: 2026,
+      contractAmount: 120_000,
+      salesVatAmount: 12_000,
+      totalRevenueAmount: 90_000,
+      totalActualCost: 0,
+      supportAmount: 5_000,
+    });
+    // 불러오기만으로 총계가 바뀌지는 않는다. 저장된 값이 그대로 남는다.
     expect(draft).toMatchObject({
       contractAmount: 120_000,
       salesVatAmount: 12_000,
       totalRevenueAmount: 90_000,
       supportAmount: 5_000,
     });
+  });
+
+  it('does not rewrite a stored single-year contract amount that disagrees with its items', () => {
+    // 2026-08 프로덕션 69건 중 8건만 식과 맞는다. 불러오는 것만으로 값이 줄면 사고다.
+    const draft = createProjectEditorDraft({
+      registrationRequirementsVersion: 2,
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      contractAmount: 100_000_000,
+      salesVatAmount: 0,
+      totalRevenueAmount: 40_000_000,
+      totalActualCost: 0,
+      supportAmount: 0,
+    });
+
+    expect(draft.contractAmount).toBe(100_000_000);
+    expect(draft.financialYears[0].contractAmount).toBe(100_000_000);
   });
 
   it('preserves the legacy v1 settlement-type NONE clearing behavior', () => {

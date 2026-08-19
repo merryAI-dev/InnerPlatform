@@ -62,11 +62,14 @@ import {
   type ProjectTeamMemberOption,
 } from '../../data/project-team-member-options';
 import {
+  CONTRACT_AMOUNT_ITEM_FIELDS,
+  deriveContractAmountFromItems,
   formatProjectAmountInput,
   formatStoredProjectAmount,
   hasExplicitProjectAmountInput,
   normalizeProjectFinancialInputFlags,
   parseProjectAmountInput,
+  type ContractAmountItemField,
 } from '../../platform/project-contract-amount';
 import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
 import {
@@ -1318,9 +1321,19 @@ export function ProjectEditorWizard({
     value: number | string | boolean | ProjectFinancialYear['paymentPlan'] | ProjectFinancialYear['paymentExpectedMonths'],
   ) => {
     setDraft((prev) => {
-      const financialYears = prev.financialYears.map((row, rowIndex) => (
-        rowIndex === index ? { ...row, [key]: value } : row
-      ));
+      const financialYears = prev.financialYears.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        const next = { ...row, [key]: value };
+        /*
+         * 단년도는 계약금액을 항목 합계로 둔다. 연도가 하나뿐이라 "총 계약금액"과
+         * "그 해의 계약금액"이 같은 값이고, 사람이 둘을 따로 넣을 이유가 없다.
+         * 다년도는 연도마다 계약금액이 따로 있으므로 그대로 입력받는다.
+         */
+        if (!hasMultiYearContract && CONTRACT_AMOUNT_ITEM_FIELDS.includes(key as ContractAmountItemField)) {
+          next.contractAmount = deriveContractAmountFromItems(next);
+        }
+        return next;
+      });
       const total = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount') => (
         financialYears.reduce((sum, row) => sum + row[field], 0)
       );
@@ -1561,7 +1574,12 @@ export function ProjectEditorWizard({
         && annualTotal('totalRevenueAmount') === draft.totalRevenueAmount
         && annualTotal('totalActualCost') === draft.totalActualCost
         && annualTotal('supportAmount') === draft.supportAmount;
-      if (hasMultiYearContract && (!financialYearsComplete || !annualTotalsMatch)) {
+      /*
+       * 금액을 연도별 표로 넣는 동안에는 연도 수와 무관하게 같은 조건을 건다.
+       * 표는 미확인 연도를 빨갛게 알려주는데 단년도만 제출이 통과하면
+       * 그 빨간 글씨가 아무 뜻도 갖지 못한다.
+       */
+      if (usesRegistrationV2 && (!financialYearsComplete || !annualTotalsMatch)) {
         issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
       }
       if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' });
@@ -2230,10 +2248,25 @@ export function ProjectEditorWizard({
   };
 
   /**
-   * 다년도 v2 계약에서는 위쪽 총계 5개가 이미 읽기 전용 자동 합계였다.
-   * 입력칸일 이유가 없으므로 연도별 표의 합계 행이 그 자리를 대신한다.
+   * 금액은 단년도·다년도 모두 연도별 표가 가진다. 표의 합계 행이 저장되는 총계이므로
+   * 위쪽 총계 입력칸 5개는 v1 등록에만 남는다. 예전에는 다년도만 표였고 단년도는
+   * 입력칸이었는데, 같은 값을 두 모양으로 넣게 되어 화면마다 다르게 읽혔다.
    */
-  const annualTotalsOwnAmounts = usesRegistrationV2 && hasMultiYearContract;
+  const annualTotalsOwnAmounts = usesRegistrationV2;
+  /** 단년도는 계약금액이 항목 합계에서 나온다. 다년도는 연도마다 따로 입력받는다. */
+  const contractAmountIsDerived = annualTotalsOwnAmounts && !hasMultiYearContract;
+  /**
+   * 자동 계산 이전에 저장된 계약금액이 항목 합계와 어긋나는 경우. 값은 여기서 고치지 않는다.
+   * 사람이 금액을 한 번이라도 고치면 그때 합계로 바뀌므로, 그 전에 차이를 보여준다.
+   */
+  const storedContractAmountConflict = (() => {
+    if (!contractAmountIsDerived) return null;
+    const row = draft.financialYears[0];
+    if (!row) return null;
+    const derived = deriveContractAmountFromItems(row);
+    if (row.contractAmount === derived) return null;
+    return { stored: row.contractAmount, derived };
+  })();
   const annualTotal = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount') => (
     draft.financialYears.reduce((sum, row) => sum + row[field], 0)
   );
@@ -2309,13 +2342,23 @@ export function ProjectEditorWizard({
                   </th>
                   {columns.map(([field, label]) => (
                     <td key={field} className="px-3 py-2">
-                      <Input
-                        inputMode="numeric"
-                        aria-label={`${row.year}년 ${label}`}
-                        value={formatProjectAmountInput(row[field], true)}
-                        onChange={(event) => updateFinancialYear(index, field, parseProjectAmountInput(event.target.value))}
-                        className={cn('min-w-[116px]', FORM_NUMERIC_CONTROL_CLASS)}
-                      />
+                      {field === 'contractAmount' && contractAmountIsDerived ? (
+                        /* 숫자 열이라 오른쪽 정렬을 지킨다. 입력칸 모양은 쓰지 않는다. */
+                        <div className="flex h-9 min-w-[116px] flex-col items-end justify-center">
+                          <span className={cn('font-medium text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
+                            {fmtKRW(row.contractAmount)}원
+                          </span>
+                          <span className="text-[11px] font-normal leading-4 text-slate-400">계산됨</span>
+                        </div>
+                      ) : (
+                        <Input
+                          inputMode="numeric"
+                          aria-label={`${row.year}년 ${label}`}
+                          value={formatProjectAmountInput(row[field], true)}
+                          onChange={(event) => updateFinancialYear(index, field, parseProjectAmountInput(event.target.value))}
+                          className={cn('min-w-[116px]', FORM_NUMERIC_CONTROL_CLASS)}
+                        />
+                      )}
                     </td>
                   ))}
                   <td className={cn('px-3 py-2 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
@@ -2352,14 +2395,32 @@ export function ProjectEditorWizard({
             <span aria-hidden>•</span>
             <span>계약금액 합계 {koreanContractTotal || '0 원'}</span>
           </li>
-          {/* 계약금액과 나머지 네 항목의 합이 다르면 알려만 준다. 값은 고치지 않는다. */}
-          {contractAmountCheck.message ? (
+          {contractAmountIsDerived ? (
+            <li className="flex gap-1.5">
+              <span aria-hidden>•</span>
+              <span>계약금액은 매출 부가세 · 수익 · 실비(원가) · 지원금의 합으로 계산됩니다.</span>
+            </li>
+          ) : null}
+          {/* 다년도는 계약금액을 사람이 넣으므로 항목 합계와 다르면 알려만 준다. 값은 고치지 않는다. */}
+          {!contractAmountIsDerived && contractAmountCheck.message ? (
             <li className="flex gap-1.5 text-amber-700">
               <span aria-hidden>•</span>
               <span>{contractAmountCheck.message}</span>
             </li>
           ) : null}
         </ul>
+        {/*
+         * 단년도 계약금액을 자동 계산으로 바꾸기 전에 저장된 값은 항목 합계와 다를 수 있다.
+         * 2026-08 프로덕션 기준 69건 중 식과 맞는 것이 8건뿐이고 실비(원가)는 전부 비어 있다.
+         * 조용히 줄어드는 것이 사고이므로, 저장 전에 바뀔 금액을 눈에 보이게 둔다.
+         */}
+        {contractAmountIsDerived && storedContractAmountConflict ? (
+          <p className={cn('rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800', FORM_HINT_CLASS)}>
+            저장된 계약금액 {fmtKRW(storedContractAmountConflict.stored)}원이 항목 합계
+            {' '}{fmtKRW(storedContractAmountConflict.derived)}원과 다릅니다.
+            금액을 한 번 고쳐 넣으면 항목 합계로 바뀌어 저장되니, 어느 쪽이 맞는지 먼저 확인해 주세요.
+          </p>
+        ) : null}
         {emptyContractYears.length > 0 || unconfirmedYears.length > 0 || totalsDrifted ? (
           <ul className={cn('space-y-1', FORM_ERROR_CLASS)}>
             {emptyContractYears.length > 0 ? (
@@ -2554,20 +2615,25 @@ export function ProjectEditorWizard({
       </ProjectFormSection>
 
       {annualTotalsOwnAmounts ? (
+        <ProjectFormSection
+          title="연도별 계약·재무"
+          description={hasMultiYearContract
+            ? '계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 합계 행이 저장되는 총계입니다.'
+            : '연도가 하나여도 같은 표로 입력합니다. 합계 행이 저장되는 총계입니다.'}
+        >
+          <div data-issue-label="계약기간 전체 연도별 재무 확인">
+            {draft.financialYears.length === 0 ? (
+              <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4', FORM_HINT_CLASS)}>
+                계약 시작일과 종료일을 먼저 입력해 주세요.
+              </p>
+            ) : renderAnnualFinanceTable()}
+          </div>
+        </ProjectFormSection>
+      ) : null}
+
+      {/* 입금 계획은 금액 표와 별개 경로다. 다년도만 연도별로 쪼갠다. */}
+      {annualTotalsOwnAmounts && hasMultiYearContract ? (
         <>
-          <ProjectFormSection
-            title="연도별 계약·재무"
-            required
-            description="다년도 사업은 계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 합계 행이 저장되는 총계입니다."
-          >
-            <div data-issue-label="계약기간 전체 연도별 재무 확인">
-              {draft.financialYears.length === 0 ? (
-                <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4', FORM_HINT_CLASS)}>
-                  계약 시작일과 종료일을 먼저 입력해 주세요.
-                </p>
-              ) : renderAnnualFinanceTable()}
-            </div>
-          </ProjectFormSection>
           {draft.financialYears.map((row, index) => (
             <ProjectFormSection key={row.year} title={`${row.year}년 입금 계획`} flushBelow>
               {renderPaymentFields(row, index)}

@@ -329,7 +329,7 @@ function projectFinancialYears(
   const startYear = dateYear(contractStart);
   const endYear = dateYear(contractEnd);
   if (!startYear || !endYear || startYear > endYear || endYear - startYear > 20) return [];
-  if (startYear === endYear) return [];
+  // 단년도도 행 하나를 만든다. 금액을 넣는 자리를 연도 수와 무관하게 표 하나로 통일한다.
   return Array.from({ length: endYear - startYear + 1 }, (_, offset) => {
     const year = startYear + offset;
     return normalized.get(year) || {

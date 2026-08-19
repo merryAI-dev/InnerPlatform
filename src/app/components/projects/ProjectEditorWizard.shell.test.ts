@@ -648,15 +648,27 @@ describe('ProjectEditorWizard form skeleton contract', () => {
     expect(source).toContain('onClick={() => goToIssue(issue)}');
   });
 
-  it('reads the multi-year finance as one table whose total row replaces the top inputs', () => {
+  it('reads the finance as one table for both single- and multi-year contracts', () => {
     expect(source).toContain('const renderAnnualFinanceTable = ');
-    expect(source).toContain('const annualTotalsOwnAmounts = usesRegistrationV2 && hasMultiYearContract');
+    // 연도 수와 무관하게 금액은 연도별 표가 가진다. 단년도만 다른 모양이던 것을 없앴다.
+    expect(source).toContain('const annualTotalsOwnAmounts = usesRegistrationV2;');
     expect(source).toContain('>연도</th>');
     expect(source).toContain('>합계</th>');
     expect(source).toContain("'px-3 py-2.5 text-right font-semibold text-[#0176D3]'");
-    // 다년 계약에서 총계 입력칸은 사라졌지만 단년 계약에서는 그대로 입력한다.
+    // 총계 입력칸 5개는 v1 등록에만 남는다.
     expect(source).toContain('formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)');
     expect(source).toContain('금액을 계약서와 대조하여 확인했습니다.');
+    // 입금 계획은 금액 표와 다른 경로다. 연도별로 쪼개는 것은 다년도뿐이다.
+    expect(source).toContain('{annualTotalsOwnAmounts && hasMultiYearContract ? (');
+  });
+
+  it('derives the single-year contract amount from its items without rewriting stored values', () => {
+    expect(source).toContain('const contractAmountIsDerived = annualTotalsOwnAmounts && !hasMultiYearContract');
+    expect(source).toContain('deriveContractAmountFromItems');
+    // 자동 계산은 사람이 금액을 고칠 때만 일어난다. 불러오기만으로 값이 바뀌면 사고다.
+    expect(source).toContain('const storedContractAmountConflict = ');
+    expect(source).toContain('저장된 계약금액');
+    expect(source).toContain('어느 쪽이 맞는지 먼저 확인해 주세요');
   });
 
   it('shows a read-only Korean unit beside amounts without touching the stored value', () => {
