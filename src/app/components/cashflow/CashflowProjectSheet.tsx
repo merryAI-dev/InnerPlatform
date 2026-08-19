@@ -100,6 +100,7 @@ import { buildOrgMemberPickerOptions } from '../../data/project-team-member-opti
 import { usePersonRoster } from '../../data/use-person-roster';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
 import { describeCashflowMonthCloseIssue } from './cashflow-month-close-blocker-helpers';
+import { buildSheetApplyNotice } from './cashflow-sheet-apply-notice';
 
 type CashflowOpsTone = 'neutral' | 'info' | 'warning' | 'danger' | 'success';
 
@@ -1742,6 +1743,12 @@ export function CashflowProjectSheet({
   ): Promise<void> => {
     if (!stage.runId || stage.stagedLineCount <= 0) return;
     const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    // 건수·내용은 검토 단계의 변경 후보로 말한다. 서버의 appliedLineCount 는 다시 쓴 월의
+    // 전체 셀 수(월당 160)라 "2건 바꿨는데 160건" 이 된다.
+    const notifySheetApplied = () => {
+      const notice = buildSheetApplyNotice({ stagedLineCount: stage.stagedLineCount, candidates: stage.candidates });
+      toast.success(notice.title, notice.lines.length > 0 ? { description: notice.lines.join('\n'), duration: 8000 } : undefined);
+    };
     const apply = async (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
       return applyCashflowSheetLabViaBff({
         tenantId: orgId,
@@ -1792,7 +1799,7 @@ export function CashflowProjectSheet({
       }
       const result = await apply(actor);
       await rememberApplyResult(result);
-      toast.success(`시트값 ${result.appliedLineCount.toLocaleString('ko-KR')}건을 MYSCube에 반영했어요.`);
+      notifySheetApplied();
       logCashflowSettlement({ phase: 'success', operation: 'cashflow.sheet_apply', projectId, summary: { appliedLineCount: result.appliedLineCount } });
     } catch (error) {
       let finalError = error;
@@ -1802,7 +1809,7 @@ export function CashflowProjectSheet({
           if (!actor?.idToken) throw error;
           const result = await apply(actor);
           await rememberApplyResult(result);
-          toast.success(`시트값 ${result.appliedLineCount.toLocaleString('ko-KR')}건을 MYSCube에 반영했어요.`);
+          notifySheetApplied();
           logCashflowSettlement({ phase: 'success', operation: 'cashflow.sheet_apply', projectId, summary: { appliedLineCount: result.appliedLineCount, authRetried: true } });
           return;
         } catch (retryError) {

@@ -9,7 +9,7 @@ export default function App() {
     <FirebaseProvider>
       <AuthProvider>
         <RouterProvider router={router} />
-        <Toaster position="bottom-right" />
+        <Toaster position="bottom-right" toastOptions={{ classNames: { description: 'whitespace-pre-line' } }} />
       </AuthProvider>
     </FirebaseProvider>
   );
