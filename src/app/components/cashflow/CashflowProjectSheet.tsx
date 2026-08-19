@@ -37,6 +37,7 @@ import {
   resolveCashflowWeeklyCompletionErrorMessage,
 } from '../../platform/api-error-message';
 import { PlatformApiError } from '../../platform/api-client';
+import { isRequestTimeoutError, reconcileMonthCloseRequestAfterTimeout } from '../../data/cashflow-month-close-request-reconcile';
 import { resolveApiErrorPresentation, type ApiErrorPresentation } from '../../platform/api-error-messages';
 import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-transaction-log';
 import {
@@ -1273,21 +1274,41 @@ export function CashflowProjectSheet({
             || '서버에서 월 결산 가능 상태를 확인하지 못했습니다.',
         );
       }
-      const request = await requestCashflowMonthCloseViaBff({
-        tenantId: orgId,
-        actor,
-        projectId,
-        payload: {
-          contractVersion: 'cashflow-cumulative-close-v2',
-          yearMonth,
-          expectedRevision: prepared.revision,
-          expectedApproverUid: savedExecutiveApproverId,
-          expectedProjectVersion: project?.version ?? 0,
-          expectedOpeningBalances: reviewedOpeningBalances,
-          closeInput: monthCloseInput,
-        },
-        idempotencyKey: `cashflow-month-close-request:${projectId}:${yearMonth}:${prepared.revision}:r${monthCloseRequest?.revision ?? -1}`,
-      });
+      const requestStartedAtIso = new Date().toISOString();
+      let request: CashflowMonthCloseRequest;
+      try {
+        request = await requestCashflowMonthCloseViaBff({
+          tenantId: orgId,
+          actor,
+          projectId,
+          payload: {
+            contractVersion: 'cashflow-cumulative-close-v2',
+            yearMonth,
+            expectedRevision: prepared.revision,
+            expectedApproverUid: savedExecutiveApproverId,
+            expectedProjectVersion: project?.version ?? 0,
+            expectedOpeningBalances: reviewedOpeningBalances,
+            closeInput: monthCloseInput,
+          },
+          idempotencyKey: `cashflow-month-close-request:${projectId}:${yearMonth}:${prepared.revision}:r${monthCloseRequest?.revision ?? -1}`,
+        });
+      } catch (error) {
+        // 브라우저가 27초에 끊어도 서버는 저장까지 갈 수 있다(첫 누적 요청은 43개월 shard).
+        // 타임아웃은 실패가 아니라 모름이다. 서버에 이번 요청이 남았는지 확인하고 둘 중 하나만 말한다.
+        if (!isRequestTimeoutError(error) || !isCurrentMonthCloseMutation(mutationScope)) throw error;
+        setMonthCloseError('요청 결과를 확인하고 있어요. 잠시만 기다려 주세요.');
+        const reconciled = await reconcileMonthCloseRequestAfterTimeout({
+          fetchCurrent: () => fetchCurrentCashflowMonthCloseRequestViaBff({ tenantId: orgId, actor, projectId, yearMonth }),
+          actorUid: actor.uid,
+          startedAtIso: requestStartedAtIso,
+        });
+        if (!isCurrentMonthCloseMutation(mutationScope)) return;
+        setMonthCloseError(null);
+        if (!reconciled) {
+          throw new Error('월 결산 요청이 접수되지 않았어요. 잠시 후 다시 시도해 주세요.');
+        }
+        request = reconciled;
+      }
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
       if (request.status !== 'PENDING') throw new Error('월결산 결재 요청 상태를 확인하지 못했습니다.');
       monthCloseCurrentRequestGenerationRef.current += 1;
