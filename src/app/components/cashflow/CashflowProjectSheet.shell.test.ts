@@ -273,6 +273,14 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('프로젝트 조직장');
     expect(source).toContain('project-executive-approver');
     // 우측 하단 토스트는 전부 지웠다 (성공·안내는 #578, 에러는 2026-08-19). 화면 상태만 남는다.
+    // 대신 완료 요청·회수·확정은 카드 안에서 한 줄로 접수됐음을 알린다 - 상태 배지만으로는
+    // "내가 누른 것이 먹혔는지" 가 안 보인다.
+    expect(source).toContain('setWeeklyActionNotice');
+    expect(source).toContain('주간 정산 완료 요청을 보냈어요');
+    expect(source).toContain('완료 요청을 회수했어요');
+    expect(source).toContain('주간 정산을 확정했어요');
+    expect(source).toContain('weeklyActionNotice && !weeklyWithdrawError');
+    expect(source).toContain("setWeeklyActionNotice(''), 6000");
     expect(source).not.toContain('toast.');
     expect(source).not.toContain("from 'sonner'");
     expect(source).not.toContain('월 결산 승인 조직장을 선택하세요');
