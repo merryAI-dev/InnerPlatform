@@ -417,7 +417,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('reuses the staged run when a closed-month change needs a reason', () => {
     expect(source).toContain("bffErrorCode(finalError) === 'cashflow_closed_month_reason_required'");
-    expect(source).toContain("onSubmit((resumeRequired ? resumeReason : reason).trim())");
+    expect(source).toContain("onSubmit((resumeRequired ? resumeReason : needsReason ? reason : '').trim())");
     expect(source).toContain('lateSheetFormulaAccepted,');
     expect(source).toContain('closedMonthChangeReason');
     expect(source).toContain('마감 후 시트값 변경');
@@ -601,10 +601,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(stageFlow.indexOf('setLateSheetApply(result)')).toBeLessThan(stageFlow.indexOf('handleApplyStagedSheetValues(result)'));
     expect(source).toContain('이미 결산이 완료된 월의 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?');
     expect(source).not.toContain('결산 마감일이 지난 값');
-    expect(source).toContain('!reason.trim() || !complete');
+    // 결재 중 차이(pendingApproval)는 같은 표를 사유 없이 보여준다. 마감 후 변경(closedMonth)만 사유 필수.
+    expect(source).toContain('(needsReason && !reason.trim()) || !complete');
+    expect(source).toContain('kind="pendingApproval"');
+    expect(source).not.toContain('결재 중 변경 후보 전체');
     expect(source).toContain('closedMonthDifferenceManifestHash');
     expect(source).toContain('closedMonthDifferenceCount');
-    expect(source).toContain("onSubmit((resumeRequired ? resumeReason : reason).trim())");
+    expect(source).toContain("onSubmit((resumeRequired ? resumeReason : needsReason ? reason : '').trim())");
   });
 
   it('runs the same main-page sheet action in refresh, stage, then apply order', () => {
