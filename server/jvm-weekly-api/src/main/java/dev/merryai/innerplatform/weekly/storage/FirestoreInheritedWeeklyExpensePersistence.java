@@ -2109,6 +2109,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             }
         }
         Instant reopenedAt = clock.instant();
+        // Firestore 트랜잭션은 읽기가 쓰기보다 먼저여야 한다. 버전 문서 존재 확인(읽기)을 완료 문서 갱신(쓰기) 앞에 둔다.
+        // 준수 이력은 버전 문서(불변)에서 최고 revision 을 읽는다. 회수도 버전을 남겨야
+        // 이력이 "완료됨" 에 머물지 않는다 — 안 남기면 회수 뒤에도 대시보드가 완료로 보여 회수 버튼이 다시 뜬다.
+        String versionId = documentId + "-r" + Math.addExact(currentRevision, 1);
+        DocumentReference versionRef = db.document(cashflowWeeklyUpdateCompletionVersionPath(actor.tenantId(), versionId));
+        if (get(versionRef).exists()) {
+            throw new WeeklyExpenseConflictException("Weekly compliance history version already exists and is immutable.");
+        }
         Map<String, Object> patch = new LinkedHashMap<>();
         patch.put("status", "OPEN");
         patch.put("revision", Math.addExact(currentRevision, 1));
@@ -2119,13 +2127,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("reopenReason", request.reason() == null ? "" : request.reason().trim());
         patch.put("updatedAt", reopenedAt.toString());
         set(ref, patch);
-        // 준수 이력은 버전 문서(불변)에서 최고 revision 을 읽는다. 회수도 버전을 남겨야
-        // 이력이 "완료됨" 에 머물지 않는다 — 안 남기면 회수 뒤에도 대시보드가 완료로 보여 회수 버튼이 다시 뜬다.
-        String versionId = documentId + "-r" + Math.addExact(currentRevision, 1);
-        DocumentReference versionRef = db.document(cashflowWeeklyUpdateCompletionVersionPath(actor.tenantId(), versionId));
-        if (get(versionRef).exists()) {
-            throw new WeeklyExpenseConflictException("Weekly compliance history version already exists and is immutable.");
-        }
         Map<String, Object> version = new LinkedHashMap<>();
         version.put("id", versionId);
         version.put("tenantId", actor.tenantId());
@@ -2187,6 +2188,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Instant confirmedAt = clock.instant();
         long nextRevision = Math.addExact(currentRevision, 1);
+        // 읽기(버전 존재 확인)를 쓰기(완료 문서 갱신) 앞에. Firestore 트랜잭션 규칙.
+        String versionId = documentId + "-r" + nextRevision;
+        DocumentReference versionRef = db.document(cashflowWeeklyUpdateCompletionVersionPath(actor.tenantId(), versionId));
+        if (get(versionRef).exists()) {
+            throw new WeeklyExpenseConflictException("Weekly compliance history version already exists and is immutable.");
+        }
         Map<String, Object> patch = new LinkedHashMap<>();
         patch.put("status", "LOCKED");
         patch.put("revision", nextRevision);
@@ -2196,11 +2203,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("updatedAt", confirmedAt.toString());
         set(ref, patch);
         // 준수 이력 버전: 준수 판정(요청 시각 기준) 은 그대로, 잠금 상태만 LOCKED 로.
-        String versionId = documentId + "-r" + nextRevision;
-        DocumentReference versionRef = db.document(cashflowWeeklyUpdateCompletionVersionPath(actor.tenantId(), versionId));
-        if (get(versionRef).exists()) {
-            throw new WeeklyExpenseConflictException("Weekly compliance history version already exists and is immutable.");
-        }
         Map<String, Object> version = new LinkedHashMap<>();
         version.put("id", versionId);
         version.put("tenantId", actor.tenantId());
