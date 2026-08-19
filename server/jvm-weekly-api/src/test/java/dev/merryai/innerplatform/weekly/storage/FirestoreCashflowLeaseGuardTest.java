@@ -3839,6 +3839,95 @@ class FirestoreCashflowLeaseGuardTest {
         );
         assertThat(stored.get("status")).isEqualTo("OPEN");
         assertThat(stored.get("reopenReason")).isEqualTo("");
+        // 회수도 불변 버전을 남긴다. 준수 이력은 최고 revision 을 읽으므로 이게 없으면 회수 뒤에도 "완료" 로 남는다.
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r2"
+        ))
+            .containsEntry("complianceStatus", "REOPENED")
+            .containsEntry("revision", 2L)
+            .containsEntry("completedAt", "");
+    }
+
+    @Test
+    void weeklyComplianceHistoryTreatsAReopenedWeekAsNotCompleted() {
+        // 완료(r1 ON_TIME) 뒤 회수(r2 REOPENED): 이력은 그 주를 완료 아님(PENDING/MISSED) 으로 되돌리고 완료 수에서 뺀다.
+        // 그래야 대시보드의 현재 주가 "완료 대기" 로 바뀌고 회수 버튼이 다시 뜨지 않는다.
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w2",
+            lockedWeeklyCompletion("2026-07", 2, 1)
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w2-r1",
+            new LinkedHashMap<>(Map.ofEntries(
+                Map.entry("id", "project-a-2026-07-w2-r1"),
+                Map.entry("tenantId", "tenant-a"),
+                Map.entry("projectId", "project-a"),
+                Map.entry("yearMonth", "2026-07"),
+                Map.entry("weekNo", 2),
+                Map.entry("revision", 1L),
+                Map.entry("complianceStatus", "ON_TIME"),
+                Map.entry("deadline", "2026-07-09T14:59:59Z"),
+                Map.entry("completedAt", "2026-07-08T09:00:00Z"),
+                Map.entry("completedBy", "pm-1")
+            ))
+        );
+        WeeklyExpensePersistence.CashflowWeeklyCompliancePage before = fixture.persistence
+            .findCashflowWeeklyComplianceHistory("tenant-a", "project-a", 50, "");
+        assertThat(before.items()).anySatisfy(item -> {
+            assertThat(item.id()).isEqualTo("2026-07-w2");
+            assertThat(item.status()).isEqualTo("ON_TIME");
+        });
+        assertThat(before.onTimeCount()).isEqualTo(1L);
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .reopenCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("reopen-w2", "2026-07", 2, 1, null)
+            ));
+
+        WeeklyExpensePersistence.CashflowWeeklyCompliancePage after = fixture.persistence
+            .findCashflowWeeklyComplianceHistory("tenant-a", "project-a", 50, "");
+        assertThat(after.items()).anySatisfy(item -> {
+            assertThat(item.id()).isEqualTo("2026-07-w2");
+            assertThat(item.status()).isIn("PENDING", "MISSED");
+            assertThat(item.completedAt()).isEmpty();
+        });
+        assertThat(after.onTimeCount()).isEqualTo(0L);
+    }
+
+    @Test
+    void weeklyComplianceHistoryTrustsAnOpenCompletionDocumentOverOldVersions() {
+        // REOPENED 버전 도입 이전에 회수된 주(완료 문서 OPEN, 버전은 r1 ON_TIME 뿐)도 완료 아님으로 보여야 한다.
+        Fixture fixture = fixture(activeMember(), Map.of());
+        Map<String, Object> reopened = lockedWeeklyCompletion("2026-07", 2, 2);
+        reopened.put("status", "OPEN");
+        reopened.put("reopenCount", 1L);
+        fixture.documents.put("orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w2", reopened);
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w2-r1",
+            new LinkedHashMap<>(Map.ofEntries(
+                Map.entry("id", "project-a-2026-07-w2-r1"),
+                Map.entry("tenantId", "tenant-a"),
+                Map.entry("projectId", "project-a"),
+                Map.entry("yearMonth", "2026-07"),
+                Map.entry("weekNo", 2),
+                Map.entry("revision", 1L),
+                Map.entry("complianceStatus", "ON_TIME"),
+                Map.entry("deadline", "2026-07-09T14:59:59Z"),
+                Map.entry("completedAt", "2026-07-08T09:00:00Z"),
+                Map.entry("completedBy", "pm-1")
+            ))
+        );
+        WeeklyExpensePersistence.CashflowWeeklyCompliancePage page = fixture.persistence
+            .findCashflowWeeklyComplianceHistory("tenant-a", "project-a", 50, "");
+        assertThat(page.items()).anySatisfy(item -> {
+            assertThat(item.id()).isEqualTo("2026-07-w2");
+            assertThat(item.status()).isIn("PENDING", "MISSED");
+            assertThat(item.completedAt()).isEmpty();
+        });
+        assertThat(page.onTimeCount()).isEqualTo(0L);
     }
 
     @Test
