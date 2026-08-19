@@ -38,7 +38,7 @@ export function resetPersonRosterCache(): void {
   inflight = null;
 }
 
-export function usePersonRoster(): DirectoryPerson[] {
+export function usePersonRoster(enabled = true): DirectoryPerson[] {
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
   const [roster, setRoster] = useState<DirectoryPerson[]>(() => cache || []);
@@ -48,7 +48,8 @@ export function usePersonRoster(): DirectoryPerson[] {
       setRoster(cache);
       return undefined;
     }
-    if (!featureFlags.platformApiEnabled || !authUser?.idToken) return undefined;
+    // enabled=false 면 읽지 않는다. 첫 화면에 필요 없는 곳(현금흐름 결재자 선택)이 뒤로 미룰 때 쓴다.
+    if (!enabled || !featureFlags.platformApiEnabled || !authUser?.idToken) return undefined;
 
     let cancelled = false;
     if (!inflight) {
@@ -67,7 +68,7 @@ export function usePersonRoster(): DirectoryPerson[] {
     });
 
     return () => { cancelled = true; };
-  }, [orgId, authUser?.uid, authUser?.idToken]);
+  }, [enabled, orgId, authUser?.uid, authUser?.idToken]);
 
   return roster;
 }

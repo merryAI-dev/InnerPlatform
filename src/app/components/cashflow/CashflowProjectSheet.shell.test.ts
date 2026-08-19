@@ -7,6 +7,27 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8')
   + readFileSync(resolve(import.meta.dirname, 'CashflowLateSheetChangeDialog.tsx'), 'utf8');
 
+describe('CashflowProjectSheet staged loading', () => {
+  // 첫 화면은 config + month-close 둘로 그린다. 나머지는 그 뒤(보조) 또는 보일 때(이력·명부)만 읽는다.
+  // 12개가 동시에 나가면 Vercel 인스턴스가 늘어나는 동안 month-close 가 제일 늦게 끝났다(2026-08-19).
+  it('loads the mirror only as a fallback or for the review dialog, never on mount', () => {
+    expect(source).toContain('const mirrorNeeded = sheetReviewDialogOpen');
+    expect(source).toContain("|| (monthCloseSettled && !(monthCloseResult?.dashboard?.source && Array.isArray(monthCloseResult?.dashboard?.cells)))");
+    expect(source).toContain('if (!mirrorNeeded) return () => { cancelled = true; };');
+  });
+  it('defers request record, apply-status and freshness probe until month-close settled', () => {
+    expect(source).toContain('if (!monthCloseSettled) return;\n    void loadMonthCloseRequest();');
+    expect(source).toContain('if (!monthCloseSettled || !projectId || !orgId || !user?.uid) return () => { cancelled = true; };');
+    expect(source).toContain('if (!monthCloseSettled || !cashflowSheetConfigLoaded || !cashflowSheetConfig?.value');
+  });
+  it('loads the activity timeline only when it scrolls into view, and the roster after month-close', () => {
+    expect(source).toContain('new IntersectionObserver(');
+    expect(source).toContain('if (!opsTimelineVisible) return;\n    void loadCashflowEvents();');
+    expect(source).toContain('<div ref={opsTimelineRef} className="min-w-0">{renderOpsTimeline()}</div>');
+    expect(source).toContain('usePersonRoster(monthCloseSettled)');
+  });
+});
+
 describe('CashflowProjectSheet monthly close shell', () => {
   it('uses the server month-close guide instead of rebuilding a target-month deadline label', () => {
     // 서버 guide 는 한 줄 안내의 폴백으로 쓴다(화면이 기한 라벨을 다시 만들지 않는다).
