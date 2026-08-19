@@ -12,7 +12,7 @@
     "api/bff.js": {
       "maxDuration": 300,
       "regions": [
-        "icn1"
+        "iad1"
       ]
     }
   },
