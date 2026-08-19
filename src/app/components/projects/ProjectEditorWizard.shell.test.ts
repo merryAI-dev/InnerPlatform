@@ -41,9 +41,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("label: '고객사 사업자등록증 *'");
     expect(source).toContain("label: '산출내역서(견적서) *'");
     expect(source).toContain("label: '제안서(워드)'");
-    // 이 칸이 받는 건 proposal_ppt_original 이다. 라벨이 매체(구글드라이브)를 가리키고
-    // 있어서 내용(PPT)을 가리키도록 바꿨다.
-    expect(source).toContain("label: '제안서 PPT 링크'");
+    // 이 칸이 받는 건 proposal_ppt_original 이고 입력값은 구글드라이브 링크다.
+    // 내용(PPT)을 앞에 두고 매체는 괄호로 덧붙여 6번과 같은 말로 읽히게 한다.
+    expect(source).toContain("label: '제안서 PPT 링크(구글드라이브 링크)'");
     expect(source).toContain("label: '발표자료(구글드라이브 링크)'");
     expect(source).toContain("label: 'RFP'");
     expect(source.match(/description: '있을 시'/g)).toHaveLength(3);
@@ -427,8 +427,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('lg:sticky lg:bottom-4');
     expect(source).not.toContain('발주처');
     expect(source).toMatch(/number: 4,\s+label: '제안서\(워드\)'/);
-    // 5번 칸이 받는 건 proposal_ppt_original 이다. 라벨이 매체가 아니라 내용을 가리킨다.
-    expect(source).toMatch(/number: 5,\s+label: '제안서 PPT 링크'/);
+    // 5번 칸이 받는 건 proposal_ppt_original 이다. 내용이 앞, 매체가 괄호다.
+    expect(source).toMatch(/number: 5,\s+label: '제안서 PPT 링크\(구글드라이브 링크\)'/);
     expect(source).toMatch(/number: 6,\s+label: '발표자료\(구글드라이브 링크\)'/);
     expect(source).toContain('{usesRegistrationV2 ? (');
     // The seven slots render as one table instead of stacked cards.
@@ -614,8 +614,9 @@ describe('ProjectEditorWizard form skeleton contract', () => {
   it('gives the accent colour exactly one meaning and keeps errors red', () => {
     // 필수 마커 · 포커스 링 · 활성 단계 칩. 그 밖에는 회색조를 쓴다.
     expect(source).toContain("'[&_[data-slot=input]]:focus-visible:ring-[#0176D3]/25'");
-    // 필수 마커는 레퍼런스대로 빨강이다. 강조색은 활성 단계와 포커스 링에만 남는다.
-    expect(source).toContain('required ? <span className="ml-0.5 text-red-600">*</span> : null');
+    // 등록 제출서류 7종 밖은 모든 값이 필수라 `*` 가 아무것도 구분하지 못한다.
+    // 표시를 걷어냈으므로 폼 어디에도 빨간 별표가 남아 있으면 안 된다.
+    expect(source).not.toContain('text-red-600">*</span>');
     expect(source).toContain("active && 'border-[#0176D3] bg-[#0176D3] text-white ring-4 ring-[#0176D3]/15'");
     expect(source).not.toContain('rose-');
   });

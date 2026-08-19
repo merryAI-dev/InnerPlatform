@@ -17,7 +17,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -291,7 +291,7 @@ const REGISTRATION_DOCUMENT_SLOTS: RegistrationDocumentSlot[] = [
   },
   {
     number: 5,
-    label: '제안서 PPT 링크',
+    label: '제안서 PPT 링크(구글드라이브 링크)',
     description: '있을 시',
     kinds: ['proposal_ppt_original'],
   },
@@ -596,7 +596,6 @@ function ProjectFormSection({ title, required, description, action, flushBelow, 
         <div>
           <h3 className={FORM_SECTION_CLASS}>
             {title}
-            {required ? <span className="ml-0.5 text-red-600">*</span> : null}
           </h3>
           {description ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{description}</p> : null}
         </div>
@@ -642,7 +641,6 @@ function ProjectFormRow({ label, required, note, hints, errors, issueLabel, chil
         <Label className={cn('inline-flex', FORM_LABEL_CLASS)}>
           <span>
             {label}
-            {required ? <span className="ml-0.5 text-red-600">*</span> : null}
           </span>
         </Label>
         {note ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{note}</p> : null}
@@ -2111,7 +2109,6 @@ export function ProjectEditorWizard({
               <th scope="col" className={cn('w-px px-3 py-2 text-right', FORM_LABEL_CLASS)}>액션</th>
             </tr>
           </thead>
-          <tbody>
             {REGISTRATION_DOCUMENT_SLOTS.map((slot) => {
               const kind = slot.kinds[0];
               const requirement = requirementOf(slot.number);
@@ -2137,8 +2134,13 @@ export function ProjectEditorWizard({
               const hasDetail = Boolean(uploadError || previewError || contractLocked || contractSummary);
 
               return (
-                <Fragment key={slot.number}>
-                  <tr className="border-b border-slate-100 align-top">
+                /*
+                 * 한 서류가 여러 줄로 늘어난다(링크 입력·예외 처리 체크·오류·분석 요약).
+                 * 줄마다 밑선을 그으면 그 부연이 다음 서류처럼 읽히므로,
+                 * 밑선은 서류 묶음 하나에 하나만 - tbody 가 그 묶음이다.
+                 */
+                <tbody key={slot.number} className="border-b border-slate-100 align-top">
+                  <tr>
                     <td className="px-3 py-3">
                       <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#001e46] text-[11px] font-semibold text-white">
                         {slot.number}
@@ -2146,7 +2148,7 @@ export function ProjectEditorWizard({
                     </td>
                     <td className="px-3 py-3">
                       <p className="font-medium text-slate-900">{slot.label}</p>
-                      <p className={cn('mt-1', FORM_HINT_CLASS)}>{slot.description}</p>
+                      {slot.description ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{slot.description}</p> : null}
                     </td>
                     <td className={cn('px-3 py-3', unmet ? 'text-red-700' : 'text-slate-700')}>
                       <span className="break-all">{status}</span>
@@ -2162,7 +2164,7 @@ export function ProjectEditorWizard({
                     </td>
                   </tr>
                   {isLinkSlot ? (
-                    <tr className="border-b border-slate-100">
+                    <tr>
                       <td />
                       <td colSpan={4} className="px-3 pb-3">
                         <Input
@@ -2180,7 +2182,7 @@ export function ProjectEditorWizard({
                     </tr>
                   ) : null}
                   {hasDetail ? (
-                    <tr className="border-b border-slate-100">
+                    <tr>
                       <td />
                       <td colSpan={4} className="px-3 pb-3">
                         {uploadError ? <p className={FORM_ERROR_CLASS} role="alert">{uploadError}</p> : null}
@@ -2198,7 +2200,7 @@ export function ProjectEditorWizard({
                     </tr>
                   ) : null}
                   {slot.number === 3 ? (
-                    <tr className="border-b border-slate-100">
+                    <tr>
                       <td />
                       <td colSpan={4} className="px-3 pb-3">
                         <label className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
@@ -2211,10 +2213,9 @@ export function ProjectEditorWizard({
                       </td>
                     </tr>
                   ) : null}
-                </Fragment>
+                </tbody>
               );
             })}
-          </tbody>
         </table>
       </div>
     );
@@ -3008,7 +3009,6 @@ export function ProjectEditorWizard({
                         onChange={(event) => updatePaymentExpectedMonth(field, event.target.value)}
                         className={cn('min-w-[150px]', FORM_CONTROL_CLASS)}
                       />
-                      {paymentPlan[field] > 0 ? <span aria-hidden className="text-red-600">*</span> : null}
                     </div>
                   </td>
                 </tr>
@@ -3168,7 +3168,7 @@ export function ProjectEditorWizard({
     },
     {
       number: 5,
-      label: '제안서 PPT 링크',
+      label: '제안서 PPT 링크(구글드라이브 링크)',
       value: draft.registrationConfirmations.proposalPptOriginal || draft.proposalPptOriginalDocument?.name || '미입력',
     },
     {
