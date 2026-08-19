@@ -4756,20 +4756,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             String requestId = text(metadata.get("requestId"), "");
             String approvalId = text(metadata.get("approvalId"), "");
             String operationId = text(metadata.get("operationId"), "");
-            List<Map<String, Object>> applied = changes.stream().map(change -> {
-                Map<String, Object> item = new LinkedHashMap<>(change);
-                item.put("actorId", event.getActorId());
-                item.put("changedAt", event.getCreatedAt().toString());
-                item.put("reason", reason);
-                item.put("sourceRevision", sourceRevision);
-                item.put("targetRevision", targetRevision);
-                item.put("requestId", requestId);
-                item.put("approvalId", approvalId);
-                item.put("operationId", operationId);
-                item.put("auditId", auditId);
-                item.put("idempotencyKey", event.getIdempotencyKey());
-                return Collections.unmodifiableMap(item);
-            }).toList();
+            // These ten values are identical for every change in one audit event. Repeating them per
+            // cell pushed a full sheet apply (1,920 cells) past the 1 MB Firestore field limit, so the
+            // apply failed with INVALID_ARGUMENT and no sheet could be applied at all. Write them once;
+            // the reader already falls back from the change to this metadata, so older records still read.
+            List<Map<String, Object>> applied = changes.stream()
+                .map(change -> Collections.unmodifiableMap(new LinkedHashMap<>(change)))
+                .toList();
+            metadata.put("actorId", event.getActorId());
+            metadata.put("changedAt", event.getCreatedAt().toString());
+            metadata.put("reason", reason);
+            metadata.put("sourceRevision", sourceRevision);
+            metadata.put("targetRevision", targetRevision);
+            metadata.put("requestId", requestId);
+            metadata.put("approvalId", approvalId);
+            metadata.put("operationId", operationId);
+            metadata.put("auditId", auditId);
+            metadata.put("idempotencyKey", event.getIdempotencyKey());
             metadata.put("appliedCellChanges", applied);
             metadata.put("appliedCellChangeCount", applied.size());
             changes.clear();
