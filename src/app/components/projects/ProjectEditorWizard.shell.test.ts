@@ -436,7 +436,10 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('{slot.description}');
     expect(source).toContain('isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)');
     expect(source).toMatch(/number: 7,\s+label: 'RFP'/);
-    expect(source).toContain('title="연도별 계약·재무"');
+    // 연도별 표는 이제 독립 섹션이 아니라 「계약 정보」 안에 있다. 통화·기간과 떨어지면
+    // 무엇의 금액인지 멀어지기 때문이다.
+    expect(source).toContain('title="계약 정보"');
+    expect(source).not.toContain('title="연도별 계약·재무"');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
     expect(source).not.toContain('4대보험 포함 확인');
     expect(source).not.toContain('퇴직급여 포함 확인');
