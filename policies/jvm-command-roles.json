@@ -152,6 +152,16 @@
         "viewer"
       ]
     },
+    "CONFIRM_CASHFLOW_WEEKLY_UPDATE_COMMAND": {
+      "command": "cashflowWeeklyUpdate.confirm",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
     "DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND": {
       "command": "cashflowMonth.decideReopen",
       "roles": [

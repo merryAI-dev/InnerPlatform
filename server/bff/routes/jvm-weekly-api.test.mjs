@@ -2000,7 +2000,8 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.actions).toMatchObject({
           completeWeekly: { enabled: true },
           // 완료 전이면 회수할 게 없다. 완료·회수는 서로 배타.
-          reopenWeekly: { enabled: false, guide: '아직 완료되지 않은 주간 정산입니다.' },
+          reopenWeekly: { enabled: false, guide: '아직 완료 요청되지 않은 주간 정산입니다.' },
+          confirmWeekly: { enabled: false, guide: '완료 요청된 주간 정산만 확정할 수 있습니다.' },
           changeExecutiveApprover: { enabled: true },
           requestMonthClose: { enabled: true, label: '월 결산 요청' },
           withdrawMonthClose: { enabled: false },
@@ -3225,6 +3226,16 @@ describe('JVM weekly API BFF proxy', () => {
           }),
         };
       }
+      if (url.endsWith('/api/v1/cashflow/project-a/weekly-update-complete/confirm')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true, projectId: 'project-a', yearMonth: body.yearMonth, weekNo: body.weekNo,
+            status: 'LOCKED', revision: body.expectedRevision + 1,
+          }),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -3251,6 +3262,9 @@ describe('JVM weekly API BFF proxy', () => {
         yearMonth: '2026-06', weekNo: 2, status: 'LOCKED', revision: 1,
       }));
 
+    source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w2', {
+      projectId: 'project-a', yearMonth: '2026-06', weekNo: 2, status: 'LOCKED', revision: 1,
+    });
     await request(app)
       .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
       .send({ yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정' })
@@ -3267,9 +3281,9 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정',
     });
 
-    // 회수(사유 없음): 화면은 revision 을 모른다. BFF 가 잠금 기록에서 읽어 JVM 낙관적 잠금에 넘긴다.
+    // 회수(사유 없음): 완료 요청(SUBMITTED) 상태. 화면은 revision 을 모른다. BFF 가 완료 기록에서 읽어 JVM 낙관적 잠금에 넘긴다.
     source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3', {
-      projectId: 'project-a', yearMonth: '2026-06', weekNo: 3, status: 'LOCKED', revision: 4,
+      projectId: 'project-a', yearMonth: '2026-06', weekNo: 3, status: 'SUBMITTED', revision: 4,
     });
     await request(app)
       .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
@@ -3280,12 +3294,36 @@ describe('JVM weekly API BFF proxy', () => {
     const withdrawBody = JSON.parse(withdrawCall[1].body);
     expect(withdrawBody).toMatchObject({ yearMonth: '2026-06', weekNo: 3, expectedRevision: 4 });
     expect(withdrawBody).not.toHaveProperty('reason');
-    // 완료된 적 없는 주는 회수할 수 없다.
+    // 확정(LOCKED) 된 주는 사유 없이 못 되돌린다.
+    source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w5', {
+      projectId: 'project-a', yearMonth: '2026-06', weekNo: 5, status: 'LOCKED', revision: 2,
+    });
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
+      .send({ yearMonth: '2026-06', weekNo: 5 })
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_reopen_reason_required'));
+    // 완료 요청된 적 없는 주는 되돌릴 수 없다.
     await request(app)
       .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
       .send({ yearMonth: '2026-06', weekNo: 4 })
       .expect(409)
       .expect((response) => expect(response.body.code).toBe('cashflow_weekly_reopen_not_locked'));
+    // 확정: 완료 요청된 주만, revision 은 BFF 가 읽어 넘긴다.
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/confirm')
+      .send({ yearMonth: '2026-06', weekNo: 5 })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_confirm_not_submitted'));
+    source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3', {
+      projectId: 'project-a', yearMonth: '2026-06', weekNo: 3, status: 'SUBMITTED', revision: 4,
+    });
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/confirm')
+      .send({ yearMonth: '2026-06', weekNo: 3 })
+      .expect(200);
+    const confirmCall = fetchImpl.mock.calls.find(([url]) => url.endsWith('/weekly-update-complete/confirm'));
+    expect(JSON.parse(confirmCall[1].body)).toMatchObject({ yearMonth: '2026-06', weekNo: 3, expectedRevision: 4 });
   });
 
   it('does not count a reopened weekly completion as settled', async () => {

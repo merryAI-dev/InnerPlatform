@@ -35,6 +35,7 @@ import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyUpdateCompletionResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyComplianceHistoryResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
+import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
@@ -2717,7 +2718,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(first.alreadyCompleted()).isFalse();
         assertThat(second.alreadyCompleted()).isTrue();
         assertThat(second.completedAt()).isEqualTo(first.completedAt());
-        assertThat(read.status()).isEqualTo("LOCKED");
+        assertThat(read.status()).isEqualTo("SUBMITTED");
         assertThat(read.snapshotHash()).isEqualTo(first.snapshotHash());
         assertThat(fixture.documents.get(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
@@ -2725,7 +2726,7 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("projectId", "project-a")
             .containsEntry("yearMonth", "2026-07")
             .containsEntry("weekNo", 3)
-            .containsEntry("status", "LOCKED")
+            .containsEntry("status", "SUBMITTED")
             .containsEntry("revision", 1L)
             .containsEntry("sourceRevision", SOURCE_REVISION)
             .containsEntry("completedAt", "2026-07-16T09:00:00Z")
@@ -2822,7 +2823,7 @@ class FirestoreCashflowLeaseGuardTest {
             )
         );
 
-        assertThat(response.status()).isEqualTo("LOCKED");
+        assertThat(response.status()).isEqualTo("SUBMITTED");
         Map<?, ?> completion = fixture.documents.get(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
         );
@@ -2902,7 +2903,7 @@ class FirestoreCashflowLeaseGuardTest {
                 )
             );
 
-            assertThat(response.status()).isEqualTo("LOCKED");
+            assertThat(response.status()).isEqualTo("SUBMITTED");
             Map<?, ?> completion = fixture.documents.get(
                 "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
             );
@@ -3144,7 +3145,7 @@ class FirestoreCashflowLeaseGuardTest {
             )
         );
 
-        assertThat(read.status()).isEqualTo("LOCKED");
+        assertThat(read.status()).isEqualTo("SUBMITTED");
         assertThat(replay.alreadyCompleted()).isTrue();
         assertThat(replay.revision()).isEqualTo(1L);
 
@@ -3201,7 +3202,7 @@ class FirestoreCashflowLeaseGuardTest {
                 .containsEntry("SALES_IN", 200L));
         assertThat(fixture.documents.get(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
-        )).containsEntry("status", "LOCKED");
+        )).containsEntry("status", "SUBMITTED");
     }
 
     @Test
@@ -3531,7 +3532,7 @@ class FirestoreCashflowLeaseGuardTest {
             )
         ));
 
-        assertThat(response.status()).isEqualTo("LOCKED");
+        assertThat(response.status()).isEqualTo("SUBMITTED");
         assertThat(response.completedBy()).isEqualTo("pm@example.com");
     }
 
@@ -3561,7 +3562,7 @@ class FirestoreCashflowLeaseGuardTest {
         ));
 
         assertThat(upgraded.alreadyCompleted()).isFalse();
-        assertThat(upgraded.status()).isEqualTo("LOCKED");
+        assertThat(upgraded.status()).isEqualTo("SUBMITTED");
         assertThat(upgraded.revision()).isEqualTo(1L);
         assertThat(fixture.documents).containsKey(
             "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1"
@@ -3681,7 +3682,7 @@ class FirestoreCashflowLeaseGuardTest {
         CashflowWeeklyUpdateCompletionResponse completed = fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).completeCashflowWeeklyUpdate(ACTOR, "project-a", override));
-        assertThat(completed.status()).isEqualTo("LOCKED");
+        assertThat(completed.status()).isEqualTo("SUBMITTED");
         assertThat(completed.updateResult()).isEqualTo("NO_CHANGES");
         assertThat(completed.complianceStatus()).isEqualTo("ON_TIME");
         assertThat(fixture.documents.get(
@@ -3818,13 +3819,19 @@ class FirestoreCashflowLeaseGuardTest {
         );
     }
 
+    private static Map<String, Object> submittedWeeklyCompletion(String yearMonth, int weekNo, long revision) {
+        Map<String, Object> value = lockedWeeklyCompletion(yearMonth, weekNo, revision);
+        value.put("status", "SUBMITTED");
+        return value;
+    }
+
     @Test
     void weeklyReopenNeedsNoReasonAndReopensALockedWeek() {
-        // 주정산 회수는 결재가 없는 가벼운 되돌림이라 사유 없이도 된다. 있으면 기록만 한다.
+        // 완료 요청(SUBMITTED) 상태의 회수는 결재 없는 가벼운 되돌림이라 사유 없이도 된다. 있으면 기록만 한다.
         Fixture fixture = fixture(activeMember(), Map.of());
         fixture.documents.put(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
-            lockedWeeklyCompletion("2026-07", 3, 1)
+            submittedWeeklyCompletion("2026-07", 3, 1)
         );
         var response = fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
             .reopenCashflowWeeklyUpdate(
@@ -3849,13 +3856,63 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void weeklyConfirmMovesASubmittedWeekToLockedForTheProjectApproverOnly() {
+        // 확정은 프로젝트 조직장만. SUBMITTED → LOCKED, revision +1, 준수 판정은 요청 시각 그대로.
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "manager-1"
+        ));
+        Map<String, Object> submitted = submittedWeeklyCompletion("2026-07", 3, 1);
+        submitted.put("complianceStatus", "ON_TIME");
+        submitted.put("deadline", "2026-07-16T14:59:59Z");
+        fixture.documents.put("orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3", submitted);
+        fixture.documents.put("orgs/tenant-a/members/manager-1", member(Map.of("uid", "manager-1", "role", "pm", "projectIds", List.of("project-a"))));
+        fixture.documents.put("orgs/tenant-a/persons/person-manager-1", Map.of("uid", "manager-1"));
+        TrustedActorContext manager = new TrustedActorContext("tenant-a", "manager-1", "manager@example.com", "pm", "Manager");
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .confirmCashflowWeeklyUpdate(ACTOR, "project-a",
+                new ConfirmCashflowWeeklyUpdateRequest("confirm-by-pm", "2026-07", 3, 1))))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_weekly_confirm_forbidden"));
+
+        var response = fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .confirmCashflowWeeklyUpdate(manager, "project-a",
+                new ConfirmCashflowWeeklyUpdateRequest("confirm-by-manager", "2026-07", 3, 1)));
+        assertThat(response.status()).isEqualTo("LOCKED");
+        assertThat(response.revision()).isEqualTo(2L);
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r2"
+        ))
+            .containsEntry("lockState", "LOCKED")
+            .containsEntry("complianceStatus", "ON_TIME");
+
+        // 확정된 주는 사유 없이 못 되돌리고, 사유가 있어도 조직장/관리자만 되돌린다.
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .reopenCashflowWeeklyUpdate(manager, "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("reopen-locked-no-reason", "2026-07", 3, 2, null))))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("reason");
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .reopenCashflowWeeklyUpdate(ACTOR, "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("reopen-locked-by-pm", "2026-07", 3, 2, "정정"))))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error ->
+                assertThat(error.code()).isEqualTo("cashflow_weekly_reopen_forbidden"));
+        var reopened = fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .reopenCashflowWeeklyUpdate(manager, "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("reopen-locked-by-manager", "2026-07", 3, 2, "정정")));
+        assertThat(reopened.status()).isEqualTo("OPEN");
+        assertThat(reopened.revision()).isEqualTo(3L);
+    }
+
+    @Test
     void weeklyComplianceHistoryTreatsAReopenedWeekAsNotCompleted() {
-        // 완료(r1 ON_TIME) 뒤 회수(r2 REOPENED): 이력은 그 주를 완료 아님(PENDING/MISSED) 으로 되돌리고 완료 수에서 뺀다.
+        // 완료 요청(r1 ON_TIME, SUBMITTED) 뒤 회수(r2 REOPENED): 이력은 그 주를 완료 아님(PENDING/MISSED) 으로 되돌리고 완료 수에서 뺀다.
         // 그래야 대시보드의 현재 주가 "완료 대기" 로 바뀌고 회수 버튼이 다시 뜨지 않는다.
         Fixture fixture = fixture(activeMember(), Map.of());
         fixture.documents.put(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w2",
-            lockedWeeklyCompletion("2026-07", 2, 1)
+            submittedWeeklyCompletion("2026-07", 2, 1)
         );
         fixture.documents.put(
             "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w2-r1",
@@ -3877,6 +3934,8 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(before.items()).anySatisfy(item -> {
             assertThat(item.id()).isEqualTo("2026-07-w2");
             assertThat(item.status()).isEqualTo("ON_TIME");
+            // lockState 없는 옛 버전은 확정으로 본다
+            assertThat(item.lockState()).isEqualTo("LOCKED");
         });
         assertThat(before.onTimeCount()).isEqualTo(1L);
 
@@ -5431,7 +5490,7 @@ class FirestoreCashflowLeaseGuardTest {
             )
         );
 
-        assertThat(august.status()).isEqualTo("LOCKED");
+        assertThat(august.status()).isEqualTo("SUBMITTED");
         assertThat(fixture.documents).containsKey(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-08-w3"
         );

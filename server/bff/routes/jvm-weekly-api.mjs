@@ -164,16 +164,33 @@ function buildCashflowMonthCloseActions({
           ? '현재 주간 정산 대상을 서버에서 확인하지 못했습니다.'
           : '이미 완료된 주간 정산입니다.',
     ),
-    // 주정산 회수: 완료된 주가 있으면 즉시. 결재 없음, 사유 없음.
+    // 주정산 회수: 완료 요청(SUBMITTED) 상태에서만, 즉시, 사유 없음. 확정(LOCKED) 뒤엔 사유 있는 재오픈만.
     reopenWeekly: cashflowAction(
-      weeklyRoleAllowed && Boolean(currentDeadline) && Boolean(readOptionalText(currentDeadline?.completedAt)),
+      weeklyRoleAllowed && Boolean(currentDeadline) && readOptionalText(currentDeadline?.lockState) === 'SUBMITTED',
       !actionAllowed
         ? accessGuide
         : !weeklyRoleAllowed
         ? '현금흐름 주간 정산 회수 권한이 없습니다.'
         : !currentDeadline
           ? '현재 주간 정산 대상을 서버에서 확인하지 못했습니다.'
-          : '아직 완료되지 않은 주간 정산입니다.',
+          : readOptionalText(currentDeadline?.lockState) === 'LOCKED'
+            ? '조직장이 확정한 주간 정산은 회수할 수 없습니다. 사유와 함께 재오픈해야 합니다.'
+            : '아직 완료 요청되지 않은 주간 정산입니다.',
+    ),
+    // 주정산 확정: 완료 요청된 주를 프로젝트 조직장이 잠금으로 확정.
+    confirmWeekly: cashflowAction(
+      weeklyRoleAllowed
+        && Boolean(currentDeadline)
+        && readOptionalText(currentDeadline?.lockState) === 'SUBMITTED'
+        && Boolean(readOptionalText(req.context?.actorId))
+        && readOptionalText(dashboard?.project?.executiveApproverId) === readOptionalText(req.context?.actorId),
+      !actionAllowed
+        ? accessGuide
+        : !currentDeadline
+          ? '현재 주간 정산 대상을 서버에서 확인하지 못했습니다.'
+          : readOptionalText(currentDeadline?.lockState) !== 'SUBMITTED'
+            ? '완료 요청된 주간 정산만 확정할 수 있습니다.'
+            : '프로젝트 조직장만 주간 정산을 확정할 수 있습니다.',
     ),
     changeExecutiveApprover: cashflowAction(
       requestAvailable
@@ -341,8 +358,10 @@ function cashflowSectionErrorsForResponse(sectionErrors) {
 // JVM 이 내는 주간 준수 상태는 ON_TIME · COMPLETED_LATE · MISSED · PENDING 넷이다
 // (FirestoreInheritedWeeklyExpensePersistence). 예전 이 표는 존재하지 않는 COMPLETED 를
 // 기다리고 ON_TIME 을 몰라서, 기한 내 완료한 주차를 "확인 필요" 로 그렸다.
-export function cashflowWeeklyStatusLabel(status, available) {
+// lockState: SUBMITTED = 완료 요청됨(조직장 확정 대기). LOCKED/없음 = 준수 상태 그대로.
+export function cashflowWeeklyStatusLabel(status, available, lockState = '') {
   if (!available) return '주간 정산 상태 확인 필요';
+  if (lockState === 'SUBMITTED') return '확정 대기';
   if (!status) return '';
   if (status === 'ON_TIME') return '기한 내 완료';
   if (status === 'COMPLETED_LATE') return '기한 후 완료';
@@ -397,12 +416,14 @@ function cashflowMonthPresentation(entry, available) {
   };
 }
 
-export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, isCurrent }) {
+export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, isCurrent, weeklyLockState = '' }) {
   if (month.tone === 'unavailable') return 'unavailable';
   // 월 결산 기한 초과는 배경이 아니라 테두리로 그린다 (week.overdue). 배경 빨강은 주간 놓침만.
   // 같은 빨강 하나로 둘을 그리니 무엇이 늦었는지 화면에서 구분이 안 됐다.
   if (month.tone !== 'default' && month.tone !== 'danger') return month.tone;
   if (!weeklyAvailable) return 'unavailable';
+  // 완료 요청만 되고 확정 전이면 노랑. 초록은 조직장이 확정한 뒤.
+  if (weeklyLockState === 'SUBMITTED') return 'warning';
   if (weeklyStatus === 'ON_TIME' || weeklyStatus === 'COMPLETED_LATE') return 'success';
   if (weeklyStatus === 'MISSED') return 'danger';
   if (weeklyStatus === 'PENDING') return 'warning';
@@ -477,7 +498,8 @@ function buildCashflowMonthClosePresentation({
     const weeklyStatus = weeklyStatusesAvailable && weeklyEntry
       ? readOptionalText(weeklyEntry.status) || null
       : null;
-    const weeklyStatusLabel = cashflowWeeklyStatusLabel(weeklyStatus, weeklyStatusesAvailable);
+    const weeklyLockState = weeklyStatusesAvailable && weeklyEntry ? readOptionalText(weeklyEntry.lockState) : '';
+    const weeklyStatusLabel = cashflowWeeklyStatusLabel(weeklyStatus, weeklyStatusesAvailable, weeklyLockState);
     const isCurrent = week.yearMonth === effectiveAsOfWeek?.yearMonth
       && week.weekNo === effectiveAsOfWeek?.weekNo;
     const statusLabel = month.tone === 'unavailable'
@@ -497,9 +519,10 @@ function buildCashflowMonthClosePresentation({
       monthStatusLabel: month.statusLabel,
       overdue: month.overdue,
       weeklyStatus,
+      weeklyLockState: weeklyLockState || null,
       weeklyStatusLabel,
       statusLabel,
-      surfaceTone: cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable: weeklyStatusesAvailable, isCurrent }),
+      surfaceTone: cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable: weeklyStatusesAvailable, isCurrent, weeklyLockState }),
     };
   });
   const asOfYear = Number(readOptionalText(effectiveAsOfWeek?.yearMonth).slice(0, 4));
@@ -2717,6 +2740,7 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
       yearMonth: item.yearMonth,
       weekNo: item.weekNo,
       status: item.status,
+      lockState: readOptionalText(item.lockState) || null,
       deadline: item.deadline,
       updateResult: item.updateResult,
       operationId: item.operationId,
@@ -3421,7 +3445,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       ...result,
       items: result.items.map((item) => ({
         ...item,
-        statusLabel: cashflowWeeklyStatusLabel(readOptionalText(item?.status), true),
+        statusLabel: cashflowWeeklyStatusLabel(readOptionalText(item?.status), true, readOptionalText(item?.lockState)),
       })),
     };
   }
@@ -4277,22 +4301,52 @@ export function mountJvmWeeklyApiRoutes(app, {
         'cashflow_weekly_reopen_request_invalid',
       );
     }
-    // 회수는 사유 없이 즉시. 화면은 revision 을 모르므로 BFF 가 현재 잠금 기록에서 읽어 JVM 낙관적 잠금에 넘긴다.
-    let expectedRevision = Number(requested.expectedRevision);
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
-      const completion = await readDocument(
-        db,
-        `orgs/${req.context.tenantId}/cashflow_weekly_update_completions/${projectId}-${yearMonth}-w${weekNo}`,
-      );
-      if (readOptionalText(completion?.status) !== 'LOCKED' || !Number.isSafeInteger(Number(completion?.revision))) {
-        throw createHttpError(409, '완료된 주간 정산만 회수할 수 있습니다.', 'cashflow_weekly_reopen_not_locked');
-      }
-      expectedRevision = Number(completion.revision);
+    // 화면은 revision 을 모른다. BFF 가 현재 완료 기록에서 읽어 JVM 낙관적 잠금에 넘긴다.
+    // 완료 요청(SUBMITTED) 은 사유 없이 회수. 확정(LOCKED) 은 사유가 있어야 재오픈 (조직장·관리자만, JVM 이 검사).
+    const completion = await readDocument(
+      db,
+      `orgs/${req.context.tenantId}/cashflow_weekly_update_completions/${projectId}-${yearMonth}-w${weekNo}`,
+    );
+    const completionStatus = readOptionalText(completion?.status);
+    if (!['SUBMITTED', 'LOCKED'].includes(completionStatus) || !Number.isSafeInteger(Number(completion?.revision))) {
+      throw createHttpError(409, '완료 요청되거나 확정된 주간 정산만 되돌릴 수 있습니다.', 'cashflow_weekly_reopen_not_locked');
     }
+    if (completionStatus === 'LOCKED' && !reason) {
+      throw createHttpError(400, '조직장이 확정한 주간 정산을 되돌리려면 사유가 필요합니다.', 'cashflow_weekly_reopen_reason_required');
+    }
+    const expectedRevision = Number.isSafeInteger(Number(requested.expectedRevision)) && Number(requested.expectedRevision) >= 1
+      ? Number(requested.expectedRevision)
+      : Number(completion.revision);
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete/reopen`,
       { ...requested, yearMonth, weekNo, expectedRevision, ...(reason ? { reason } : {}) },
+      { cashflowWrite: true },
+    );
+    res.status(200).json(result);
+  }));
+
+  // 주정산 확정: 완료 요청된 주를 프로젝트 조직장이 잠금으로 확정한다. revision 은 BFF 가 읽어 넘긴다.
+  app.post('/api/v1/cashflow/:projectId/weekly-update-complete/confirm', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'confirm weekly cashflow update', authMode, workspaceEmailDomain);
+    const projectId = readOptionalText(req.params.projectId);
+    const requested = commandBody(req);
+    const yearMonth = readOptionalText(requested.yearMonth);
+    const weekNo = Number(requested.weekNo);
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth) || !Number.isSafeInteger(weekNo) || weekNo < 1 || weekNo > 5) {
+      throw createHttpError(400, '주간 정산 확정에는 대상 연월과 주차가 필요합니다.', 'cashflow_weekly_confirm_request_invalid');
+    }
+    const completion = await readDocument(
+      db,
+      `orgs/${req.context.tenantId}/cashflow_weekly_update_completions/${projectId}-${yearMonth}-w${weekNo}`,
+    );
+    if (readOptionalText(completion?.status) !== 'SUBMITTED' || !Number.isSafeInteger(Number(completion?.revision))) {
+      throw createHttpError(409, '완료 요청된 주간 정산만 확정할 수 있습니다.', 'cashflow_weekly_confirm_not_submitted');
+    }
+    const result = await proxyMutation(
+      req,
+      `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete/confirm`,
+      { ...requested, yearMonth, weekNo, expectedRevision: Number(completion.revision) },
       { cashflowWrite: true },
     );
     res.status(200).json(result);

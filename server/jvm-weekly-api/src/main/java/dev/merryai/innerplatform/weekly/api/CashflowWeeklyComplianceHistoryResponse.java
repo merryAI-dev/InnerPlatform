@@ -17,6 +17,7 @@ public record CashflowWeeklyComplianceHistoryResponse(
         String completedBy,
         String operationId,
         String auditId,
-        String updateResult
+        String updateResult,
+        String lockState
     ) {}
 }
