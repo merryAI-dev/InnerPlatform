@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router';
-import { CheckCircle2, Circle, FileText, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, FileText, AlertTriangle } from 'lucide-react';
+import { Checkbox } from '../ui/checkbox';
 import { usePortalStore } from '../../data/portal-store';
-import type { Project } from '../../data/types';
+import type { Project, ProjectCheckout } from '../../data/types';
 
 /**
  * 종료사업 체크아웃.
@@ -12,15 +13,21 @@ import type { Project } from '../../data/types';
  * "무엇이 남았는지" 를 묻는 자리를 여기 하나로 둔다.
  */
 
-type CheckItem = { label: string; done: boolean; note?: string };
+type CheckField = keyof Pick<
+  ProjectCheckout,
+  'finalPaymentReceived' | 'bankBalanceZero' | 'performanceCertificateReceived'
+  | 'usbEvidenceSubmitted' | 'evidenceDeletedAfterUsb'
+>;
+type CheckItem = { field: CheckField; label: string; done: boolean; note?: string };
 type UploadItem = { label: string; attached: boolean; note?: string };
 
 function readChecklist(project: Project): CheckItem[] {
   const checkout = project.checkout;
   return [
-    { label: '잔금 입금 완료', done: checkout?.finalPaymentReceived === true },
-    { label: '사업비 통장 0원', done: checkout?.bankBalanceZero === true },
+    { field: 'finalPaymentReceived', label: '잔금 입금 완료', done: checkout?.finalPaymentReceived === true },
+    { field: 'bankBalanceZero', label: '사업비 통장 0원', done: checkout?.bankBalanceZero === true },
     {
+      field: 'performanceCertificateReceived',
       label: '용역수행실적증명서 원본 제출',
       done: checkout?.performanceCertificateReceived === true,
       note: '원본 수령 시 최소 5부. 전자플랫폼(e나라도움 · KOICA · 온드림 등)은 업로드로 마무리합니다.',
@@ -50,7 +57,7 @@ function readUploads(project: Project): UploadItem[] {
 }
 
 export function PortalProjectCheckout() {
-  const { activeProjectId, projects } = usePortalStore();
+  const { activeProjectId, projects, updateProjectCheckout } = usePortalStore();
   const project = useMemo(
     () => projects.find((candidate) => candidate.id === activeProjectId) || null,
     [activeProjectId, projects],
@@ -98,14 +105,20 @@ export function PortalProjectCheckout() {
         <h2 className="border-b border-slate-200 pb-2 text-[12px] font-semibold text-slate-700">체크리스트</h2>
         <ul className="space-y-2">
           {checklist.map((item) => (
-            <li key={item.label} className="flex items-start gap-2 text-[13px]">
-              {item.done
-                ? <CheckCircle2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-[#047857]" />
-                : <Circle aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />}
-              <span className="min-w-0">
-                <span className={item.done ? 'text-slate-900' : 'text-slate-600'}>{item.label}</span>
-                {item.note ? <span className="mt-0.5 block text-[12px] text-slate-500">{item.note}</span> : null}
-              </span>
+            <li key={item.field} className="text-[13px]">
+              <label className="flex cursor-pointer items-start gap-2">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={item.done}
+                  onCheckedChange={(checked) => {
+                    void updateProjectCheckout(project.id, { [item.field]: checked === true });
+                  }}
+                />
+                <span className="min-w-0">
+                  <span className={item.done ? 'text-slate-900' : 'text-slate-600'}>{item.label}</span>
+                  {item.note ? <span className="mt-0.5 block text-[12px] text-slate-500">{item.note}</span> : null}
+                </span>
+              </label>
             </li>
           ))}
         </ul>
@@ -130,23 +143,28 @@ export function PortalProjectCheckout() {
       <section className="space-y-3">
         <h2 className="border-b border-slate-200 pb-2 text-[12px] font-semibold text-slate-700">정산사업 마감</h2>
         <ul className="space-y-2 text-[13px]">
-          <li className="flex items-start gap-2">
-            {settlementClosed
-              ? <CheckCircle2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-[#047857]" />
-              : <Circle aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />}
-            <span>정산 자료 USB 저장 후 재경팀 제출</span>
-          </li>
-          <li className="flex items-start gap-2">
-            {evidenceDeleted
-              ? <CheckCircle2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-[#047857]" />
-              : <Circle aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />}
-            <span>증빙자료 삭제 (사용내역은 그대로 유지)</span>
-          </li>
+          {([
+            ['usbEvidenceSubmitted', '정산 자료 USB 저장 후 재경팀 제출', settlementClosed],
+            ['evidenceDeletedAfterUsb', '증빙자료 삭제 (사용내역은 그대로 유지)', evidenceDeleted],
+          ] as Array<[CheckField, string, boolean]>).map(([field, label, done]) => (
+            <li key={field}>
+              <label className="flex cursor-pointer items-start gap-2">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={done}
+                  onCheckedChange={(checked) => {
+                    void updateProjectCheckout(project.id, { [field]: checked === true });
+                  }}
+                />
+                <span className={done ? 'text-slate-900' : 'text-slate-600'}>{label}</span>
+              </label>
+            </li>
+          ))}
         </ul>
       </section>
 
       <p className="text-[13px] text-slate-600">
-        체크와 증빙은{' '}
+        체크는 이 화면에서 바로 저장됩니다. 증빙 업로드는{' '}
         <Link className="font-medium text-[#0176D3] underline underline-offset-2" to={`/portal/edit-project/${project.id}`}>
           프로젝트 수정
         </Link>

@@ -27,6 +27,7 @@ import type {
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   Project,
+  ProjectCheckout,
   ProjectStatus,
   OrgMember,
   ParticipationEntry,
@@ -520,6 +521,7 @@ interface PortalActions {
   setSessionActiveProject: (projectId: string) => Promise<boolean>;
   patchProjectSnapshot: (project: Project) => void;
   updateProjectStatus: (projectId: string, status: ProjectStatus) => Promise<boolean>;
+  updateProjectCheckout: (projectId: string, patch: Partial<ProjectCheckout>) => Promise<boolean>;
   logout: () => void;
   addExpenseSet: (set: ExpenseSet) => void;
   updateExpenseSet: (id: string, updates: Partial<ExpenseSet>) => void;
@@ -3420,6 +3422,84 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     scopedProjectIds,
   ]);
 
+  /**
+   * 종료사업 체크아웃 항목을 저장한다. 상태 저장과 같은 경로를 쓰되 `checkout` 만 덮어쓴다.
+   * 종료 확인은 편집기 초안을 열 만큼 큰 일이 아니라 체크 하나가 곧 저장이다.
+   */
+  const updateProjectCheckout = useCallback(async (
+    projectId: string,
+    patch: Partial<ProjectCheckout>,
+  ): Promise<boolean> => {
+    const targetProjectId = projectId.trim();
+    if (!targetProjectId || !includesProject(scopedProjectIds, targetProjectId)) {
+      toast.error('선택 가능한 사업이 아닙니다.');
+      return false;
+    }
+
+    const existingProject = projectsRef.current.find((project) => project.id === targetProjectId);
+    if (!existingProject) {
+      toast.error('사업 정보를 찾지 못했습니다.');
+      return false;
+    }
+
+    const nextCheckout = { ...(existingProject.checkout || {}), ...patch } as ProjectCheckout;
+    const projectPatch: Partial<Project> = { checkout: nextCheckout, updatedAt: new Date().toISOString() };
+    const previousProjects = projectsRef.current;
+    const nextProjects = previousProjects.map((project) => (
+      project.id === targetProjectId ? { ...project, ...projectPatch } : project
+    ));
+    projectsRef.current = nextProjects;
+    setProjects(nextProjects);
+
+    if (isDevHarnessUser || !firestoreEnabled || !db) return true;
+
+    try {
+      if (isPlatformApiEnabled()) {
+        const idToken = authUser?.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+        await upsertProjectViaBff({
+          tenantId: orgId,
+          actor: {
+            uid: authUser?.uid || portalUser?.id || 'portal-user',
+            email: authUser?.email || portalUser?.email || '',
+            role: authUser?.role || portalUser?.role || 'pm',
+            idToken,
+          },
+          project: {
+            ...existingProject,
+            ...projectPatch,
+            expectedVersion: existingProject.version ?? 1,
+          } as UpsertProjectPayload,
+        });
+      } else {
+        await setDoc(
+          doc(db, getOrgDocumentPath(orgId, 'projects', targetProjectId)),
+          withTenantScope(orgId, projectPatch),
+          { merge: true },
+        );
+      }
+      return true;
+    } catch (err) {
+      console.error('[PortalStore] updateProjectCheckout error:', err);
+      projectsRef.current = previousProjects;
+      setProjects(previousProjects);
+      toast.error('체크아웃 저장에 실패했습니다.');
+      return false;
+    }
+  }, [
+    authUser?.email,
+    authUser?.idToken,
+    authUser?.role,
+    authUser?.uid,
+    db,
+    firestoreEnabled,
+    isDevHarnessUser,
+    orgId,
+    portalUser?.email,
+    portalUser?.id,
+    portalUser?.role,
+    scopedProjectIds,
+  ]);
+
   const logout = useCallback(() => {
     setActiveProjectIdState('');
     setPortalUser(null);
@@ -3786,6 +3866,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setSessionActiveProject,
     patchProjectSnapshot,
     updateProjectStatus,
+    updateProjectCheckout,
     logout,
     addExpenseSet,
     updateExpenseSet,
