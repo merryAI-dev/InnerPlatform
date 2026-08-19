@@ -272,7 +272,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('text-card-foreground">월 결산');
     expect(source).toContain('프로젝트 조직장');
     expect(source).toContain('project-executive-approver');
-    expect(source).toContain("toast.error('먼저 프로젝트 조직장을 선택해 주세요.')");
+    // 우측 하단 토스트는 전부 지웠다 (성공·안내는 #578, 에러는 2026-08-19). 화면 상태만 남는다.
+    expect(source).not.toContain('toast.');
+    expect(source).not.toContain("from 'sonner'");
     expect(source).not.toContain('월 결산 승인 조직장을 선택하세요');
     expect(source).toContain('saveCashflowMonthCloseApproverViaBff');
     expect(source).toContain('text-secondary-foreground">{check.title}');
@@ -640,7 +642,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('selectedProjectId: selectedProjectIdRef.current');
     expect(source).toContain('selectedYearMonth: selectedYearMonthRef.current');
     expect(source).toContain('isCurrentMonthCloseMutation(mutationScope, result.request)');
-    expect(source).toContain('선택한 프로젝트 또는 결산 월이 변경되었습니다. 현재 화면의 월 결산 상태를 다시 확인해 주세요.');
     expect(source).toContain('setMonthCloseRequestError(\'월 결산 승인 상태를 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.\')');
     expect(source).toContain('setMonthCloseRequest(null);');
   });
@@ -816,7 +817,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('const canReviewReopen = monthCloseRequest?.canDecideReopen === true;');
     expect(source).not.toContain("monthCloseResult?.status !== 'OPEN'");
     expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');
-    expect(source).toContain('현재 조직장 또는 Runtime admin만 재오픈 요청을 처리할 수 있습니다.');
+    // 권한 판정은 서버(canDecideReopen). 화면은 그 값으로 버튼을 막을 뿐, 별도 문구를 띄우지 않는다.
+    expect(source).toContain("if (reopenAction !== 'request' && !canReviewReopen) {");
   });
 
   it('keeps a missing server cell null instead of fabricating zero', () => {

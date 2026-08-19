@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save } from 'lucide-react';
-import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -33,7 +32,6 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import {
   resolveApiErrorMessage,
-  resolveCashflowMonthReopenErrorMessage,
   resolveCashflowWeeklyCompletionErrorMessage,
 } from '../../platform/api-error-message';
 import { PlatformApiError } from '../../platform/api-client';
@@ -533,7 +531,6 @@ export function CashflowProjectSheet({
       setMonthCloseReviewDirty(false);
       blocker.proceed?.();
     } catch (error) {
-      toast.error(resolveApiErrorMessage(error, '저장하지 않고 종료하지 못했습니다. 다시 시도해 주세요.'));
     } finally {
       setExitBusy(false);
     }
@@ -838,16 +835,13 @@ export function CashflowProjectSheet({
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
     if (!weeklyUpdateResult) return;
     if (monthCloseActions?.completeWeekly.enabled !== true) {
-      toast.error(monthCloseActions?.completeWeekly.guide || '주간 정산 가능 상태를 서버에서 확인해 주세요.');
       return;
     }
     if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) {
-      toast.error('선택한 프로젝트 또는 결산 월이 변경되었습니다. 현재 화면의 주간 정산 상태를 다시 확인해 주세요.');
       return;
     }
     if (!savedExecutiveApproverId) {
       setExecutiveApproverAttention(true);
-      toast.error('먼저 프로젝트 조직장을 선택해 주세요.');
       return;
     }
     setWeeklyCompletionBusy(true);
@@ -919,7 +913,6 @@ export function CashflowProjectSheet({
       );
       setWeeklyCompletionError(message);
       setWeeklyProjectionWarning(weeklyProjectionValidation(error));
-      toast.error(message);
     } finally {
       setWeeklyCompletionBusy(false);
     }
@@ -1126,12 +1119,10 @@ export function CashflowProjectSheet({
 
   const handleSaveExecutiveApprover = useCallback(async (): Promise<void> => {
     if (monthCloseActions?.changeExecutiveApprover.enabled !== true) {
-      toast.error(monthCloseActions?.changeExecutiveApprover.guide || '조직장 변경 가능 상태를 서버에서 확인해 주세요.');
       return;
     }
     const approver = executiveApproverOptions.find((member) => member.uid === selectedExecutiveApproverId);
     if (!project || !approver) {
-      toast.error('조직장을 선택해 주세요.');
       return;
     }
     const mutationScope = captureMonthCloseMutationScope('approver');
@@ -1157,7 +1148,6 @@ export function CashflowProjectSheet({
       onExecutiveApproverSaved?.(result);
     } catch (error) {
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
-      toast.error(resolveApiErrorMessage(error, '조직장을 저장하지 못했습니다.'));
     } finally {
       if (isCurrentMonthCloseMutation(mutationScope)) setExecutiveApproverBusy(false);
     }
@@ -1177,12 +1167,10 @@ export function CashflowProjectSheet({
       summary,
     });
     if (monthCloseActions?.requestMonthClose.enabled !== true) {
-      toast.error(monthCloseActions?.requestMonthClose.guide || '서버에서 월 결산 가능 상태를 확인하지 못했습니다.');
       return;
     }
     if (project && !savedExecutiveApproverId) {
       setExecutiveApproverAttention(true);
-      toast.error('먼저 프로젝트 조직장을 선택해 주세요.');
       return;
     }
     setMonthCloseReviewOpen(true);
@@ -1199,16 +1187,13 @@ export function CashflowProjectSheet({
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
     if (monthCloseActions?.requestMonthClose.enabled !== true) {
-      toast.error(monthCloseActions?.requestMonthClose.guide || '서버에서 월 결산 가능 상태를 확인하지 못했습니다.');
       return;
     }
     if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) {
-      toast.error('선택한 프로젝트 또는 결산 월이 변경되었습니다. 현재 화면의 월 결산 상태를 다시 확인해 주세요.');
       return;
     }
     if (!yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed) {
       if (!savedExecutiveApproverId) setExecutiveApproverAttention(true);
-      toast.error('결산 대상 월과 조직장을 선택하고 시트값 확인에 동의해 주세요.');
       return;
     }
     let monthCloseInput: CashflowMonthCloseDraftInput;
@@ -1237,12 +1222,10 @@ export function CashflowProjectSheet({
         summary: { reason: 'draft_input_invalid', hasSheetConfig: Boolean(cashflowSheetConfig?.value) },
         error,
       });
-      toast.error(resolveApiErrorMessage(error, '월 결산할 데이터를 준비하지 못했습니다. 시트 값을 다시 확인해 주세요.'));
       return;
     }
     const reviewedOpeningBalances = monthCloseResult?.dashboard?.openingBalances;
     if (!reviewedOpeningBalances) {
-      toast.error('전년도 이월 항목을 불러오지 못했습니다. 월 결산 화면을 다시 열어 주세요.');
       return;
     }
 
@@ -1340,7 +1323,6 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      toast.error(resolveApiErrorMessage(error, '월 결산 요청에 실패했습니다. 입력 내용을 확인하고 다시 시도해 주세요.'));
       await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest()]);
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
     } finally {
@@ -1370,7 +1352,6 @@ export function CashflowProjectSheet({
 
   const handleWithdrawMonthCloseRequest = useCallback(async (): Promise<void> => {
     if (monthCloseActions?.withdrawMonthClose.enabled !== true) {
-      toast.error(monthCloseActions?.withdrawMonthClose.guide || '월 결산 요청 회수 가능 상태를 서버에서 확인해 주세요.');
       return;
     }
     if (!monthCloseRequest?.manifestHash) return;
@@ -1420,7 +1401,6 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      toast.error(resolveApiErrorMessage(error, '월 결산 요청 회수에 실패했습니다. 최신 상태를 확인해 주세요.'));
       await loadMonthCloseRequest();
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
     } finally {
@@ -1444,15 +1424,12 @@ export function CashflowProjectSheet({
   const handleMonthReopenAction = useCallback(async (): Promise<void> => {
     const reason = reopenReason.trim();
     if (!reopenAction || !monthCloseRequest || !reason) {
-      toast.error('사유를 입력해 주세요.');
       return;
     }
     if (reopenAction === 'request' && monthCloseActions?.requestMonthReopen.enabled !== true) {
-      toast.error(monthCloseActions?.requestMonthReopen.guide || '재오픈 요청 가능 상태를 서버에서 확인해 주세요.');
       return;
     }
     if (reopenAction !== 'request' && !canReviewReopen) {
-      toast.error('현재 조직장 또는 Runtime admin만 재오픈 요청을 처리할 수 있습니다.');
       return;
     }
 
@@ -1498,10 +1475,6 @@ export function CashflowProjectSheet({
       setReopenReason('');
     } catch (error) {
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
-      toast.error(resolveCashflowMonthReopenErrorMessage(
-        error,
-        '재오픈 처리를 완료하지 못했습니다.',
-      ));
     } finally {
       if (isCurrentMonthCloseMutation(mutationScope)) setMonthCloseBusy(false);
     }
@@ -1516,7 +1489,6 @@ export function CashflowProjectSheet({
         yearMonth,
         summary: { reason: 'sheet_config_missing' },
       });
-      toast.error('연결된 Google Sheet가 없습니다.');
       return null;
     }
     const startedAt = Date.now();
@@ -1547,7 +1519,6 @@ export function CashflowProjectSheet({
         void loadCashflowEvents();
         } else if (mirror.status === 'STALE') {
         } else {
-        toast.error(mirror.lastRefreshError?.message || '시트 연동에 실패했습니다.');
       }
     };
     setSheetRefreshLoading(true);
@@ -1561,7 +1532,6 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
-        toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
         return null;
       }
       const mirror = await refreshMirror(actor);
@@ -1600,7 +1570,6 @@ export function CashflowProjectSheet({
             durationMs: Date.now() - startedAt,
             error: retryError,
           });
-          toast.error(resolveApiErrorMessage(retryError, '시트값을 불러오지 못했습니다.'));
           return null;
         }
       }
@@ -1612,7 +1581,6 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      toast.error(resolveApiErrorMessage(error, '시트값을 불러오지 못했습니다.'));
       return null;
     } finally {
       setSheetRefreshLoading(false);
@@ -1685,7 +1653,6 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
-        toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
         return;
       }
       const result = await apply(actor);
@@ -1735,7 +1702,6 @@ export function CashflowProjectSheet({
         setLateSheetApply(null);
         setSheetApplyResumeRequired(false);
       }
-      toast.error(resolveApiErrorMessage(finalError, '시트 값을 MYSCube 시트에 반영하지 못했습니다.'));
     } finally {
       setSheetStageApplyLoading(false);
     }
@@ -1770,7 +1736,6 @@ export function CashflowProjectSheet({
   ): Promise<void> => {
     const sourceMirror = mirrorOverride || cashflowSheetMirror;
     if (sourceMirror?.status !== 'FRESH' || !sourceMirror.sourceRevision) {
-      toast.error('먼저 시트값 불러오기를 실행해 고정해 주세요.');
       return;
     }
     const stageIdempotencyKey = `cashflow-sheet-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1786,9 +1751,6 @@ export function CashflowProjectSheet({
       if (result.status === 'BLOCKED') {
         const contractIssue = result.pendingApprovalContractIssues?.[0];
         const blockedMonths = (contractIssue?.blockedMonths || result.blockedMonths || []).join(', ');
-        toast.warning(contractIssue
-          ? `${contractIssue.message}${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}${contractIssue.requestId !== 'unknown' ? ` (요청 ID: ${contractIssue.requestId})` : ''}`
-          : `반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
       if (result.stagedLineCount <= 0) {
@@ -1817,7 +1779,6 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
-        toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
         return;
       }
       const stage = await stageMirror(actor);
@@ -1841,11 +1802,9 @@ export function CashflowProjectSheet({
           await applyStageResult(await stageMirror(actor));
           return;
         } catch (retryError) {
-          toast.error(resolveApiErrorMessage(retryError, '고정된 시트 값을 준비하지 못했습니다.'));
           return;
         }
       }
-      toast.error(resolveApiErrorMessage(error, '고정된 시트 값을 준비하지 못했습니다.'));
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -2667,7 +2626,6 @@ export function CashflowProjectSheet({
                       onClick={() => {
                         if (!savedExecutiveApproverId) {
                           setExecutiveApproverAttention(true);
-                          toast.error('먼저 프로젝트 조직장을 선택해 주세요.');
                           return;
                         }
                         setWeeklyCompletionError('');
