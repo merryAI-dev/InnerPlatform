@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import request from 'supertest';
 import { createBffApp } from './app.mjs';
 
@@ -12,7 +11,6 @@ const INTERNAL_WORKER_PATHS = [
   '/api/internal/workers/work-queue/run',
   '/api/internal/workers/payroll/run',
   '/api/internal/workers/client-errors/run',
-  '/api/internal/workers/cashflow-sheet-sync/run',
 ];
 
 function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
@@ -34,17 +32,6 @@ function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
 }
 
 describe('internal worker endpoints (cron)', () => {
-  it('wires the Thursday cashflow worker to comparison without automatic apply', () => {
-    const source = readFileSync(new URL('./app.mjs', import.meta.url), 'utf8');
-    const route = source.slice(
-      source.indexOf('const runCashflowSheetSyncWorkerRoute'),
-      source.indexOf("app.get('/api/internal/workers/cashflow-sheet-sync/run'"),
-    );
-    expect(route).toContain('cashflowSheetCompareProject');
-    expect(route).not.toContain('cashflowSheetSyncProject');
-    expect(route).not.toContain('apply: true');
-  });
-
   it('keeps the Live maintenance probe open while workers stay disabled', async () => {
     const app = createTestApp({
       projectId: LIVE_PROJECT_ID,
@@ -153,71 +140,6 @@ describe('internal worker endpoints (cron)', () => {
 
     expect(res.status).toBe(401);
     expect(res.body?.error).toBe('unauthorized_worker');
-  });
-
-  it('runs the cashflow sheet sync only with the Vercel cron bearer token', async () => {
-    const cashflowSheetSyncWorker = vi.fn(async () => ({
-      ok: true,
-      tenantId: 'mysc',
-      discoveredProjects: 2,
-      processedProjects: 2,
-      succeededProjects: 2,
-      failedProjects: 0,
-    }));
-    const app = createTestApp({
-      projectId: LIVE_PROJECT_ID,
-      allowedOrigins: [LIVE_ORIGIN],
-      cashflowSheetSyncWorker,
-      env: {
-        BFF_DEPLOY_ENV: 'live',
-        BFF_SCHEDULER_OWNER: 'vercel',
-        CRON_SECRET: LONG_CRON_SECRET,
-      },
-    });
-
-    const res = await request(app)
-      .get('/api/internal/workers/cashflow-sheet-sync/run')
-      .set('Authorization', `Bearer ${LONG_CRON_SECRET}`);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({
-      ok: true,
-      worker: 'cashflow_sheet_sync',
-      discoveredProjects: 2,
-      processedProjects: 2,
-    });
-    expect(cashflowSheetSyncWorker).toHaveBeenCalledOnce();
-  });
-
-  it('reuses the same KST schedule run ID when Vercel retries the Thursday cron', async () => {
-    const cashflowSheetSyncWorker = vi.fn(async ({ runId }) => ({
-      ok: true,
-      runId,
-      discoveredProjects: 0,
-      processedProjects: 0,
-    }));
-    const app = createTestApp({
-      projectId: LIVE_PROJECT_ID,
-      allowedOrigins: [LIVE_ORIGIN],
-      cashflowSheetSyncWorker,
-      now: () => '2026-08-06T00:30:00.000Z',
-      env: {
-        BFF_DEPLOY_ENV: 'live',
-        BFF_SCHEDULER_OWNER: 'vercel',
-        CRON_SECRET: LONG_CRON_SECRET,
-      },
-    });
-
-    for (let retry = 0; retry < 2; retry += 1) {
-      await request(app)
-        .get('/api/internal/workers/cashflow-sheet-sync/run')
-        .set('Authorization', `Bearer ${LONG_CRON_SECRET}`)
-        .expect(200);
-    }
-
-    expect(cashflowSheetSyncWorker).toHaveBeenCalledTimes(2);
-    expect(cashflowSheetSyncWorker.mock.calls[0][0].runId).toBe('cashflow-sheet-sync:2026-08-06');
-    expect(cashflowSheetSyncWorker.mock.calls[1][0].runId).toBe('cashflow-sheet-sync:2026-08-06');
   });
 
   it('rejects unsafe runtime configuration before creating the Firestore client', () => {

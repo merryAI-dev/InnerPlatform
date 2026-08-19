@@ -9,7 +9,6 @@ const VERCEL_OWNED_WORKERS = new Map([
   ['/api/internal/workers/work-queue/run', '15 2 * * *'],
   ['/api/internal/workers/outbox/run', '30 2 * * *'],
   ['/api/internal/workers/payroll/run', '45 2 * * *'],
-  ['/api/internal/workers/cashflow-sheet-sync/run', '0 9 * * 4'],
 ]);
 
 describe('scheduler ownership config', () => {

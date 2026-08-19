@@ -29,7 +29,6 @@ import {
 import {
   runPayrollWorker,
 } from './payroll-worker.mjs';
-import { runCashflowSheetSyncWorker } from './cashflow-sheet-sync-worker.mjs';
 import {
   resolveAffectedViews,
   resolveRelationRules,
@@ -744,7 +743,6 @@ export function createBffApp(options = {}) {
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
-  let cashflowSheetCompareProject = null;
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
   const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
@@ -1046,35 +1044,6 @@ export function createBffApp(options = {}) {
   app.get('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
   app.post('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
 
-  const executeCashflowSheetSyncWorker = options.cashflowSheetSyncWorker
-    || ((workerOptions) => runCashflowSheetSyncWorker(db, workerOptions));
-  const runCashflowSheetSyncWorkerRoute = asyncHandler(async (req, res) => {
-    assertInternalWorkerAuthorized(req);
-    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || 'mysc';
-    const runId = `cashflow-sheet-sync:${formatSeoulDate(now())}`;
-    const result = await executeCashflowSheetSyncWorker({
-      tenantId,
-      concurrency: 4,
-      runId,
-      syncProject: ({ tenantId: projectTenantId, projectId: cashflowProjectId, runId: projectRunId }) => {
-        if (typeof cashflowSheetCompareProject !== 'function') {
-          throw createHttpError(503, 'Cashflow sheet comparison is not configured.', 'cashflow_sheet_comparison_unconfigured');
-        }
-        return cashflowSheetCompareProject({
-          tenantId: projectTenantId,
-          projectId: cashflowProjectId,
-          runId: projectRunId,
-        });
-      },
-    });
-    res.status(200).json({
-      worker: 'cashflow_sheet_sync',
-      projectId,
-      ...result,
-    });
-  });
-  app.get('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
-  app.post('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
 
   const runClientErrorSlackWorkerRoute = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
@@ -1589,7 +1558,6 @@ export function createBffApp(options = {}) {
     env,
     javaWeeklyClient: options.javaWeeklyClient,
   });
-  cashflowSheetCompareProject = cashflowSheetLabRoutes?.compareProject || null;
   mountCashflowLaborRiskRoutes(app, {
     db,
     now,

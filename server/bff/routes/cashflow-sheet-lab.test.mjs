@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertJavaCashflowMatchesFirestore,
   assertJavaCashflowReadbackMatchesAppliedMonths,
-  classifyCashflowComparisons,
   mountCashflowSheetLabRoutes,
 } from './cashflow-sheet-lab.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
@@ -753,29 +752,6 @@ describe('cashflow sheet lab route', () => {
     )).toThrow(expect.objectContaining({ code: expectedCode }));
   });
 
-  it.each([
-    [0, 0, 0, 'ALL_SYNCED'],
-    [0, 1, 1, 'FIRESTORE_DIFFERS'],
-    [1, 0, 1, 'JVM_DIFFERS'],
-    [1, 1, 0, 'SHEET_DIFFERS'],
-    [1, 2, 3, 'THREE_WAY_DIFFERENT'],
-  ])('classifies independent Sheet/JVM/Firestore comparisons (%s, %s, %s)', (sheetToJvm, sheetToFirestore, jvmToFirestore, expected) => {
-    const available = (changeCount) => ({ status: 'AVAILABLE', changeCount });
-    expect(classifyCashflowComparisons({
-      sheetToJvm: available(sheetToJvm),
-      sheetToFirestore: available(sheetToFirestore),
-      jvmToFirestore: available(jvmToFirestore),
-    })).toBe(expected);
-  });
-
-  it('keeps an unavailable pair partial instead of replacing it with zero', () => {
-    expect(classifyCashflowComparisons({
-      sheetToJvm: { status: 'UNAVAILABLE', changeCount: null },
-      sheetToFirestore: { status: 'AVAILABLE', changeCount: 4 },
-      jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null },
-    })).toBe('PARTIAL');
-  });
-
   it('fails closed when the JVM canonical snapshot differs from Firestore before or after apply', () => {
     const firestoreSnapshot = {
       weeks: [{
@@ -878,9 +854,10 @@ describe('cashflow sheet lab route', () => {
     expect(failed.body.status).toBe('UNAVAILABLE');
   });
 
-  it('skips the whole pipeline when the sheet has not changed (freshness fast-path)', async () => {
-    // 검색엔진 원칙: 읽기 요청이 크롤링을 트리거하지 않는다. 시트가 안 바뀌었으면
-    // 두 번째 불러오기는 Drive modifiedTime 한 번만 묻고 고정본을 그대로 돌려준다.
+  it('always reads the sheet in full, even when Drive says it has not changed', async () => {
+    // 2026-08-19: Drive 는 편집 뒤 수십 초~2분 동안 옛 modifiedTime 을 돌려준다. 그 시간 동안
+    // "안 바뀜"으로 건너뛰면 방금 고친 값이 안 들어온다. 사용자가 누르는 이유는 고쳤기
+    // 때문이므로 매번 통째로 읽는다. modifiedTime 은 changes/probe 표시용으로 기록만 한다.
     const db = createDb({
       project: {
         id: 'project-a',
@@ -894,7 +871,7 @@ describe('cashflow sheet lab route', () => {
         },
       },
     });
-    let modifiedTime = '2026-08-09T10:00:00.000Z';
+    const modifiedTime = '2026-08-09T10:00:00.000Z';
     const previewSpreadsheet = vi.fn(async () => ({
       spreadsheetId: 'spreadsheet-a',
       spreadsheetTitle: 'Cashflow workbook',
@@ -912,7 +889,6 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'fresh-001' })
       .expect(200);
     expect(first.body.status).toBe('FRESH');
-    expect(first.body.unchanged).toBeUndefined();
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     // 불러오기가 느릴 때 어느 구간인지 브라우저에서 바로 갈리도록 구간 기록을 헤더로 낸다.
     expect(first.headers['server-timing']).toMatch(/google_sheet_fetch;dur=\d+/);
@@ -922,37 +898,23 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a').sourceFileModifiedTime)
       .toBe(modifiedTime);
 
-    // 변경 없음 -> 풀 리드 없이 고정본 반환
+    // Drive 가 같은 modifiedTime 을 줘도 다시 통째로 읽는다. 건너뛴 응답(unchanged) 은 더 이상 없다.
     const second = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'fresh-002' })
       .expect(200);
-    expect(second.body.unchanged).toBe(true);
-    expect(second.body.sourceRevision).toBe(first.body.sourceRevision);
-    // 변경 없음 경로도 헤더가 나온다 - freshness 확인에만 시간이 갔다는 것이 보여야 한다.
-    expect(second.headers['server-timing']).toMatch(/freshness_probe;dur=\d+/);
-    expect(second.headers['server-timing']).not.toMatch(/google_sheet_fetch/);
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
-    expect(getSpreadsheetFreshness).toHaveBeenCalledTimes(2);
+    expect(second.body.status).toBe('FRESH');
+    expect(second.body.unchanged).toBeUndefined();
+    expect(second.headers['server-timing']).toMatch(/google_sheet_fetch;dur=\d+/);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
 
-    // 시트가 바뀌면 다시 풀 리드
-    modifiedTime = '2026-08-09T11:00:00.000Z';
+    // probe 실패도 불러오기를 막지 않는다 - modifiedTime 은 기록용일 뿐이다.
+    getSpreadsheetFreshness.mockRejectedValueOnce(new Error('drive down'));
     const third = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'fresh-003' })
       .expect(200);
-    expect(third.body.unchanged).toBeUndefined();
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
-    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a').sourceFileModifiedTime)
-      .toBe(modifiedTime);
-
-    // probe 실패는 열화가 아니라 풀 리드로 폴백한다 - 낡은 데이터를 최신이라 말하지 않는다.
-    getSpreadsheetFreshness.mockRejectedValueOnce(new Error('drive down'));
-    const fourth = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
-      .send({ idempotencyKey: 'fresh-004' })
-      .expect(200);
-    expect(fourth.body.unchanged).toBeUndefined();
+    expect(third.body.status).toBe('FRESH');
     expect(previewSpreadsheet).toHaveBeenCalledTimes(3);
   });
 
@@ -3712,75 +3674,6 @@ describe('cashflow sheet lab route', () => {
     }));
     expect(javaWeeklyClient.applyCashflowSheetBatch.mock.calls[0][0].months).toHaveLength(12);
     expect(editLeaseService.release).not.toHaveBeenCalled();
-  });
-
-  it('rebuilds a mirror written by an older schema even when the sheet has not changed', async () => {
-    // 라이브 AXR 재현. 연간 열의 항목별 상태를 담도록 코드를 고쳐 배포했는데, refresh 는
-    // 시트 modifiedTime 이 같다는 이유로 옛 미러를 그대로 돌려줬다. 시트를 안 건드린 47개
-    // 프로젝트가 영원히 옛 형태로 남는다. "시트가 같으면 결과도 같다" 는 코드가 같을 때만 참이다.
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        contractStart: '2024-01-01',
-        contractEnd: '2028-12-31',
-        cashflowSheetLab: {
-          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-1',
-        },
-      },
-    });
-    const modifiedTime = '2026-08-09T10:00:00.000Z';
-    const previewSpreadsheet = vi.fn(async () => ({
-      spreadsheetId: 'spreadsheet-a',
-      spreadsheetTitle: 'Cashflow workbook',
-      selectedSheetName: 'cashflow(사용내역 연동)',
-      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-      matrix: buildMatrix(),
-    }));
-    const getSpreadsheetFreshness = vi.fn(async () => ({
-      spreadsheetId: 'spreadsheet-a', modifiedTime, version: '7',
-    }));
-    const app = createApp({ db, googleSheetsService: { previewSpreadsheet, getSpreadsheetFreshness } });
-
-    const first = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
-      .send({ idempotencyKey: 'schema-001' })
-      .expect(200);
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
-    const mirrorPath = 'orgs/tenant-a/cashflow_sheet_mirrors/project-a';
-    const currentSchema = db.__getDocument(mirrorPath).schemaVersion;
-    expect(currentSchema).toBeGreaterThanOrEqual(3);
-
-    // 같은 시트, 같은 코드 → 건너뜀 (기존 fast-path 유지)
-    const second = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
-      .send({ idempotencyKey: 'schema-002' })
-      .expect(200);
-    expect(second.body.unchanged).toBe(true);
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
-
-    // 배포 전 코드가 남긴 미러로 되돌린다: 형태 버전만 낮춘다.
-    const stored = db.__getDocument(mirrorPath);
-    db.__setDocument?.(mirrorPath, { ...stored, schemaVersion: currentSchema - 1 })
-      ?? Object.assign(stored, { schemaVersion: currentSchema - 1 });
-
-    // 시트는 그대로인데 형태가 옛것 → 다시 읽어서 새 형태로 만든다.
-    const third = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
-      .send({ idempotencyKey: 'schema-003' })
-      .expect(200);
-    expect(third.body.unchanged).toBeUndefined();
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
-    expect(db.__getDocument(mirrorPath).schemaVersion).toBe(currentSchema);
-    // 새로 읽었으니 다시 형태 버전이 맞고, 그 다음 refresh 는 다시 fast-path 를 탄다.
-    const fourth = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
-      .send({ idempotencyKey: 'schema-004' })
-      .expect(200);
-    expect(fourth.body.unchanged).toBe(true);
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
   });
 
   it('includes unchanged bridge months for explicit month replacement without applying them', async () => {

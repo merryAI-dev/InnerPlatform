@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save, Undo2 } from 'lucide-react';
 import { useBlocker, useNavigate } from 'react-router';
+// 성공 확인만 우측 하단에 띄운다(2026-08-19 보람: 반영·요청·회수가 됐는지 확인할 길이 없음).
+// 에러는 그 자리 인라인 배너로 남긴다.
+import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
@@ -900,6 +903,7 @@ export function CashflowProjectSheet({
       setWeeklyActionNotice(result.alreadyCompleted
         ? '이미 완료 요청된 주입니다. 현재 상태를 다시 불러왔어요.'
         : '주간 정산 완료 요청을 보냈어요. 조직장 확정을 기다립니다.');
+      if (!result.alreadyCompleted) toast.success('주간 정산 완료 요청을 보냈어요.');
       setWeeklyProjectionWarning(null);
       setWeeklyUpdateResult('');
       logCashflowSettlement({
@@ -954,6 +958,7 @@ export function CashflowProjectSheet({
       });
       await loadCashflowMonthClose();
       setWeeklyActionNotice('완료 요청을 회수했어요. 값을 고친 뒤 다시 요청할 수 있어요.');
+      toast.success('주간 정산 완료 요청을 회수했어요.');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.weekly_settlement.withdraw',
@@ -1001,6 +1006,7 @@ export function CashflowProjectSheet({
       });
       await loadCashflowMonthClose();
       setWeeklyActionNotice('주간 정산을 확정했어요. 이제 이 주는 잠깁니다.');
+      toast.success('주간 정산을 확정했어요.');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.weekly_settlement.confirm',
@@ -1432,6 +1438,7 @@ export function CashflowProjectSheet({
         loadCashflowEvents(),
       ]);
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
+      toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.month_close.request',
@@ -1510,6 +1517,7 @@ export function CashflowProjectSheet({
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
       await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest(), loadCashflowEvents()]);
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
+      toast.success('월 결산 요청을 회수했어요.');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.month_close.withdraw',
@@ -1784,6 +1792,7 @@ export function CashflowProjectSheet({
       }
       const result = await apply(actor);
       await rememberApplyResult(result);
+      toast.success(`시트값 ${result.appliedLineCount.toLocaleString('ko-KR')}건을 MYSCube에 반영했어요.`);
       logCashflowSettlement({ phase: 'success', operation: 'cashflow.sheet_apply', projectId, summary: { appliedLineCount: result.appliedLineCount } });
     } catch (error) {
       let finalError = error;
@@ -1793,6 +1802,7 @@ export function CashflowProjectSheet({
           if (!actor?.idToken) throw error;
           const result = await apply(actor);
           await rememberApplyResult(result);
+          toast.success(`시트값 ${result.appliedLineCount.toLocaleString('ko-KR')}건을 MYSCube에 반영했어요.`);
           logCashflowSettlement({ phase: 'success', operation: 'cashflow.sheet_apply', projectId, summary: { appliedLineCount: result.appliedLineCount, authRetried: true } });
           return;
         } catch (retryError) {

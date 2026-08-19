@@ -372,8 +372,8 @@ Structure notes that save time:
 - `mcp-oauth.mjs` is an OAuth authorization server for the MCP integration, paired with the
   `/mcp/authorize` route.
 
-**Workers are cron-triggered, not long-running.** Five workers — outbox, work-queue, payroll,
-cashflow-sheet-sync, client-errors — are driven by **Vercel crons** in `vercel.json` hitting
+**Workers are cron-triggered, not long-running.** Four workers — outbox, work-queue, payroll,
+client-errors — are driven by **Vercel crons** in `vercel.json` hitting
 `/api/internal/workers/<name>/run`. `server/bff/runtime-safety.mjs` enforces `BFF_WORKERS_ENABLED` and
 `BFF_SCHEDULER_OWNER` (`manual|vercel|k8s|disabled`) and hard-refuses invalid combinations — e.g.
 `manual` is blocked for a live BFF, and standalone worker processes are refused when the owner is

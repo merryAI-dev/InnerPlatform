@@ -295,10 +295,7 @@ export interface CashflowSheetLabMirrorResult {
   schemaVersion?: number;
   projectId: string;
   status: 'EMPTY' | 'FRESH' | 'STALE' | 'ERROR';
-  // 서버가 Drive modifiedTime 대조로 풀 리드를 건너뛰고 고정본을 그대로 돌려준 경우.
-  unchanged?: boolean;
   sourceFileModifiedTime?: string | null;
-  freshnessCheckedAt?: string;
   sourceYear?: number;
   sources?: Record<string, {
     sourceYear: number;
