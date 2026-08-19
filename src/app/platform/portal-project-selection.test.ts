@@ -31,6 +31,26 @@ const projects = [
 ] as unknown as Project[];
 
 describe('portal project selection helpers', () => {
+  it('keeps trashed projects out of the portal candidate pool', () => {
+    // 관리자 화면(store.tsx)은 휴지통 사업을 걸러 보여주는데 포털은 걸러주는 곳이 없었다.
+    // BFF 목록 조회도 포털 리스너도 trashedAt 을 보지 않으므로 여기서 막는다.
+    const withTrashed = [
+      ...projects,
+      { id: 'p-trashed', name: 'Deleted Project', managerId: 'uid-pm', trashedAt: '2026-08-01T00:00:00.000Z' },
+    ] as unknown as Project[];
+
+    const result = resolvePortalProjectCandidates({
+      role: 'viewer',
+      authUid: 'uid-pm',
+      assignedProjectIds: ['p-assigned', 'p-trashed'],
+      projects: withTrashed,
+    });
+
+    const ids = [...result.priorityProjects, ...result.searchProjects].map((project) => project.id);
+    expect(ids).not.toContain('p-trashed');
+    expect(ids).toContain('p-assigned');
+  });
+
   it('lets PM portal users search the full project pool while keeping assigned projects prioritized', () => {
     const result = resolvePortalProjectCandidates({
       role: 'viewer',

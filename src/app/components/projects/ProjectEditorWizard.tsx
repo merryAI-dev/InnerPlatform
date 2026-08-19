@@ -17,7 +17,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -72,6 +72,7 @@ import {
   type ContractAmountItemField,
 } from '../../platform/project-contract-amount';
 import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
+import { deriveProjectStatusFromContractPeriod } from '../../platform/project-status-from-period';
 import {
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
@@ -673,6 +674,14 @@ function ProjectFormRow({ label, required, note, hints, errors, issueLabel, chil
       </div>
     </div>
   );
+}
+
+/**
+ * 짧은 필드 둘을 한 줄에 나란히 둔다. 한 항목이 한 줄씩 차지하면 화면이 세로로만 길어져
+ * 짝지어 읽어야 할 값(시작일-종료일, 상태-구분)이 멀어진다. 좁은 화면에서는 다시 한 줄씩이다.
+ */
+function ProjectFormFieldPair({ children }: { children: ReactNode }) {
+  return <div className="grid gap-4 lg:grid-cols-2 lg:gap-x-8">{children}</div>;
 }
 
 /**
@@ -1315,6 +1324,25 @@ export function ProjectEditorWizard({
     }));
   };
 
+  /**
+   * 계약 기간을 고치면 진행 상태가 따라온다. 사람이 고르는 값이 아니라 날짜에서 나오는 값이다.
+   * 불러오기만으로 저장된 상태를 바꾸지는 않는다 - 사람이 기간을 손댈 때만 다시 계산한다.
+   */
+  const updateContractPeriod = (key: 'contractStart' | 'contractEnd', value: string) => {
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      return createProjectEditorWizardDraft({
+        ...next,
+        status: deriveProjectStatusFromContractPeriod({
+          contractStart: next.contractStart,
+          contractEnd: next.contractEnd,
+          currentStatus: next.status,
+          today: new Date().toISOString().slice(0, 10),
+        }),
+      });
+    });
+  };
+
   const updateFinancialYear = (
     index: number,
     key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'paymentPlan' | 'paymentExpectedMonths' | 'advanceInterimBelow70Reason' | 'isSettled' | 'confirmed',
@@ -1565,7 +1593,7 @@ export function ProjectEditorWizard({
         : [];
       const financialYearsComplete = expectedYears.length > 0
         && draft.financialYears.length === expectedYears.length
-        && expectedYears.every((year) => draft.financialYears.some((row) => row.year === year && row.confirmed));
+        && expectedYears.every((year) => draft.financialYears.some((row) => row.year === year));
       const annualTotal = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount') => (
         draft.financialYears.reduce((sum, row) => sum + row[field], 0)
       );
@@ -2313,7 +2341,6 @@ export function ProjectEditorWizard({
       ['totalActualCost', '실비(원가)'],
       ['supportAmount', '지원금'],
     ] as const;
-    const unconfirmedYears = draft.financialYears.filter((row) => !row.confirmed).map((row) => `${row.year}년`);
     const emptyContractYears = draft.financialYears.filter((row) => row.contractAmount <= 0).map((row) => `${row.year}년`);
     // 저장된 총계와 연도 합계가 어긋나면 이미 submitIssues 가 잡는다. 여기서는 같은 사실을
     // 표 밑에서 보여주기만 하고 판정은 하지 않는다.
@@ -2328,10 +2355,15 @@ export function ProjectEditorWizard({
               <tr className="border-y border-slate-200 bg-slate-50">
                 <th scope="col" className={cn('py-2 pr-3', FORM_LABEL_CLASS)}>연도</th>
                 {columns.map(([field, label]) => (
-                  <th key={field} scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>{label}</th>
+                  <Fragment key={field}>
+                    <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>{label}</th>
+                    {/* 통화는 계약금액 바로 옆에서 고른다. 금액과 떨어지면 무슨 단위인지 멀어진다. */}
+                    {field === 'contractAmount' ? (
+                      <th scope="col" className={cn('px-3 py-2 text-left', FORM_LABEL_CLASS)}>통화</th>
+                    ) : null}
+                  </Fragment>
                 ))}
                 <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>수익률</th>
-                <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>계약서 대조</th>
               </tr>
             </thead>
             <tbody>
@@ -2341,12 +2373,13 @@ export function ProjectEditorWizard({
                     {row.year}년
                   </th>
                   {columns.map(([field, label]) => (
-                    <td key={field} className="px-3 py-2">
+                    <Fragment key={field}>
+                    <td className="px-3 py-2">
                       {field === 'contractAmount' && contractAmountIsDerived ? (
                         /* 숫자 열이라 오른쪽 정렬을 지킨다. 입력칸 모양은 쓰지 않는다. */
                         <div className="flex h-9 min-w-[116px] flex-col items-end justify-center">
                           <span className={cn('font-medium text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
-                            {fmtKRW(row.contractAmount)}원
+                            {fmtKRW(row.contractAmount)}
                           </span>
                           <span className="text-[11px] font-normal leading-4 text-slate-400">계산됨</span>
                         </div>
@@ -2360,31 +2393,38 @@ export function ProjectEditorWizard({
                         />
                       )}
                     </td>
+                    {/* 통화는 사업 단위로 하나다. 합계 행에서 한 번만 고른다. */}
+                    {field === 'contractAmount' ? <td className="px-3 py-2" /> : null}
+                    </Fragment>
                   ))}
                   <td className={cn('px-3 py-2 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
                     {`${(row.profitRate * 100).toFixed(2)}%`}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Checkbox
-                      aria-label={`${row.year}년 금액을 계약서와 대조하여 확인했습니다.`}
-                      checked={row.confirmed}
-                      onCheckedChange={(checked) => updateFinancialYear(index, 'confirmed', checked === true)}
-                    />
                   </td>
                 </tr>
               ))}
               <tr className="bg-slate-100">
                 <th scope="row" className={cn('py-2.5 pr-3 text-slate-900', FORM_LABEL_CLASS)}>합계</th>
                 {columns.map(([field]) => (
-                  <td key={field} className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
-                    {fmtKRW(annualTotal(field))}
-                  </td>
+                  <Fragment key={field}>
+                    <td className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
+                      {fmtKRW(annualTotal(field))}
+                    </td>
+                    {field === 'contractAmount' ? (
+                      <td className="px-3 py-2.5">
+                        <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
+                          <SelectTrigger className={cn('h-8 min-w-[92px]', FORM_CONTROL_CLASS)} aria-label="통화"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
+                              <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                    ) : null}
+                  </Fragment>
                 ))}
-                <td className={cn('px-3 py-2.5 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
+                <td className={cn('px-3 py-2.5 text-right font-semibold text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
                   {profitRateLabel ? `${profitRateLabel}%` : '-'}
-                </td>
-                <td className={cn('px-3 py-2.5 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
-                  {draft.financialYears.length - unconfirmedYears.length}/{draft.financialYears.length}
                 </td>
               </tr>
             </tbody>
@@ -2421,18 +2461,12 @@ export function ProjectEditorWizard({
             금액을 한 번 고쳐 넣으면 항목 합계로 바뀌어 저장되니, 어느 쪽이 맞는지 먼저 확인해 주세요.
           </p>
         ) : null}
-        {emptyContractYears.length > 0 || unconfirmedYears.length > 0 || totalsDrifted ? (
+        {emptyContractYears.length > 0 || totalsDrifted ? (
           <ul className={cn('space-y-1', FORM_ERROR_CLASS)}>
             {emptyContractYears.length > 0 ? (
               <li className="flex gap-1.5">
                 <span aria-hidden>·</span>
                 <span>{emptyContractYears.join(', ')} 계약금액이 아직 비어 있습니다.</span>
-              </li>
-            ) : null}
-            {unconfirmedYears.length > 0 ? (
-              <li className="flex gap-1.5">
-                <span aria-hidden>·</span>
-                <span>{unconfirmedYears.join(', ')} 금액을 계약서와 대조하여 확인해 주세요.</span>
               </li>
             ) : null}
             {totalsDrifted ? (
@@ -2449,226 +2483,13 @@ export function ProjectEditorWizard({
 
   const renderFinancialStep = () => (
     <div className={FORM_SECTION_STACK_CLASS}>
-      {onContractFileUpload || onProjectDocumentFileUpload ? (
-        <div>
-          {usesRegistrationV2 ? (
-            <ProjectFormSection
-              title="등록 제출서류 7종"
-              description="1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다."
-              flushBelow
-            >
-              {renderRegistrationDocumentTable()}
-              {/* Contract-specific confirmations stay below the list; they belong to slot 1
-                  but are questions about the contract rather than an attachment. */}
-              <ProjectFormRow
-                label="모두 싸인으로 진행하셨나요?"
-                required
-                issueLabel="모두 싸인으로 진행하셨나요?"
-                errors={fieldIssues('모두 싸인으로 진행하셨나요?', '계약서를 써니(사업지원팀)에게 제출했습니다.')}
-              >
-                <div className={cn('flex gap-4 pt-2 text-slate-700', FORM_VALUE_CLASS)}>
-                  {[true, false].map((value) => (
-                    <label key={String(value)} className="flex items-center gap-2">
-                      <input type="radio" checked={draft.registrationConfirmations.modusignContractUsed === value} onChange={() => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value, originalContractSubmitted: value ? null : draft.registrationConfirmations.originalContractSubmitted })} />
-                      {value ? '예' : '아니오'}
-                    </label>
-                  ))}
-                </div>
-                {draft.registrationConfirmations.modusignContractUsed === false ? (
-                  <label className={cn('mt-2 flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
-                    <Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />
-                    계약서를 써니(사업지원팀)에게 제출했습니다.
-                  </label>
-                ) : null}
-              </ProjectFormRow>
-            </ProjectFormSection>
-          ) : (
-            <ProjectFormSection title="첨부 서류">
-              {registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
-            </ProjectFormSection>
-          )}
-        </div>
-      ) : null}
-
-      <ProjectFormSection title="계약 기간과 상태">
-        <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
-          <Input type="date" value={draft.contractStart} onChange={(event) => update('contractStart', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
-        </ProjectFormRow>
-        <ProjectFormRow
-          label="계약 종료일"
-          required
-          issueLabel="계약 종료일"
-          errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
-        >
-          <Input type="date" value={draft.contractEnd} onChange={(event) => update('contractEnd', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
-        </ProjectFormRow>
-
-        {canEditProjectStatus(mode) ? (
-          <ProjectFormRow label="프로젝트 진행 상태">
-            <Select value={draft.status} onValueChange={(value) => update('status', value as ProjectStatus)}>
-              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((status) => (
-                  <SelectItem key={status} value={status}>{PROJECT_STATUS_LABELS[status]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        ) : null}
-        {canEditProjectStatus(mode) && isAdminMode(mode) ? (
-          <ProjectFormRow label="프로젝트 구분">
-            <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
-              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
-                  <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        ) : null}
-        {/* 계약서 유형은 관리자 화면에서만 상태·구분과 나란히 있었고, 포털에서는 단독으로
-            보였다. 행 컴포넌트를 쓰면서 두 경우 모두 같은 자리에 한 번만 놓는다. */}
-        {!canEditProjectStatus(mode) || isAdminMode(mode) ? renderContractTypeSelect() : null}
-      </ProjectFormSection>
-
-      <ProjectFormSection title="계약 금액">
-        <ProjectFormRow label="통화">
-          <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
-            <SelectTrigger className={cn('max-w-[160px]', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
-                <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </ProjectFormRow>
-
-        {annualTotalsOwnAmounts ? (
-          <p className={FORM_HINT_CLASS}>
-            다년도 계약이라 계약금액 · 총매출부가세 · 총수익 · 총실비(원가) · 총지원금은
-            아래 연도별 표의 합계 행이 그대로 저장값입니다.
-          </p>
-        ) : (
-          <>
-            <ProjectFormRow
-              label="계약금액"
-              required
-              issueLabel="계약금액"
-              errors={fieldIssues('계약금액')}
-              hints={[
-                amountHint(draft.contractAmount, hasContractAmountInput, PROJECT_CURRENCY_LABELS[draft.currency]),
-                contractAmountCheck.message,
-              ]}
-            >
-              <Input
-                inputMode="numeric"
-                value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
-                onChange={(event) => updateAmount('contractAmount', event.target.value)}
-                placeholder="0"
-                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-              />
-            </ProjectFormRow>
-            <ProjectFormRow label="총매출부가세" hints={[amountHint(draft.salesVatAmount, hasSalesVatAmountInput)]}>
-              <Input
-                inputMode="numeric"
-                value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
-                onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
-                placeholder="0"
-                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-              />
-            </ProjectFormRow>
-            <ProjectFormRow label="총수익" hints={[amountHint(draft.totalRevenueAmount, hasTotalRevenueAmountInput)]}>
-              <Input
-                inputMode="numeric"
-                value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
-                onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
-                placeholder="0"
-                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-              />
-            </ProjectFormRow>
-            <ProjectFormRow label="총실비(원가)" hints={[amountHint(draft.totalActualCost, hasTotalActualCostInput)]}>
-              <Input
-                inputMode="numeric"
-                value={formatProjectAmountInput(draft.totalActualCost, hasTotalActualCostInput)}
-                onChange={(event) => updateAmount('totalActualCost', event.target.value)}
-                placeholder="0"
-                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-              />
-            </ProjectFormRow>
-            <ProjectFormRow label="총지원금" hints={[amountHint(draft.supportAmount, hasSupportAmountInput)]}>
-              <Input
-                inputMode="numeric"
-                value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
-                onChange={(event) => updateAmount('supportAmount', event.target.value)}
-                placeholder="0"
-                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-              />
-            </ProjectFormRow>
-          </>
-        )}
-
-        {/* 총수익률은 늘 파생값이었다. 입력칸 모양을 벗기고 "계산됨" 형태로만 구분한다. */}
-        <ProjectFormRow label="총수익률" note="총수익 / 계약금액">
-          <ProjectComputedValue value={profitRateLabel ? `${profitRateLabel}%` : '-'} />
-        </ProjectFormRow>
-      </ProjectFormSection>
-
-      {annualTotalsOwnAmounts ? (
-        <ProjectFormSection
-          title="연도별 계약·재무"
-          description={hasMultiYearContract
-            ? '계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 합계 행이 저장되는 총계입니다.'
-            : '연도가 하나여도 같은 표로 입력합니다. 합계 행이 저장되는 총계입니다.'}
-        >
-          <div data-issue-label="계약기간 전체 연도별 재무 확인">
-            {draft.financialYears.length === 0 ? (
-              <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4', FORM_HINT_CLASS)}>
-                계약 시작일과 종료일을 먼저 입력해 주세요.
-              </p>
-            ) : renderAnnualFinanceTable()}
-          </div>
-        </ProjectFormSection>
-      ) : null}
-
-      {/* 입금 계획은 금액 표와 별개 경로다. 다년도만 연도별로 쪼갠다. */}
-      {annualTotalsOwnAmounts && hasMultiYearContract ? (
-        <>
-          {draft.financialYears.map((row, index) => (
-            <ProjectFormSection key={row.year} title={`${row.year}년 입금 계획`} flushBelow>
-              {renderPaymentFields(row, index)}
-            </ProjectFormSection>
-          ))}
-          <ProjectFormRow label="기타 메모">
-            <Textarea value={draft.paymentPlanDesc} onChange={(event) => update('paymentPlanDesc', event.target.value)} className={cn('min-h-[92px]', FORM_VALUE_CLASS)} />
-          </ProjectFormRow>
-        </>
-      ) : null}
-
-      {mode === 'admin' ? (
-        <ProjectFormSection title="관리자 입력">
-          <ProjectFormRow label="당해연도 예산" hints={[amountHint(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)]}>
-            <Input
-              inputMode="numeric"
-              value={formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)}
-              onChange={(event) => update('budgetCurrentYear', parseProjectAmountInput(event.target.value))}
-              placeholder="0"
-              className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-            />
-          </ProjectFormRow>
-          <ProjectFormRow label="세금계산서 발행액" hints={[amountHint(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)]}>
-            <Input
-              inputMode="numeric"
-              value={formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)}
-              onChange={(event) => update('taxInvoiceAmount', parseProjectAmountInput(event.target.value))}
-              placeholder="0"
-              className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
-            />
-          </ProjectFormRow>
-        </ProjectFormSection>
-      ) : null}
-
+      {/*
+        정산(사업유형)이 아래 입력의 필요 여부를 결정한다. 뒤에 두면 서류와 금액을 다 채운
+        뒤에야 "이 사업은 정산이 없다"를 알게 되므로 맨 앞으로 옮겼다.
+      */}
       <ProjectFormSection title="정산">
+        {/* 사업유형이 정산 기준을 결정한다. 둘을 세로로 쌓으면 그 관계가 보이지 않아 나란히 둔다. */}
+        <ProjectFormFieldPair>
         <ProjectFormRow
           label={usesRegistrationV2 ? '사업유형' : '정산 유형'}
           required={usesRegistrationV2}
@@ -2714,6 +2535,7 @@ export function ProjectEditorWizard({
             </Select>
           </ProjectFormRow>
         )}
+        </ProjectFormFieldPair>
         {settlementDetailsEnabled ? (
           <>
             <ProjectFormRow label="통장 유형">
@@ -2788,6 +2610,210 @@ export function ProjectEditorWizard({
           </p>
         ) : null}
       </ProjectFormSection>
+      {onContractFileUpload || onProjectDocumentFileUpload ? (
+        <div>
+          {usesRegistrationV2 ? (
+            <ProjectFormSection
+              title="등록 제출서류 7종"
+              description="1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다."
+              flushBelow
+            >
+              {renderRegistrationDocumentTable()}
+              {/* Contract-specific confirmations stay below the list; they belong to slot 1
+                  but are questions about the contract rather than an attachment. */}
+              <ProjectFormRow
+                label="모두 싸인으로 진행하셨나요?"
+                required
+                issueLabel="모두 싸인으로 진행하셨나요?"
+                errors={fieldIssues('모두 싸인으로 진행하셨나요?', '계약서를 써니(사업지원팀)에게 제출했습니다.')}
+              >
+                <div className={cn('flex gap-4 pt-2 text-slate-700', FORM_VALUE_CLASS)}>
+                  {[true, false].map((value) => (
+                    <label key={String(value)} className="flex items-center gap-2">
+                      <input type="radio" checked={draft.registrationConfirmations.modusignContractUsed === value} onChange={() => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value, originalContractSubmitted: value ? null : draft.registrationConfirmations.originalContractSubmitted })} />
+                      {value ? '예' : '아니오'}
+                    </label>
+                  ))}
+                </div>
+                {draft.registrationConfirmations.modusignContractUsed === false ? (
+                  <label className={cn('mt-2 flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
+                    <Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />
+                    계약서를 써니(사업지원팀)에게 제출했습니다.
+                  </label>
+                ) : null}
+              </ProjectFormRow>
+            </ProjectFormSection>
+          ) : (
+            <ProjectFormSection title="첨부 서류">
+              {registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
+            </ProjectFormSection>
+          )}
+        </div>
+      ) : null}
+
+      {/*
+        계약 기간 · 계약 금액 · 연도별 계약·재무를 한 묶음으로 읽는다. 셋은 같은 계약을
+        기간 / 통화 / 금액으로 나눠 말할 뿐이라 제목을 세 번 끊으면 관계가 보이지 않았다.
+      */}
+      <ProjectFormSection title="계약 정보">
+        <ProjectFormFieldPair>
+          <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
+            <Input type="date" value={draft.contractStart} onChange={(event) => updateContractPeriod('contractStart', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+          </ProjectFormRow>
+          <ProjectFormRow
+            label="계약 종료일"
+            required
+            issueLabel="계약 종료일"
+            errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
+          >
+            <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+          </ProjectFormRow>
+        </ProjectFormFieldPair>
+
+        <ProjectFormFieldPair>
+        {canEditProjectStatus(mode) && isAdminMode(mode) ? (
+          <ProjectFormRow label="프로젝트 구분">
+            <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
+                  <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </ProjectFormRow>
+        ) : null}
+        </ProjectFormFieldPair>
+        {/* 계약서 유형은 관리자 화면에서만 상태·구분과 나란히 있었고, 포털에서는 단독으로
+            보였다. 행 컴포넌트를 쓰면서 두 경우 모두 같은 자리에 한 번만 놓는다. */}
+        <ProjectFormFieldPair>
+        {!canEditProjectStatus(mode) || isAdminMode(mode) ? renderContractTypeSelect() : null}
+        </ProjectFormFieldPair>
+
+        {annualTotalsOwnAmounts ? (
+          <p className={FORM_HINT_CLASS}>
+            {hasMultiYearContract
+              ? '계약금액 · 총매출부가세 · 총수익 · 총실비(원가) · 총지원금은 아래 연도별 표의 합계 행이 그대로 저장값입니다.'
+              : '계약금액 · 총매출부가세 · 총수익 · 총실비(원가) · 총지원금은 아래 표에서 입력하며, 합계 행이 그대로 저장값입니다.'}
+          </p>
+        ) : (
+          <>
+            <ProjectFormRow
+              label="계약금액"
+              required
+              issueLabel="계약금액"
+              errors={fieldIssues('계약금액')}
+              hints={[
+                amountHint(draft.contractAmount, hasContractAmountInput, PROJECT_CURRENCY_LABELS[draft.currency]),
+                contractAmountCheck.message,
+              ]}
+            >
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
+                onChange={(event) => updateAmount('contractAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총매출부가세" hints={[amountHint(draft.salesVatAmount, hasSalesVatAmountInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
+                onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총수익" hints={[amountHint(draft.totalRevenueAmount, hasTotalRevenueAmountInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
+                onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총실비(원가)" hints={[amountHint(draft.totalActualCost, hasTotalActualCostInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.totalActualCost, hasTotalActualCostInput)}
+                onChange={(event) => updateAmount('totalActualCost', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+            <ProjectFormRow label="총지원금" hints={[amountHint(draft.supportAmount, hasSupportAmountInput)]}>
+              <Input
+                inputMode="numeric"
+                value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
+                onChange={(event) => updateAmount('supportAmount', event.target.value)}
+                placeholder="0"
+                className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+              />
+            </ProjectFormRow>
+          </>
+        )}
+
+        {/*
+          총수익률은 파생값이라 표의 합계 행 `수익률` 칸이 이미 같은 값을 보여준다.
+          표를 쓸 때 위에 따로 떼어 두면 어느 값의 비율인지 읽히지 않으므로 여기서는 접는다.
+        */}
+        {annualTotalsOwnAmounts ? null : (
+          <ProjectFormRow label="총수익률" note="총수익 / 계약금액">
+            <ProjectComputedValue value={profitRateLabel ? `${profitRateLabel}%` : '-'} />
+          </ProjectFormRow>
+        )}
+
+        {/* 금액 표는 「계약 정보」 안에 그대로 둔다. 통화·기간과 떨어지면 무엇의 금액인지 멀어진다. */}
+        {annualTotalsOwnAmounts ? (
+          <div data-issue-label="계약기간 전체 연도별 재무 확인">
+            {draft.financialYears.length === 0 ? (
+              <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4', FORM_HINT_CLASS)}>
+                계약 시작일과 종료일을 먼저 입력해 주세요.
+              </p>
+            ) : renderAnnualFinanceTable()}
+          </div>
+        ) : null}
+      </ProjectFormSection>
+
+      {/* 입금 계획은 금액 표와 별개 경로다. 다년도만 연도별로 쪼갠다. */}
+      {annualTotalsOwnAmounts && hasMultiYearContract ? (
+        <>
+          {draft.financialYears.map((row, index) => (
+            <ProjectFormSection key={row.year} title={`${row.year}년 입금 계획`} flushBelow>
+              {renderPaymentFields(row, index)}
+            </ProjectFormSection>
+          ))}
+          <ProjectFormRow label="기타 메모">
+            <Textarea value={draft.paymentPlanDesc} onChange={(event) => update('paymentPlanDesc', event.target.value)} className={cn('min-h-[92px]', FORM_VALUE_CLASS)} />
+          </ProjectFormRow>
+        </>
+      ) : null}
+
+      {mode === 'admin' ? (
+        <ProjectFormSection title="관리자 입력">
+          <ProjectFormRow label="당해연도 예산" hints={[amountHint(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)]}>
+            <Input
+              inputMode="numeric"
+              value={formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)}
+              onChange={(event) => update('budgetCurrentYear', parseProjectAmountInput(event.target.value))}
+              placeholder="0"
+              className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+            />
+          </ProjectFormRow>
+          <ProjectFormRow label="세금계산서 발행액" hints={[amountHint(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)]}>
+            <Input
+              inputMode="numeric"
+              value={formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)}
+              onChange={(event) => update('taxInvoiceAmount', parseProjectAmountInput(event.target.value))}
+              placeholder="0"
+              className={cn('max-w-[220px]', FORM_NUMERIC_CONTROL_CLASS)}
+            />
+          </ProjectFormRow>
+        </ProjectFormSection>
+      ) : null}
+
 
       {!hasMultiYearContract ? (
         <ProjectFormSection title="입금 계획" flushBelow>
