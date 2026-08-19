@@ -106,11 +106,17 @@ jobs:
     environment: Production
     env:
       PROJECT_ID: inner-platform-live-20260316
-      REGION: asia-northeast3
+      # Firestore (default) 는 nam5(미국) 에 있다. JVM 은 요청당 Firestore 왕복 7회가 전부라
+      # 데이터 옆(us-central1) 에 둔다. 서울(asia-northeast3) 에선 왕복마다 ~200ms 였다.
+      # 이미지 레지스트리는 그대로 서울에 둔다(리전 간 pull 은 배포 시간에만 영향).
+      REGION: us-central1
       SERVICE: innerplatform-jvm-weekly-api-live
+      # 새 리전의 서비스는 IAM 이 비어 있다. 배포자(run.developer)는 setIamPolicy 권한이 없으므로
+      # 첫 배포 뒤 아래 두 계정에 roles/run.invoker 를 사람이 한 번 붙여야 검증·BFF 호출이 통과한다:
+      #   myscube-live-bff-invoker@inner-platform-live-20260316.iam.gserviceaccount.com
+      #   github-jvm-deployer@inner-platform-live-20260316.iam.gserviceaccount.com
       RUNTIME_SERVICE_ACCOUNT: innerplatform-jvm-runtime@inner-platform-live-20260316.iam.gserviceaccount.com
       IMAGE: asia-northeast3-docker.pkg.dev/inner-platform-live-20260316/jvm-images/innerplatform-jvm-weekly-api-live
-      JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
       JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
       DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
       CASHFLOW_PROJECT_ID: p1773817948751
@@ -144,23 +150,23 @@ jobs:
             | length > 0
           ' <<< "${runs}" >/dev/null
 
+      # gcloud 자격증명만. 서비스 호출용 ID 토큰은 배포 뒤 서비스 URL 을 audience 로 따로 발급한다.
       - uses: google-github-actions/auth@v3
         id: auth
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
           service_account: ${{ vars.GCP_JVM_DEPLOYER_SERVICE_ACCOUNT_LIVE }}
-          token_format: id_token
-          id_token_audience: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
 
       - uses: google-github-actions/setup-gcloud@v3
 
       - name: Capture current live revision
         id: previous
         run: |
-          revision="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json \
-            | jq -r '.status.traffic[] | select(.percent == 100) | .revisionName' | head -n 1)"
-          test -n "${revision}"
+          # 이 리전에 서비스가 아직 없으면(첫 배포) 비워 둔다. 롤백 단계는 그때 건너뛴다.
+          revision="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json 2>/dev/null \
+            | jq -r '.status.traffic[] | select(.percent == 100) | .revisionName' | head -n 1 || true)"
           echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+          echo "previous live revision: ${revision:-<none>}"
 
       - name: Build tested image
         id: image
@@ -180,8 +186,16 @@ jobs:
         id: candidate
         env:
           IMAGE_URI: ${{ steps.image.outputs.uri }}
+          PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
         run: |
           revision_suffix="hotfix-${DEPLOY_SHA::8}"
+          # 새 서비스의 첫 리비전은 --no-traffic 을 거부한다(gcloud 오류). 첫 배포에서만 뺀다 —
+          # 아직 아무도(BFF 포함) 이 URL 을 안 보므로 트래픽 100% 가 곧바로 붙어도 사용자 영향은 없다.
+          traffic_flag="--no-traffic"
+          if [ -z "${PREVIOUS_REVISION}" ]; then
+            echo "first deployment in ${REGION}: no previous revision, deploying with traffic"
+            traffic_flag=""
+          fi
           gcloud run deploy "${SERVICE}" \
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
@@ -189,7 +203,7 @@ jobs:
             --image "${IMAGE_URI}" \
             --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
             --revision-suffix "${revision_suffix}" \
-            --no-traffic \
+            ${traffic_flag} \
             --tag candidate \
             --ingress all \
             --min-instances 1 \
@@ -201,13 +215,28 @@ jobs:
           candidate_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json \
             | jq -r --arg revision "${revision}" '.status.traffic[] | select(.revisionName == $revision and .tag == "candidate") | .url')"
           test -n "${candidate_url}"
+          service_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
+          test -n "${service_url}"
           echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
           echo "url=${candidate_url}" >> "${GITHUB_OUTPUT}"
+          echo "service_url=${service_url}" >> "${GITHUB_OUTPUT}"
+          echo "service url (BFF JVM_WEEKLY_API_BASE_URL_LIVE / _ID_TOKEN_AUDIENCE_LIVE 는 이 값): ${service_url}"
+
+      # ID 토큰의 audience 는 호출받는 서비스의 URL 이어야 한다. 서비스 URL 은 배포 뒤에야
+      # 확정되므로(리전 이동 첫 배포) 여기서 그 URL 로 다시 발급한다.
+      - name: Mint ID token for the deployed service
+        id: service_auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
+          service_account: ${{ vars.GCP_JVM_DEPLOYER_SERVICE_ACCOUNT_LIVE }}
+          token_format: id_token
+          id_token_audience: ${{ steps.candidate.outputs.service_url }}
 
       - name: Verify candidate against legacy live read
         env:
           CANDIDATE_URL: ${{ steps.candidate.outputs.url }}
-          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+          ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
         run: |
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
@@ -235,7 +264,7 @@ jobs:
 
       - name: Verify canonical service after promotion
         env:
-          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+          ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
         run: |
           canonical_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
           curl --fail --silent --show-error \
@@ -252,7 +281,7 @@ jobs:
             | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH' >/dev/null
 
       - name: Roll back failed promotion
-        if: failure() && steps.promote.outcome == 'success'
+        if: failure() && steps.promote.outcome == 'success' && steps.previous.outputs.revision != ''
         env:
           PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
         run: |
