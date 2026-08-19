@@ -101,6 +101,7 @@ import { usePersonRoster } from '../../data/use-person-roster';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
 import { describeCashflowMonthCloseIssue } from './cashflow-month-close-blocker-helpers';
 import { buildSheetApplyNotice } from './cashflow-sheet-apply-notice';
+import { pickCashflowMonthCloseNotice } from './cashflow-month-close-notice';
 
 type CashflowOpsTone = 'neutral' | 'info' | 'warning' | 'danger' | 'success';
 
@@ -1192,15 +1193,21 @@ export function CashflowProjectSheet({
     }))
   ), [monthCloseResult?.dashboard?.validation?.blockers]);
 
-  // 버튼을 숨기면 "기능이 없다"로 읽힌다. 서버가 왜 못 하는지 이미 문구로 주므로 그대로 보여준다.
-  // 지금 화면에서 의미가 있는 것만 - 진행 중 요청의 회수, 승인 완료 회차의 재오픈.
-  const monthCloseActionNotices = useMemo(() => ([
-    { key: 'withdrawMonthClose', label: '결재 요청 회수', action: monthCloseActions?.withdrawMonthClose },
-    { key: 'requestMonthReopen', label: '재오픈 요청', action: monthCloseActions?.requestMonthReopen },
-  ] as const)
-    .filter((entry) => entry.action && entry.action.enabled !== true && Boolean(entry.action.guide))
-    .map((entry) => ({ key: entry.key, label: entry.label, guide: entry.action!.guide })),
-  [monthCloseActions?.requestMonthReopen, monthCloseActions?.withdrawMonthClose]);
+  // 안내는 한 줄. 상태에서 결정적인 것 하나만 고른다(2026-08-19 보람: 다 보여주니 정보가 아님).
+  const monthCloseNotice = useMemo(() => pickCashflowMonthCloseNotice({
+    requestStatus: monthCloseRequest?.status,
+    requestedByUid: monthCloseRequest?.requestedByUid,
+    requestedByName: monthCloseRequest?.requestedByName,
+    approverName: monthCloseRequest?.approverName,
+    requestedAt: monthCloseRequest?.requestedAt,
+    currentUid: user?.uid,
+    canWithdraw: monthCloseActions?.withdrawMonthClose.enabled === true,
+    withdrawGuide: monthCloseActions?.withdrawMonthClose.guide,
+    canRequestReopen: monthCloseActions?.requestMonthReopen.enabled === true,
+    reopenGuide: monthCloseActions?.requestMonthReopen.guide,
+    requestGuide: monthCloseActions?.requestMonthClose.guide,
+    todayIso: new Date().toISOString(),
+  }), [monthCloseActions?.requestMonthClose.guide, monthCloseActions?.requestMonthReopen, monthCloseActions?.withdrawMonthClose, monthCloseRequest?.approverName, monthCloseRequest?.requestedAt, monthCloseRequest?.requestedByName, monthCloseRequest?.requestedByUid, monthCloseRequest?.status, user?.uid]);
 
   const monthClosePreparation = useMemo(() => {
     if (monthCloseError) {
@@ -2860,17 +2867,13 @@ export function CashflowProjectSheet({
                           ))}
                         </ul>
                       </div>
-                    ) : monthCloseActions?.requestMonthClose.guide ? (
-                      <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
-                        {monthCloseActions.requestMonthClose.guide}
+                    ) : monthCloseNotice ? (
+                      <div
+                        role={monthCloseNotice.tone === 'attention' ? 'status' : undefined}
+                        className={`mt-1 text-[12px] leading-4 ${monthCloseNotice.tone === 'attention' ? 'font-semibold text-red-700' : 'text-muted-foreground'}`}
+                      >
+                        {monthCloseNotice.text}
                       </div>
-                    ) : null}
-                    {monthCloseActionNotices.length > 0 ? (
-                      <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-muted-foreground">
-                        {monthCloseActionNotices.map((notice) => (
-                          <li key={notice.key}>{notice.label} · {notice.guide}</li>
-                        ))}
-                      </ul>
                     ) : null}
                     {monthCloseRequestError ? (
                       <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-red-700">

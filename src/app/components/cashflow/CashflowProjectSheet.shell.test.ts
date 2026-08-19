@@ -9,7 +9,8 @@ const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.t
 
 describe('CashflowProjectSheet monthly close shell', () => {
   it('uses the server month-close guide instead of rebuilding a target-month deadline label', () => {
-    expect(source).toContain('monthCloseActions?.requestMonthClose.guide ? (');
+    // 서버 guide 는 한 줄 안내의 폴백으로 쓴다(화면이 기한 라벨을 다시 만들지 않는다).
+    expect(source).toContain('requestGuide: monthCloseActions?.requestMonthClose.guide');
     expect(source).not.toContain('monthCloseResult.dashboard.summary.targetYearMonth}월 결산');
   });
 
@@ -546,7 +547,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(operations).not.toContain('목요일 자정 업데이트');
     expect(operations).toContain('monthCloseActions?.requestMonthClose.enabled');
     expect(operations).not.toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
-    expect(operations).toContain('monthCloseActions?.requestMonthClose.guide');
+    expect(operations).toContain('monthCloseNotice ? (');
     expect(operations).not.toContain('closeDeadline');
     expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
   });
