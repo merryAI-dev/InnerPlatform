@@ -13,7 +13,10 @@ describe('JVM production deploy workflow', () => {
     expect(workflow.indexOf('update-traffic')).toBeGreaterThan(workflow.indexOf('/month-close/dashboard-source'));
     expect(workflow).toContain('workload_identity_provider');
     expect(workflow).toContain('token_format: id_token');
-    expect(workflow).toContain('ID_TOKEN: ${{ steps.auth.outputs.id_token }}');
+    // 서비스 호출 토큰의 audience 는 배포 뒤 확정된 서비스 URL. 리전을 옮기면 URL 이 바뀌므로 변수로 못 박지 않는다.
+    expect(workflow).toContain('ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}');
+    expect(workflow).toContain('id_token_audience: ${{ steps.candidate.outputs.service_url }}');
+    expect(workflow).not.toContain('id_token_audience: ${{ vars.');
     expect(workflow).not.toContain('gcloud auth print-identity-token');
     expect(workflow).toContain('actions: read');
     expect(workflow).toContain("java-version: '21'");
@@ -34,6 +37,12 @@ describe('JVM production deploy workflow', () => {
     expect(workflow.indexOf('Verify canonical service after promotion')).toBeGreaterThan(workflow.indexOf('update-traffic'));
     expect(workflow).toContain("if: failure() && steps.promote.outcome == 'success'");
     expect(workflow).toContain('--to-revisions "${PREVIOUS_REVISION}=100"');
+    // 데이터(Firestore nam5) 옆 리전. 새 리전 첫 배포엔 이전 리비전이 없고 --no-traffic 은 거부된다.
+    expect(workflow).toContain('REGION: us-central1');
+    expect(workflow).toContain('if [ -z "${PREVIOUS_REVISION}" ]; then');
+    expect(workflow).toContain('traffic_flag=""');
+    expect(workflow).toContain("steps.previous.outputs.revision != ''");
+    expect(workflow).not.toContain('test -n "${revision}"');
   });
 
   it('auto-deploys only a green main commit whose JVM sources actually changed', () => {
