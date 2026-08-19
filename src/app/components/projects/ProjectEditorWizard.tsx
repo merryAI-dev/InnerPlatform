@@ -17,7 +17,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -72,6 +72,7 @@ import {
   type ContractAmountItemField,
 } from '../../platform/project-contract-amount';
 import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
+import { deriveProjectStatusFromContractPeriod } from '../../platform/project-status-from-period';
 import {
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
@@ -1323,6 +1324,25 @@ export function ProjectEditorWizard({
     }));
   };
 
+  /**
+   * 계약 기간을 고치면 진행 상태가 따라온다. 사람이 고르는 값이 아니라 날짜에서 나오는 값이다.
+   * 불러오기만으로 저장된 상태를 바꾸지는 않는다 - 사람이 기간을 손댈 때만 다시 계산한다.
+   */
+  const updateContractPeriod = (key: 'contractStart' | 'contractEnd', value: string) => {
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      return createProjectEditorWizardDraft({
+        ...next,
+        status: deriveProjectStatusFromContractPeriod({
+          contractStart: next.contractStart,
+          contractEnd: next.contractEnd,
+          currentStatus: next.status,
+          today: new Date().toISOString().slice(0, 10),
+        }),
+      });
+    });
+  };
+
   const updateFinancialYear = (
     index: number,
     key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'paymentPlan' | 'paymentExpectedMonths' | 'advanceInterimBelow70Reason' | 'isSettled' | 'confirmed',
@@ -1573,7 +1593,7 @@ export function ProjectEditorWizard({
         : [];
       const financialYearsComplete = expectedYears.length > 0
         && draft.financialYears.length === expectedYears.length
-        && expectedYears.every((year) => draft.financialYears.some((row) => row.year === year && row.confirmed));
+        && expectedYears.every((year) => draft.financialYears.some((row) => row.year === year));
       const annualTotal = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount') => (
         draft.financialYears.reduce((sum, row) => sum + row[field], 0)
       );
@@ -2321,7 +2341,6 @@ export function ProjectEditorWizard({
       ['totalActualCost', '실비(원가)'],
       ['supportAmount', '지원금'],
     ] as const;
-    const unconfirmedYears = draft.financialYears.filter((row) => !row.confirmed).map((row) => `${row.year}년`);
     const emptyContractYears = draft.financialYears.filter((row) => row.contractAmount <= 0).map((row) => `${row.year}년`);
     // 저장된 총계와 연도 합계가 어긋나면 이미 submitIssues 가 잡는다. 여기서는 같은 사실을
     // 표 밑에서 보여주기만 하고 판정은 하지 않는다.
@@ -2336,14 +2355,15 @@ export function ProjectEditorWizard({
               <tr className="border-y border-slate-200 bg-slate-50">
                 <th scope="col" className={cn('py-2 pr-3', FORM_LABEL_CLASS)}>연도</th>
                 {columns.map(([field, label]) => (
-                  <th key={field} scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>
-                    {label}
-                    {/* 금액 열임을 열 이름에서 바로 읽히게 한다. 셀마다 반복하지 않는다. */}
-                    <span className="ml-1 text-[11px] font-normal text-slate-400">{draft.currency}</span>
-                  </th>
+                  <Fragment key={field}>
+                    <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>{label}</th>
+                    {/* 통화는 계약금액 바로 옆에서 고른다. 금액과 떨어지면 무슨 단위인지 멀어진다. */}
+                    {field === 'contractAmount' ? (
+                      <th scope="col" className={cn('px-3 py-2 text-left', FORM_LABEL_CLASS)}>통화</th>
+                    ) : null}
+                  </Fragment>
                 ))}
                 <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>수익률</th>
-                <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>계약서 대조</th>
               </tr>
             </thead>
             <tbody>
@@ -2353,12 +2373,12 @@ export function ProjectEditorWizard({
                     {row.year}년
                   </th>
                   {columns.map(([field, label]) => (
-                    <td key={field} className="px-3 py-2">
+                    <Fragment key={field}>
+                    <td className="px-3 py-2">
                       {field === 'contractAmount' && contractAmountIsDerived ? (
                         /* 숫자 열이라 오른쪽 정렬을 지킨다. 입력칸 모양은 쓰지 않는다. */
                         <div className="flex h-9 min-w-[116px] flex-col items-end justify-center">
                           <span className={cn('font-medium text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
-                            <span className="mr-1 text-[11px] font-normal text-slate-400">{draft.currency}</span>
                             {fmtKRW(row.contractAmount)}
                           </span>
                           <span className="text-[11px] font-normal leading-4 text-slate-400">계산됨</span>
@@ -2373,33 +2393,38 @@ export function ProjectEditorWizard({
                         />
                       )}
                     </td>
+                    {/* 통화는 사업 단위로 하나다. 합계 행에서 한 번만 고른다. */}
+                    {field === 'contractAmount' ? <td className="px-3 py-2" /> : null}
+                    </Fragment>
                   ))}
                   <td className={cn('px-3 py-2 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
                     {`${(row.profitRate * 100).toFixed(2)}%`}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Checkbox
-                      aria-label={`${row.year}년 금액을 계약서와 대조하여 확인했습니다.`}
-                      checked={row.confirmed}
-                      onCheckedChange={(checked) => updateFinancialYear(index, 'confirmed', checked === true)}
-                    />
                   </td>
                 </tr>
               ))}
               <tr className="bg-slate-100">
                 <th scope="row" className={cn('py-2.5 pr-3 text-slate-900', FORM_LABEL_CLASS)}>합계</th>
                 {columns.map(([field]) => (
-                  <td key={field} className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
-                    {fmtKRW(annualTotal(field))}
-                  </td>
+                  <Fragment key={field}>
+                    <td className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
+                      {fmtKRW(annualTotal(field))}
+                    </td>
+                    {field === 'contractAmount' ? (
+                      <td className="px-3 py-2.5">
+                        <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
+                          <SelectTrigger className={cn('h-8 min-w-[92px]', FORM_CONTROL_CLASS)} aria-label="통화"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
+                              <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                    ) : null}
+                  </Fragment>
                 ))}
-                {/* 총수익률의 자리. 위에 따로 떼어 두지 않고 무엇을 나눈 값인지 여기서 밝힌다. */}
-                <td className={cn('px-3 py-2.5 text-right', FORM_NUMERIC_VALUE_CLASS)}>
-                  <span className="font-semibold text-slate-900">{profitRateLabel ? `${profitRateLabel}%` : '-'}</span>
-                  <span className="ml-1 text-[11px] font-normal text-slate-400">총수익÷계약금액</span>
-                </td>
-                <td className={cn('px-3 py-2.5 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
-                  {draft.financialYears.length - unconfirmedYears.length}/{draft.financialYears.length}
+                <td className={cn('px-3 py-2.5 text-right font-semibold text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
+                  {profitRateLabel ? `${profitRateLabel}%` : '-'}
                 </td>
               </tr>
             </tbody>
@@ -2436,18 +2461,12 @@ export function ProjectEditorWizard({
             금액을 한 번 고쳐 넣으면 항목 합계로 바뀌어 저장되니, 어느 쪽이 맞는지 먼저 확인해 주세요.
           </p>
         ) : null}
-        {emptyContractYears.length > 0 || unconfirmedYears.length > 0 || totalsDrifted ? (
+        {emptyContractYears.length > 0 || totalsDrifted ? (
           <ul className={cn('space-y-1', FORM_ERROR_CLASS)}>
             {emptyContractYears.length > 0 ? (
               <li className="flex gap-1.5">
                 <span aria-hidden>·</span>
                 <span>{emptyContractYears.join(', ')} 계약금액이 아직 비어 있습니다.</span>
-              </li>
-            ) : null}
-            {unconfirmedYears.length > 0 ? (
-              <li className="flex gap-1.5">
-                <span aria-hidden>·</span>
-                <span>{unconfirmedYears.join(', ')} 금액을 계약서와 대조하여 확인해 주세요.</span>
               </li>
             ) : null}
             {totalsDrifted ? (
@@ -2639,7 +2658,7 @@ export function ProjectEditorWizard({
       <ProjectFormSection title="계약 정보">
         <ProjectFormFieldPair>
           <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
-            <Input type="date" value={draft.contractStart} onChange={(event) => update('contractStart', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+            <Input type="date" value={draft.contractStart} onChange={(event) => updateContractPeriod('contractStart', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
           </ProjectFormRow>
           <ProjectFormRow
             label="계약 종료일"
@@ -2647,23 +2666,11 @@ export function ProjectEditorWizard({
             issueLabel="계약 종료일"
             errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
           >
-            <Input type="date" value={draft.contractEnd} onChange={(event) => update('contractEnd', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+            <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
           </ProjectFormRow>
         </ProjectFormFieldPair>
 
         <ProjectFormFieldPair>
-        {canEditProjectStatus(mode) ? (
-          <ProjectFormRow label="프로젝트 진행 상태">
-            <Select value={draft.status} onValueChange={(value) => update('status', value as ProjectStatus)}>
-              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((status) => (
-                  <SelectItem key={status} value={status}>{PROJECT_STATUS_LABELS[status]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        ) : null}
         {canEditProjectStatus(mode) && isAdminMode(mode) ? (
           <ProjectFormRow label="프로젝트 구분">
             <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
@@ -2681,16 +2688,6 @@ export function ProjectEditorWizard({
             보였다. 행 컴포넌트를 쓰면서 두 경우 모두 같은 자리에 한 번만 놓는다. */}
         <ProjectFormFieldPair>
         {!canEditProjectStatus(mode) || isAdminMode(mode) ? renderContractTypeSelect() : null}
-        <ProjectFormRow label="통화">
-          <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
-            <SelectTrigger className={cn('max-w-[160px]', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
-                <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </ProjectFormRow>
         </ProjectFormFieldPair>
 
         {annualTotalsOwnAmounts ? (
