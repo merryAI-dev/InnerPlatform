@@ -35,8 +35,19 @@ export function StatusBadge({ status, label, tone }: {
     <Badge variant="outline" className={`gap-1.5 ${STATUS_CLASS[tone]}`}>
       <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[tone]}`} />
       <span>{label}</span>
-      <span className="font-mono text-[9px] opacity-70">{status}</span>
+      <span className="sr-only">{status}</span>
     </Badge>
+  );
+}
+
+// 해시는 앞 12자만 보인다. 전체 값은 title 과 sr-only 로 남긴다.
+function ShortHash({ value, label }: { value: string | null | undefined; label: string }) {
+  if (!value) return <span>{label}</span>;
+  const body = value.replace(/^sha256:/, '');
+  return (
+    <span className="font-mono text-[11px]" title={value}>
+      {body.slice(0, 12)}…<span className="sr-only">{value}</span>
+    </span>
   );
 }
 
@@ -100,7 +111,7 @@ function ExecutiveApproverEditor({
         void onUpdate(item, uid, reason);
       }}
     >
-      <label htmlFor={inputId} className="block text-xs font-medium">조직장 People UID</label>
+      <label htmlFor={inputId} className="block text-xs font-medium">조직장 (인력 명부에서 선택)</label>
       <div className="flex gap-2">
         <select
           id={inputId}
@@ -151,7 +162,7 @@ function PolicyPermissionsSection({
   onUpdateExecutiveApprover: (item: CashflowPeriodPolicyProjectItem, uid: string, reason: string) => Promise<void>;
 }) {
   return (
-    <SectionCard title="정책 / 권한" description="슈퍼관리자와 프로젝트별 조직장 People UID 연결을 서버 권한 기준으로 표시합니다." icon={ShieldCheck}>
+    <SectionCard title="정책 / 권한" description="월 결산을 승인할 수 있는 관리자와 프로젝트별 조직장 연결 상태입니다." icon={ShieldCheck}>
       <div className="space-y-3 border-b border-border p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -172,7 +183,7 @@ function PolicyPermissionsSection({
         </div>
       </div>
       <Table className="min-w-[980px]">
-        <TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>조직장 연결 상태</TableHead><TableHead>현재 연결</TableHead><TableHead>field-only 변경</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>조직장 연결 상태</TableHead><TableHead>현재 조직장</TableHead><TableHead>조직장 변경</TableHead></TableRow></TableHeader>
         <TableBody>{snapshot.items.map((item) => (
           <TableRow key={`permission:${item.project.id}`}>
             <TableCell><div className="font-medium">{item.project.name}</div><div className="font-mono text-[10px] text-muted-foreground">{item.project.id}</div></TableCell>
@@ -288,7 +299,7 @@ function RecoveryEditor({
               disabled={recovering}
               className="mt-0.5 h-4 w-4 rounded border-input"
             />
-            <span>되돌리기 어려운 복구이며 변경 전·후 전체 값이 append-only 감사 사본으로 보존됨을 확인했습니다.</span>
+            <span>되돌리기 어려운 권한 복구입니다. 변경 전·후 전체 값이 append-only 감사 사본으로 보존됨을 확인했습니다.</span>
           </label>
           <Button
             type="submit"
@@ -313,7 +324,7 @@ function RecoveryEditor({
         ) : null}
         {item.recovery.resetToReclose.selectionAllowed ? (
           <fieldset className="space-y-1.5 rounded-md border border-border bg-background p-2">
-            <legend className="px-1 text-xs font-medium">서버 확인 재결산 회차</legend>
+            <legend className="px-1 text-xs font-medium">재결산할 회차</legend>
             {item.recovery.resetToReclose.cycleCandidates.map((candidate) => (
               <label key={`${item.project.id}:reset:${candidate.yearMonth}`} className="flex items-center gap-2 text-xs">
                 <input
@@ -358,7 +369,7 @@ function RecoveryEditor({
                 disabled={resetting || recovering}
                 className="mt-0.5 h-4 w-4 rounded border-input"
               />
-              <span>되돌리기 어려운 격리 작업이며 전체 before 값이 append-only 감사 사본으로 보존됨을 확인했습니다.</span>
+              <span>되돌리기 어려운 작업입니다. 지금 값 전체가 append-only 감사 사본으로 보존됨을 확인했습니다.</span>
             </label>
             <Button
               type="submit"
@@ -393,9 +404,9 @@ function AuthoritySectionWithRecovery({
   ) => Promise<void>;
 }) {
   return (
-    <SectionCard title="월결산 authority" description="누적 마감 경계는 authority head가 제공한 값을 그대로 표시합니다." icon={CheckCircle2}>
-      <Table className="min-w-[1320px]"><TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>상태</TableHead><TableHead>닫힌 범위</TableHead><TableHead>Revision</TableHead><TableHead>Root hash</TableHead><TableHead>마감 시각</TableHead><TableHead>ERP 복구</TableHead></TableRow></TableHeader>
-        <TableBody>{snapshot.items.map((item) => <TableRow key={`authority:${item.project.id}`}><TableCell>{item.project.name}</TableCell><TableCell><StatusBadge status={item.authority.status} label={item.authority.statusLabel} tone={item.authority.tone} /></TableCell><TableCell>{item.authority.closedThroughLabel}<span className="sr-only">{item.authority.closedThrough}</span></TableCell><TableCell>{item.authority.revisionLabel}</TableCell><TableCell className="max-w-[220px] break-all font-mono text-xs">{item.authority.rootHashLabel}<span className="sr-only">{item.authority.rootHash}</span></TableCell><TableCell>{item.authority.closedAtLabel}<span className="sr-only">{item.authority.closedAt}</span></TableCell><TableCell><RecoveryEditor item={item} recovering={recoveringProjectId === item.project.id} resetting={resettingProjectId === item.project.id} onRecover={onRecoverCumulativeCloseHead} onReset={onResetCumulativeCloseToReclose} /></TableCell></TableRow>)}</TableBody>
+    <SectionCard title="월 결산 잠금 범위" description="어느 달까지 결산이 확정되어 잠겼는지 프로젝트별로 표시합니다. 잠금은 결산 회차와 같은 연도의 마감 범위 이하 월에만 적용되고, 지난 연도는 연간 결산으로만 다룹니다." icon={CheckCircle2}>
+      <Table className="min-w-[1320px]"><TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>상태</TableHead><TableHead>마감 범위</TableHead><TableHead>결산 회차</TableHead><TableHead>결산 차수</TableHead><TableHead>확정 해시</TableHead><TableHead>마감 시각</TableHead><TableHead>복구</TableHead></TableRow></TableHeader>
+        <TableBody>{snapshot.items.map((item) => <TableRow key={`authority:${item.project.id}`}><TableCell>{item.project.name}</TableCell><TableCell><StatusBadge status={item.authority.status} label={item.authority.statusLabel} tone={item.authority.tone} /></TableCell><TableCell>{item.authority.closedThroughLabel}<span className="sr-only">{item.authority.closedThrough}</span></TableCell><TableCell>{item.authority.settlementMonthLabel}<span className="sr-only">{item.authority.settlementMonth}</span></TableCell><TableCell>{item.authority.revisionLabel}</TableCell><TableCell><ShortHash value={item.authority.rootHash} label={item.authority.rootHashLabel} /></TableCell><TableCell>{item.authority.closedAtLabel}<span className="sr-only">{item.authority.closedAt}</span></TableCell><TableCell><RecoveryEditor item={item} recovering={recoveringProjectId === item.project.id} resetting={resettingProjectId === item.project.id} onRecover={onRecoverCumulativeCloseHead} onReset={onResetCumulativeCloseToReclose} /></TableCell></TableRow>)}</TableBody>
       </Table>
     </SectionCard>
   );
@@ -403,8 +414,8 @@ function AuthoritySectionWithRecovery({
 
 function RunSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) {
   return (
-    <SectionCard title="월결산 run / error" description="회차 실행 기록은 authority 상태와 분리해 표시합니다." icon={Clock3}>
-      <Table className="min-w-[900px]"><TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>실행 상태</TableHead><TableHead>회차</TableHead><TableHead>Revision</TableHead><TableHead>처리자</TableHead><TableHead>처리 시각</TableHead></TableRow></TableHeader>
+    <SectionCard title="마지막 결산 실행" description="가장 최근에 실행된 월 결산 회차와 처리자입니다. 위의 잠금 범위와 별개로, 실행이 실패했거나 진행 중이면 여기서 보입니다." icon={Clock3}>
+      <Table className="min-w-[900px]"><TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>실행 상태</TableHead><TableHead>회차</TableHead><TableHead>결산 차수</TableHead><TableHead>처리자</TableHead><TableHead>처리 시각</TableHead></TableRow></TableHeader>
         <TableBody>{snapshot.items.map((item) => <TableRow key={`run:${item.project.id}`}><TableCell>{item.project.name}</TableCell><TableCell><StatusBadge status={item.latestRun.status} label={item.latestRun.statusLabel} tone={item.latestRun.tone} /></TableCell><TableCell>{item.latestRun.yearMonthLabel}<span className="sr-only">{item.latestRun.yearMonth}</span></TableCell><TableCell>{item.latestRun.revisionLabel}</TableCell><TableCell>{item.latestRun.closedByLabel}<div className="font-mono text-[10px] text-muted-foreground">{item.latestRun.closedByUid}</div></TableCell><TableCell>{item.latestRun.closedAtLabel}<span className="sr-only">{item.latestRun.closedAt}</span></TableCell></TableRow>)}</TableBody>
       </Table>
     </SectionCard>
@@ -413,22 +424,25 @@ function RunSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) {
 
 function SheetSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) {
   return (
-    <SectionCard title="Sheet grain / source revision QA" description="연 결산과 주차 결산 grain, source/target revision을 서버 QA 결과 그대로 나눠 표시합니다." icon={Database}>
+    <SectionCard title="시트 원본 상태" description="프로젝트 시트에서 마지막으로 불러온 값의 상태입니다. 주차 결산 연도 1개와 연간 결산 연도가 시트 양식대로 잡혔는지, 불러온 값이 결산에 반영됐는지 표시합니다." icon={Database}>
       <div className="divide-y divide-border">{snapshot.items.map((item) => (
         <article key={`sheet:${item.project.id}`} className="space-y-4 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">{item.project.name}</h3><StatusBadge status={item.sheet.status} label={item.sheet.statusLabel} tone={item.sheet.tone} /></div>
           <dl className="grid gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
-            <div><dt className="text-muted-foreground">주차 grain</dt><dd className="mt-1 font-medium">{item.sheet.weeklyYearLabel}</dd></div>
-            <div><dt className="text-muted-foreground">연 grain</dt><dd className="mt-1 font-medium">{item.sheet.annualYearsLabel}</dd></div>
-            <div><dt className="text-muted-foreground">Revision QA</dt><dd className="mt-1"><StatusBadge status={item.sheet.revisionStatus} label={item.sheet.revisionStatusLabel} tone={item.sheet.revisionTone} /></dd></div>
-            <div><dt className="text-muted-foreground">캡처 시각</dt><dd className="mt-1 font-medium">{item.sheet.capturedAtLabel}</dd><dd className="sr-only">{item.sheet.capturedAt}</dd></div>
+            <div><dt className="text-muted-foreground">주차 결산 연도</dt><dd className="mt-1 font-medium">{item.sheet.weeklyYearLabel}</dd></div>
+            <div><dt className="text-muted-foreground">연간 결산 연도</dt><dd className="mt-1 font-medium">{item.sheet.annualYearsLabel}</dd></div>
+            <div><dt className="text-muted-foreground">불러온 값 반영</dt><dd className="mt-1"><StatusBadge status={item.sheet.revisionStatus} label={item.sheet.revisionStatusLabel} tone={item.sheet.revisionTone} /></dd></div>
+            <div><dt className="text-muted-foreground">마지막 불러오기</dt><dd className="mt-1 font-medium">{item.sheet.capturedAtLabel}</dd><dd className="sr-only">{item.sheet.capturedAt}</dd></div>
           </dl>
-          <dl className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 text-xs md:grid-cols-2">
-            <div><dt className="text-muted-foreground">Source revision</dt><dd className="mt-1 break-all font-mono">{item.sheet.sourceRevisionLabel}</dd><dd className="sr-only">{item.sheet.sourceRevision}</dd></div>
-            <div><dt className="text-muted-foreground">Applied source revision</dt><dd className="mt-1 break-all font-mono">{item.sheet.appliedSourceRevisionLabel}</dd><dd className="sr-only">{item.sheet.appliedSourceRevision}</dd></div>
-            <div><dt className="text-muted-foreground">Target revision at fetch</dt><dd className="mt-1 break-all font-mono">{item.sheet.targetRevisionAtFetchLabel}</dd><dd className="sr-only">{item.sheet.targetRevisionAtFetch}</dd></div>
-            <div><dt className="text-muted-foreground">Applied target revision</dt><dd className="mt-1 break-all font-mono">{item.sheet.appliedTargetRevisionLabel}</dd><dd className="sr-only">{item.sheet.appliedTargetRevision}</dd></div>
-          </dl>
+          <details className="rounded-md border border-border bg-muted/20 text-xs">
+            <summary className="cursor-pointer px-3 py-2 text-muted-foreground">불러온 값·반영 값 식별자 (AXR 확인용)</summary>
+            <dl className="grid gap-3 border-t border-border p-3 md:grid-cols-2">
+              <div><dt className="text-muted-foreground">시트에서 불러온 값</dt><dd className="mt-1"><ShortHash value={item.sheet.sourceRevision} label={item.sheet.sourceRevisionLabel} /></dd></div>
+              <div><dt className="text-muted-foreground">결산에 반영된 값</dt><dd className="mt-1"><ShortHash value={item.sheet.appliedSourceRevision} label={item.sheet.appliedSourceRevisionLabel} /></dd></div>
+              <div><dt className="text-muted-foreground">불러올 때의 결산 상태</dt><dd className="mt-1"><ShortHash value={item.sheet.targetRevisionAtFetch} label={item.sheet.targetRevisionAtFetchLabel} /></dd></div>
+              <div><dt className="text-muted-foreground">반영 후 결산 상태</dt><dd className="mt-1"><ShortHash value={item.sheet.appliedTargetRevision} label={item.sheet.appliedTargetRevisionLabel} /></dd></div>
+            </dl>
+          </details>
         </article>
       ))}</div>
     </SectionCard>
@@ -437,7 +451,7 @@ function SheetSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) 
 
 function VarianceSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) {
   return (
-    <SectionCard title="Projection ↔ Actual 편차" description="편차와 coverage는 서버 제공값만 표시하며 화면에서 합산하지 않습니다." icon={History}>
+    <SectionCard title="Projection ↔ Actual 편차" description="주 정산이 잠긴 주차의 예상(Projection)과 실제(Actual) 차이입니다. 비교할 수 없는 주차는 이유와 함께 그대로 표시합니다." icon={History}>
       <div className="space-y-3 border-b border-border p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-xs font-semibold">전사 편차 요약</h3>
@@ -486,25 +500,25 @@ function VarianceSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse 
 }
 
 function IssueRows({ issues, prefix }: { issues: CashflowPeriodPolicyIssue[]; prefix: string }) {
-  if (issues.length === 0) return <p className="text-xs text-muted-foreground">등록된 issue가 없습니다.</p>;
+  if (issues.length === 0) return <p className="text-xs text-muted-foreground">확인할 항목이 없습니다.</p>;
   return <ul className="space-y-2">{issues.map((issue) => <li key={`${prefix}:${issue.code}`} className="rounded-md border border-border bg-background p-3 text-xs"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={issue.severity} label={issue.severity} tone={issue.severityTone} /><span className="font-semibold">{issue.label}</span><code className="text-[10px] text-muted-foreground">{issue.code}</code></div><p className="mt-2 text-muted-foreground">{issue.detail}</p></li>)}</ul>;
 }
 
 function IssuesSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) {
   return (
-    <SectionCard title="Issues / UNAVAILABLE" description="누락과 조회 실패를 숨기지 않고 서버 issue 및 UNAVAILABLE 상태 그대로 표시합니다." icon={AlertTriangle}>
-      <div className="space-y-4 p-4"><div><h3 className="mb-2 text-xs font-semibold">전사 issue</h3><IssueRows issues={snapshot.issues} prefix="global" /></div>{snapshot.items.map((item) => <div key={`issues:${item.project.id}`}><h3 className="mb-2 text-xs font-semibold">{item.project.name}</h3><IssueRows issues={item.issues} prefix={item.project.id} /></div>)}</div>
+    <SectionCard title="확인 필요 항목" description="빠졌거나 읽지 못한 것을 숨기지 않고 그대로 보여줍니다. 여기가 비어 있으면 위 상태가 정상입니다." icon={AlertTriangle}>
+      <div className="space-y-4 p-4"><div><h3 className="mb-2 text-xs font-semibold">전사 공통</h3><IssueRows issues={snapshot.issues} prefix="global" /></div>{snapshot.items.map((item) => <div key={`issues:${item.project.id}`}><h3 className="mb-2 text-xs font-semibold">{item.project.name}</h3><IssueRows issues={item.issues} prefix={item.project.id} /></div>)}</div>
     </SectionCard>
   );
 }
 
 function AuditSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) {
   return (
-    <SectionCard title="Audit" description="JVM이 append-only로 기록한 닫힌 월 수정 증거만 읽기 전용으로 표시합니다." icon={History}>
+    <SectionCard title="닫힌 월 수정 이력" description="결산이 끝난 달의 값을 사유와 함께 고친 기록입니다. 서버가 추가만 하고 지우지 않는 기록이라 화면에서는 읽기만 합니다." icon={History}>
       <div className="border-b border-border p-4">
         <StatusBadge status={snapshot.amendments.status} label={snapshot.amendments.statusLabel} tone={snapshot.amendments.tone} />
       </div>
-      <Table className="min-w-[1180px]"><TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>대상 월</TableHead><TableHead>수정 사유</TableHead><TableHead>Close revision</TableHead><TableHead>Sheet revision</TableHead><TableHead>처리자</TableHead><TableHead>생성 시각</TableHead></TableRow></TableHeader>
+      <Table className="min-w-[1180px]"><TableHeader><TableRow><TableHead>프로젝트</TableHead><TableHead>대상 월</TableHead><TableHead>수정 사유</TableHead><TableHead>결산 차수</TableHead><TableHead>시트 값 식별자</TableHead><TableHead>처리자</TableHead><TableHead>기록 시각</TableHead></TableRow></TableHeader>
         <TableBody>{snapshot.amendments.rows.length === 0 ? (
           <TableRow><TableCell colSpan={7}><StatusBadge status={snapshot.amendments.status} label={snapshot.amendments.statusLabel} tone={snapshot.amendments.tone} /></TableCell></TableRow>
         ) : snapshot.amendments.rows.map((row) => (
@@ -512,8 +526,8 @@ function AuditSection({ snapshot }: { snapshot: CashflowPeriodPolicyResponse }) 
             <TableCell><div className="font-medium">{row.projectName}</div><div className="font-mono text-[10px] text-muted-foreground">{row.projectId}</div></TableCell>
             <TableCell>{row.yearMonthLabel}<div className="font-mono text-[10px] text-muted-foreground">{row.yearMonth}</div></TableCell>
             <TableCell className="max-w-[260px] whitespace-normal">{row.reasonLabel}</TableCell>
-            <TableCell><div>{row.closeRevisionLabel} → {row.resultingCloseRevisionLabel}</div><div className="mt-1 max-w-[220px] break-all font-mono text-[10px] text-muted-foreground">{row.closeSnapshotHashLabel}</div></TableCell>
-            <TableCell className="space-y-1 font-mono text-[10px]"><div>source {row.sourceRevisionLabel}</div><div>target {row.targetRevisionLabel}</div><div>result {row.resultingTargetRevisionLabel}</div></TableCell>
+            <TableCell><div>{row.closeRevisionLabel} → {row.resultingCloseRevisionLabel}</div><div className="mt-1 text-muted-foreground"><ShortHash value={row.closeSnapshotHash} label={row.closeSnapshotHashLabel} /></div></TableCell>
+            <TableCell className="space-y-1 text-[11px]"><div>불러온 값 <ShortHash value={row.sourceRevision} label={row.sourceRevisionLabel} /></div><div>수정 전 <ShortHash value={row.targetRevision} label={row.targetRevisionLabel} /></div><div>수정 후 <ShortHash value={row.resultingTargetRevision} label={row.resultingTargetRevisionLabel} /></div></TableCell>
             <TableCell><div>{row.actorLabel}</div><div className="font-mono text-[10px] text-muted-foreground">{row.actorUid}</div></TableCell>
             <TableCell><div>{row.createdAtLabel}</div><div className="font-mono text-[10px] text-muted-foreground">{row.createdAt}</div></TableCell>
           </TableRow>

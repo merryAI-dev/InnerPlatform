@@ -55,7 +55,7 @@ export function resolveCashflowPeriodPolicyRecoveryError(error: unknown): string
     return '복구 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요. 계속되면 AXR팀에 프로젝트 ID와 함께 알려 주세요.';
   }
   if (error.status === 403) {
-    return 'People UID가 연결된 ACTIVE runtime admin 권한을 확인해 주세요.';
+    return '인력 명부와 연결된 활성 관리자만 실행할 수 있습니다. 권한 관리에서 연결 상태를 확인해 주세요.';
   }
   if (error.code === 'cashflow_close_head_recovery_normal_reopen_required'
     || error.code === 'cashflow_close_reset_to_reclose_normal_reopen_required') {
@@ -76,7 +76,7 @@ function Header({ snapshot, onRetry }: { snapshot?: CashflowPeriodPolicyResponse
       icon={CalendarRange}
       iconGradient="linear-gradient(135deg, #0f766e, #2dd4bf)"
       title="현금흐름 기간·마감 정책"
-      description="서버 authority 기준으로 기간 grain, 월결산 실행, 권한, source revision을 분리해 확인합니다."
+      description="프로젝트별로 월 결산이 어디까지 잠겼는지, 마지막 결산 실행, 시트 원본 상태, 조직장 승인 권한을 확인하고 필요하면 복구합니다."
       badge={snapshot?.statusLabel}
       actions={snapshot ? (
         <Button type="button" variant="outline" size="sm" className="gap-2" onClick={onRetry}>
@@ -152,7 +152,7 @@ export function CashflowPeriodPolicyView({
           <CardContent className="py-12 text-center">
             <CalendarRange className="mx-auto h-9 w-9 text-muted-foreground" />
             <h2 className="mt-3 text-sm font-semibold">표시할 현금흐름 기간·마감 정책이 없습니다</h2>
-            <p className="mt-1 text-xs text-muted-foreground">서버 스냅샷 생성 시각: {state.snapshot.generatedAtLabel}</p>
+            <p className="mt-1 text-xs text-muted-foreground">기준 시각: {state.snapshot.generatedAtLabel}</p>
           </CardContent>
         </Card>
         <CashflowPeriodPolicySections
@@ -174,7 +174,7 @@ export function CashflowPeriodPolicyView({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
         <StatusBadge status={state.snapshot.status} label={state.snapshot.statusLabel} tone={state.snapshot.tone} />
         <p className="text-xs text-muted-foreground">
-          서버 스냅샷 {state.snapshot.generatedAtLabel}
+          기준 시각 {state.snapshot.generatedAtLabel}
           <span className="sr-only">{state.snapshot.generatedAt}</span>
         </p>
       </div>
@@ -250,13 +250,13 @@ export function CashflowPeriodPolicyPage() {
         reason,
         idempotencyKey: `cashflow-period-policy-${crypto.randomUUID()}`,
       });
-      toast.success(`${item.project.name} 조직장 People UID를 연결했습니다.`);
+      toast.success(`${item.project.name} 조직장을 연결했습니다.`);
       retry();
     } catch (error: unknown) {
       if (error instanceof PlatformApiError && error.status === 403) {
         setState({ kind: 'forbidden' });
       } else {
-        toast.error('조직장 People UID를 연결하지 못했습니다. 화면을 다시 불러온 뒤 다시 시도해 주세요.');
+        toast.error('조직장을 연결하지 못했습니다. 화면을 다시 불러온 뒤 다시 시도해 주세요.');
       }
     } finally {
       setSavingProjectId('');

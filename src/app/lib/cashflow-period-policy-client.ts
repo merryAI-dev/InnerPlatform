@@ -40,6 +40,8 @@ export interface CashflowPeriodPolicyStatusBlock {
 export interface CashflowPeriodPolicyAuthority extends CashflowPeriodPolicyStatusBlock {
   closedThrough: string | null;
   closedThroughLabel: string;
+  settlementMonth: string | null;
+  settlementMonthLabel: string;
   revision: number | null;
   revisionLabel: string;
   rootHash: string | null;

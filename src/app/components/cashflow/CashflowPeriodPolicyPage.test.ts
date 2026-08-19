@@ -65,6 +65,7 @@ const snapshot: CashflowPeriodPolicyResponse = {
     project: { id: 'project-a', name: 'AXR 프로젝트', status: 'ACTIVE', statusLabel: '운영 중', tone: 'positive' },
     authority: {
       status: 'CLOSED', statusLabel: '누적 마감', tone: 'positive', closedThrough: '2026-07', closedThroughLabel: '2026년 7월까지',
+      settlementMonth: '2026-08', settlementMonthLabel: '2026년 8월 결산 회차',
       revision: 4, revisionLabel: 'rev.4', rootHash: 'sha256:authority-a', rootHashLabel: 'sha256:authority-a',
       closedAt: '2026-08-10T00:00:00.000Z', closedAtLabel: '2026.08.10 09:00',
     },
@@ -96,7 +97,7 @@ const snapshot: CashflowPeriodPolicyResponse = {
     },
     sheet: {
       status: 'PARTIAL', statusLabel: '시트 QA 확인 필요', tone: 'caution', weeklyYear: 2026, weeklyYearLabel: '2026년 주차 결산',
-      annualYears: [2024, 2025], annualYearsLabel: '2024년, 2025년 연간형',
+      annualYears: [2024, 2025], annualYearsLabel: '2024년, 2025년 연간 결산',
       sourceRevision: 'sheet-source-a', sourceRevisionLabel: '원본 sheet-source-a',
       appliedSourceRevision: 'sheet-source-b', appliedSourceRevisionLabel: '반영 sheet-source-b',
       targetRevisionAtFetch: 'target-a', targetRevisionAtFetchLabel: '조회 target-a',
@@ -148,10 +149,10 @@ describe('CashflowPeriodPolicyView', () => {
     const html = render({ kind: 'ready', snapshot });
 
     for (const text of [
-      '현금흐름 기간·마감 정책', '정책 / 권한', '월결산 authority', '월결산 run / error',
-      'Sheet grain / source revision QA', 'Projection ↔ Actual 편차', 'Issues / UNAVAILABLE', 'Audit',
-      '2026년 7월까지', 'sha256:authority-a', '2026년 8월 회차', '2026년 주차 결산', '2024년, 2025년 연간형', '2024', '2025',
-      '원본 sheet-source-a', '반영 sheet-source-b', '전사 편차 부분 비교', '전사 비교 가능 1/1주차 · 부분 합계',
+      '현금흐름 기간·마감 정책', '정책 / 권한', '월 결산 잠금 범위', '마지막 결산 실행',
+      '시트 원본 상태', 'Projection ↔ Actual 편차', '확인 필요 항목', '닫힌 월 수정 이력',
+      '2026년 7월까지', 'sha256:authority-a', '2026년 8월 회차', '2026년 주차 결산', '2024년, 2025년 연간 결산', '2024', '2025',
+      '2026년 8월 결산 회차', 'sheet-source-a', 'sheet-source-b', '전사 편차 부분 비교', '전사 비교 가능 1/1주차 · 부분 합계',
       '2026년 8월 2주차', '기초 잔액', '1,000원', '900원', '100원', '90원', '10원',
       'People UID 연결됨', '조직장 후보 조회 완료', '김조직장', '권한 관리', 'version 7', '일부 원본을 읽지 못했습니다.',
       '닫힌 월 수정 이력 1건', '7월 결산 후 직접사업비 정정', 'uid-superadmin',
@@ -209,7 +210,6 @@ describe('CashflowPeriodPolicyView', () => {
     });
 
     expect(html).toContain('닫힌 월 수정 이력 조회 불가');
-    expect(html).toContain('UNAVAILABLE');
     expect(html).not.toContain('7월 결산 후 직접사업비 정정');
     expect(html).not.toContain('정책 스냅샷 생성');
   });
@@ -356,9 +356,9 @@ describe('CashflowPeriodPolicyView', () => {
     const pageSource = readFileSync(resolve(import.meta.dirname, 'CashflowPeriodPolicyPage.tsx'), 'utf8');
 
     expect(pageSource).not.toContain("resolveApiErrorMessage(error, '기간·마감 정책을 불러오지 못했습니다.')");
-    expect(pageSource).not.toContain("resolveApiErrorMessage(error, '조직장 People UID를 연결하지 못했습니다.')");
+    expect(pageSource).not.toContain("resolveApiErrorMessage(error, '조직장을 연결하지 못했습니다.')");
     expect(pageSource).toContain('기간·마감 정책을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    expect(pageSource).toContain('조직장 People UID를 연결하지 못했습니다. 화면을 다시 불러온 뒤 다시 시도해 주세요.');
+    expect(pageSource).toContain('조직장을 연결하지 못했습니다. 화면을 다시 불러온 뒤 다시 시도해 주세요.');
   });
 });
 
