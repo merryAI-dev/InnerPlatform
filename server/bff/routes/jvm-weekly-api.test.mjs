@@ -1999,6 +1999,8 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => {
         expect(response.body.actions).toMatchObject({
           completeWeekly: { enabled: true },
+          // 완료 전이면 회수할 게 없다. 완료·회수는 서로 배타.
+          reopenWeekly: { enabled: false, guide: '아직 완료되지 않은 주간 정산입니다.' },
           changeExecutiveApprover: { enabled: true },
           requestMonthClose: { enabled: true, label: '월 결산 요청' },
           withdrawMonthClose: { enabled: false },
@@ -3264,6 +3266,26 @@ describe('JVM weekly API BFF proxy', () => {
     expect(JSON.parse(reopenCall[1].body)).toMatchObject({
       yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정',
     });
+
+    // 회수(사유 없음): 화면은 revision 을 모른다. BFF 가 잠금 기록에서 읽어 JVM 낙관적 잠금에 넘긴다.
+    source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3', {
+      projectId: 'project-a', yearMonth: '2026-06', weekNo: 3, status: 'LOCKED', revision: 4,
+    });
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
+      .send({ yearMonth: '2026-06', weekNo: 3 })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({ yearMonth: '2026-06', weekNo: 3, status: 'OPEN' }));
+    const withdrawCall = fetchImpl.mock.calls.filter(([url]) => url.endsWith('/weekly-update-complete/reopen')).at(-1);
+    const withdrawBody = JSON.parse(withdrawCall[1].body);
+    expect(withdrawBody).toMatchObject({ yearMonth: '2026-06', weekNo: 3, expectedRevision: 4 });
+    expect(withdrawBody).not.toHaveProperty('reason');
+    // 완료된 적 없는 주는 회수할 수 없다.
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
+      .send({ yearMonth: '2026-06', weekNo: 4 })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_reopen_not_locked'));
   });
 
   it('does not count a reopened weekly completion as settled', async () => {
@@ -3370,7 +3392,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('cashflow_weekly_update_scope_invalid'));
     await request(app)
       .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
-      .send({ yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '' })
+      .send({ yearMonth: '2026-06', weekNo: 9 })
       .expect(400)
       .expect((response) => expect(response.body.code).toBe('cashflow_weekly_reopen_request_invalid'));
     expect(fetchImpl).not.toHaveBeenCalled();

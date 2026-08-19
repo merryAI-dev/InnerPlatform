@@ -164,6 +164,17 @@ function buildCashflowMonthCloseActions({
           ? '현재 주간 정산 대상을 서버에서 확인하지 못했습니다.'
           : '이미 완료된 주간 정산입니다.',
     ),
+    // 주정산 회수: 완료된 주가 있으면 즉시. 결재 없음, 사유 없음.
+    reopenWeekly: cashflowAction(
+      weeklyRoleAllowed && Boolean(currentDeadline) && Boolean(readOptionalText(currentDeadline?.completedAt)),
+      !actionAllowed
+        ? accessGuide
+        : !weeklyRoleAllowed
+        ? '현금흐름 주간 정산 회수 권한이 없습니다.'
+        : !currentDeadline
+          ? '현재 주간 정산 대상을 서버에서 확인하지 못했습니다.'
+          : '아직 완료되지 않은 주간 정산입니다.',
+    ),
     changeExecutiveApprover: cashflowAction(
       requestAvailable
         && approverLockRead.available
@@ -4252,28 +4263,36 @@ export function mountJvmWeeklyApiRoutes(app, {
     const requested = commandBody(req);
     const yearMonth = readOptionalText(requested.yearMonth);
     const weekNo = Number(requested.weekNo);
-    const expectedRevision = Number(requested.expectedRevision);
     const reason = readOptionalText(requested.reason);
     if (
       !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
       || !Number.isSafeInteger(weekNo)
       || weekNo < 1
       || weekNo > 5
-      || !Number.isSafeInteger(expectedRevision)
-      || expectedRevision < 1
-      || !reason
       || reason.length > 1_000
     ) {
       throw createHttpError(
         400,
-        '주간 정산 재오픈에는 대상 연월·주차·현재 revision·사유가 필요합니다.',
+        '주간 정산 회수에는 대상 연월과 주차가 필요합니다.',
         'cashflow_weekly_reopen_request_invalid',
       );
+    }
+    // 회수는 사유 없이 즉시. 화면은 revision 을 모르므로 BFF 가 현재 잠금 기록에서 읽어 JVM 낙관적 잠금에 넘긴다.
+    let expectedRevision = Number(requested.expectedRevision);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      const completion = await readDocument(
+        db,
+        `orgs/${req.context.tenantId}/cashflow_weekly_update_completions/${projectId}-${yearMonth}-w${weekNo}`,
+      );
+      if (readOptionalText(completion?.status) !== 'LOCKED' || !Number.isSafeInteger(Number(completion?.revision))) {
+        throw createHttpError(409, '완료된 주간 정산만 회수할 수 있습니다.', 'cashflow_weekly_reopen_not_locked');
+      }
+      expectedRevision = Number(completion.revision);
     }
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete/reopen`,
-      { ...requested, yearMonth, weekNo, expectedRevision, reason },
+      { ...requested, yearMonth, weekNo, expectedRevision, ...(reason ? { reason } : {}) },
       { cashflowWrite: true },
     );
     res.status(200).json(result);

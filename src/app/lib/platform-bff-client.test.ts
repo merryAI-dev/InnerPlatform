@@ -276,6 +276,7 @@ describe('platform-bff-client', () => {
     } satisfies CashflowMonthClosePresentation;
     const actions = {
       completeWeekly: { enabled: false, guide: '주간 가이드' },
+      reopenWeekly: { enabled: false, guide: '주간 회수 가이드' },
       changeExecutiveApprover: { enabled: false, guide: '조직장 가이드' },
       requestMonthClose: { enabled: false, guide: '서버 가이드', label: '월 결산 요청' },
       withdrawMonthClose: { enabled: false, guide: '회수 가이드' },
@@ -572,8 +573,7 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, client,
     });
     await reopenCashflowWeeklyUpdateViaBff({
-      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2,
-      expectedRevision: 1, reason: '긴급 정정', client,
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, client,
     });
 
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({
@@ -584,8 +584,9 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/weekly-update-complete?yearMonth=2026-06&weekNo=2',
       expect.objectContaining({ retries: 0 }),
     );
+    // 회수는 사유 없이, revision 도 화면이 아니라 BFF 가 잠금 기록에서 읽는다.
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete/reopen', expect.objectContaining({
-      body: { yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정' },
+      body: { yearMonth: '2026-06', weekNo: 2 },
     }));
   });
 

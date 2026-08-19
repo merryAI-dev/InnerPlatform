@@ -3819,6 +3819,29 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void weeklyReopenNeedsNoReasonAndReopensALockedWeek() {
+        // 주정산 회수는 결재가 없는 가벼운 되돌림이라 사유 없이도 된다. 있으면 기록만 한다.
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+        var response = fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .reopenCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("reopen-no-reason", "2026-07", 3, 1, null)
+            ));
+        assertThat(response.status()).isEqualTo("OPEN");
+        assertThat(response.revision()).isEqualTo(2L);
+        Map<String, Object> stored = fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+        );
+        assertThat(stored.get("status")).isEqualTo("OPEN");
+        assertThat(stored.get("reopenReason")).isEqualTo("");
+    }
+
+    @Test
     void weeklyReopenRejectsRevisionDriftAndClosedMonth() {
         Fixture revisionFixture = fixture(activeMember(), Map.of());
         revisionFixture.documents.put(
