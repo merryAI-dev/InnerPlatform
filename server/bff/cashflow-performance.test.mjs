@@ -83,3 +83,23 @@ describe('cashflow performance trace', () => {
     expect(logged).toBe(true);
   });
 });
+
+describe('cashflow performance trace Server-Timing', () => {
+  it('renders measured spans as a Server-Timing header with a total', async () => {
+    let clock = 0;
+    const trace = createCashflowPerformanceTrace({
+      requestId: 'req-1',
+      operation: 'cashflow.month_close.read',
+      logger: () => {},
+      now: () => clock,
+    });
+    await trace.measure('jvm_dashboard', async () => { clock += 3200; }, { attempt: 1 });
+    await trace.measure('dashboard_compose', async () => { clock += 410; }, { attempt: 1 });
+    await trace.measure('jvm_dashboard', async () => { clock += 100; }, { attempt: 2 });
+    await expect(trace.measure('publication_after', async () => { clock += 5; throw Object.assign(new Error('x'), { code: 'cashflow_x' }); })).rejects.toThrow();
+    clock += 15;
+    expect(trace.serverTiming()).toBe(
+      'jvm_dashboard;dur=3200, dashboard_compose;dur=410, jvm_dashboard.2;dur=100, publication_after;dur=5;desc="error", total;dur=3730',
+    );
+  });
+});

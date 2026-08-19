@@ -3983,6 +3983,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         }
       }
     }, monthCloseRouteTimeoutMs);
+    // 8초의 정체를 브라우저에서 바로 보게: Network 탭 Timing 에 span 분해가 뜬다. 본문·로직은 그대로.
+    res.set('Server-Timing', trace.serverTiming());
     res.status(200).json(body);
   }));
 

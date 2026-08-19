@@ -4540,9 +4540,12 @@ describe('JVM weekly API BFF proxy', () => {
         db,
         now: () => new Date('2026-07-10T00:00:00.000Z'),
       });
-      return (await request(app)
+      const response = await request(app)
         .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
-        .expect(200)).body.dashboard;
+        .expect(200);
+      // 8초 분해를 브라우저에서 보게 한 Server-Timing. span 이름·ms 만, 본문은 그대로.
+      expect(response.headers['server-timing']).toMatch(/^publication_before;dur=\d+, jvm_dashboard;dur=\d+, jvm_compliance;dur=\d+, dashboard_compose;dur=\d+, publication_after;dur=\d+, total;dur=\d+$/);
+      return response.body.dashboard;
     };
     const baseline = await readDashboard(createMonthCloseDb());
     // 결산된 회차의 연간 열·총계는 닫힌 스냅샷에서 온다. 미러 상태와 무관하게 AVAILABLE 이어야
