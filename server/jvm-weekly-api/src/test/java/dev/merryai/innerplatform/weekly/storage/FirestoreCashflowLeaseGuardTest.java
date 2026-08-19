@@ -5789,11 +5789,15 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, Object> metadata = new ObjectMapper().readValue(String.valueOf(auditDocs.getFirst().get("metadataJson")), Map.class);
         assertThat(metadata).containsEntry("appliedCellChangeCount", 1);
         List<Map<String, Object>> changes = (List<Map<String, Object>>) metadata.get("appliedCellChanges");
+        // The ten shared values live once on the event, not on every cell: repeating them per cell
+        // pushed a full sheet apply past the 1 MB Firestore field limit and blocked the apply entirely.
+        assertThat(metadata).containsKeys("actorId", "changedAt", "reason", "sourceRevision", "targetRevision",
+            "requestId", "approvalId", "operationId", "auditId", "idempotencyKey");
         assertThat(changes).singleElement().satisfies(change -> {
             assertThat(change).containsEntry("yearMonth", "2026-07").containsEntry("weekNo", 2)
                 .containsEntry("mode", "projection").containsEntry("cashflowLine", "SALES_IN")
-                .containsKeys("actorId", "changedAt", "reason", "sourceRevision", "targetRevision", "requestId",
-                    "approvalId", "operationId", "auditId", "idempotencyKey");
+                .doesNotContainKeys("actorId", "changedAt", "reason", "sourceRevision", "targetRevision",
+                    "requestId", "approvalId", "operationId", "auditId", "idempotencyKey");
             assertThat((Map<String, Object>) change.get("before")).containsEntry("cellState", "EMPTY").containsEntry("amount", null);
             assertThat((Map<String, Object>) change.get("after")).containsEntry("cellState", "VALUE").containsEntry("amount", 1234);
         });
