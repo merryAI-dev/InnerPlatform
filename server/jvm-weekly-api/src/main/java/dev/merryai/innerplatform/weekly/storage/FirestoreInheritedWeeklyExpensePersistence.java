@@ -34,6 +34,7 @@ import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmation;
@@ -5281,10 +5282,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private DocumentSnapshot get(DocumentReference ref) {
+        long startedAt = System.nanoTime();
         try {
             Transaction tx = currentTransaction.get();
             DocumentSnapshot snap = tx == null ? ref.get().get() : tx.get(ref).get();
             cacheDocument(ref, snap.exists() ? data(snap) : Map.of());
+            CashflowReadMetrics.recordDocGet(System.nanoTime() - startedAt);
             return snap;
         } catch (Exception error) {
             throw new IllegalStateException("Could not read Firestore document: " + ref.getPath(), error);
@@ -5300,12 +5303,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private List<DocumentSnapshot> getAll(DocumentReference... refs) {
+        long startedAt = System.nanoTime();
         try {
             Transaction tx = currentTransaction.get();
             List<DocumentSnapshot> snapshots = tx == null ? db.getAll(refs).get() : tx.getAll(refs).get();
             for (DocumentSnapshot snap : snapshots) {
                 cacheDocument(snap.getReference(), snap.exists() ? data(snap) : Map.of());
             }
+            CashflowReadMetrics.recordGetAll(System.nanoTime() - startedAt, snapshots.size());
             return snapshots;
         } catch (Exception error) {
             throw new IllegalStateException("Could not read Firestore documents.", error);
@@ -5313,12 +5318,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private QuerySnapshot query(Query query) {
+        long startedAt = System.nanoTime();
         try {
             Transaction tx = currentTransaction.get();
             QuerySnapshot snap = tx == null ? query.get().get() : tx.get(query).get();
             for (DocumentSnapshot doc : snap.getDocuments()) {
                 cacheDocument(doc.getReference(), data(doc));
             }
+            CashflowReadMetrics.recordQuery(System.nanoTime() - startedAt, snap.size());
             return snap;
         } catch (Exception error) {
             throw new IllegalStateException("Could not query Firestore.", error);
