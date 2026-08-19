@@ -1747,7 +1747,7 @@ export function CashflowProjectSheet({
     // 전체 셀 수(월당 160)라 "2건 바꿨는데 160건" 이 된다.
     const notifySheetApplied = () => {
       const notice = buildSheetApplyNotice({ stagedLineCount: stage.stagedLineCount, candidates: stage.candidates });
-      toast.success(notice.title, notice.lines.length > 0 ? { description: notice.lines.join('\n'), duration: 8000 } : undefined);
+      toast.success(notice.title, notice.lines.length > 0 ? { description: notice.lines.join('\n') } : undefined);
     };
     const apply = async (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
       return applyCashflowSheetLabViaBff({
