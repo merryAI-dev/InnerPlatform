@@ -272,17 +272,22 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('text-card-foreground">월 결산');
     expect(source).toContain('프로젝트 조직장');
     expect(source).toContain('project-executive-approver');
-    // 우측 하단 토스트는 전부 지웠다 (성공·안내는 #578, 에러는 2026-08-19). 화면 상태만 남는다.
-    // 대신 완료 요청·회수·확정은 카드 안에서 한 줄로 접수됐음을 알린다 - 상태 배지만으로는
-    // "내가 누른 것이 먹혔는지" 가 안 보인다.
+    // 에러 토스트는 지웠다(2026-08-19 오전) - 실패는 그 자리 인라인 배너로 말한다.
+    // 성공 확인은 같은 날 오후에 되살렸다: 반영·요청·회수·확정이 됐는지 사용자가 알 길이 없었다.
+    // 그래서 toast 는 success 만 쓴다.
     expect(source).toContain('setWeeklyActionNotice');
     expect(source).toContain('주간 정산 완료 요청을 보냈어요');
     expect(source).toContain('완료 요청을 회수했어요');
     expect(source).toContain('주간 정산을 확정했어요');
     expect(source).toContain('weeklyActionNotice && !weeklyWithdrawError');
     expect(source).toContain("setWeeklyActionNotice(''), 6000");
-    expect(source).not.toContain('toast.');
-    expect(source).not.toContain("from 'sonner'");
+    expect(source).toContain("import { toast } from 'sonner';");
+    expect(source).toContain('건을 MYSCube에 반영했어요.');
+    expect(source).toContain("toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.')");
+    expect(source).toContain("toast.success('월 결산 요청을 회수했어요.')");
+    expect(source).not.toContain('toast.error');
+    expect(source).not.toContain('toast.info');
+    expect(source).not.toContain('toast.warning');
     expect(source).not.toContain('월 결산 승인 조직장을 선택하세요');
     expect(source).toContain('saveCashflowMonthCloseApproverViaBff');
     expect(source).toContain('text-secondary-foreground">{check.title}');

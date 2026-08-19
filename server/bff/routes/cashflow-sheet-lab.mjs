@@ -975,36 +975,6 @@ function canonicalCellKey(cell) {
   return `${cell.sourceYear}:${cell.yearMonth}:${cell.weekNo}:${cell.mode}:${cell.cashflowLine}`;
 }
 
-function canonicalCellsFromMirror(mirrors = []) {
-  const cells = mirrors.flatMap((mirror) => (mirror?.cells || []).map((cell) => ({
-    sourceYear: Number(readOptionalText(cell?.yearMonth).slice(0, 4)),
-    yearMonth: readOptionalText(cell?.yearMonth),
-    weekNo: Number(cell?.weekNo),
-    mode: readOptionalText(cell?.mode),
-    cashflowLine: readOptionalText(cell?.lineId),
-    state: readOptionalText(cell?.state),
-    ...(['VALUE', 'ZERO'].includes(readOptionalText(cell?.state)) ? { amount: Number(cell?.amount) } : {}),
-  })));
-  const index = new Map();
-  for (const cell of cells) {
-    if (!Number.isSafeInteger(cell.sourceYear)
-      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(cell.yearMonth)
-      || !Number.isSafeInteger(cell.weekNo) || cell.weekNo < 1 || cell.weekNo > 5
-      || !CASHFLOW_MODES.includes(cell.mode)
-      || !CASHFLOW_LINE_ORDER.has(cell.cashflowLine)
-      || !['EMPTY', 'ZERO', 'VALUE'].includes(cell.state)
-      || (cell.state !== 'EMPTY' && !Number.isSafeInteger(cell.amount))) {
-      throw createHttpError(502, 'Sheet cashflow snapshot is invalid.', 'cashflow_sheet_snapshot_invalid');
-    }
-    const key = canonicalCellKey(cell);
-    if (index.has(key)) {
-      throw createHttpError(502, 'Sheet cashflow snapshot contains duplicate cells.', 'cashflow_sheet_snapshot_invalid');
-    }
-    index.set(key, cell);
-  }
-  return index;
-}
-
 function canonicalCellsFromSnapshot(snapshot, allowedKeys) {
   const entries = canonicalCellEntriesFromWeeks(snapshot?.weeks || []).map((cell) => ({
     ...cell,
@@ -1012,32 +982,6 @@ function canonicalCellsFromSnapshot(snapshot, allowedKeys) {
   }));
   const index = new Map(entries.map((cell) => [canonicalCellKey(cell), cell]));
   return new Map([...allowedKeys].map((key) => [key, index.get(key) || { state: 'EMPTY' }]));
-}
-
-function canonicalSheetSourceCellsFromSnapshot(snapshot, sheetCells) {
-  const amounts = buildSnapshotAmountIndex(snapshot);
-  return new Map([...sheetCells].map(([key, sheetCell]) => {
-    const mapping = {
-      mode: sheetCell.mode,
-      yearMonth: sheetCell.yearMonth,
-      weekNo: sheetCell.weekNo,
-      lineId: sheetCell.cashflowLine,
-    };
-    const hasValue = hasIndexedSnapshotAmount(amounts, mapping);
-    const amount = hasValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amounts, mapping)) : null;
-    return [key, hasValue ? { ...sheetCell, state: amount === 0 ? 'ZERO' : 'VALUE', amount } : { state: 'EMPTY' }];
-  }));
-}
-
-function canonicalAggregateCellIndex(snapshot) {
-  return new Map(canonicalCellEntriesFromWeeks(snapshot?.weeks || []).map((cell) => {
-    const normalized = { ...cell, sourceYear: Number(cell.yearMonth.slice(0, 4)) };
-    return [canonicalCellKey(normalized), normalized];
-  }));
-}
-
-function compareCanonicalCellIndexes(left, right) {
-  return compareCanonicalCells(left, right, new Set([...left.keys(), ...right.keys()]));
 }
 
 function compareCanonicalCells(left, right, keys) {
@@ -1057,37 +1001,6 @@ function compareCanonicalCells(left, right, keys) {
     projectionChangeCount,
     actualChangeCount,
   };
-}
-
-function unavailableComparison(error) {
-  return {
-    status: 'UNAVAILABLE',
-    changeCount: null,
-    projectionChangeCount: null,
-    actualChangeCount: null,
-    code: readOptionalText(error?.code) || 'cashflow_comparison_unavailable',
-  };
-}
-
-function attemptComparison(compare, error) {
-  try {
-    return compare();
-  } catch (comparisonError) {
-    return unavailableComparison(comparisonError || error);
-  }
-}
-
-export function classifyCashflowComparisons(comparisons) {
-  const values = Object.values(comparisons);
-  if (values.some((value) => value.status !== 'AVAILABLE')) return 'PARTIAL';
-  const sj = comparisons.sheetToJvm.changeCount === 0;
-  const sf = comparisons.sheetToFirestore.changeCount === 0;
-  const jf = comparisons.jvmToFirestore.changeCount === 0;
-  if (sj && sf && jf) return 'ALL_SYNCED';
-  if (sj && !sf && !jf) return 'FIRESTORE_DIFFERS';
-  if (sf && !sj && !jf) return 'JVM_DIFFERS';
-  if (jf && !sj && !sf) return 'SHEET_DIFFERS';
-  return 'THREE_WAY_DIFFERENT';
 }
 
 async function readCashflowSheetMirror(db, tenantId, projectId) {
@@ -4191,30 +4104,11 @@ export function mountCashflowSheetLabRoutes(app, {
     ) {
       throw createHttpError(409, '같은 idempotencyKey에 다른 시트 연동 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
     }
-    // 시트 검색 원칙: 읽기 요청이 크롤링을 트리거하지 않는다. 시트가 안 바뀌었으면
-    // (Drive modifiedTime 대조, ~수십 ms) 풀 리드·파싱·JVM 대조·저장을 전부 건너뛰고
-    // 고정본을 그대로 돌려준다. 저장된 modifiedTime 은 항상 데이터 읽기 "이전"에 찍은
-    // 값이라, 경합이 나면 불필요한 풀 리드 쪽으로만 틀린다 - 낡은 데이터를 최신이라고
-    // 말하는 방향으로는 틀리지 않는다.
+    // 불러오기는 항상 시트를 통째로 읽는다. 예전엔 Drive modifiedTime 이 같으면 건너뛰었는데,
+    // Drive 는 편집 뒤 수십 초~2분 동안 옛 modifiedTime 을 돌려줘서 "방금 고쳤는데 안 바뀜"
+    // 이 됐다. 사용자가 누르는 이유는 고쳤기 때문이므로 그 절약은 가치가 없었다(2026-08-19).
+    // modifiedTime 은 changes/probe 의 "불러오기 필요" 표시용으로만 기록한다.
     let freshness = null;
-    if (
-      previousMirror?.status === 'FRESH'
-      && Number(previousMirror?.schemaVersion) === CASHFLOW_SHEET_MIRROR_SCHEMA_VERSION
-      && readOptionalText(previousMirror?.sourceFileModifiedTime)
-      && readOptionalText(previousMirror?.lastRefreshRequestHash) === refreshRequestHash
-    ) {
-      freshness = await trace.measure(
-        'freshness_probe',
-        () => loadSheetFreshness(source.value).catch(() => null),
-      );
-      if (freshness?.modifiedTime && freshness.modifiedTime === previousMirror.sourceFileModifiedTime) {
-        logCashflowSheetLab('mirror.refresh.unchanged', req, {
-          projectId,
-          sourceFileModifiedTime: freshness.modifiedTime,
-        });
-        return { ...previousMirror, unchanged: true, freshnessCheckedAt: attemptedAt };
-      }
-    }
     const refreshRun = await trace.measure(
       'refresh_reserve',
       () => beginCashflowSheetRefreshRun({
@@ -4404,115 +4298,6 @@ export function mountCashflowSheetLabRoutes(app, {
     if (traceRef.trace) res.set('Server-Timing', traceRef.trace.serverTiming());
     res.status(200).json(mirror);
   }));
-
-  const compareCashflowSheetProject = async ({ tenantId, projectId, runId, context } = {}) => {
-    const project = await readProjectDocument(db, tenantId, projectId);
-    const configs = readCashflowSheetLabConfigs(project);
-    if (configs.length === 0) {
-      throw createHttpError(400, 'Cashflow sheet URL is not configured.', 'cashflow_sheet_config_required');
-    }
-    const actorContext = context || {
-      tenantId,
-      actorId: 'cashflow-sheet-observer',
-      actorRole: 'admin',
-      actorEmail: 'cashflow-sheet-observer@mysc.co.kr',
-      requestId: runId,
-    };
-    const sheetPromise = (async () => {
-      const mirrors = [];
-      for (const config of configs) {
-        const mirror = await executeCashflowSheetMirrorRefresh({
-          context: actorContext,
-          requestId: actorContext.requestId,
-          params: { projectId },
-          body: {
-            sourceYear: config.sourceYear,
-            idempotencyKey: `${runId}:${projectId}:observe:${config.sourceYear}`,
-          },
-        });
-        if (readOptionalText(mirror?.status) !== 'FRESH') {
-          const refreshError = mirror?.lastRefreshError || {};
-          throw createHttpError(
-            Number(refreshError.statusCode) || 503,
-            readOptionalText(refreshError.message) || 'Cashflow sheet refresh failed.',
-            readOptionalText(refreshError.code) || 'cashflow_sheet_refresh_failed',
-          );
-        }
-        mirrors.push(mirror);
-      }
-      return { mirrors, cells: canonicalCellsFromMirror(mirrors) };
-    })();
-    const [sheetResult, javaResult, firestoreResult] = await Promise.allSettled([
-      sheetPromise,
-      authoritativeJavaClient
-        ? authoritativeJavaClient.getCashflowSnapshot({ context: actorContext, projectId })
-        : Promise.reject(createHttpError(503, 'JVM cashflow API is not configured.', 'jvm_weekly_api_unconfigured')),
-      readCashflowWeeksSnapshot(db, tenantId, projectId),
-    ]);
-    let sheetCells;
-    let javaAggregateCells;
-    let firestoreAggregateCells;
-    let javaSnapshot;
-    let javaSheetSourceSnapshot;
-    let firestoreSnapshot;
-    const sheetError = sheetResult.status === 'rejected' ? sheetResult.reason : null;
-    let javaError = javaResult.status === 'rejected' ? javaResult.reason : null;
-    let firestoreError = firestoreResult.status === 'rejected' ? firestoreResult.reason : null;
-    if (sheetResult.status === 'fulfilled') sheetCells = sheetResult.value.cells;
-    try {
-      if (javaError) throw javaError;
-      if (readOptionalText(javaResult.value?.projectId) !== projectId) {
-        throw createHttpError(502, 'JVM cashflow readback project mismatch.', 'jvm_cashflow_readback_mismatch');
-      }
-      javaSnapshot = { weeks: canonicalWeeksFromJavaSnapshot(javaResult.value) };
-      javaSheetSourceSnapshot = { weeks: canonicalSheetSourceWeeksFromJavaSnapshot(javaResult.value) };
-      javaAggregateCells = canonicalAggregateCellIndex(javaSnapshot);
-    } catch (error) {
-      javaError = error;
-      javaSnapshot = undefined;
-      javaSheetSourceSnapshot = undefined;
-      javaAggregateCells = undefined;
-    }
-    try {
-      if (firestoreError) throw firestoreError;
-      firestoreSnapshot = firestoreResult.value;
-      firestoreAggregateCells = canonicalAggregateCellIndex(firestoreSnapshot);
-    } catch (error) {
-      firestoreError = error;
-      firestoreSnapshot = undefined;
-      firestoreAggregateCells = undefined;
-    }
-    const comparisons = {
-      sheetToJvm: sheetCells && javaSheetSourceSnapshot
-        ? attemptComparison(
-          () => compareCanonicalCells(sheetCells, canonicalCellsFromSnapshot(javaSheetSourceSnapshot, sheetCells.keys()), sheetCells.keys()),
-          javaError,
-        )
-        : unavailableComparison(sheetError || javaError),
-      sheetToFirestore: sheetCells && firestoreSnapshot
-        ? attemptComparison(
-          () => compareCanonicalCells(sheetCells, canonicalSheetSourceCellsFromSnapshot(firestoreSnapshot, sheetCells), sheetCells.keys()),
-          firestoreError,
-        )
-        : unavailableComparison(sheetError || firestoreError),
-      jvmToFirestore: javaAggregateCells && firestoreAggregateCells
-        ? attemptComparison(() => compareCanonicalCellIndexes(javaAggregateCells, firestoreAggregateCells), javaError || firestoreError)
-        : unavailableComparison(javaError || firestoreError),
-    };
-    const classification = classifyCashflowComparisons(comparisons);
-    return {
-      status: classification === 'PARTIAL' ? 'PARTIAL' : 'COMPARED',
-      classification,
-      checkedAt: new Date().toISOString(),
-      sheet: {
-        status: sheetCells ? 'AVAILABLE' : 'UNAVAILABLE',
-        revisions: sheetResult.status === 'fulfilled'
-          ? sheetResult.value.mirrors.map((mirror) => readOptionalText(mirror.sourceRevision)).filter(Boolean)
-          : [],
-      },
-      comparisons,
-    };
-  };
 
   // modifiedTime(~수십 ms)만 저장된 고정본과 대조해 "변경됨/없음"만 판정한다 - 건수·diff
   // 는 계산하지 않는다. 판정 불능(probe 실패, 미러 없음)은 보수적으로 "불러오기 필요"로
@@ -4735,5 +4520,4 @@ export function mountCashflowSheetLabRoutes(app, {
     }
   }));
 
-  return { compareProject: compareCashflowSheetProject };
 }
