@@ -3426,7 +3426,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
    * 종료사업 체크아웃 항목을 저장한다. 상태 저장과 같은 경로를 쓰되 `checkout` 만 덮어쓴다.
    * 종료 확인은 편집기 초안을 열 만큼 큰 일이 아니라 체크 하나가 곧 저장이다.
    */
-  const updateProjectCheckout = useCallback(async (
+  /**
+   * 체크아웃 저장은 한 줄로 세운다. 체크박스를 연달아 누르면 요청이 동시에 나가고, 각자
+   * 자기가 읽은 version 을 보내 뒤엣것이 409 로 튕긴다. 앞 요청이 끝나야 다음이 시작한다.
+   */
+  const checkoutSaveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+
+
+  const runCheckoutSave = useCallback(async (
     projectId: string,
     patch: Partial<ProjectCheckout>,
   ): Promise<boolean> => {
@@ -3456,7 +3463,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     try {
       if (isPlatformApiEnabled()) {
         const idToken = authUser?.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-        await upsertProjectViaBff({
+        // 앞 저장이 끝난 뒤의 최신 버전을 읽는다. 이 함수가 처음 읽은 값은 이미 낡았을 수 있다.
+        const latest = projectsRef.current.find((project) => project.id === targetProjectId) || existingProject;
+        const saved = await upsertProjectViaBff({
           tenantId: orgId,
           actor: {
             uid: authUser?.uid || portalUser?.id || 'portal-user',
@@ -3465,11 +3474,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             idToken,
           },
           project: {
-            ...existingProject,
+            ...latest,
             ...projectPatch,
-            expectedVersion: existingProject.version ?? 1,
+            expectedVersion: latest.version ?? 1,
           } as UpsertProjectPayload,
         });
+        // 서버가 올린 version 을 되쓰지 않으면 다음 체크가 다시 낡은 값을 보낸다.
+        if (typeof saved?.version === 'number') {
+          const versioned = projectsRef.current.map((project) => (
+            project.id === targetProjectId ? { ...project, version: saved.version } : project
+          ));
+          projectsRef.current = versioned;
+          setProjects(versioned);
+        }
       } else {
         await setDoc(
           doc(db, getOrgDocumentPath(orgId, 'projects', targetProjectId)),
@@ -3499,6 +3516,23 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     portalUser?.role,
     scopedProjectIds,
   ]);
+
+  /**
+   * 밖에서 부르는 입구. 실제 저장은 위 구현이 하고, 여기서는 줄을 세우기만 한다.
+   * 체크박스를 연달아 누르면 요청이 동시에 나가 각자 자기가 읽은 version 을 보내고
+   * 뒤엣것이 409 로 튕긴다 (라이브에서 실제로 났다).
+   */
+  const updateProjectCheckout = useCallback((
+    projectId: string,
+    patch: Partial<ProjectCheckout>,
+  ): Promise<boolean> => {
+    const queued = checkoutSaveChainRef.current
+      .catch(() => undefined)
+      .then(() => runCheckoutSave(projectId, patch));
+    checkoutSaveChainRef.current = queued;
+    return queued;
+  }, [runCheckoutSave]);
+
 
   const logout = useCallback(() => {
     setActiveProjectIdState('');
