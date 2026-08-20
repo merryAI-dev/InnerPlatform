@@ -346,6 +346,22 @@ function bffErrorCode(error: unknown): string {
   return source.body?.code || source.body?.error || '';
 }
 
+/*
+ * 시트 검토·반영에서 화면이 다루지 않는 오류의 문구.
+ *
+ * 이 두 흐름은 실패해도 아무것도 띄우지 않고 끝나는 자리가 여럿이었다. 사람 눈에는
+ * 버튼만 원래대로 돌아오니 반영이 된 줄 안다(실제 신고: "로직이 중도에 끝나는 느낌이고
+ * 토스트도 안 뜬다"). 문구는 서버 코드에 대한 공용 안내를 그대로 쓴다 - 여기서 새로 짓지 않는다.
+ * 이 화면의 오류는 토스트가 아니라 그 자리 인라인 배너로 남긴다(2026-08-19 결정).
+ */
+function sheetOperationErrorMessage(error: unknown): string {
+  const status = error instanceof PlatformApiError
+    ? error.status
+    : Number((error as { status?: number })?.status) || 400;
+  const code = error instanceof PlatformApiError ? error.code : bffErrorCode(error);
+  return resolveApiErrorPresentation(code, status).guide;
+}
+
 export function CashflowProjectSheet({
   projectId,
   projectName,
@@ -498,6 +514,8 @@ export function CashflowProjectSheet({
   const [reopenAction, setReopenAction] = useState<'request' | 'approve' | 'reject' | null>(null);
   const [reopenReason, setReopenReason] = useState('');
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
+  // 시트 검토·반영이 실패한 이유. 성공만 토스트로 알리고 오류는 그 자리에 남긴다.
+  const [sheetOperationError, setSheetOperationError] = useState('');
   const [sheetReviewDialogOpen, setSheetReviewDialogOpen] = useState(false);
   const [lateSheetApply, setLateSheetApply] = useState<CashflowSheetLabStageResult | null>(null);
   const [sheetApplyResumeRequired, setSheetApplyResumeRequired] = useState(false);
@@ -2132,6 +2150,7 @@ export function CashflowProjectSheet({
     };
 
     setSheetStageApplyLoading(true);
+    setSheetOperationError('');
     logCashflowSettlement({
       phase: 'start',
       operation: 'cashflow.sheet_apply',
@@ -2191,6 +2210,9 @@ export function CashflowProjectSheet({
       } else {
         setLateSheetApply(null);
         setSheetApplyResumeRequired(false);
+        // 위 분기가 못 받은 오류는 여기서 끝난다. 말하지 않으면 사람은 반영이 된 줄 안다.
+        // 서버가 게이트를 새로 붙여도 조용히 사라지지 않게 하는 것이 이 분기의 목적이다.
+        setSheetOperationError(sheetOperationErrorMessage(finalError));
       }
     } finally {
       setSheetStageApplyLoading(false);
@@ -2241,10 +2263,14 @@ export function CashflowProjectSheet({
       if (result.status === 'BLOCKED') {
         const contractIssue = result.pendingApprovalContractIssues?.[0];
         const blockedMonths = (contractIssue?.blockedMonths || result.blockedMonths || []).join(', ');
+        setSheetOperationError(contractIssue
+          ? `${contractIssue.message}${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`
+          : `반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
       if (result.stagedLineCount <= 0) {
         // 없으면 없다고 말한다. 조용히 끝나면 반영이 중간에 멈춘 것처럼 보인다.
+        toast.success('MYSCube가 이미 시트 최신값과 같습니다.');
         return;
       }
       if (result.pendingApprovalDifferences?.length) {
@@ -2260,6 +2286,7 @@ export function CashflowProjectSheet({
       await handleApplyStagedSheetValues(result);
     };
     setSheetRefreshLoading(true);
+    setSheetOperationError('');
     logCashflowSettlement({
       phase: 'start',
       operation: 'cashflow.sheet_stage',
@@ -2292,9 +2319,11 @@ export function CashflowProjectSheet({
           await applyStageResult(await stageMirror(actor));
           return;
         } catch (retryError) {
+          setSheetOperationError(sheetOperationErrorMessage(retryError));
           return;
         }
       }
+      setSheetOperationError(sheetOperationErrorMessage(error));
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -3265,6 +3294,12 @@ export function CashflowProjectSheet({
               <span className="ml-1 border-l border-border pl-3 text-muted-foreground">
                 세금계산서 발행일 · 입금일 · 입금액 주별 확인됨
               </span>
+            </div>
+          ) : null}
+
+          {sheetOperationError ? (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-[12px] leading-5 text-red-800">
+              {sheetOperationError}
             </div>
           ) : null}
 
