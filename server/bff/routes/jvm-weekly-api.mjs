@@ -1079,6 +1079,21 @@ function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
+function readJvmOperationalCycle(source, yearMonth) {
+  const cycle = objectValue(source?.operationalCycle);
+  if (!cycle || readOptionalText(cycle.cycleYearMonth) !== yearMonth) return null;
+  const targetYearMonth = readOptionalText(cycle.targetYearMonth);
+  const deadline = readOptionalText(cycle.closeDeadline);
+  if (!targetYearMonth || !deadline || typeof cycle.closeEligible !== 'boolean' || typeof cycle.late !== 'boolean') return null;
+  return {
+    cycleYearMonth: yearMonth,
+    targetYearMonth,
+    deadline,
+    eligible: cycle.closeEligible,
+    late: cycle.late,
+  };
+}
+
 function amendedSheetFormulaSnapshot(mirror, amendmentEvidence) {
   const sourceRevision = readOptionalText(amendmentEvidence?.sourceRevision);
   const targetRevision = readOptionalText(amendmentEvidence?.resultingTargetRevision);
@@ -3910,7 +3925,8 @@ export function mountJvmWeeklyApiRoutes(app, {
             'jvm_weekly_response_invalid',
           );
         }
-        const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
+        const cumulativeCycle = readJvmOperationalCycle(source, yearMonth)
+          || cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
         if (!cumulativeCycle) {
           throw createHttpError(502, '월 결산 회차 기준일을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
         }
@@ -3920,10 +3936,8 @@ export function mountJvmWeeklyApiRoutes(app, {
           targetYearMonth: cumulativeCycle.targetYearMonth,
           evaluatedBusinessDate: cycleBusinessDate,
           closeDeadline: cumulativeCycle.deadline,
-          closeEligible: readOptionalText(result?.status) === 'OPEN' && cumulativeCycle.eligible,
-          late: readOptionalText(result?.status) === 'OPEN'
-            ? cycleBusinessDate > cumulativeCycle.deadline
-            : Boolean(result?.late),
+          closeEligible: cumulativeCycle.eligible,
+          late: cumulativeCycle.late,
           monthState: monthCloseRequest ? cashflowMonthCloseRequestView(monthCloseRequest) : null,
         };
         const cashflowSourceUnavailable = jvmPartial.unavailableSections.has('cashflow');
@@ -4470,7 +4484,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
       }
       const cycleBusinessDate = readOptionalText(sourceClose?.evaluatedBusinessDate) || comparisonBoundary.asOfDate;
-      const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
+      const cumulativeCycle = readJvmOperationalCycle(source, yearMonth)
+        || cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
       if (readOptionalText(sourceClose?.status) !== 'OPEN' || !cumulativeCycle?.eligible) {
         throw createHttpError(
           409,

@@ -1050,20 +1050,21 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('publishes the server-owned 2026 board, status joins, and comparison presentation', async () => {
     const source = fullMonthCloseSource();
+    const dashboardSource = monthDashboardSource(
+      { ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0 },
+      undefined, undefined, undefined, undefined, closedCumulativeAuthority('2026-07'),
+    );
+    dashboardSource.operationalCycle = {
+      cycleYearMonth: '2026-08', targetYearMonth: '2026-07', closeDeadline: '2099-01-02',
+      closeEligible: true, late: false,
+    };
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
       requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08', status: 'PENDING',
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(monthDashboardSource(
-        { ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0 },
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        closedCumulativeAuthority('2026-07'),
-      )),
+      text: async () => JSON.stringify(dashboardSource),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv,
@@ -1100,6 +1101,9 @@ describe('JVM weekly API BFF proxy', () => {
           },
         });
         expect(presentation.weeks).toHaveLength(60);
+        expect(response.body.dashboard.summary).toMatchObject({
+          targetYearMonth: '2026-07', closeDeadline: '2099-01-02', late: false,
+        });
         expect(presentation.months).toHaveLength(12);
         expect(presentation.months.find((month) => month.yearMonth === '2026-07')).toMatchObject({
           label: '2026년 07월', columnCount: 5, status: 'CLOSED', locked: true, overdue: false,
