@@ -999,6 +999,8 @@ export interface CashflowDeadlineSummary {
     status: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
     lockState?: 'SUBMITTED' | 'LOCKED' | null;
     deadline?: string | null;
+    // 조직장 확정 마감(실무자 마감 +13시간). 표시 전용 - 미준수 누적 대상이 아니다.
+    approverDeadline?: string | null;
     completedAt?: string | null;
     completedBy?: string | null;
     updateResult?: 'CHANGED' | 'NO_CHANGES' | null;
@@ -1007,8 +1009,10 @@ export interface CashflowDeadlineSummary {
     yearMonth: string;
     weekNo: number;
     deadline: string;
+    approverDeadline?: string | null;
     completedAt: string | null;
     completedBy?: string | null;
+    confirmedAt?: string | null;
     status: 'ON_TIME' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
     // SUBMITTED = 완료 요청됨(조직장 확정 대기), LOCKED = 확정, 없음 = 완료 요청 전
     lockState?: 'SUBMITTED' | 'LOCKED' | null;
@@ -1170,6 +1174,9 @@ export interface CashflowMonthCloseDashboard {
     cycleYearMonth?: string;
     targetYearMonth?: string;
     closeDeadline: string | null;
+    // 진행 바용 시각 표현(KST). closeDeadlineAt = 익월 11일 0시, approverDeadlineAt = 14일 0시.
+    closeDeadlineAt?: string | null;
+    approverDeadlineAt?: string | null;
     late: boolean;
   };
   validation: {
