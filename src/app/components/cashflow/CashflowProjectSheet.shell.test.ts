@@ -23,7 +23,18 @@ describe('CashflowProjectSheet schedule bar', () => {
   it('does not invent a confirm timestamp, and drops withdrawn or rejected requests back to "not requested"', () => {
     expect(source).toContain("approverDone: current.lockState === 'LOCKED'");
     expect(source).not.toContain('current.confirmedAt || current.completedAt');
-    expect(source).toContain("const requested = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);");
+    // 회수·반려된 요청은 "요청 전" 으로 되돌아간다. 진행 중으로 보는 상태는 이 다섯뿐이다.
+    expect(source).toContain("const inFlight = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);");
+  });
+
+  // 회차 월과 덮는 대상 월은 다르다. 누적 결산을 8월에 돌려도 대상은 throughMonth 까지다.
+  // 회차가 있다는 것만 보고 그렸더니 아직 아무도 하지 않은 8월이 완료로 보였다(JLIN IBS).
+  // 덮이지 않는 달은 진행도를 빌리지 않고 예정 날짜만 그린다. 회차 자체는 건드리지 않는다 -
+  // 회수·승인은 회차 월로 하는 것이 맞고, 그 경로는 BFF 조회가 그대로 유지한다.
+  it('does not borrow a cycle progress for a month the cycle does not cover', () => {
+    expect(source).toContain('const monthCoveredByRequest =');
+    expect(source).toContain('return yearMonth <= through;');
+    expect(source).toContain('const requested = inFlight && monthCoveredByRequest;');
   });
 });
 

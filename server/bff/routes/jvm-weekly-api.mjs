@@ -1027,6 +1027,9 @@ async function readCashflowRequestPartyNames({ db, tenantId, record }) {
 
 async function readCashflowMonthCloseRequest({ db, tenantId, projectId, yearMonth }) {
   if (!db?.doc) return null;
+  // 문서 ID 는 회차를 실행한 달이다. 그 회차가 덮는 대상 월(throughMonth)과 다를 수 있으나
+  // 여기서 걸러내지 않는다 - 회차 월로 조회해야 그 회차를 회수·승인할 수 있기 때문이다.
+  // "이 달의 결산이 끝났는가" 는 다른 질문이고, throughMonth 로 화면이 판단한다.
   const direct = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
   if (direct.exists) return direct.data() || null;
   if (typeof db.collection !== 'function') return null;
@@ -2837,6 +2840,10 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
       lockState: readOptionalText(item.lockState) || null,
       deadline: item.deadline,
       approverDeadline: cashflowWeeklyApproverDeadlineAt(item.deadline),
+      // 완료 정보는 JVM 이 이미 주는 값이다(CashflowWeeklyComplianceHistoryResponse.Item).
+      // 여기서 떨어뜨리면 지난 주차가 "언제 완료했는지" 를 화면이 알 길이 없어진다.
+      completedAt: readOptionalText(item.completedAt) || null,
+      completedBy: readOptionalText(item.completedBy) || null,
       updateResult: item.updateResult,
       operationId: item.operationId,
       auditId: item.auditId,
