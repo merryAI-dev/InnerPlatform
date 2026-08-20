@@ -73,6 +73,7 @@ import {
 } from '../../platform/project-contract-amount';
 import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
 import { deriveProjectStatusFromContractPeriod } from '../../platform/project-status-from-period';
+import { advanceFocusToNextInput, shouldAdvanceOnEnter } from '../../platform/form-advance-on-enter';
 import {
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
@@ -640,12 +641,19 @@ function ProjectFormRow({ label, required, note, hints, errors, issueLabel, chil
   const visibleHints = (hints || []).filter(Boolean);
   const visibleErrors = (errors || []).filter(Boolean);
   return (
+    /*
+     * 지금 입력하는 줄을 눈에 띄게 둔다. `focus-within` 이라 상태를 새로 들지 않고,
+     * 왼쪽 얇은 액센트 막대와 라벨 색만 바뀐다. 배경까지 칠하면 값이 읽히지 않는다.
+     */
     <div
       data-issue-label={issueLabel}
-      className="grid gap-2 lg:grid-cols-[168px_minmax(0,1fr)] lg:gap-x-6"
+      className={cn(
+        'grid gap-2 rounded-md border-l-2 border-transparent pl-2 transition-colors lg:grid-cols-[168px_minmax(0,1fr)] lg:gap-x-6',
+        'focus-within:border-l-[#0176D3] focus-within:bg-[#0176D3]/[0.04]',
+      )}
     >
       <div className="lg:pt-2">
-        <Label className={cn('inline-flex', FORM_LABEL_CLASS)}>
+        <Label className={cn('inline-flex text-slate-700 [div:focus-within>&]:text-[#0176D3]', FORM_LABEL_CLASS)}>
           <span>
             {label}
           </span>
@@ -2492,133 +2500,6 @@ export function ProjectEditorWizard({
 
   const renderFinancialStep = () => (
     <div className={FORM_SECTION_STACK_CLASS}>
-      {/*
-        정산(사업유형)이 아래 입력의 필요 여부를 결정한다. 뒤에 두면 서류와 금액을 다 채운
-        뒤에야 "이 사업은 정산이 없다"를 알게 되므로 맨 앞으로 옮겼다.
-      */}
-      <ProjectFormSection title="정산">
-        {/* 사업유형이 정산 기준을 결정한다. 둘을 세로로 쌓으면 그 관계가 보이지 않아 나란히 둔다. */}
-        <ProjectFormFieldPair>
-        <ProjectFormRow
-          label={usesRegistrationV2 ? '사업유형' : '정산 유형'}
-          required={usesRegistrationV2}
-          issueLabel="사업유형"
-          errors={fieldIssues('사업유형')}
-        >
-          <Select
-            value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
-            onValueChange={(value) => update('settlementType', value as SettlementType)}
-          >
-            <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
-                <SelectItem key={key} value={key}>{value}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </ProjectFormRow>
-        {usesRegistrationV2 ? (
-          <ProjectFormRow label="정산 기준">
-            <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
-                  <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        ) : draft.settlementType === 'NONE' ? (
-          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
-            정산 없음은 정산 기준·통장·정산 시스템 입력이 필요하지 않습니다.
-          </p>
-        ) : (
-          <ProjectFormRow label="정산 기준">
-            <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
-              <SelectContent>
-                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
-                  <SelectItem key={key} value={key}>{value}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        )}
-        </ProjectFormFieldPair>
-        {settlementDetailsEnabled ? (
-          <>
-            <ProjectFormRow label="통장 유형">
-              <Select value={draft.accountType} onValueChange={(value) => update('accountType', value as AccountType)}>
-                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([key, value]) => (
-                    <SelectItem key={key} value={key}>{value}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </ProjectFormRow>
-            <ProjectFormRow label="이자 반납 여부">
-              <Select value={draft.interestRefundPolicy || undefined} onValueChange={(value) => update('interestRefundPolicy', value as InterestRefundPolicy)}>
-                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder="이자 반납 여부 선택" /></SelectTrigger>
-                <SelectContent>
-                  {(Object.entries(INTEREST_REFUND_POLICY_LABELS) as [InterestRefundPolicy, string][]).map(([key, value]) => (
-                    <SelectItem key={key} value={key}>{value}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </ProjectFormRow>
-            <ProjectFormRow
-              label="정산 시스템"
-              issueLabel="기타 정산 시스템 이름"
-              errors={fieldIssues('기타 정산 시스템 이름', '기타 정산 시스템 이름은 100자 이하여야 합니다.')}
-            >
-              <Select
-                value={draft.settlementSystem === 'OTHER' && draft.settlementSystemOther.trim() ? `OTHER:${draft.settlementSystemOther.trim()}` : draft.settlementSystem}
-                onValueChange={updateSettlementSystem}
-              >
-                <SelectTrigger className={cn('max-w-sm', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {[
-                    ...PROJECT_SETTLEMENT_SYSTEM_CODES,
-                    ...(PROJECT_SETTLEMENT_SYSTEM_CODES.includes(draft.settlementSystem) ? [] : [draft.settlementSystem]),
-                  ].map((key) => (
-                    <SelectItem key={key} value={key}>{SETTLEMENT_SYSTEM_LABELS[key]}</SelectItem>
-                  ))}
-                  {[...settlementSystemOptions, draft.settlementSystemOther]
-                    .map((value) => value.replace(/\s+/g, ' ').trim())
-                    .filter((value, index, values) => value && values.findIndex((candidate) => candidate.toLocaleLowerCase('ko-KR') === value.toLocaleLowerCase('ko-KR')) === index)
-                    .map((value) => (
-                    <SelectItem key={`OTHER:${value}`} value={`OTHER:${value}`}>{value}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {draft.settlementSystem === 'OTHER' ? (
-                <Input
-                  value={draft.settlementSystemOther}
-                  onChange={(event) => update('settlementSystemOther', event.target.value)}
-                  placeholder="정산 시스템 이름 직접 입력"
-                  aria-label="기타 정산 시스템 이름"
-                  className={cn('mt-2 max-w-sm', FORM_CONTROL_CLASS)}
-                />
-              ) : null}
-            </ProjectFormRow>
-            <ProjectFormRow label="인건비 정산 기준">
-              <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
-                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
-                    <SelectItem key={key} value={key}>{value}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </ProjectFormRow>
-          </>
-        ) : usesRegistrationV2 ? (
-          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
-            정산 기준이 정산없음이면 통장·정산 시스템 입력이 필요하지 않습니다.
-          </p>
-        ) : null}
-      </ProjectFormSection>
       {onContractFileUpload || onProjectDocumentFileUpload ? (
         <div>
           {usesRegistrationV2 ? (
@@ -2829,6 +2710,133 @@ export function ProjectEditorWizard({
           {renderPaymentFields()}
         </ProjectFormSection>
       ) : null}
+      {/*
+        정산은 계약 내용과 입금 계획을 다 넣은 뒤에 정리한다. 앞에 두었더니 아직
+        아무 값도 없는 상태에서 정산 유형부터 고르게 되어 판단할 근거가 없었다.
+      */}
+      <ProjectFormSection title="정산">
+        {/* 사업유형이 정산 기준을 결정한다. 둘을 세로로 쌓으면 그 관계가 보이지 않아 나란히 둔다. */}
+        <ProjectFormFieldPair>
+        <ProjectFormRow
+          label={usesRegistrationV2 ? '사업유형' : '정산 유형'}
+          required={usesRegistrationV2}
+          issueLabel="사업유형"
+          errors={fieldIssues('사업유형')}
+        >
+          <Select
+            value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
+            onValueChange={(value) => update('settlementType', value as SettlementType)}
+          >
+            <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
+                <SelectItem key={key} value={key}>{value}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ProjectFormRow>
+        {usesRegistrationV2 ? (
+          <ProjectFormRow label="정산 기준">
+            <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
+                  <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </ProjectFormRow>
+        ) : draft.settlementType === 'NONE' ? (
+          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
+            정산 없음은 정산 기준·통장·정산 시스템 입력이 필요하지 않습니다.
+          </p>
+        ) : (
+          <ProjectFormRow label="정산 기준">
+            <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
+              <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
+              <SelectContent>
+                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
+                  <SelectItem key={key} value={key}>{value}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </ProjectFormRow>
+        )}
+        </ProjectFormFieldPair>
+        {settlementDetailsEnabled ? (
+          <>
+            <ProjectFormRow label="통장 유형">
+              <Select value={draft.accountType} onValueChange={(value) => update('accountType', value as AccountType)}>
+                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([key, value]) => (
+                    <SelectItem key={key} value={key}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ProjectFormRow>
+            <ProjectFormRow label="이자 반납 여부">
+              <Select value={draft.interestRefundPolicy || undefined} onValueChange={(value) => update('interestRefundPolicy', value as InterestRefundPolicy)}>
+                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue placeholder="이자 반납 여부 선택" /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(INTEREST_REFUND_POLICY_LABELS) as [InterestRefundPolicy, string][]).map(([key, value]) => (
+                    <SelectItem key={key} value={key}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ProjectFormRow>
+            <ProjectFormRow
+              label="정산 시스템"
+              issueLabel="기타 정산 시스템 이름"
+              errors={fieldIssues('기타 정산 시스템 이름', '기타 정산 시스템 이름은 100자 이하여야 합니다.')}
+            >
+              <Select
+                value={draft.settlementSystem === 'OTHER' && draft.settlementSystemOther.trim() ? `OTHER:${draft.settlementSystemOther.trim()}` : draft.settlementSystem}
+                onValueChange={updateSettlementSystem}
+              >
+                <SelectTrigger className={cn('max-w-sm', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[
+                    ...PROJECT_SETTLEMENT_SYSTEM_CODES,
+                    ...(PROJECT_SETTLEMENT_SYSTEM_CODES.includes(draft.settlementSystem) ? [] : [draft.settlementSystem]),
+                  ].map((key) => (
+                    <SelectItem key={key} value={key}>{SETTLEMENT_SYSTEM_LABELS[key]}</SelectItem>
+                  ))}
+                  {[...settlementSystemOptions, draft.settlementSystemOther]
+                    .map((value) => value.replace(/\s+/g, ' ').trim())
+                    .filter((value, index, values) => value && values.findIndex((candidate) => candidate.toLocaleLowerCase('ko-KR') === value.toLocaleLowerCase('ko-KR')) === index)
+                    .map((value) => (
+                    <SelectItem key={`OTHER:${value}`} value={`OTHER:${value}`}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {draft.settlementSystem === 'OTHER' ? (
+                <Input
+                  value={draft.settlementSystemOther}
+                  onChange={(event) => update('settlementSystemOther', event.target.value)}
+                  placeholder="정산 시스템 이름 직접 입력"
+                  aria-label="기타 정산 시스템 이름"
+                  className={cn('mt-2 max-w-sm', FORM_CONTROL_CLASS)}
+                />
+              ) : null}
+            </ProjectFormRow>
+            <ProjectFormRow label="인건비 정산 기준">
+              <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
+                <SelectTrigger className={cn('max-w-xs', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
+                    <SelectItem key={key} value={key}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ProjectFormRow>
+          </>
+        ) : usesRegistrationV2 ? (
+          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
+            정산 기준이 정산없음이면 통장·정산 시스템 입력이 필요하지 않습니다.
+          </p>
+        ) : null}
+      </ProjectFormSection>
     </div>
   );
 
@@ -3721,7 +3729,19 @@ export function ProjectEditorWizard({
       {/* 단계 이름은 위 칩과 진행 표시에 이미 두 번 나온다. 카드 제목까지 두면 같은 말이
           섹션 제목 바로 위에서 세 번 반복되므로, 카드 안에서는 섹션 제목만 남긴다. */}
       <Card className="border-slate-200/90 shadow-sm">
-        <CardContent className={cn('space-y-6 pt-6', PROJECT_EDITOR_FORM_SURFACE_CLASS)}>
+        <CardContent
+          className={cn('space-y-6 pt-6', PROJECT_EDITOR_FORM_SURFACE_CLASS)}
+          /*
+           * 한 칸을 다 넣고 Enter 를 누르면 다음 입력으로 넘어간다. 숫자를 연달아 넣는
+           * 화면이라 손이 Tab 보다 Enter 로 간다. 판정은 form-advance-on-enter 가 한다
+           * (textarea · 한글 조합 중 · 셀렉트 · 수식 키는 건드리지 않는다).
+           */
+          onKeyDown={(event) => {
+            if (!shouldAdvanceOnEnter(event)) return;
+            const moved = advanceFocusToNextInput(event.currentTarget, event.target as HTMLInputElement);
+            if (moved) event.preventDefault();
+          }}
+        >
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             <p className={FORM_LABEL_CLASS}>이 단계에서 준비할 것</p>
             <ul className={cn('mt-2 space-y-1', FORM_HINT_CLASS)}>
