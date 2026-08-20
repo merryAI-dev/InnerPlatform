@@ -1545,8 +1545,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(value.get("operationId"), ""),
                 text(value.get("auditId"), ""),
                 text(value.get("updateResult"), ""),
-                // lockState 도입 전 버전(확정 개념 없던 완료) 은 확정으로 본다.
-                text(value.get("lockState"), "LOCKED")
+                /*
+                 * lockState 가 없는 완료는 "완료 요청됨" 으로 본다.
+                 *
+                 * 예전에는 확정으로 봤는데, 그것이 사실과 반대였다. lockState 는 조직장
+                 * 확정 단계와 함께 생긴 필드이고, 그 필드가 없다는 것은 확정 단계를 지난
+                 * 적이 없다는 뜻이다. 확정으로 읽으면 확정한 적 없는 주가 "조직장 확정 ·
+                 * 완료" 로 보이고, 회수(SUBMITTED 에서만 가능)까지 막힌다 - 라이브에서
+                 * 실제로 그렇게 막혔다(2026-08, JLIN IBS · GGGI).
+                 */
+                text(value.get("lockState"), "SUBMITTED")
             ));
         }
         // 현재 완료 문서가 OPEN(회수됨) 이면 버전 이력과 무관하게 그 주는 완료가 아니다.
