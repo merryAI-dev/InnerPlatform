@@ -1080,11 +1080,19 @@ function objectValue(value) {
 }
 
 function readJvmOperationalCycle(source, yearMonth) {
+  if (!source || typeof source !== 'object' || !Object.prototype.hasOwnProperty.call(source, 'operationalCycle')) return null;
   const cycle = objectValue(source?.operationalCycle);
-  if (!cycle || readOptionalText(cycle.cycleYearMonth) !== yearMonth) return null;
+  if (!cycle || readOptionalText(cycle.cycleYearMonth) !== yearMonth) {
+    throw createHttpError(502, 'JVM 월 결산 회차 자료가 올바르지 않습니다.', 'jvm_weekly_response_invalid');
+  }
   const targetYearMonth = readOptionalText(cycle.targetYearMonth);
   const deadline = readOptionalText(cycle.closeDeadline);
-  if (!targetYearMonth || !deadline || typeof cycle.closeEligible !== 'boolean' || typeof cycle.late !== 'boolean') return null;
+  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(targetYearMonth)
+    || !/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(deadline)
+    || typeof cycle.closeEligible !== 'boolean'
+    || typeof cycle.late !== 'boolean') {
+    throw createHttpError(502, 'JVM 월 결산 회차 자료가 올바르지 않습니다.', 'jvm_weekly_response_invalid');
+  }
   return {
     cycleYearMonth: yearMonth,
     targetYearMonth,
