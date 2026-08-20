@@ -102,6 +102,8 @@ import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loa
 import { describeCashflowMonthCloseIssue } from './cashflow-month-close-blocker-helpers';
 import { buildSheetApplyNotice } from './cashflow-sheet-apply-notice';
 import { pickCashflowMonthCloseNotice } from './cashflow-month-close-notice';
+import { CashflowScheduleBar } from './CashflowScheduleBar';
+import { buildScheduleSteps } from './cashflow-schedule-steps';
 
 type CashflowOpsTone = 'neutral' | 'info' | 'warning' | 'danger' | 'success';
 
@@ -1233,6 +1235,45 @@ export function CashflowProjectSheet({
   ), [monthCloseResult?.dashboard?.validation?.blockers]);
 
   // 안내는 한 줄. 상태에서 결정적인 것 하나만 고른다(2026-08-19 보람: 다 보여주니 정보가 아님).
+  // 회수·반려된 요청은 "요청 안 한 상태" 로 되돌린다 - 진행 바가 끝난 일처럼 보이면 안 된다.
+  const monthRequestProgress = useMemo(() => {
+    const status = String(monthCloseRequest?.status || '').toUpperCase();
+    const requested = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);
+    return { requested, approved: ['APPROVED', 'REOPEN_REQUESTED'].includes(status) };
+  }, [monthCloseRequest?.status]);
+
+  // 일정 진행 바. 마감·완료 시각·초과 판정은 서버 값이고, 여기서는 단계 상태만 고른다.
+  const weeklyScheduleSteps = useMemo(() => {
+    const current = monthCloseResult?.dashboard?.deadlineSummary?.current;
+    if (!current?.deadline) return [];
+    return buildScheduleSteps({
+      practitionerLabel: '완료 요청',
+      approverLabel: '조직장 확정',
+      practitionerDeadline: current.deadline,
+      approverDeadline: current.approverDeadline,
+      practitionerDoneAt: current.completedAt,
+      // 확정 시각은 응답에 없다. 시각을 지어내지 않고 "확정됨" 만 표시한다.
+      approverDoneAt: current.lockState === 'LOCKED' ? current.confirmedAt : null,
+      approverDone: current.lockState === 'LOCKED',
+      practitionerLate: current.status === 'COMPLETED_LATE',
+      nowIso: new Date().toISOString(),
+    });
+  }, [monthCloseResult?.dashboard?.deadlineSummary?.current]);
+
+  const monthScheduleSteps = useMemo(() => {
+    const summary = monthCloseResult?.dashboard?.summary;
+    if (!summary?.closeDeadlineAt) return [];
+    return buildScheduleSteps({
+      practitionerLabel: '결산 요청',
+      approverLabel: '조직장 승인',
+      practitionerDeadline: summary.closeDeadlineAt,
+      approverDeadline: summary.approverDeadlineAt,
+      practitionerDoneAt: monthRequestProgress.requested ? monthCloseRequest?.requestedAt : null,
+      approverDoneAt: monthRequestProgress.approved ? monthCloseRequest?.reviewedAt : null,
+      nowIso: new Date().toISOString(),
+    });
+  }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthRequestProgress, monthCloseResult?.dashboard?.summary]);
+
   const monthCloseNotice = useMemo(() => pickCashflowMonthCloseNotice({
     requestStatus: monthCloseRequest?.status,
     requestedByUid: monthCloseRequest?.requestedByUid,
@@ -2856,6 +2897,7 @@ export function CashflowProjectSheet({
                 </div>
                 {weeklyWithdrawError ? <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800">{weeklyWithdrawError}</div> : null}
                 {weeklyActionNotice && !weeklyWithdrawError ? <div role="status" className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] leading-5 text-emerald-900">{weeklyActionNotice}</div> : null}
+                {weeklyScheduleSteps.length > 0 ? <CashflowScheduleBar steps={weeklyScheduleSteps} className="mt-3" /> : null}
                 <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
                   <span>누적 미준수 <strong className="ml-1 text-red-700">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.missedCount, '회')}</strong></span>
                   <span>기한 내 완료 <strong className="ml-1 text-primary">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.completedCount, '회')}</strong></span>
@@ -2965,6 +3007,7 @@ export function CashflowProjectSheet({
                     ) : null}
                   </div>
                 </div>
+                {monthScheduleSteps.length > 0 ? <CashflowScheduleBar steps={monthScheduleSteps} className="mt-3" /> : null}
               </div>
           </section>
 

@@ -7,6 +7,26 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8')
   + readFileSync(resolve(import.meta.dirname, 'CashflowLateSheetChangeDialog.tsx'), 'utf8');
 
+describe('CashflowProjectSheet schedule bar', () => {
+  // 마감·완료 시각·초과 판정은 서버 값이고 화면은 단계만 고른다. 조직장 초과는 표시만(누적 없음).
+  it('draws a weekly and a month schedule bar from server deadlines', () => {
+    expect(source).toContain('buildScheduleSteps({');
+    expect(source).toContain("practitionerLabel: '완료 요청'");
+    expect(source).toContain("approverLabel: '조직장 확정'");
+    expect(source).toContain("practitionerLabel: '결산 요청'");
+    expect(source).toContain("approverLabel: '조직장 승인'");
+    expect(source).toContain('practitionerDeadline: summary.closeDeadlineAt');
+    expect(source).toContain('approverDeadline: summary.approverDeadlineAt');
+    expect(source).toContain('<CashflowScheduleBar steps={weeklyScheduleSteps}');
+    expect(source).toContain('<CashflowScheduleBar steps={monthScheduleSteps}');
+  });
+  it('does not invent a confirm timestamp, and drops withdrawn or rejected requests back to "not requested"', () => {
+    expect(source).toContain("approverDone: current.lockState === 'LOCKED'");
+    expect(source).not.toContain('current.confirmedAt || current.completedAt');
+    expect(source).toContain("const requested = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);");
+  });
+});
+
 describe('CashflowProjectSheet staged loading', () => {
   // 첫 화면은 config + month-close 둘로 그린다. 나머지는 그 뒤(보조) 또는 보일 때(이력·명부)만 읽는다.
   // 12개가 동시에 나가면 Vercel 인스턴스가 늘어나는 동안 month-close 가 제일 늦게 끝났다(2026-08-19).
