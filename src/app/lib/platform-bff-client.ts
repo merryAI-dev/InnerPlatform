@@ -1108,6 +1108,8 @@ export interface CashflowMonthCloseDashboard {
     yearMonth: string;
     status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | string;
     closeDeadline?: string | null;
+    closeDeadlineAt?: string | null;
+    approverDeadlineAt?: string | null;
     closeOverdue?: boolean;
     sheetCalculationChecks?: CashflowMonthCloseDashboard['sheetCalculationChecks'] | null;
   }> | null;
