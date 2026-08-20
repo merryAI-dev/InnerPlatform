@@ -1546,15 +1546,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(value.get("auditId"), ""),
                 text(value.get("updateResult"), ""),
                 /*
-                 * lockState 가 없는 완료는 "완료 요청됨" 으로 본다.
+                 * lockState 가 없는 완료는 확정(LOCKED)으로 본다.
                  *
-                 * 예전에는 확정으로 봤는데, 그것이 사실과 반대였다. lockState 는 조직장
-                 * 확정 단계와 함께 생긴 필드이고, 그 필드가 없다는 것은 확정 단계를 지난
-                 * 적이 없다는 뜻이다. 확정으로 읽으면 확정한 적 없는 주가 "조직장 확정 ·
-                 * 완료" 로 보이고, 회수(SUBMITTED 에서만 가능)까지 막힌다 - 라이브에서
-                 * 실제로 그렇게 막혔다(2026-08, JLIN IBS · GGGI).
+                 * 2026-08-20 에 이 기본값을 SUBMITTED 로 바꿨다가 되돌렸다. 회수 가능
+                 * 여부를 판정하는 필드는 lockState 가 아니라 완료 문서의 status 이고
+                 * (jvm-weekly-api.mjs 의 reopen 라우트), 라이브 문서는 status="LOCKED" 다.
+                 * lockState 만 바꾸니 화면은 "확정 대기" 로 열리는데 회수는 400
+                 * (cashflow_weekly_reopen_reason_required) 으로 막히는 불일치가 났다.
+                 * 두 필드를 함께 다루기 전에는 이 기본값을 건드리지 않는다.
                  */
-                text(value.get("lockState"), "SUBMITTED")
+                text(value.get("lockState"), "LOCKED")
             ));
         }
         // 현재 완료 문서가 OPEN(회수됨) 이면 버전 이력과 무관하게 그 주는 완료가 아니다.

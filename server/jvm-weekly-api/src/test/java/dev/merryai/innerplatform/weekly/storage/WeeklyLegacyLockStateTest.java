@@ -10,22 +10,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * lockState 가 없는 완료 기록의 해석을 고정한다.
  *
- * <p>라이브 사고(2026-08, JLIN IBS · GGGI): 완료 문서 55건 전부에 lockState 가 없었는데
- * 이 자리가 없는 값을 LOCKED 로 읽어, 조직장이 확정한 적 없는 주가 "조직장 확정 · 완료"
- * 로 보이고 회수(SUBMITTED 에서만 가능)까지 막혔다. lockState 는 확정 단계와 함께 생긴
- * 필드이므로, 없다는 것은 확정을 지난 적이 없다는 뜻이다.
+ * <p>2026-08-20 에 이 기본값을 SUBMITTED 로 바꿨다가 되돌렸다. 회수 가능 여부를 판정하는
+ * 필드는 lockState 가 아니라 완료 문서의 status 이고, 라이브 문서는 status="LOCKED" 다.
+ * lockState 만 바꾸니 화면은 회수 버튼을 열어 주는데 서버가 400 으로 막는 불일치가 났다.
+ * 두 필드를 함께 다루기 전에는 이 기본값을 건드리지 않는다.
  */
 class WeeklyLegacyLockStateTest {
     @Test
-    void treatsCompletionsWithoutLockStateAsAwaitingConfirmation() throws Exception {
+    void treatsCompletionsWithoutLockStateAsConfirmed() throws Exception {
         String source = Files.readString(Path.of(
             "src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreInheritedWeeklyExpensePersistence.java"
         ));
 
         assertThat(source)
-            .as("lockState 없는 완료는 확정 대기(SUBMITTED)로 읽어야 한다")
-            .contains("text(value.get(\"lockState\"), \"SUBMITTED\")")
-            .doesNotContain("text(value.get(\"lockState\"), \"LOCKED\")");
+            .as("회수 판정은 완료 문서의 status 가 하고, lockState 만 바꾸면 화면과 서버가 갈린다")
+            .contains("text(value.get(\"lockState\"), \"LOCKED\")")
+            .doesNotContain("text(value.get(\"lockState\"), \"SUBMITTED\")");
         // 확정 쓰기는 그대로 LOCKED 여야 한다 - 읽기 기본값만 바뀐 것이다.
         assertThat(source).contains("version.put(\"lockState\", \"LOCKED\")");
         assertThat(source).contains("version.put(\"lockState\", \"SUBMITTED\")");
