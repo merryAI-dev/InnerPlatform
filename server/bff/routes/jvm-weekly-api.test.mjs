@@ -668,6 +668,33 @@ describe('JVM weekly API BFF proxy', () => {
     );
   });
 
+  it('keeps JVM-sent weekly deadlines instead of overwriting them with the BFF copy', async () => {
+    // 주간 마감의 단일 소스는 JVM CashflowWeekDeadline 이다. BFF parity 사본은 JVM 이
+    // 값을 보내지 않는 구버전 응답에만 채운다. 일부러 사본과 다른 값을 JVM 이 보내게 해서
+    // 어느 쪽이 이기는지 고정한다 - 사본이 이기면 규칙이 조용히 갈린다.
+    const source = fullMonthCloseSource();
+    const settlement = {
+      projectId: 'project-a', yearMonth: '2026-08',
+      items: [{
+        period: 'WEEK_1', status: 'COMPLETED',
+        deadlineAt: '2026-08-01T15:00:00.000Z', approverDeadlineAt: '2026-08-02T04:00:00.000Z',
+      }],
+    };
+    const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(
+      init.method === 'POST' ? { items: [structuredClone(settlement)], errors: [] } : structuredClone(settlement),
+    ), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        const week = response.body.items.find((item) => item.period === 'WEEK_1');
+        expect(week.deadlineAt).toBe('2026-08-01T15:00:00.000Z');
+        expect(week.approverDeadlineAt).toBe('2026-08-02T04:00:00.000Z');
+      });
+  });
+
   it('uses the canonical month-close request as the MONTH status source of truth', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {

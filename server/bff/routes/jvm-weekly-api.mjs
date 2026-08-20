@@ -723,17 +723,18 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
         : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
           ? 'PENDING_APPROVAL'
           : 'WAITING_FOR_UPDATE';
-    // 월간 마감은 JVM 응답을 그대로 전달한다. 주간 표시만 기존 JVM parity 표를 사용한다.
+    // 마감의 단일 소스는 JVM 이다 (CashflowWeekDeadline). JVM 이 보낸 값을 그대로 쓰고,
+    // 아직 값을 보내지 않는 구버전 응답에만 parity 표 사본으로 채운다. 사본이 판정을
+    // 이기기 시작하면 규칙이 조용히 갈린다 - 그래서 순서가 JVM 먼저다.
     const withDeadlines = (item) => {
       const period = readOptionalText(item?.period);
       const weekMatch = /^WEEK_([1-5])$/.exec(period);
       if (!weekMatch) return item;
-      const deadlineAt = cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
-      return {
-        ...item,
-        deadlineAt,
-        approverDeadlineAt: cashflowWeeklyApproverDeadlineAt(deadlineAt),
-      };
+      const deadlineAt = readOptionalText(item?.deadlineAt)
+        || cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
+      const approverDeadlineAt = readOptionalText(item?.approverDeadlineAt)
+        || cashflowWeeklyApproverDeadlineAt(deadlineAt);
+      return { ...item, deadlineAt, approverDeadlineAt };
     };
     const alignedItems = statusItems
       .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item))
