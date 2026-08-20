@@ -39,12 +39,13 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
     expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, yearMonth)}");
-    // 2026-08-20: 상태 배지를 진행 바로 대체했다. 승인은 그 바를 눌러서 한다.
-    expect(source).toContain('<CashflowScheduleBarCompact steps={steps} />');
-    expect(source).toContain("onClick={() => onAction('APPROVE')}");
-    expect(source).toContain('승인하기');
+    // 2026-08-20: 진행 바로 바꿨다가 헷갈린다는 피드백으로 배지로 롤백. 기간 줄만 유지.
+    expect(source).toContain('주정산 이전');
+    expect(source).toContain('결산 전');
+    expect(source).toContain('조직장 승인 필요');
+    expect(source).toContain('승인 완료');
     expect(source).toContain('<ProjectPeriodLine start={project.contractStart} end={project.contractEnd} />');
-    expect(source).not.toContain("bg-emerald-50 px-2.5 font-semibold text-emerald-700");
+    expect(source).not.toContain('CashflowScheduleBarCompact');
     expect(source).toContain("user?.uid === project.executiveApproverId");
     expect(source).toContain('setRefreshSequence((current) => current + 1)');
     expect(source).not.toContain('fetchCashflowSettlementStatusesBatchViaBff');
@@ -122,7 +123,6 @@ describe('CashflowWeeklyPage settlement status surface', () => {
   });
 
   it('keeps the status filter labels aligned with their settlement period', () => {
-    // 필터 드롭다운의 말은 그대로다 - 바뀐 것은 표 안의 표시뿐이다.
     expect(source).toContain("period === 'MONTH' ? '결산 전' : '주정산 이전'");
     expect(source).toContain('조직장 승인 필요');
   });

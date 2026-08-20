@@ -5,8 +5,7 @@ import { toast } from 'sonner';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
-import { CashflowScheduleBarCompact } from './CashflowScheduleBar';
-import { buildScheduleSteps, formatProjectPeriod } from './cashflow-schedule-steps';
+import { formatProjectPeriod } from './cashflow-schedule-steps';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useAppStore } from '../../data/store';
@@ -112,31 +111,23 @@ function SettlementStatusButton({
   onAction: (action: 'SUBMIT' | 'APPROVE') => void;
 }) {
   const status = item?.status || 'WAITING_FOR_UPDATE';
-  // 상태 배지를 진행 바로 대체한다(2026-08-20 보람). 승인은 그대로 여기서 누른다.
-  const steps = buildScheduleSteps({
-    practitionerLabel: period === 'MONTH' ? '결산 요청' : '완료 요청',
-    approverLabel: period === 'MONTH' ? '조직장 승인' : '조직장 확정',
-    practitionerDeadline: item?.deadlineAt,
-    approverDeadline: item?.approverDeadlineAt,
-    practitionerDoneAt: status === 'WAITING_FOR_UPDATE' ? null : item?.submittedAt || null,
-    approverDoneAt: status === 'COMPLETED' ? item?.approvedAt || null : null,
-    approverDone: status === 'COMPLETED',
-    nowIso: new Date().toISOString(),
-  });
-  const bar = <CashflowScheduleBarCompact steps={steps} />;
-  if (status !== 'PENDING_APPROVAL') return bar;
+  if (status === 'COMPLETED') {
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />승인 완료</span>;
+  }
+  if (status === 'WAITING_FOR_UPDATE') {
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 font-semibold text-red-700"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />{period === 'MONTH' ? '결산 전' : '주정산 이전'}</span>;
+  }
   return (
     <Button
       type="button"
       size="sm"
       variant="outline"
-      className="min-h-8 w-full flex-col gap-1 whitespace-normal rounded-md border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-[#17324D] hover:bg-slate-50"
+      className="min-h-8 gap-1.5 whitespace-normal rounded-full border-amber-200 bg-amber-50 px-2.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
       disabled={loading || !canApprove}
       onClick={() => onAction('APPROVE')}
-      title="조직장 승인"
     >
-      {bar}
-      <span>{loading ? '처리 중…' : '승인하기'}</span>
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      {loading ? '처리 중…' : '조직장 승인 필요'}
     </Button>
   );
 }
