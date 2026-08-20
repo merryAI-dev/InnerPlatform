@@ -107,6 +107,7 @@ import {
   saveWeeklyExpenseDraftViaBff,
   type UpsertProjectPayload,
   upsertProjectViaBff,
+  uploadProjectCheckoutAttachmentViaBff,
   upsertTransactionViaBff,
 } from '../lib/platform-bff-client';
 import type { CashflowMutationLease } from '../lib/cashflow-edit-lease';
@@ -522,6 +523,7 @@ interface PortalActions {
   patchProjectSnapshot: (project: Project) => void;
   updateProjectStatus: (projectId: string, status: ProjectStatus) => Promise<boolean>;
   updateProjectCheckout: (projectId: string, patch: Partial<ProjectCheckout>) => Promise<boolean>;
+  uploadProjectCheckoutDocument: (projectId: string, documentKind: string, file: File) => Promise<boolean>;
   logout: () => void;
   addExpenseSet: (set: ExpenseSet) => void;
   updateExpenseSet: (id: string, updates: Partial<ExpenseSet>) => void;
@@ -3518,6 +3520,64 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   ]);
 
   /**
+   * 체크아웃 증빙 업로드. 체크 저장과 같은 줄에 세운다 - 둘 다 프로젝트 version 을 올리므로
+   * 동시에 나가면 서로를 409 로 튕긴다.
+   */
+  const uploadProjectCheckoutDocument = useCallback((
+    projectId: string,
+    documentKind: string,
+    file: File,
+  ): Promise<boolean> => {
+    const queued = checkoutSaveChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const targetProjectId = projectId.trim();
+        if (!targetProjectId || !includesProject(scopedProjectIds, targetProjectId)) {
+          toast.error('선택 가능한 사업이 아닙니다.');
+          return false;
+        }
+        if (!isPlatformApiEnabled()) {
+          toast.error('이 환경에서는 증빙 업로드를 지원하지 않습니다.');
+          return false;
+        }
+        try {
+          const buffer = await file.arrayBuffer();
+          let binary = '';
+          const bytes = new Uint8Array(buffer);
+          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+          const idToken = authUser?.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+          const saved = await uploadProjectCheckoutAttachmentViaBff({
+            tenantId: orgId,
+            actor: {
+              uid: authUser?.uid || portalUser?.id || 'portal-user',
+              email: authUser?.email || portalUser?.email || '',
+              role: authUser?.role || portalUser?.role || 'pm',
+              idToken,
+            },
+            projectId: targetProjectId,
+            documentKind,
+            file: { name: file.name, size: file.size, type: file.type, contentBase64: btoa(binary) },
+          });
+          if (typeof saved?.version === 'number') {
+            const versioned = projectsRef.current.map((project) => (
+              project.id === targetProjectId ? { ...project, version: saved.version } : project
+            ));
+            projectsRef.current = versioned;
+            setProjects(versioned);
+          }
+          toast.success('증빙을 올렸습니다.');
+          return true;
+        } catch (err) {
+          console.error('[PortalStore] uploadProjectCheckoutDocument error:', err);
+          toast.error('증빙 업로드에 실패했습니다.');
+          return false;
+        }
+      });
+    checkoutSaveChainRef.current = queued;
+    return queued;
+  }, [authUser?.email, authUser?.idToken, authUser?.role, authUser?.uid, orgId, portalUser?.email, portalUser?.id, portalUser?.role, scopedProjectIds]);
+
+  /**
    * 밖에서 부르는 입구. 실제 저장은 위 구현이 하고, 여기서는 줄을 세우기만 한다.
    * 체크박스를 연달아 누르면 요청이 동시에 나가 각자 자기가 읽은 version 을 보내고
    * 뒤엣것이 409 로 튕긴다 (라이브에서 실제로 났다).
@@ -3901,6 +3961,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     patchProjectSnapshot,
     updateProjectStatus,
     updateProjectCheckout,
+    uploadProjectCheckoutDocument,
     logout,
     addExpenseSet,
     updateExpenseSet,

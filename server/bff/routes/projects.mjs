@@ -1,4 +1,6 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
+import { projectDocumentValidationError } from '../project-document-validation.mjs';
 import { createOutboxEvent } from '../outbox.mjs';
 import {
   DriveServiceError,
@@ -488,6 +490,17 @@ function normalizeProjectStatus(value) {
 
 function normalizeProjectPhase(value) {
   return value === 'PROSPECT' || value === 'CONFIRMED' ? value : 'CONFIRMED';
+}
+
+function decodeCheckoutBase64(value, expectedSize) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw createHttpError(400, 'contentBase64 is invalid', 'checkout_attachment_invalid');
+  }
+  const buffer = Buffer.from(value, 'base64');
+  if (buffer.byteLength !== expectedSize) {
+    throw createHttpError(422, 'Attachment size does not match its content', 'checkout_attachment_size_mismatch');
+  }
+  return buffer;
 }
 
 async function readProjectAttachmentMember({ db, tenantId, actorId }) {
@@ -2793,6 +2806,7 @@ export function mountProjectRoutes(app, {
       performance_certificate: 'performanceCertificateDocument',
       tax_invoice: 'taxInvoiceDocument',
       final_settlement_report: 'finalSettlementReportDocument',
+      final_report: 'finalReportDocument',
     }[documentKind];
     if (!projectId || !field) {
       throw createHttpError(400, 'Project attachment request is invalid', 'project_attachment_invalid');
@@ -2834,6 +2848,101 @@ export function mountProjectRoutes(app, {
       path,
     });
     sendPrivateProjectAttachment(res, downloaded, attachment, objectName);
+  }));
+
+  /*
+   * 종료사업 체크아웃 증빙 업로드.
+   *
+   * 초안·편집 리스를 거치지 않는다. 이미 승인이 끝난 사업의 마무리 증빙인데 수정 초안으로
+   * 올리면 제출 시 `executiveReviewReopens` 가 조직장 결재를 다시 연다. 마무리 서류를
+   * 붙였다고 결재가 풀리면 안 된다.
+   *
+   * 그래서 여기서는 문서 칸 하나와 version 만 올린다. 결재 관련 필드는 쓰지 않는다.
+   */
+  app.post('/api/v1/projects/:projectId/checkout-attachments/:documentKind', asyncHandler(async (req, res) => {
+    const { tenantId, actorId, actorRole } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload checkout attachments');
+    const projectId = readOptionalText(req.params.projectId);
+    const documentKind = readOptionalText(req.params.documentKind);
+    // 체크아웃 증빙만 받는다. 등록 서류는 이 경로로 바꿀 수 없다.
+    const field = {
+      performance_certificate: 'performanceCertificateDocument',
+      tax_invoice: 'taxInvoiceDocument',
+      final_settlement_report: 'finalSettlementReportDocument',
+      final_report: 'finalReportDocument',
+    }[documentKind];
+    if (!projectId || !field) {
+      throw createHttpError(400, 'Checkout attachment request is invalid', 'checkout_attachment_invalid');
+    }
+
+    const fileName = readOptionalText(req.body?.fileName);
+    const mimeType = readOptionalText(req.body?.mimeType) || 'application/pdf';
+    const fileSize = Number(req.body?.fileSize);
+    const contentBase64 = readOptionalText(req.body?.contentBase64);
+    if (!fileName || !contentBase64 || !Number.isFinite(fileSize) || fileSize <= 0) {
+      throw createHttpError(400, 'Checkout attachment payload is invalid', 'checkout_attachment_invalid');
+    }
+    const buffer = decodeCheckoutBase64(contentBase64, fileSize);
+    const validationError = projectDocumentValidationError({ buffer, mimeType, fileName, documentKind });
+    if (validationError) {
+      throw createHttpError(422, validationError, 'checkout_attachment_rejected');
+    }
+
+    const projectRef = db.doc(`orgs/${tenantId}/projects/${projectId}`);
+    const projectSnap = await projectRef.get();
+    if (!projectSnap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+    const project = projectSnap.data() || {};
+
+    const member = await readProjectAttachmentMember({ db, tenantId, actorId });
+    const profile = member?.portalProfile && typeof member.portalProfile === 'object' ? member.portalProfile : {};
+    const storedRole = normalizeRole(member?.role) || normalizeRole(actorRole);
+    const assignedProjectIds = new Set([
+      member?.projectId,
+      ...(Array.isArray(member?.projectIds) ? member.projectIds : []),
+      profile.projectId,
+      ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+    ].map(readOptionalText).filter(Boolean));
+    if (
+      !['admin', 'finance'].includes(storedRole)
+      && !assignedProjectIds.has(projectId)
+      && readOptionalText(project.executiveApproverId) !== actorId
+    ) {
+      throw createHttpError(403, 'Checkout attachment access denied', 'forbidden');
+    }
+
+    if (typeof projectRequestContractStorageService?.uploadProjectRegistrationAttachment !== 'function') {
+      throw new Error('Project registration attachment storage is not configured');
+    }
+    const attachmentId = `att_${randomUUID().replace(/-/g, '')}`;
+    const uploaded = await projectRequestContractStorageService.uploadProjectRegistrationAttachment({
+      tenantId, projectId, attachmentId, fileName, mimeType, buffer,
+    });
+
+    const timestamp = now();
+    const attachment = {
+      attachmentId,
+      documentKind,
+      path: readOptionalText(uploaded?.path),
+      name: readOptionalText(uploaded?.name) || fileName,
+      size: buffer.byteLength,
+      contentType: mimeType,
+      uploadedAt: readOptionalText(uploaded?.uploadedAt) || timestamp,
+    };
+    const version = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+      const current = snap.data() || {};
+      const nextVersion = Number(current.version || 0) + 1;
+      tx.update(projectRef, {
+        [field]: attachment,
+        version: nextVersion,
+        updatedAt: timestamp,
+        updatedBy: actorId,
+      });
+      return nextVersion;
+    });
+
+    res.status(200).json({ id: projectId, tenantId, version, updatedAt: timestamp, documentKind, attachment });
   }));
 
   app.get('/api/v1/project-requests/:requestId/attachments/:documentKind', asyncHandler(async (req, res) => {
