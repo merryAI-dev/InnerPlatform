@@ -1315,11 +1315,30 @@ export function CashflowProjectSheet({
 
   // 안내는 한 줄. 상태에서 결정적인 것 하나만 고른다(2026-08-19 보람: 다 보여주니 정보가 아님).
   // 회수·반려된 요청은 "요청 안 한 상태" 로 되돌린다 - 진행 바가 끝난 일처럼 보이면 안 된다.
+  /*
+   * 회차 월과 덮는 대상 월은 다르다. 누적 결산은 8월에 돌려도 대상이 2026-07 까지다
+   * (throughMonth). 회차가 있다는 것만 보고 "이 달 결산 완료" 로 그리면, 아직 아무도
+   * 하지 않은 8월이 완료로 보인다 - 라이브에서 그랬다(JLIN IBS).
+   *
+   * 회차 자체는 그대로 둔다. 회수·승인은 회차 월로 하는 것이 맞다. 여기서는 "보고 있는
+   * 달이 그 회차에 덮이는가" 만 따로 판단한다. 값은 서버가 이미 준다.
+   */
+  const monthCoveredByRequest = useMemo(() => {
+    const through = String(monthCloseRequest?.throughMonth || monthCloseRequest?.yearMonth || '');
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(through)) return true;
+    return yearMonth <= through;
+  }, [monthCloseRequest?.throughMonth, monthCloseRequest?.yearMonth, yearMonth]);
+
   const monthRequestProgress = useMemo(() => {
     const status = String(monthCloseRequest?.status || '').toUpperCase();
-    const requested = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);
-    return { requested, approved: ['APPROVED', 'REOPEN_REQUESTED'].includes(status) };
-  }, [monthCloseRequest?.status]);
+    const inFlight = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);
+    // 덮이지 않는 달은 그 회차의 진행도를 빌려 쓰지 않는다.
+    const requested = inFlight && monthCoveredByRequest;
+    return {
+      requested,
+      approved: requested && ['APPROVED', 'REOPEN_REQUESTED'].includes(status),
+    };
+  }, [monthCloseRequest?.status, monthCoveredByRequest]);
 
   // 일정 진행 바. 마감·완료 시각·초과 판정은 서버 값이고, 여기서는 단계 상태만 고른다.
   const weeklyScheduleSteps = useMemo(() => {
