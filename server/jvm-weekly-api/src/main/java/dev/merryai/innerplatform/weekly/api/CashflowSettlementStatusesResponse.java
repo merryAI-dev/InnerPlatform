@@ -14,7 +14,20 @@ public record CashflowSettlementStatusesResponse(
         String submittedBy,
         String approvedAt,
         String approvedBy,
-        long revision
+        long revision,
+        String deadlineAt,
+        String approverDeadlineAt
     ) {
+        public Item(
+            String period,
+            String status,
+            String submittedAt,
+            String submittedBy,
+            String approvedAt,
+            String approvedBy,
+            long revision
+        ) {
+            this(period, status, submittedAt, submittedBy, approvedAt, approvedBy, revision, null, null);
+        }
     }
 }
