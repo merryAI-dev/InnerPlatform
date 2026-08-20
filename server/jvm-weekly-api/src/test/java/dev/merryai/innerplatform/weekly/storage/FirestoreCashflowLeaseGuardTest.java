@@ -3934,11 +3934,8 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(before.items()).anySatisfy(item -> {
             assertThat(item.id()).isEqualTo("2026-07-w2");
             assertThat(item.status()).isEqualTo("ON_TIME");
-            // lockState 없는 옛 버전은 확정 대기로 본다. 그 필드는 확정 단계와 함께
-            // 생겼으므로, 없다는 것은 확정을 지난 적이 없다는 뜻이다. 예전에는 확정으로
-            // 읽어서 라이브에서 확정한 적 없는 주가 완료로 보이고 회수가 막혔다
-            // (2026-08, JLIN IBS · GGGI - 완료 문서 55건 전부 lockState 없음).
-            assertThat(item.lockState()).isEqualTo("SUBMITTED");
+            // lockState 없는 옛 버전은 확정으로 본다 (회수 판정은 status 가 한다)
+            assertThat(item.lockState()).isEqualTo("LOCKED");
         });
         assertThat(before.onTimeCount()).isEqualTo(1L);
 
