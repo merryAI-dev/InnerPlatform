@@ -42,6 +42,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmatio
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
+import dev.merryai.innerplatform.weekly.domain.CashflowWeekDeadline;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseHash;
@@ -2037,19 +2038,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private Instant financeWeekDeadline(String yearMonth, int weekNo) {
-        YearMonth month = YearMonth.parse(yearMonth);
-        LocalDate first = month.atDay(1);
-        LocalDate firstMonday = first.minusDays(first.getDayOfWeek().getValue() - 1L);
-        LocalDate start = weekNo == 1 ? first : firstMonday.plusWeeks(weekNo - 1L);
-        LocalDate end = weekNo == CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
-            ? month.atEndOfMonth()
-            : firstMonday.plusWeeks(weekNo).minusDays(1);
-        LocalDate thursday = start;
-        while (!thursday.isAfter(end) && thursday.getDayOfWeek() != java.time.DayOfWeek.THURSDAY) {
-            thursday = thursday.plusDays(1);
-        }
-        LocalDate deadlineDate = thursday.isAfter(end) ? end.plusDays(1) : thursday.plusDays(1);
-        return deadlineDate.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant();
+        // 규칙 본문은 CashflowWeekDeadline 로 옮겼다. 사본이 남으면 규칙이 조용히 갈린다.
+        return CashflowWeekDeadline.practitionerDeadlineAt(YearMonth.parse(yearMonth), weekNo);
     }
 
     private String weeklyComplianceStatus(String yearMonth, int weekNo, Instant completedAt, Instant deadline) {
