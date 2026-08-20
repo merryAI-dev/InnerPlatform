@@ -3933,8 +3933,8 @@ export function mountJvmWeeklyApiRoutes(app, {
             'jvm_weekly_response_invalid',
           );
         }
-        const cumulativeCycle = readJvmOperationalCycle(source, yearMonth)
-          || cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
+        const operationalCycle = readJvmOperationalCycle(source, yearMonth);
+        const cumulativeCycle = operationalCycle || cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
         if (!cumulativeCycle) {
           throw createHttpError(502, '월 결산 회차 기준일을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
         }
@@ -3944,8 +3944,14 @@ export function mountJvmWeeklyApiRoutes(app, {
           targetYearMonth: cumulativeCycle.targetYearMonth,
           evaluatedBusinessDate: cycleBusinessDate,
           closeDeadline: cumulativeCycle.deadline,
-          closeEligible: cumulativeCycle.eligible,
-          late: cumulativeCycle.late,
+          closeEligible: operationalCycle
+            ? operationalCycle.eligible
+            : readOptionalText(result?.status) === 'OPEN' && cumulativeCycle.eligible,
+          late: operationalCycle
+            ? operationalCycle.late
+            : readOptionalText(result?.status) === 'OPEN'
+              ? cycleBusinessDate > cumulativeCycle.deadline
+              : Boolean(result?.late),
           monthState: monthCloseRequest ? cashflowMonthCloseRequestView(monthCloseRequest) : null,
         };
         const cashflowSourceUnavailable = jvmPartial.unavailableSections.has('cashflow');
@@ -4492,8 +4498,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
       }
       const cycleBusinessDate = readOptionalText(sourceClose?.evaluatedBusinessDate) || comparisonBoundary.asOfDate;
-      const cumulativeCycle = readJvmOperationalCycle(source, yearMonth)
-        || cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
+      const operationalCycle = readJvmOperationalCycle(source, yearMonth);
+      const cumulativeCycle = operationalCycle || cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
       if (readOptionalText(sourceClose?.status) !== 'OPEN' || !cumulativeCycle?.eligible) {
         throw createHttpError(
           409,
