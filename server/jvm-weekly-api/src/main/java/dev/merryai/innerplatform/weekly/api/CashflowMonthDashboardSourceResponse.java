@@ -14,7 +14,8 @@ public record CashflowMonthDashboardSourceResponse(
     List<Blocker> blockers,
     List<SectionError> sectionErrors,
     ActionCapability reopenRequest,
-    OperationalCycle operationalCycle
+    OperationalCycle operationalCycle,
+    List<MonthSettlementCalendarItem> monthCloseCalendar
 ) {
     public CashflowMonthDashboardSourceResponse(
         CashflowMonthCloseResponse monthClose,
@@ -27,7 +28,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, cumulativeClose,
-            projectionActualSummary, blockers, List.of(), ActionCapability.unavailable(), null
+            projectionActualSummary, blockers, List.of(), ActionCapability.unavailable(), null, List.of()
         );
     }
 
@@ -41,7 +42,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, cumulativeClose,
-            projectionActualSummary, List.of(), List.of(), ActionCapability.unavailable(), null
+            projectionActualSummary, List.of(), List.of(), ActionCapability.unavailable(), null, List.of()
         );
     }
 
@@ -53,7 +54,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, CumulativeClose.missing(),
-            null, List.of(), List.of(), ActionCapability.unavailable(), null
+            null, List.of(), List.of(), ActionCapability.unavailable(), null, List.of()
         );
     }
 
@@ -70,6 +71,7 @@ public record CashflowMonthDashboardSourceResponse(
         blockers = blockers == null ? List.of() : List.copyOf(blockers);
         sectionErrors = sectionErrors == null ? List.of() : List.copyOf(sectionErrors);
         reopenRequest = reopenRequest == null ? ActionCapability.unavailable() : reopenRequest;
+        monthCloseCalendar = monthCloseCalendar == null ? List.of() : List.copyOf(monthCloseCalendar);
     }
 
     public record Blocker(String code, String message) {}
@@ -88,6 +90,13 @@ public record CashflowMonthDashboardSourceResponse(
         String closeDeadline,
         boolean closeEligible,
         boolean late
+    ) {}
+
+    public record MonthSettlementCalendarItem(
+        String yearMonth,
+        String closeDeadline,
+        String closeDeadlineAt,
+        String approverDeadlineAt
     ) {}
 
     public record MonthStatusEvidence(
