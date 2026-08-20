@@ -473,6 +473,9 @@ export function CashflowProjectSheet({
   const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
   const [weeklyCompletionError, setWeeklyCompletionError] = useState('');
   const [weeklyWithdrawBusy, setWeeklyWithdrawBusy] = useState(false);
+  // 조직장이 확정한 주를 되돌릴 때만 사유를 받는다. 완료 요청 회수는 사유가 필요 없다.
+  const [weeklyReopenReasonOpen, setWeeklyReopenReasonOpen] = useState(false);
+  const [weeklyReopenReason, setWeeklyReopenReason] = useState('');
   const [weeklyWithdrawError, setWeeklyWithdrawError] = useState('');
   const [weeklyConfirmBusy, setWeeklyConfirmBusy] = useState(false);
   // 완료 요청·회수·확정이 실제로 접수됐다는 확인. 상태 배지만으로는 "내가 누른 것이 먹혔는지" 가 안 보인다.
@@ -1040,7 +1043,7 @@ export function CashflowProjectSheet({
   }, [loadCashflowMonthClose, monthCloseActions?.completeWeekly, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, savedExecutiveApproverId, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
 
   // 주정산 회수: 사유·결재 없이 즉시. revision 은 BFF 가 잠금 기록에서 읽는다. 되돌리려면 다시 완료하면 된다.
-  const handleWithdrawWeeklyUpdate = useCallback(async (): Promise<void> => {
+  const handleWithdrawWeeklyUpdate = useCallback(async (reason?: string): Promise<void> => {
     if (monthCloseActions?.reopenWeekly.enabled !== true) return;
     const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
     if (!currentDeadline) return;
@@ -1058,9 +1061,14 @@ export function CashflowProjectSheet({
         projectId,
         yearMonth: currentDeadline.yearMonth,
         weekNo: currentDeadline.weekNo,
+        ...(reason ? { reason } : {}),
       });
       await loadCashflowMonthClose();
-      setWeeklyActionNotice('완료 요청을 회수했어요. 값을 고친 뒤 다시 요청할 수 있어요.');
+      setWeeklyReopenReasonOpen(false);
+      setWeeklyReopenReason('');
+      setWeeklyActionNotice(reason
+        ? '확정된 주간 정산을 되돌렸어요. 값을 고친 뒤 다시 요청할 수 있어요.'
+        : '완료 요청을 회수했어요. 값을 고친 뒤 다시 요청할 수 있어요.');
       toast.success('주간 정산 완료 요청을 회수했어요.');
       logCashflowSettlement({
         phase: 'success',
@@ -1081,6 +1089,14 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
+      // 조직장이 확정한 주는 사유가 있어야 되돌릴 수 있다. 서버가 그렇게 말해 주므로
+      // 그때만 사유 창을 연다 - 화면이 확정 여부를 따로 판정하지 않는다.
+      if (bffErrorCode(error) === 'cashflow_weekly_reopen_reason_required') {
+        setWeeklyReopenReason('');
+        setWeeklyReopenReasonOpen(true);
+        setWeeklyWithdrawError('');
+        return;
+      }
       setWeeklyWithdrawError(resolveApiErrorMessage(error, '주간 정산을 회수하지 못했습니다. 화면을 다시 불러온 뒤 시도해 주세요.'));
     } finally {
       setWeeklyWithdrawBusy(false);
@@ -3856,7 +3872,53 @@ export function CashflowProjectSheet({
         </AlertDialogContent>
       </AlertDialog>
 
+            {/*
+        확정된 주간 정산 되돌리기. 사유 필요 여부는 서버가 판정하고(400
+        cashflow_weekly_reopen_reason_required) 화면은 그 답을 받아 이 창을 연다.
+        완료 요청 회수는 사유가 없어도 되므로 이 창이 뜨지 않는다.
+      */}
       <AlertDialog
+        open={weeklyReopenReasonOpen}
+        onOpenChange={(open) => {
+          if (!open && !weeklyWithdrawBusy) {
+            setWeeklyReopenReasonOpen(false);
+            setWeeklyReopenReason('');
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>확정된 주간 정산 되돌리기</AlertDialogTitle>
+            <AlertDialogDescription>
+              조직장이 확정한 주간 정산입니다. 되돌리면 감사 이력에 남으니 사유를 구체적으로 작성해 주세요.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="grid gap-2 text-[12px] font-semibold text-slate-700">
+            사유
+            <textarea
+              value={weeklyReopenReason}
+              className="min-h-[120px] rounded-md border border-slate-200 p-3 text-[12px] font-normal outline-none focus:border-[#17324D]"
+              placeholder="되돌려야 하는 이유와 고칠 범위를 입력해 주세요."
+              disabled={weeklyWithdrawBusy}
+              onChange={(event) => setWeeklyReopenReason(event.target.value)}
+            />
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={weeklyWithdrawBusy}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={weeklyWithdrawBusy || weeklyReopenReason.trim().length === 0}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleWithdrawWeeklyUpdate(weeklyReopenReason.trim());
+              }}
+            >
+              되돌리기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+<AlertDialog
         open={reopenAction !== null}
         onOpenChange={(open) => {
           if (!open && !monthCloseBusy) {
