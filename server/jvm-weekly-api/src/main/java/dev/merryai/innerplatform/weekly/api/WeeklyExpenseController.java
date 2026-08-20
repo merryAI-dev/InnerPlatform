@@ -33,6 +33,7 @@ import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApply
 import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.query.CashflowMonthDashboardQueryService;
 import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.domain.ApproverDeadlineCalculator;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -586,7 +587,8 @@ public class WeeklyExpenseController {
                 result.reopenRequest().enabled(),
                 result.reopenRequest().reasonCode()
             ),
-            operationalCycle(yearMonth, operationalStatus, latestRun)
+            operationalCycle(yearMonth, operationalStatus, latestRun),
+            monthCloseCalendar(yearMonth)
         );
     }
 
@@ -605,6 +607,21 @@ public class WeeklyExpenseController {
             open && targetMonth.isBefore(YearMonth.from(evaluatedBusinessDate)),
             open ? evaluatedBusinessDate.isAfter(closeDeadline) : latestRun.late()
         );
+    }
+
+    private static List<CashflowMonthDashboardSourceResponse.MonthSettlementCalendarItem> monthCloseCalendar(
+        String yearMonth
+    ) {
+        YearMonth selectedYear = YearMonth.parse(yearMonth).withMonth(1);
+        return java.util.stream.IntStream.range(0, 12)
+            .mapToObj(selectedYear::plusMonths)
+            .map(targetMonth -> new CashflowMonthDashboardSourceResponse.MonthSettlementCalendarItem(
+                targetMonth.toString(),
+                CashflowCloseDeadline.forTargetMonth(targetMonth).toString(),
+                CashflowCloseDeadline.settlementDeadlineAt(targetMonth).toString(),
+                ApproverDeadlineCalculator.monthly(targetMonth.toString(), 3).toString()
+            ))
+            .toList();
     }
 
     private String blockerGuide(String code) {
