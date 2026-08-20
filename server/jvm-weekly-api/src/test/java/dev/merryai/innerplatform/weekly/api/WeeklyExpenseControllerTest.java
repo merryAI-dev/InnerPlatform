@@ -1662,6 +1662,11 @@ class WeeklyExpenseControllerTest {
         assertThat(response.cumulativeClose().status()).isNull();
         assertThat(response.cumulativeClose().fromMonth()).isNull();
         assertThat(response.cumulativeClose().headRevision()).isNull();
+        assertThat(response.monthSettlementDeadlines()).isEqualTo(
+            new CashflowMonthDashboardSourceResponse.MonthSettlementDeadlines(
+                "2026-07-10T15:00:00Z", "2026-07-13T15:00:00Z"
+            )
+        );
         verify(dashboardPersistence)
             .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026);
         verify(dashboardPersistence).findCashflowLedgerSource(

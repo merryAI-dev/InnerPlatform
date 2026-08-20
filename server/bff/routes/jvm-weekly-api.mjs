@@ -52,12 +52,7 @@ import {
   withdrawPendingCumulativeCloseRequest,
 } from '../cashflow-month-close-withdrawal.mjs';
 export { cashflowCumulativeCloseCycle };
-import {
-  cashflowMonthCloseApproverDeadlineAt,
-  cashflowMonthCloseDeadline,
-  cashflowMonthCloseDeadlineAt,
-  isCashflowCloseOverdue,
-} from '../cashflow-close-deadline.mjs';
+import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
 import { cashflowMonthRequestCovers } from '../cashflow-month-state.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -3190,9 +3185,9 @@ async function composeCashflowMonthDashboard({
       cycleYearMonth: readOptionalText(close?.cycleYearMonth) || yearMonth,
       targetYearMonth: readOptionalText(close?.targetYearMonth) || buildCumulativeCloseScope(yearMonth).throughMonth,
       closeDeadline: readOptionalText(close?.closeDeadline) || null,
-      // 진행 바가 읽는 시각 표현. 월 마감 날짜 규칙은 JVM 과 패리티 쌍이고 여기서 시각으로 옮긴다.
-      closeDeadlineAt: cashflowMonthCloseDeadlineAt(readOptionalText(close?.yearMonth) || yearMonth),
-      approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(readOptionalText(close?.yearMonth) || yearMonth),
+      // 일정 바의 시각은 JVM dashboard-source가 계산한다. BFF는 추측하거나 보정하지 않는다.
+      closeDeadlineAt: readOptionalText(close?.closeDeadlineAt) || null,
+      approverDeadlineAt: readOptionalText(close?.approverDeadlineAt) || null,
       late: Boolean(close?.late),
     },
     validation: {
@@ -3898,6 +3893,8 @@ export function mountJvmWeeklyApiRoutes(app, {
           late: readOptionalText(result?.status) === 'OPEN'
             ? cycleBusinessDate > cumulativeCycle.deadline
             : Boolean(result?.late),
+          closeDeadlineAt: readOptionalText(source?.monthSettlementDeadlines?.deadlineAt) || null,
+          approverDeadlineAt: readOptionalText(source?.monthSettlementDeadlines?.approverDeadlineAt) || null,
           monthState: monthCloseRequest ? cashflowMonthCloseRequestView(monthCloseRequest) : null,
         };
         const cashflowSourceUnavailable = jvmPartial.unavailableSections.has('cashflow');

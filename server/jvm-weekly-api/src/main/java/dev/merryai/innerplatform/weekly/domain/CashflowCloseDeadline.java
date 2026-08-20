@@ -1,7 +1,9 @@
 package dev.merryai.innerplatform.weekly.domain;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.time.YearMonth;
+import java.time.ZoneId;
 
 /**
  * 월 결산 기한 규칙의 단일 소스.
@@ -17,6 +19,7 @@ import java.time.YearMonth;
  * 대상 월은 직전 월이므로 두 표현은 같은 날짜를 가리킨다.
  */
 public final class CashflowCloseDeadline {
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     private CashflowCloseDeadline() {
     }
@@ -33,6 +36,11 @@ public final class CashflowCloseDeadline {
 
     public static LocalDate forMonth(YearMonth cycleOrTargetMonth, boolean cumulative) {
         return cumulative ? forCumulativeCycle(cycleOrTargetMonth) : forTargetMonth(cycleOrTargetMonth);
+    }
+
+    /** 일정 바용 실무자 마감 시각. 마감일 10일이 끝나는 익월 11일 0시 KST다. */
+    public static Instant settlementDeadlineAt(YearMonth targetMonth) {
+        return forTargetMonth(targetMonth).plusDays(1).atStartOfDay(SEOUL).toInstant();
     }
 
     /** 기한 초과 여부. 확정된 달은 초과로 보지 않는다. */

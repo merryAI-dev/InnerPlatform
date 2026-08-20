@@ -1022,6 +1022,33 @@ describe('JVM weekly API BFF proxy', () => {
     expect(performanceEvents.every((event) => event.requestId === 'req-1')).toBe(true);
   });
 
+  it('passes JVM-owned month schedule instants through without rebuilding them', async () => {
+    const source = fullMonthCloseSource();
+    const dashboardSource = monthDashboardSource({
+      ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0,
+    });
+    dashboardSource.monthSettlementDeadlines = {
+      deadlineAt: '2099-01-02T03:04:05.000Z',
+      approverDeadlineAt: '2099-01-05T06:07:08.000Z',
+    };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true, status: 200, text: async () => JSON.stringify(dashboardSource),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv, db: source.db,
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.summary).toMatchObject({
+          closeDeadlineAt: '2099-01-02T03:04:05.000Z',
+          approverDeadlineAt: '2099-01-05T06:07:08.000Z',
+        });
+      });
+  });
+
   it('publishes the server-owned 2026 board, status joins, and comparison presentation', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {

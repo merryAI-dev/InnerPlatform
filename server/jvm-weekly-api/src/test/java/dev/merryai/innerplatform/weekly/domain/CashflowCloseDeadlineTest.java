@@ -3,6 +3,7 @@ package dev.merryai.innerplatform.weekly.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.time.YearMonth;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,6 +29,17 @@ class CashflowCloseDeadlineTest {
     void targetMonthDeadlineMatchesTheBffTable(String yearMonth, String expected) {
         assertThat(CashflowCloseDeadline.forTargetMonth(YearMonth.parse(yearMonth)))
             .isEqualTo(LocalDate.parse(expected));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "2026-08, 2026-09-10T15:00:00Z",
+        "2026-12, 2027-01-10T15:00:00Z",
+        "2024-02, 2024-03-10T15:00:00Z",
+    })
+    void settlementDeadlineEndsAtMidnightAfterTheFinalDeadlineDay(String yearMonth, String expected) {
+        assertThat(CashflowCloseDeadline.settlementDeadlineAt(YearMonth.parse(yearMonth)))
+            .isEqualTo(Instant.parse(expected));
     }
 
     @Test

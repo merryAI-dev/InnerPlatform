@@ -3,6 +3,8 @@ package dev.merryai.innerplatform.weekly.api;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
+import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
+import dev.merryai.innerplatform.weekly.domain.ApproverDeadlineCalculator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
@@ -44,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.time.YearMonth;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -582,7 +585,16 @@ public class WeeklyExpenseController {
             new CashflowMonthDashboardSourceResponse.ActionCapability(
                 result.reopenRequest().enabled(),
                 result.reopenRequest().reasonCode()
-            )
+            ),
+            monthSettlementDeadlines(yearMonth)
+        );
+    }
+
+    private static CashflowMonthDashboardSourceResponse.MonthSettlementDeadlines monthSettlementDeadlines(String yearMonth) {
+        YearMonth month = YearMonth.parse(yearMonth);
+        return new CashflowMonthDashboardSourceResponse.MonthSettlementDeadlines(
+            CashflowCloseDeadline.settlementDeadlineAt(month).toString(),
+            ApproverDeadlineCalculator.monthly(yearMonth, 3).toString()
         );
     }
 
