@@ -211,24 +211,30 @@ function formatPortalTimelineDate(value?: string | null): string {
   }).format(new Date(at));
 }
 
+/*
+ * 색은 같은 구역의 CashflowScheduleBar 와 한 팔레트다(DESIGN.md).
+ * 완료 #17324D · 진행 #0176D3 · 초과 #e11d48 · 대기 회색. 타임라인이 자기만의
+ * 색(갈색 amber 계열, 비브랜드 네이비)을 따로 가지면 한 화면에 디자인이 둘이 된다.
+ */
 function portalTimelineDotClass(tone: PortalTimelineTone): string {
-  if (tone === 'closed' || tone === 'success') return 'border-emerald-600 bg-emerald-600 text-white';
+  if (tone === 'closed' || tone === 'success') return 'border-[#17324D] bg-[#17324D] text-white';
   if (tone === 'danger') return 'border-red-600 bg-red-600 text-white';
-  if (tone === 'warning') return 'border-amber-500 bg-amber-50 text-amber-800';
+  if (tone === 'warning') return 'border-[#17324D] bg-white text-[#17324D] ring-2 ring-[#17324D]/15';
   return 'border-slate-300 bg-white text-slate-400';
 }
 
 function portalTimelineTextClass(tone: PortalTimelineTone): string {
   if (tone === 'danger') return 'font-semibold text-red-700';
-  if (tone === 'closed' || tone === 'success') return 'font-semibold text-emerald-700';
-  if (tone === 'warning') return 'font-semibold text-amber-800';
+  // 완료는 점(✓)이 이미 말한다. 글자까지 색을 더하지 않는다.
+  if (tone === 'closed' || tone === 'success') return 'font-semibold text-slate-700';
+  if (tone === 'warning') return 'font-semibold text-[#17324D]';
   return 'text-slate-500';
 }
 
 function portalTimelineConnectorClass(tone: PortalTimelineTone): string {
-  if (tone === 'closed' || tone === 'success') return 'bg-emerald-300';
+  if (tone === 'closed' || tone === 'success') return 'bg-[#17324D]/25';
   if (tone === 'danger') return 'bg-red-300';
-  if (tone === 'warning') return 'bg-amber-300';
+  if (tone === 'warning') return 'bg-[#17324D]/25';
   return 'bg-slate-200';
 }
 
@@ -241,10 +247,10 @@ function portalScheduleStepStateLabel(state: ScheduleStep['state']): string {
 }
 
 function portalScheduleStepClass(state: ScheduleStep['state'], suppressOverdue = false): string {
-  if (state === 'done') return 'text-emerald-700';
+  if (state === 'done') return 'text-slate-700';
   if (state === 'done_late' || state === 'overdue') return suppressOverdue ? 'text-slate-500' : 'text-red-700';
-  if (state === 'current' || state === 'upcoming') return 'text-amber-800';
-  return 'text-slate-500';
+  if (state === 'current') return 'text-[#17324D]';
+  return 'text-slate-400';
 }
 
 function logCashflowSettlement(input: {
@@ -2894,7 +2900,7 @@ export function CashflowProjectSheet({
 
   function renderPortalSettlementPanel() {
     const renderScheduleDetails = (steps: ScheduleStep[], suppressOverdue = false) => (
-      <div className="mt-3 space-y-2 text-left">
+      <div className="mt-3 space-y-2 text-center">
         {steps.map((step) => (
           <div key={step.key} className="text-[12px] leading-4 text-slate-600">
             <div className={`font-semibold ${portalScheduleStepClass(step.state, suppressOverdue)}`}>
@@ -2906,12 +2912,19 @@ export function CashflowProjectSheet({
       </div>
     );
 
-    const renderWeeklyAction = () => (
+    const renderWeeklyAction = () => {
+      /*
+       * 할 동작이 없으면 버튼을 그리지 않는다. 완료 요청도 확정도 끝난 주에 비활성
+       * "주간 정산 확인 중" 버튼이 남으면, 위 단계에 "완료" 라고 적어 놓고 아래에서
+       * 아직 확인 중이라고 말하는 셈이다. "확인 중" 은 로딩일 때만 참이다.
+       */
+      if (!monthCloseLoading && !portalWeeklyAction && !portalWeeklyActionAmbiguous) return null;
+      return (
       <Button
         type="button"
         size="sm"
         variant={portalWeeklyAction === 'confirm' ? 'default' : 'outline'}
-        className={`mt-3 min-h-11 w-full rounded-md px-3 text-[12px] font-semibold ${portalWeeklyAction === 'confirm' ? 'bg-[#17324D] text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
+        className={`mt-3 min-h-8 w-full rounded-md px-3 text-[12px] font-semibold ${portalWeeklyAction === 'confirm' ? 'bg-[#17324D] text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
         disabled={monthCloseLoading || portalWeeklyButtonBusy || !portalWeeklyAction}
         aria-label={`${portalWeeklyButtonLabel} · ${currentPresentationWeek?.label || '현재 주차'}`}
         title={portalWeeklyActionAmbiguous ? '여러 주간 정산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
@@ -2924,16 +2937,20 @@ export function CashflowProjectSheet({
         {portalWeeklyButtonBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : portalWeeklyAction === 'withdraw' ? <Undo2 className="mr-1 h-3 w-3" /> : portalWeeklyAction === 'confirm' ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
         {portalWeeklyButtonLabel}
       </Button>
-    );
+      );
+    };
 
-    const renderMonthlyAction = () => (
+    const renderMonthlyAction = () => {
+      // 주간과 같은 이유. 재오픈 검토자는 예외다(검토 버튼이 항상 있어야 한다).
+      if (!monthCloseLoading && !portalMonthlyAction && !portalMonthlyActionAmbiguous && !canReviewReopen) return null;
+      return (
       <div className="mt-3 flex flex-wrap gap-2">
         {!monthCloseError && !canReviewReopen ? (
           <Button
             type="button"
             size="sm"
             variant={portalMonthlyAction === 'request' ? 'default' : 'outline'}
-            className={`min-h-11 w-full rounded-md px-3 text-[12px] font-semibold ${portalMonthlyAction === 'request' ? 'bg-[#17324D] text-white shadow-none hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
+            className={`min-h-8 w-full rounded-md px-3 text-[12px] font-semibold ${portalMonthlyAction === 'request' ? 'bg-[#17324D] text-white shadow-none hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
             disabled={monthCloseBusy || monthCloseLoading || !portalMonthlyAction}
             aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}
             title={portalMonthlyActionAmbiguous ? '여러 월결산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
@@ -2955,12 +2972,14 @@ export function CashflowProjectSheet({
           </Button>
         ) : !monthCloseError && canReviewReopen ? (
           <>
-            <Button type="button" size="sm" className="min-h-11 flex-1 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
-            <Button type="button" size="sm" variant="outline" className="min-h-11 flex-1 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
+            <Button type="button" size="sm" className="min-h-8 flex-1 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
+            <Button type="button" size="sm" variant="outline" className="min-h-8 flex-1 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
           </>
         ) : null}
       </div>
-    );
+      );
+    };
+
 
     return (
       <section data-cashflow-settlement-actions className="overflow-hidden rounded-lg border border-border bg-border">

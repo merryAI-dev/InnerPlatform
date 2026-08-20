@@ -2,28 +2,28 @@ import { Check } from 'lucide-react';
 import type { ScheduleStep, ScheduleStepState } from './cashflow-schedule-steps';
 
 // 정산 일정 진행 바. 단계 판정은 cashflow-schedule-steps 가 하고 여기서는 그리기만 한다.
-// 색은 DESIGN.md 계열만 쓴다 - 참고 이미지의 보라 계열은 금지 색이다.
+// 색은 캐시플로 ERP 언어(#17324D 네이비 · red 는 오류에만)를 따른다. 보라 계열은 금지 색이다.
 const DOT: Record<ScheduleStepState, string> = {
-  done: 'border-[#001e46] bg-[#001e46] text-white',
-  done_late: 'border-[#001e46] bg-[#001e46] text-white',
-  current: 'border-[#0176D3] bg-white text-[#0176D3] ring-2 ring-[#0176D3]/20',
-  overdue: 'border-[#e11d48] bg-[#e11d48] text-white',
+  done: 'border-[#17324D] bg-[#17324D] text-white',
+  done_late: 'border-[#17324D] bg-[#17324D] text-white',
+  current: 'border-[#17324D] bg-white text-[#17324D] ring-2 ring-[#17324D]/15',
+  overdue: 'border-red-600 bg-red-600 text-white',
   upcoming: 'border-slate-300 bg-white text-slate-400',
 };
 
 const LABEL: Record<ScheduleStepState, string> = {
   done: 'text-slate-700',
   done_late: 'text-slate-700',
-  current: 'font-semibold text-[#0176D3]',
-  overdue: 'font-semibold text-[#e11d48]',
+  current: 'font-semibold text-[#17324D]',
+  overdue: 'font-semibold text-red-700',
   upcoming: 'text-slate-400',
 };
 
 const DETAIL: Record<ScheduleStepState, string> = {
   done: 'text-slate-500',
-  done_late: 'text-[#e11d48]',
+  done_late: 'text-red-700',
   current: 'text-slate-600',
-  overdue: 'text-[#e11d48]',
+  overdue: 'text-red-700',
   upcoming: 'text-slate-400',
 };
 
@@ -44,7 +44,7 @@ export function CashflowScheduleBarCompact({ steps, className = '' }: { steps: S
       <div className="flex items-center gap-1">
         {steps.map((step, index) => (
           <span key={step.key} className="flex items-center gap-1">
-            {index > 0 ? <span aria-hidden="true" className={`h-px w-4 ${steps[index - 1].state === 'upcoming' ? 'bg-slate-200' : 'bg-[#001e46]/30'}`} /> : null}
+            {index > 0 ? <span aria-hidden="true" className={`h-px w-4 ${steps[index - 1].state === 'upcoming' ? 'bg-slate-200' : 'bg-[#17324D]/30'}`} /> : null}
             <span
               title={`${step.label} · ${STATE_TEXT[step.state]}${step.detail ? ` · ${step.detail}` : ''}`}
               className={`inline-flex h-4 w-4 items-center justify-center rounded-full border ${DOT[step.state]}`}
@@ -71,7 +71,7 @@ export function CashflowScheduleBar({ steps, className = '' }: { steps: Schedule
           {index > 0 ? (
             <span
               aria-hidden="true"
-              className={`mt-2.5 h-px flex-1 ${steps[index - 1].state === 'upcoming' ? 'bg-slate-200' : 'bg-[#001e46]/30'}`}
+              className={`mt-2.5 h-px flex-1 ${steps[index - 1].state === 'upcoming' ? 'bg-slate-200' : 'bg-[#17324D]/30'}`}
             />
           ) : null}
           <div className="flex min-w-0 items-start gap-1.5">
