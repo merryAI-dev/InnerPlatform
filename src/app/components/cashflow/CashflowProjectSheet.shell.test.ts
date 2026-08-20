@@ -589,20 +589,26 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(operations).toContain('monthCloseActions?.requestMonthClose.enabled');
     expect(operations).not.toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
     expect(operations).toContain('monthCloseNotice ? (');
-    expect(operations).toContain('closeDeadlineAt');
+    expect(source).toContain('closeDeadlineAt');
     expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
   });
 
-  it('keeps the portal-only single-surface actions and two-month progress display', () => {
+  it('keeps the portal-only single-surface actions and server-owned settlement timeline', () => {
+    const portal = source.slice(source.indexOf('function renderPortalSettlementPanel()'), source.indexOf('function renderOperationsPanel()'));
     expect(source).toContain('portalMode');
-    expect(source).toContain('data-cashflow-portal-month-progress');
+    expect(source).toContain('data-cashflow-portal-settlement-timeline');
     expect(source).toContain('portalWeeklyAction');
     expect(source).toContain('portalMonthlyAction');
-    expect(source).toContain('monthCloseStatuses?.find');
+    expect(source).not.toContain('monthCloseStatuses?.find');
+    expect(source).toContain('tone: week.surfaceTone');
+    expect(source).toContain('cashflowPresentation?.monthClose');
+    expect(source).toContain('project?.contractEnd');
     expect(source).toContain('aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}');
-    expect(source).toContain('!portalMode && monthScheduleSteps.length > 0');
+    expect(source).toContain('monthScheduleSteps.length > 0');
     expect(source).toContain("if (portalMode) {");
     expect(source).toContain('월 결산 재오픈 요청을 보냈어요.');
+    expect(portal).toContain('{!monthCloseError && !canReviewReopen ? (');
+    expect(portal).toContain(') : !monthCloseError && canReviewReopen ? (');
   });
 
   it('guides a blocked month close to the specific next action and records safe developer diagnostics', () => {

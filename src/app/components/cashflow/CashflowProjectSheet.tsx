@@ -58,6 +58,7 @@ import {
   type CashflowMonthCloseDraftInput,
   type CashflowMonthCloseResult,
   type CashflowMonthCloseRequest,
+  type CashflowMonthClosePresentation,
   type CashflowMonthClosePresentationWeek,
   type CashflowOperationsRate,
   type CashflowDeadlineSummary,
@@ -104,8 +105,6 @@ import { buildSheetApplyNotice } from './cashflow-sheet-apply-notice';
 import { pickCashflowMonthCloseNotice } from './cashflow-month-close-notice';
 import { CashflowScheduleBar } from './CashflowScheduleBar';
 import { buildScheduleSteps, formatDeadlineLabel } from './cashflow-schedule-steps';
-import { resolvePortalMonthlyCloseProgress } from './cashflow-portal-settlement';
-import { addMonthsToYearMonth } from '../../platform/business-days';
 
 type CashflowOpsTone = 'neutral' | 'info' | 'warning' | 'danger' | 'success';
 
@@ -187,6 +186,45 @@ function cashflowSurfaceClass(tone?: CashflowMonthClosePresentationWeek['surface
             : tone === 'unavailable' ? 'bg-red-50'
               : '';
   return overdue ? `${bg} ring-2 ring-inset ring-red-400`.trim() : bg;
+}
+
+type PortalTimelineTone = CashflowMonthClosePresentationWeek['surfaceTone'] | CashflowMonthClosePresentation['monthClose']['tone'];
+
+type PortalTimelineNode = {
+  key: string;
+  label: string;
+  statusLabel: string;
+  tone: PortalTimelineTone;
+  current: boolean;
+};
+
+function formatPortalTimelineDate(value?: string | null): string {
+  const at = Date.parse(String(value || ''));
+  if (!Number.isFinite(at)) return '확인 불가';
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  }).format(new Date(at));
+}
+
+function portalTimelineDotClass(tone: PortalTimelineTone, current: boolean): string {
+  if (tone === 'closed' || tone === 'success') return 'border-[#001e46] bg-[#001e46] text-white';
+  if (tone === 'danger') return 'border-[#e11d48] bg-[#e11d48] text-white';
+  if (tone === 'unavailable') return 'border-red-300 bg-red-50 text-red-600';
+  if (current || tone === 'current') return 'border-[#0176D3] bg-white text-[#0176D3] ring-2 ring-[#0176D3]/20';
+  if (tone === 'warning') return 'border-[#B7791F] bg-white text-[#B7791F]';
+  return 'border-slate-300 bg-white text-slate-400';
+}
+
+function portalTimelineTextClass(tone: PortalTimelineTone, current: boolean): string {
+  if (tone === 'danger' || tone === 'unavailable') return 'text-red-700';
+  if (current || tone === 'current') return 'font-bold text-[#0176D3]';
+  if (tone === 'closed' || tone === 'success') return 'font-semibold text-slate-700';
+  if (tone === 'warning') return 'font-semibold text-[#8A5A00]';
+  return 'text-slate-500';
 }
 
 function logCashflowSettlement(input: {
@@ -1289,43 +1327,40 @@ export function CashflowProjectSheet({
     });
   }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthRequestProgress, monthCloseResult?.dashboard?.summary]);
 
-  const portalMonthCloseProgressRows = useMemo(() => {
+  const portalTimelineNodes = useMemo<PortalTimelineNode[]>(() => {
     if (!portalMode) return [];
-    const dashboard = monthCloseResult?.dashboard;
-    const summary = dashboard?.summary;
-    const nextYearMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)
-      ? addMonthsToYearMonth(yearMonth, 1)
-      : null;
-    const next = nextYearMonth
-      ? dashboard?.monthCloseStatuses?.find((entry) => entry.yearMonth === nextYearMonth)
-      : undefined;
-
+    const weeklyNodes = (cashflowPresentation?.weeks || [])
+      .filter((week) => week.yearMonth === yearMonth)
+      .map((week): PortalTimelineNode => {
+        return {
+          key: `weekly-${week.yearMonth}-${week.weekNo}`,
+          label: week.label,
+          statusLabel: week.statusLabel || '확인 불가',
+          tone: week.surfaceTone,
+          current: week.isCurrent,
+        };
+      });
+    const monthlyPresentation = cashflowPresentation?.monthClose;
+    const monthlyNode: PortalTimelineNode = {
+      key: `monthly-${yearMonth}`,
+      label: `${yearMonth.slice(5)}월 월결산`,
+      statusLabel: monthlyPresentation?.statusLabel || '확인 불가',
+      tone: monthlyPresentation?.tone || 'neutral',
+      current: false,
+    };
+    const projectEnd = project?.contractEnd;
     return [
+      ...weeklyNodes,
+      monthlyNode,
       {
-        periodLabel: '이번 달',
-        yearMonth,
-        progress: resolvePortalMonthlyCloseProgress({
-          available: Boolean(dashboard),
-          closeStatus: monthCloseResult?.status,
-          requestStatus: monthCloseRequest?.status,
-        }),
-        closeDeadlineAt: summary?.closeDeadlineAt || null,
-        approverDeadlineAt: summary?.approverDeadlineAt || null,
-        overdue: summary?.late === true,
-      },
-      {
-        periodLabel: '다음 달',
-        yearMonth: nextYearMonth,
-        progress: resolvePortalMonthlyCloseProgress({
-          available: Boolean(next),
-          closeStatus: next?.status,
-        }),
-        closeDeadlineAt: next?.closeDeadlineAt || null,
-        approverDeadlineAt: next?.approverDeadlineAt || null,
-        overdue: next?.closeOverdue === true,
+        key: 'project-end',
+        label: '프로젝트 종료',
+        statusLabel: formatPortalTimelineDate(projectEnd),
+        tone: projectEnd ? 'default' : 'unavailable',
+        current: false,
       },
     ];
-  }, [monthCloseRequest?.status, monthCloseResult?.dashboard, monthCloseResult?.status, portalMode, yearMonth]);
+  }, [cashflowPresentation?.monthClose, cashflowPresentation?.weeks, portalMode, project?.contractEnd, yearMonth]);
 
   const weeklyEnabledActions = [
     monthCloseActions?.completeWeekly.enabled ? 'complete' : null,
@@ -2834,6 +2869,151 @@ export function CashflowProjectSheet({
     );
   }
 
+  function renderPortalSettlementPanel() {
+    const currentMonth = {
+      scheduleSteps: monthScheduleSteps,
+      closeDeadlineAt: monthCloseResult?.dashboard?.summary?.closeDeadlineAt || null,
+      approverDeadlineAt: monthCloseResult?.dashboard?.summary?.approverDeadlineAt || null,
+    };
+    const deadlineNow = new Date().toISOString();
+    return (
+      <section data-cashflow-settlement-actions className="overflow-hidden rounded-lg border border-border bg-border">
+        <div className="bg-card px-4 py-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <div className="text-[15px] font-bold text-card-foreground">결산 · {yearMonth} 기준</div>
+              <div className="mt-1 text-[12px] text-muted-foreground">주간·월간 결산 일정을 한 줄에서 확인합니다.</div>
+            </div>
+            <span className="text-[12px] text-muted-foreground">프로젝트 종료일 고정</span>
+          </div>
+
+          <div data-cashflow-portal-settlement-timeline className="mt-4 overflow-x-auto pb-1">
+            <ol aria-label={`${yearMonth} 결산 일정`} className="flex min-w-max items-start px-2">
+              {portalTimelineNodes.map((node, index) => (
+                <li key={node.key} className={`flex items-start ${index > 0 ? 'flex-1' : ''}`}>
+                  {index > 0 ? <span aria-hidden="true" className={`mt-3 h-px min-w-8 flex-1 ${portalTimelineNodes[index - 1].tone === 'default' ? 'bg-slate-200' : 'bg-[#001e46]/30'}`} /> : null}
+                  <div className="w-[118px] shrink-0 text-center">
+                    <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-[12px] font-bold ${portalTimelineDotClass(node.tone, node.current)}`}>
+                      {node.tone === 'closed' || node.tone === 'success' ? '✓' : node.current ? '↓' : node.tone === 'danger' ? '!' : node.tone === 'unavailable' ? '?' : '·'}
+                    </span>
+                    <div className={`mt-1 text-[12px] leading-4 ${portalTimelineTextClass(node.tone, node.current)}`}>
+                      {node.label}
+                    </div>
+                    <div className={`mt-0.5 text-[12px] leading-4 ${portalTimelineTextClass(node.tone, node.current)}`}>
+                      {node.statusLabel}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {monthCloseSectionErrors.length > 0 ? (
+            <div role="status" className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-accent px-3 py-2 text-[12px] text-card-foreground">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                일부 정보를 불러오지 못했습니다
+                {` (${monthCloseSectionErrors.map((entry) => entry.cause ? `${entry.label}: ${entry.cause}` : entry.label).join(', ')})`}
+                . 관련 판정은 다시 조회하기 전까지 차단됩니다.
+              </span>
+              <button type="button" className="font-semibold underline underline-offset-2" disabled={monthCloseLoading} onClick={() => { void loadCashflowMonthClose(); }}>
+                다시 불러오기
+              </button>
+            </div>
+          ) : null}
+
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-bold text-card-foreground">이번 주 정산</div>
+                <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
+                  {currentPresentationWeek ? `${currentPresentationWeek.label} · ${currentPresentationWeek.statusLabel}` : '확인 불가'}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={portalWeeklyAction === 'confirm' ? 'default' : 'outline'}
+                className={`h-8 min-h-11 shrink-0 rounded-md px-3 text-[12px] font-semibold ${portalWeeklyAction === 'confirm' ? 'bg-[#17324D] text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
+                disabled={monthCloseLoading || portalWeeklyButtonBusy || !portalWeeklyAction}
+                aria-label={`${portalWeeklyButtonLabel} · ${currentPresentationWeek?.label || '현재 주차'}`}
+                title={portalWeeklyActionAmbiguous ? '여러 주간 정산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
+                onClick={() => {
+                  if (portalWeeklyAction === 'complete') return handleOpenWeeklyCompletion();
+                  if (portalWeeklyAction === 'withdraw') return void handleWithdrawWeeklyUpdate();
+                  if (portalWeeklyAction === 'confirm') return void handleConfirmWeeklyUpdate();
+                }}
+              >
+                {portalWeeklyButtonBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : portalWeeklyAction === 'withdraw' ? <Undo2 className="mr-1 h-3 w-3" /> : portalWeeklyAction === 'confirm' ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
+                {portalWeeklyButtonLabel}
+              </Button>
+            </div>
+            {weeklyScheduleSteps.length > 0 ? <CashflowScheduleBar steps={weeklyScheduleSteps} className="mt-3" /> : null}
+            {weeklyWithdrawError ? <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800">{weeklyWithdrawError}</div> : null}
+            {weeklyActionNotice && !weeklyWithdrawError ? <div role="status" className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] leading-5 text-emerald-900">{weeklyActionNotice}</div> : null}
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
+              <span>누적 미준수 <strong className="ml-1 text-red-700">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.missedCount, '회')}</strong></span>
+              <span>기한 내 완료 <strong className="ml-1 text-primary">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.completedCount, '회')}</strong></span>
+              <button type="button" className="font-semibold text-[#17324D] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#17324D]" onClick={() => setWeeklyHistoryOpen(true)}>자세히</button>
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="text-[13px] font-bold text-card-foreground">이번 달 월결산</div>
+                  <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
+                </div>
+                {monthCloseNotice ? <div className={`mt-1 text-[12px] leading-4 ${monthCloseNotice.tone === 'attention' ? 'font-semibold text-red-700' : 'text-muted-foreground'}`}>{monthCloseNotice.text}</div> : null}
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {!monthCloseError && !canReviewReopen ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={portalMonthlyAction === 'request' ? 'default' : 'outline'}
+                    className={`h-8 min-h-11 rounded-md px-3 text-[12px] font-semibold ${portalMonthlyAction === 'request' ? 'bg-[#17324D] text-white shadow-none hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
+                    disabled={monthCloseBusy || monthCloseLoading || !portalMonthlyAction}
+                    aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}
+                    title={portalMonthlyActionAmbiguous ? '여러 월결산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
+                    onClick={() => {
+                      if (portalMonthlyAction === 'request') return handleOpenMonthCloseReview();
+                      if (portalMonthlyAction === 'withdraw') {
+                        setMonthCloseWithdrawReason('');
+                        setMonthCloseWithdrawOpen(true);
+                        return;
+                      }
+                      if (portalMonthlyAction === 'reopen') {
+                        setReopenReason('');
+                        setReopenAction('request');
+                      }
+                    }}
+                  >
+                    {portalMonthlyButtonBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <CheckCircle2 className="mr-1 h-3 w-3" />}
+                    {portalMonthlyButtonLabel}
+                  </Button>
+                ) : !monthCloseError && canReviewReopen ? (
+                  <>
+                    <Button type="button" size="sm" className="min-h-11 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
+                    <Button type="button" size="sm" variant="outline" className="min-h-11 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            {monthCloseBlockers.length > 0 ? <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800">월 결산을 진행할 수 없어요: {monthCloseBlockers.map((blocker) => blocker.message).join(' · ')}</div> : null}
+            {currentMonth?.scheduleSteps.length ? <CashflowScheduleBar steps={currentMonth.scheduleSteps} className="mt-3" /> : null}
+            <div className="mt-2 grid gap-1 text-[12px] leading-4 text-slate-500 sm:grid-cols-2 sm:gap-2">
+              <span>실무자 마감 · {formatDeadlineLabel(currentMonth?.closeDeadlineAt, deadlineNow) || '확인 불가'}</span>
+              <span>조직장 승인 · {formatDeadlineLabel(currentMonth?.approverDeadlineAt, deadlineNow) || '확인 불가'}</span>
+            </div>
+            {monthCloseRequestError ? <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-red-700"><span>{monthCloseRequestError}</span><button type="button" className="font-semibold underline underline-offset-2" onClick={() => { void loadMonthCloseRequest(); }}>다시 불러오기</button></div> : null}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function renderOperationsPanel() {
     const statusBadgeLabel = opsSummary?.status.label || (monthCloseLoading ? '서버 검증 중' : '확인 불가');
     const statusTone: CashflowOpsTone = opsSummary?.status.tone || (monthCloseLoading ? 'neutral' : 'danger');
@@ -2941,58 +3121,8 @@ export function CashflowProjectSheet({
             </div>
           ) : null}
 
+          {portalMode ? renderPortalSettlementPanel() : (
           <section data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              {portalMode ? (
-                <div className="col-span-full bg-card px-4 py-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div>
-                      <div className="text-[13px] font-bold text-card-foreground">결산 진행</div>
-                      <div className="mt-1 text-[12px] text-muted-foreground">주간 정산과 월결산은 별도 업무로 진행됩니다.</div>
-                    </div>
-                    <span className="text-[12px] text-muted-foreground">월결산 일정 기준</span>
-                  </div>
-                  <div data-cashflow-portal-month-progress className="mt-3 grid gap-3 sm:grid-cols-2">
-                    {portalMonthCloseProgressRows.map((entry) => {
-                      const progressWidth = entry.progress.percent === null ? 0 : entry.progress.percent;
-                      const progressClass = entry.progress.tone === 'success'
-                        ? 'bg-emerald-600'
-                        : entry.progress.tone === 'warning'
-                          ? 'bg-[#B7791F]'
-                          : 'bg-[#0176D3]';
-                      const deadlineNow = new Date().toISOString();
-                      return (
-                        <div
-                          key={`${entry.periodLabel}-${entry.yearMonth || 'unknown'}`}
-                          className={`rounded-md border bg-white px-3 py-2.5 ${entry.overdue ? 'border-red-300' : 'border-slate-200'}`}
-                        >
-                          <div className="flex items-center justify-between gap-2 text-[12px]">
-                            <span className="font-semibold text-slate-800">
-                              {entry.periodLabel} · {entry.yearMonth || '확인 불가'} 월결산
-                            </span>
-                            <span className={entry.progress.tone === 'success' ? 'font-semibold text-emerald-700' : entry.overdue ? 'font-semibold text-red-700' : 'text-slate-500'}>
-                              {entry.progress.label}
-                            </span>
-                          </div>
-                          <div
-                            className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"
-                            role="progressbar"
-                            aria-label={`${entry.periodLabel} ${entry.yearMonth || ''} 월결산 진행률`}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={entry.progress.percent ?? undefined}
-                          >
-                            <div className={`h-full rounded-full transition-[width] ${progressClass}`} style={{ width: `${progressWidth}%` }} />
-                          </div>
-                          <div className="mt-2 grid gap-1 text-[12px] leading-4 text-slate-500 sm:grid-cols-2 sm:gap-2">
-                            <span>실무자 마감 · {formatDeadlineLabel(entry.closeDeadlineAt, deadlineNow) || '확인 불가'}</span>
-                            <span>조직장 승인 · {formatDeadlineLabel(entry.approverDeadlineAt, deadlineNow) || '확인 불가'}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
               <div className="bg-card px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -3003,25 +3133,7 @@ export function CashflowProjectSheet({
                         : '확인 불가'}
                     </div>
                   </div>
-                  {portalMode ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={portalWeeklyAction === 'confirm' ? 'default' : 'outline'}
-                      className={`h-8 min-h-11 shrink-0 rounded-md px-3 text-[12px] font-semibold ${portalWeeklyAction === 'confirm' ? 'bg-[#17324D] text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
-                      disabled={monthCloseLoading || portalWeeklyButtonBusy || !portalWeeklyAction}
-                      aria-label={`${portalWeeklyButtonLabel} · ${currentPresentationWeek?.label || '현재 주차'}`}
-                      title={portalWeeklyActionAmbiguous ? '여러 주간 정산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
-                      onClick={() => {
-                        if (portalWeeklyAction === 'complete') return handleOpenWeeklyCompletion();
-                        if (portalWeeklyAction === 'withdraw') return void handleWithdrawWeeklyUpdate();
-                        if (portalWeeklyAction === 'confirm') return void handleConfirmWeeklyUpdate();
-                      }}
-                    >
-                      {portalWeeklyButtonBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : portalWeeklyAction === 'withdraw' ? <Undo2 className="mr-1 h-3 w-3" /> : portalWeeklyAction === 'confirm' ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
-                      {portalWeeklyButtonLabel}
-                    </Button>
-                  ) : monthCloseActions ? (
+                  {monthCloseActions ? (
                     <Button
                       type="button"
                       size="sm"
@@ -3034,7 +3146,7 @@ export function CashflowProjectSheet({
                       주간 정산 완료 요청
                     </Button>
                   ) : null}
-                  {!portalMode && monthCloseActions?.reopenWeekly.enabled ? (
+                  {monthCloseActions?.reopenWeekly.enabled ? (
                     <Button
                       type="button"
                       size="sm"
@@ -3047,7 +3159,7 @@ export function CashflowProjectSheet({
                       요청 회수
                     </Button>
                   ) : null}
-                  {!portalMode && monthCloseActions?.confirmWeekly.enabled ? (
+                  {monthCloseActions?.confirmWeekly.enabled ? (
                     <Button
                       type="button"
                       size="sm"
@@ -3135,38 +3247,7 @@ export function CashflowProjectSheet({
                     ) : null}
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {portalMode && !canReviewReopen ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={portalMonthlyAction === 'request' ? 'default' : 'outline'}
-                        className={`h-8 min-h-11 rounded-md px-3 text-[12px] font-semibold ${portalMonthlyAction === 'request' ? 'bg-[#17324D] text-white shadow-none hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
-                        disabled={monthCloseBusy || monthCloseLoading || !portalMonthlyAction}
-                        aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}
-                        title={portalMonthlyActionAmbiguous ? '여러 월결산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
-                        onClick={() => {
-                          if (portalMonthlyAction === 'request') return handleOpenMonthCloseReview();
-                          if (portalMonthlyAction === 'withdraw') {
-                            setMonthCloseWithdrawReason('');
-                            setMonthCloseWithdrawOpen(true);
-                            return;
-                          }
-                          if (portalMonthlyAction === 'reopen') {
-                            setReopenReason('');
-                            setReopenAction('request');
-                          }
-                        }}
-                      >
-                        {portalMonthlyButtonBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <CheckCircle2 className="mr-1 h-3 w-3" />}
-                        {portalMonthlyButtonLabel}
-                      </Button>
-                    ) : portalMode && !monthCloseError && canReviewReopen ? (
-                      <>
-                        <Button type="button" size="sm" className="min-h-11 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
-                        <Button type="button" size="sm" variant="outline" className="min-h-11 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
-                      </>
-                    ) : null}
-                    {!portalMode && monthCloseActions?.requestMonthClose.enabled ? (
+                    {monthCloseActions?.requestMonthClose.enabled ? (
                       <Button
                         type="button"
                         size="sm"
@@ -3178,7 +3259,7 @@ export function CashflowProjectSheet({
                         {monthCloseActions.requestMonthClose.label}
                       </Button>
                     ) : null}
-                    {!portalMode && monthCloseActions?.withdrawMonthClose.enabled ? (
+                    {monthCloseActions?.withdrawMonthClose.enabled ? (
                       <Button
                         type="button"
                         size="sm"
@@ -3190,12 +3271,12 @@ export function CashflowProjectSheet({
                         결재 요청 회수
                       </Button>
                     ) : null}
-                    {!portalMode && !monthCloseError && monthCloseActions?.requestMonthReopen.enabled ? (
+                    {!monthCloseError && monthCloseActions?.requestMonthReopen.enabled ? (
                       <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-[#17324D]" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                         재오픈 요청
                       </Button>
                     ) : null}
-                    {!portalMode && !monthCloseError && canReviewReopen ? (
+                    {!monthCloseError && canReviewReopen ? (
                       <>
                         <Button type="button" size="sm" className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
                         <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
@@ -3203,9 +3284,10 @@ export function CashflowProjectSheet({
                     ) : null}
                   </div>
                 </div>
-                {!portalMode && monthScheduleSteps.length > 0 ? <CashflowScheduleBar steps={monthScheduleSteps} className="mt-3" /> : null}
+                {monthScheduleSteps.length > 0 ? <CashflowScheduleBar steps={monthScheduleSteps} className="mt-3" /> : null}
               </div>
           </section>
+          )}
 
           {cashflowSheetMirror?.lastRefreshError?.message ? (
             <div className="flex items-start justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
