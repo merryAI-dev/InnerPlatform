@@ -589,8 +589,20 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(operations).toContain('monthCloseActions?.requestMonthClose.enabled');
     expect(operations).not.toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
     expect(operations).toContain('monthCloseNotice ? (');
-    expect(operations).not.toContain('closeDeadline');
+    expect(operations).toContain('closeDeadlineAt');
     expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
+  });
+
+  it('keeps the portal-only single-surface actions and two-month progress display', () => {
+    expect(source).toContain('portalMode');
+    expect(source).toContain('data-cashflow-portal-month-progress');
+    expect(source).toContain('portalWeeklyAction');
+    expect(source).toContain('portalMonthlyAction');
+    expect(source).toContain('monthCloseStatuses?.find');
+    expect(source).toContain('aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}');
+    expect(source).toContain('!portalMode && monthScheduleSteps.length > 0');
+    expect(source).toContain("if (portalMode) {");
+    expect(source).toContain('월 결산 재오픈 요청을 보냈어요.');
   });
 
   it('guides a blocked month close to the specific next action and records safe developer diagnostics', () => {
