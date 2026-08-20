@@ -192,7 +192,7 @@ type PortalTimelineTone = CashflowMonthClosePresentationWeek['surfaceTone'] | Ca
 
 type PortalTimelineNode = {
   key: string;
-  kind: 'weekly' | 'monthly' | 'project-end';
+  kind: 'weekly' | 'monthly' | 'monthly-executed' | 'project-end';
   label: string;
   statusLabel: string;
   tone: PortalTimelineTone;
@@ -1388,6 +1388,41 @@ export function CashflowProjectSheet({
     });
   }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthRequestProgress, monthCloseResult?.dashboard?.summary]);
 
+  /*
+   * 이 달을 덮는 회차가 없으면 이 달은 아직 결산 전이다. 지난 회차의 "완료" 배지를
+   * 빌려 쓰면 배지는 완료인데 아래 단계는 진행 중이라 화면이 스스로 모순된다.
+   */
+  const monthOwnPresentation = useMemo(() => {
+    // 라벨은 서버 표현을 그대로 쓴다. 이 달을 덮는 회차가 있을 때만 그 표현이 이 달의 것이다.
+    if (monthCoveredByRequest) {
+      return {
+        statusLabel: cashflowPresentation?.monthClose.statusLabel || '확인 불가',
+        tone: cashflowPresentation?.monthClose.tone || 'neutral',
+      };
+    }
+    return { statusLabel: '결산 전', tone: 'neutral' as const };
+  }, [cashflowPresentation?.monthClose, monthCoveredByRequest]);
+
+  /*
+   * 이 달에 실행됐지만 이 달을 덮지 않는 회차(예: 8월에 돌린 7월분 누적 결산).
+   * 대상 월이 다르므로 이 달의 마감이 아니라 그 회차의 완료 사실만 그린다.
+   */
+  const executedCycleSteps = useMemo(() => {
+    if (monthCoveredByRequest || !monthCloseRequest?.requestedAt) return [];
+    const status = String(monthCloseRequest?.status || '').toUpperCase();
+    return buildScheduleSteps({
+      practitionerLabel: '결산 요청',
+      approverLabel: '조직장 승인',
+      // 지난 회차의 마감은 이 화면의 관심이 아니다. 시각을 지어내지 않는다.
+      practitionerDeadline: null,
+      approverDeadline: null,
+      practitionerDoneAt: monthCloseRequest.requestedAt,
+      approverDoneAt: ['APPROVED', 'REOPEN_REQUESTED'].includes(status) ? monthCloseRequest?.reviewedAt : null,
+      approverDone: ['APPROVED', 'REOPEN_REQUESTED'].includes(status),
+      nowIso: new Date().toISOString(),
+    });
+  }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthCloseRequest?.status, monthCoveredByRequest]);
+
   const portalTimelineNodes = useMemo<PortalTimelineNode[]>(() => {
     if (!portalMode) return [];
     const weeklyNodes = (cashflowPresentation?.weeks || [])
@@ -1403,16 +1438,36 @@ export function CashflowProjectSheet({
         };
       });
     const monthlyPresentation = cashflowPresentation?.monthClose;
+    /*
+     * 월결산 노드를 둘로 나눈다.
+     *
+     * 예전에는 노드가 하나였고, 배지는 "이 달에 실행된 회차"(7월분 · 완료)를, 단계는
+     * "이 달을 대상으로 하는 결산"(8월분 · 9월 마감)을 그렸다. 서로 다른 두 회차가 한
+     * 자리에 섞여 "완료인데 진행 중" 으로 보였다. 노드 하나가 회차 하나만 말하게 한다.
+     */
+    const executedCycleNode: PortalTimelineNode | null = executedCycleSteps.length > 0
+      ? {
+        key: `monthly-executed-${monthCloseRequest?.throughMonth || ''}`,
+        kind: 'monthly-executed',
+        // 사람은 "무엇을 결산했나" 로 기억한다. 실행 시각은 아래 단계에 남는다.
+        label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`,
+        statusLabel: monthlyPresentation?.statusLabel || '확인 불가',
+        tone: monthlyPresentation?.tone || 'neutral',
+        current: false,
+      }
+      : null;
     const monthlyNode: PortalTimelineNode = {
       key: `monthly-${yearMonth}`,
       kind: 'monthly',
       label: `${yearMonth.slice(5)}월 월결산`,
-      statusLabel: monthlyPresentation?.statusLabel || '확인 불가',
-      tone: monthlyPresentation?.tone || 'neutral',
+      // 이 달을 덮는 회차가 없으면 상태도 이 달 기준이어야 한다 - 지난 회차의 배지를 빌리지 않는다.
+      statusLabel: monthOwnPresentation.statusLabel,
+      tone: monthOwnPresentation.tone as PortalTimelineTone,
       current: false,
     };
     const projectEnd = project?.contractEnd;
     return [
+      ...(executedCycleNode ? [executedCycleNode] : []),
       ...weeklyNodes,
       monthlyNode,
       {
@@ -1424,7 +1479,7 @@ export function CashflowProjectSheet({
         current: false,
       },
     ];
-  }, [cashflowPresentation?.monthClose, cashflowPresentation?.weeks, portalMode, project?.contractEnd, yearMonth]);
+  }, [cashflowPresentation?.monthClose, cashflowPresentation?.weeks, executedCycleSteps, monthCloseRequest?.throughMonth, monthOwnPresentation, portalMode, project?.contractEnd, yearMonth]);
 
   const weeklyEnabledActions = [
     monthCloseActions?.completeWeekly.enabled ? 'complete' : null,
@@ -3045,10 +3100,17 @@ export function CashflowProjectSheet({
                         {renderWeeklyAction()}
                       </div>
                     ) : null}
+                    {node.kind === 'monthly-executed' ? (
+                      <div data-cashflow-portal-monthly-executed-node className="px-2">
+                        {renderScheduleDetails(executedCycleSteps, true)}
+                        {renderMonthlyAction()}
+                      </div>
+                    ) : null}
                     {node.kind === 'monthly' ? (
                       <div data-cashflow-portal-monthly-node className="px-2">
                         {renderScheduleDetails(monthScheduleSteps, true)}
-                        {renderMonthlyAction()}
+                        {/* 회수·재오픈은 요청 레코드를 가진 회차의 일이다. 그 회차가 앞 노드로 나갔으면 버튼도 거기 있다. */}
+                        {executedCycleSteps.length > 0 ? null : renderMonthlyAction()}
                       </div>
                     ) : null}
                   </div>
@@ -3624,10 +3686,10 @@ export function CashflowProjectSheet({
     );
   }
 
-  const monthCloseStatusLabel = cashflowPresentation?.monthClose.statusLabel || '확인 불가';
-  const monthCloseStatusClass = cashflowPresentation?.monthClose.tone === 'danger'
+  const monthCloseStatusLabel = monthOwnPresentation.statusLabel;
+  const monthCloseStatusClass = monthOwnPresentation.tone === 'danger'
     ? 'border border-red-200 bg-red-50 text-red-700'
-    : cashflowPresentation?.monthClose.tone === 'success'
+    : monthOwnPresentation.tone === 'success'
       ? 'border border-border bg-secondary text-secondary-foreground'
       : 'border border-border bg-accent text-accent-foreground';
   const sheetDashboardMetadata = cashflowPresentation?.evidenceSource === 'DASHBOARD'
