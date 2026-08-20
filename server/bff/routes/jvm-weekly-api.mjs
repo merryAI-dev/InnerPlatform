@@ -52,7 +52,13 @@ import {
   withdrawPendingCumulativeCloseRequest,
 } from '../cashflow-month-close-withdrawal.mjs';
 export { cashflowCumulativeCloseCycle };
-import { cashflowMonthCloseDeadline, isCashflowCloseOverdue } from '../cashflow-close-deadline.mjs';
+import {
+  cashflowMonthCloseApproverDeadlineAt,
+  cashflowMonthCloseDeadline,
+  cashflowMonthCloseDeadlineAt,
+  cashflowWeeklyApproverDeadlineAt,
+  isCashflowCloseOverdue,
+} from '../cashflow-close-deadline.mjs';
 import { cashflowMonthRequestCovers } from '../cashflow-month-state.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -2309,6 +2315,9 @@ async function readCashflowMonthCloseStatuses({
       yearMonth,
       status,
       closeDeadline: cashflowMonthCloseDeadline(yearMonth),
+      // 진행 바용 시각 표현: 실무자 = 익월 11일 0시 KST, 조직장 승인 = 14일 0시 KST(표시 전용, 누적 없음).
+      closeDeadlineAt: cashflowMonthCloseDeadlineAt(yearMonth),
+      approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(yearMonth),
       // 기준일을 모르면 기한 초과를 단정하지 않는다.
       closeOverdue: isCashflowCloseOverdue({ yearMonth, status, businessDate }),
       sheetCalculationChecks: historyUnavailable
@@ -2727,7 +2736,11 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
     comparisonBoundary?.asOfWeek?.yearMonth,
     comparisonBoundary?.asOfWeek?.weekNo,
   );
-  const current = currentOrdinal === -1 ? null : indexed[currentOrdinal] || null;
+  const currentItem = currentOrdinal === -1 ? null : indexed[currentOrdinal] || null;
+  // 조직장 승인 마감은 표시 전용(누적 없음). 실무자 마감(JVM 이 준 deadline) + 13시간.
+  const current = currentItem
+    ? { ...currentItem, approverDeadline: cashflowWeeklyApproverDeadlineAt(currentItem.deadline) }
+    : null;
   return {
     trackingStartedAt: null,
     onTimeCount: Number(compliance?.onTimeCount) || 0,
@@ -2742,6 +2755,7 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
       status: item.status,
       lockState: readOptionalText(item.lockState) || null,
       deadline: item.deadline,
+      approverDeadline: cashflowWeeklyApproverDeadlineAt(item.deadline),
       updateResult: item.updateResult,
       operationId: item.operationId,
       auditId: item.auditId,

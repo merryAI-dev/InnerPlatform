@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cashflowMonthCloseApproverDeadlineAt,
   cashflowMonthCloseDeadline,
+  cashflowMonthCloseDeadlineAt,
+  cashflowWeeklyApproverDeadlineAt,
   isCashflowCloseOverdue,
 } from './cashflow-close-deadline.mjs';
 
@@ -46,5 +49,30 @@ describe('close overdue', () => {
   // 기준일을 모르는 것과 "초과 아님" 은 다르다 — 단정하지 않는다.
   it.each(['', 'not-a-date', undefined])('does not assert overdue without a business date (%j)', (businessDate) => {
     expect(isCashflowCloseOverdue({ yearMonth: '2026-07', status: 'OPEN', businessDate })).toBe(false);
+  });
+});
+
+// 조직장 승인 마감(2026-08-20)은 표시 전용이라 JVM 짝이 없다 - 쓰기를 막게 되면 그때 JVM 으로.
+describe('approver deadlines — display only, KST', () => {
+  it('weekly approver deadline is the practitioner deadline + 13 hours', () => {
+    // 실무자 마감 금 0시 KST = 목 15:00Z → 승인 마감 금 13:00 KST = 금 04:00Z
+    expect(cashflowWeeklyApproverDeadlineAt('2026-08-20T15:00:00Z')).toBe('2026-08-21T04:00:00.000Z');
+    // 목요일이 없는 부분 주의 대체 마감에도 같은 +13시간이 따라간다.
+    expect(cashflowWeeklyApproverDeadlineAt('2026-08-31T15:00:00.000Z')).toBe('2026-09-01T04:00:00.000Z');
+    expect(cashflowWeeklyApproverDeadlineAt('')).toBeNull();
+    expect(cashflowWeeklyApproverDeadlineAt(undefined)).toBeNull();
+  });
+
+  it('month practitioner instant is the 11th 00:00 KST — same table as the date rule', () => {
+    // 10일이 마지막 유효일 = 11일 0시 KST = 10일 15:00Z
+    expect(cashflowMonthCloseDeadlineAt('2026-07')).toBe('2026-08-10T15:00:00.000Z');
+    expect(cashflowMonthCloseDeadlineAt('2026-12')).toBe('2027-01-10T15:00:00.000Z');
+    expect(cashflowMonthCloseDeadlineAt('2026-13')).toBeNull();
+  });
+
+  it('month approver deadline is calendar-fixed at the 14th 00:00 KST, not request+3d', () => {
+    expect(cashflowMonthCloseApproverDeadlineAt('2026-07')).toBe('2026-08-13T15:00:00.000Z');
+    expect(cashflowMonthCloseApproverDeadlineAt('2026-12')).toBe('2027-01-13T15:00:00.000Z');
+    expect(cashflowMonthCloseApproverDeadlineAt('nope')).toBeNull();
   });
 });
