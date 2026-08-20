@@ -297,6 +297,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps Projection then ACTUAL row order and uses navy for difference rows', () => {
+    const cashflowTables = source.slice(source.indexOf('function renderProjectionCell'), source.indexOf('function renderPortalSettlementPanel()'));
     expect(source.indexOf('data-cashflow-block="projection"')).toBeLessThan(source.indexOf('data-cashflow-block="actual"'));
     expect(source).toMatch(/renderModeLineRows\(mode, CASHFLOW_IN_LINES[\s\S]*renderSummaryRow\(mode, 'totalIn'\)[\s\S]*renderModeLineRows\(mode, CASHFLOW_OUT_LINES[\s\S]*renderSummaryRow\(mode, 'totalOut'\)[\s\S]*renderSummaryRow\(mode, 'net'\)/);
     expect(source).toContain('Projection - Actual 차이');
@@ -341,7 +342,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('space-y-5 bg-background p-4');
     expect(source).not.toMatch(/FFF7DE|E4C974|D6A92C|FCE8A8/);
     expect(source).toContain('text-red-700');
-    expect(source).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
+    expect(cashflowTables).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
   });
 
   it('shows week codes without redundant date ranges in both cashflow tables', () => {
@@ -595,14 +596,25 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('keeps the portal-only single-surface actions and server-owned settlement timeline', () => {
     const portal = source.slice(source.indexOf('function renderPortalSettlementPanel()'), source.indexOf('function renderOperationsPanel()'));
+    const admin = source.slice(source.indexOf('function renderOperationsPanel()'), source.indexOf('function renderOpsTimeline()'));
     expect(source).toContain('portalMode');
     expect(source).toContain('data-cashflow-portal-settlement-timeline');
     expect(source).toContain('portalWeeklyAction');
     expect(source).toContain('portalMonthlyAction');
     expect(source).not.toContain('monthCloseStatuses?.find');
     expect(source).toContain('tone: week.surfaceTone');
+    expect(source).toContain("statusLabel: week.statusLabel || '확인 불가'");
     expect(source).toContain('cashflowPresentation?.monthClose');
+    expect(source).toContain("statusLabel: monthlyPresentation?.statusLabel || '확인 불가'");
     expect(source).toContain('project?.contractEnd');
+    expect(source).toContain('label: `${week.label} 주정산`');
+    expect(portal).toContain('data-cashflow-portal-weekly-node');
+    expect(portal).toContain('data-cashflow-portal-monthly-node');
+    expect(portal).toContain('renderScheduleDetails(monthScheduleSteps, true)');
+    expect(portal).toContain('data-cashflow-portal-settlement-annotations');
+    expect(portal).not.toContain('<CashflowScheduleBar');
+    expect(admin).toContain('<CashflowScheduleBar steps={weeklyScheduleSteps}');
+    expect(admin).toContain('<CashflowScheduleBar steps={monthScheduleSteps}');
     expect(source).toContain('aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}');
     expect(source).toContain('monthScheduleSteps.length > 0');
     expect(source).toContain("if (portalMode) {");
