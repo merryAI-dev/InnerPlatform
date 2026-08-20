@@ -36,6 +36,31 @@ describe('CashflowProjectSheet schedule bar', () => {
     expect(source).toContain('return yearMonth <= through;');
     expect(source).toContain('const requested = inFlight && monthCoveredByRequest;');
   });
+
+  // 노드 하나가 두 회차를 그리던 문제. 배지는 8월에 돌린 7월분(완료)을, 단계는 8월분(9월 마감)을
+  // 봐서 "완료인데 진행 중" 이 됐다. 노드 하나는 회차 하나만 말한다.
+  it('splits the executed cycle out of the month it does not cover', () => {
+    // 실행된 회차는 그 달 안에서 일어난 일이므로 주정산 앞(월초)에 놓는다.
+    expect(source).toContain('const executedCycleNode: PortalTimelineNode | null');
+    expect(source).toContain('...(executedCycleNode ? [executedCycleNode] : []),\n      ...weeklyNodes,');
+    // 지난 회차의 마감은 이 화면의 관심이 아니다 - 완료 사실만 그리고 시각을 지어내지 않는다.
+    expect(source).toContain('practitionerDeadline: null,');
+    expect(source).toContain('practitionerDoneAt: monthCloseRequest.requestedAt,');
+    // 대상 월로 이름 붙인다. 사람은 "무엇을 결산했나" 로 기억한다.
+    expect(source).toContain("label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`");
+  });
+
+  it('keeps one month-close action button, on the node that owns the request', () => {
+    expect(source).toContain('{executedCycleSteps.length > 0 ? null : renderMonthlyAction()}');
+    expect(source).toContain('{renderScheduleDetails(executedCycleSteps, true)}');
+  });
+
+  // 배지와 단계가 서로 다른 근거를 보면 화면이 스스로 모순된다("월 결산 완료" 위 "결산 요청 · 진행 중").
+  it('reads the month badge from the same source as the month schedule steps', () => {
+    expect(source).toContain('const monthOwnPresentation = useMemo(');
+    expect(source).toContain('const monthCloseStatusLabel = monthOwnPresentation.statusLabel;');
+    expect(source).not.toContain("const monthCloseStatusLabel = cashflowPresentation?.monthClose.statusLabel");
+  });
 });
 
 describe('CashflowProjectSheet staged loading', () => {
