@@ -53,6 +53,7 @@ import {
 } from '../cashflow-month-close-withdrawal.mjs';
 export { cashflowCumulativeCloseCycle };
 import {
+  cashflowFinanceWeekDeadlineAt,
   cashflowMonthCloseApproverDeadlineAt,
   cashflowMonthCloseDeadline,
   cashflowMonthCloseDeadlineAt,
@@ -721,14 +722,38 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
       : project?.settlementStatuses?.items;
     if (!projectId || !yearMonth || !Array.isArray(statusItems)) return;
     const snapshot = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
-    if (!snapshot.exists) return;
-    const requestStatus = readOptionalText(snapshot.data()?.status);
-    const status = requestStatus === 'APPROVED'
-      ? 'COMPLETED'
-      : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
-        ? 'PENDING_APPROVAL'
-        : 'WAITING_FOR_UPDATE';
-    const alignedItems = statusItems.map((item) => item.period === 'MONTH' ? { ...item, status } : item);
+    const requestStatus = snapshot.exists ? readOptionalText(snapshot.data()?.status) : '';
+    // 요청 문서가 없으면 월 상태는 JVM 이 준 것을 그대로 둔다. 마감은 그것과 무관하게 붙인다.
+    const status = !snapshot.exists
+      ? null
+      : requestStatus === 'APPROVED'
+        ? 'COMPLETED'
+        : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
+          ? 'PENDING_APPROVAL'
+          : 'WAITING_FOR_UPDATE';
+    // 진행 바용 마감(표시 전용). 주차 마감은 JVM financeWeekDeadline 의 사본(패리티 표),
+    // 조직장 마감은 표시 전용 규칙이라 BFF 에만 있다.
+    const withDeadlines = (item) => {
+      const period = readOptionalText(item?.period);
+      if (period === 'MONTH') {
+        return {
+          ...item,
+          deadlineAt: cashflowMonthCloseDeadlineAt(yearMonth),
+          approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(yearMonth),
+        };
+      }
+      const weekMatch = /^WEEK_([1-5])$/.exec(period);
+      if (!weekMatch) return item;
+      const deadlineAt = cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
+      return {
+        ...item,
+        deadlineAt,
+        approverDeadlineAt: cashflowWeeklyApproverDeadlineAt(deadlineAt),
+      };
+    };
+    const alignedItems = statusItems
+      .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item))
+      .map(withDeadlines);
     if (Array.isArray(project?.items)) {
       project.items = alignedItems;
     } else {

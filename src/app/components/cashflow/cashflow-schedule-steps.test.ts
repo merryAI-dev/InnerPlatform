@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildScheduleSteps, formatDeadlineLabel } from './cashflow-schedule-steps';
+import { buildScheduleSteps, formatDeadlineLabel, formatProjectPeriod } from './cashflow-schedule-steps';
 
 // 2026-08-20 은 목요일. 주정산 실무자 마감 = 목 자정 = 금 0시 KST = 2026-08-20T15:00Z.
 // 조직장 마감 = 금 13:00 KST = 2026-08-21T04:00Z.
@@ -105,5 +105,20 @@ describe('approver step without a timestamp', () => {
       ...base, practitionerDoneAt: '2026-08-19T05:20:00Z', approverDone: true, nowIso: '2026-08-25T02:00:00Z',
     });
     expect(approver).toMatchObject({ state: 'done', detail: '완료' });
+  });
+});
+
+describe('formatProjectPeriod', () => {
+  it('shows the range, and warns as the end approaches', () => {
+    expect(formatProjectPeriod('2026-01-01', '2026-12-31', '2026-08-20T02:00:00Z')).toBe('2026-01-01 ~ 2026-12-31');
+    expect(formatProjectPeriod('2026-01-01', '2026-09-10', '2026-08-20T02:00:00Z')).toBe('2026-01-01 ~ 2026-09-10 · 종료 D-21');
+    expect(formatProjectPeriod('2026-01-01', '2026-08-20', '2026-08-20T02:00:00Z')).toBe('2026-01-01 ~ 2026-08-20 · 오늘 종료');
+    expect(formatProjectPeriod('2026-01-01', '2026-07-31', '2026-08-20T02:00:00Z')).toBe('2026-01-01 ~ 2026-07-31 · 종료됨');
+  });
+
+  it('says what it knows when a date is missing, and nothing when it knows neither', () => {
+    expect(formatProjectPeriod('2026-01-01', '', '2026-08-20T02:00:00Z')).toBe('2026-01-01 ~ 종료일 미정');
+    expect(formatProjectPeriod('', '', '2026-08-20T02:00:00Z')).toBe('');
+    expect(formatProjectPeriod(null, undefined, '2026-08-20T02:00:00Z')).toBe('');
   });
 });

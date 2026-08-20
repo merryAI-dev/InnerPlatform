@@ -1598,6 +1598,9 @@ export type CashflowSettlementStatus = 'WAITING_FOR_UPDATE' | 'PENDING_APPROVAL'
 export interface CashflowSettlementStatusItem {
   period: CashflowSettlementPeriod;
   status: CashflowSettlementStatus;
+  // 진행 바용 마감(KST, 표시 전용). 주차 마감은 JVM financeWeekDeadline 과 같은 표.
+  deadlineAt?: string | null;
+  approverDeadlineAt?: string | null;
   submittedAt: string;
   submittedBy: string;
   approvedAt: string;

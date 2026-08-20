@@ -135,3 +135,22 @@ export function buildScheduleSteps(input: ScheduleBarInput): ScheduleStep[] {
 
   return [practitioner, approver];
 }
+
+/** 사업 기간 한 줄. 종료가 지났거나 다가오면 그 사실을 덧붙인다 - 종료 시 체크아웃이 붙는다. */
+export function formatProjectPeriod(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  nowIso: string = new Date().toISOString(),
+): string {
+  const from = String(start ?? '').slice(0, 10);
+  const to = String(end ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) && !/^\d{4}-\d{2}-\d{2}$/.test(to)) return '';
+  const range = `${from || '시작일 미정'} ~ ${to || '종료일 미정'}`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) return range;
+  const days = daysUntil(`${to}T00:00:00+09:00`, nowIso);
+  if (days === null) return range;
+  if (days < 0) return `${range} · 종료됨`;
+  if (days === 0) return `${range} · 오늘 종료`;
+  if (days <= 30) return `${range} · 종료 D-${days}`;
+  return range;
+}
