@@ -53,11 +53,9 @@ import {
 } from '../cashflow-month-close-withdrawal.mjs';
 export { cashflowCumulativeCloseCycle };
 import {
-  cashflowFinanceWeekDeadlineAt,
   cashflowMonthCloseApproverDeadlineAt,
   cashflowMonthCloseDeadline,
   cashflowMonthCloseDeadlineAt,
-  cashflowWeeklyApproverDeadlineAt,
   isCashflowCloseOverdue,
 } from '../cashflow-close-deadline.mjs';
 import { cashflowMonthRequestCovers } from '../cashflow-month-state.mjs';
@@ -731,29 +729,9 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
         : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
           ? 'PENDING_APPROVAL'
           : 'WAITING_FOR_UPDATE';
-    // 진행 바용 마감(표시 전용). 주차 마감은 JVM financeWeekDeadline 의 사본(패리티 표),
-    // 조직장 마감은 표시 전용 규칙이라 BFF 에만 있다.
-    const withDeadlines = (item) => {
-      const period = readOptionalText(item?.period);
-      if (period === 'MONTH') {
-        return {
-          ...item,
-          deadlineAt: cashflowMonthCloseDeadlineAt(yearMonth),
-          approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(yearMonth),
-        };
-      }
-      const weekMatch = /^WEEK_([1-5])$/.exec(period);
-      if (!weekMatch) return item;
-      const deadlineAt = cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
-      return {
-        ...item,
-        deadlineAt,
-        approverDeadlineAt: cashflowWeeklyApproverDeadlineAt(deadlineAt),
-      };
-    };
+    // 마감은 JVM 이 실어 보낸다(deadlineAt / approverDeadlineAt). BFF 는 상태만 정렬한다.
     const alignedItems = statusItems
-      .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item))
-      .map(withDeadlines);
+      .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item));
     if (Array.isArray(project?.items)) {
       project.items = alignedItems;
     } else {
@@ -2340,9 +2318,6 @@ async function readCashflowMonthCloseStatuses({
       yearMonth,
       status,
       closeDeadline: cashflowMonthCloseDeadline(yearMonth),
-      // 진행 바용 시각 표현: 실무자 = 익월 11일 0시 KST, 조직장 승인 = 14일 0시 KST(표시 전용, 누적 없음).
-      closeDeadlineAt: cashflowMonthCloseDeadlineAt(yearMonth),
-      approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(yearMonth),
       // 기준일을 모르면 기한 초과를 단정하지 않는다.
       closeOverdue: isCashflowCloseOverdue({ yearMonth, status, businessDate }),
       sheetCalculationChecks: historyUnavailable
@@ -2761,11 +2736,7 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
     comparisonBoundary?.asOfWeek?.yearMonth,
     comparisonBoundary?.asOfWeek?.weekNo,
   );
-  const currentItem = currentOrdinal === -1 ? null : indexed[currentOrdinal] || null;
-  // 조직장 승인 마감은 표시 전용(누적 없음). 실무자 마감(JVM 이 준 deadline) + 13시간.
-  const current = currentItem
-    ? { ...currentItem, approverDeadline: cashflowWeeklyApproverDeadlineAt(currentItem.deadline) }
-    : null;
+  const current = currentOrdinal === -1 ? null : indexed[currentOrdinal] || null;
   return {
     trackingStartedAt: null,
     onTimeCount: Number(compliance?.onTimeCount) || 0,
@@ -2780,7 +2751,7 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
       status: item.status,
       lockState: readOptionalText(item.lockState) || null,
       deadline: item.deadline,
-      approverDeadline: cashflowWeeklyApproverDeadlineAt(item.deadline),
+      approverDeadline: readOptionalText(item.approverDeadline) || null,
       updateResult: item.updateResult,
       operationId: item.operationId,
       auditId: item.auditId,
@@ -3219,6 +3190,9 @@ async function composeCashflowMonthDashboard({
       cycleYearMonth: readOptionalText(close?.cycleYearMonth) || yearMonth,
       targetYearMonth: readOptionalText(close?.targetYearMonth) || buildCumulativeCloseScope(yearMonth).throughMonth,
       closeDeadline: readOptionalText(close?.closeDeadline) || null,
+      // 진행 바가 읽는 시각 표현. 월 마감 날짜 규칙은 JVM 과 패리티 쌍이고 여기서 시각으로 옮긴다.
+      closeDeadlineAt: cashflowMonthCloseDeadlineAt(readOptionalText(close?.yearMonth) || yearMonth),
+      approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(readOptionalText(close?.yearMonth) || yearMonth),
       late: Boolean(close?.late),
     },
     validation: {

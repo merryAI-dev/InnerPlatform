@@ -14,7 +14,10 @@ public record CashflowSettlementStatusesResponse(
         String submittedBy,
         String approvedAt,
         String approvedBy,
-        long revision
+        long revision,
+        // 실무자 마감과 조직장 승인 마감. 규칙은 JVM 이 소유하고 화면은 받은 값을 그린다.
+        String deadlineAt,
+        String approverDeadlineAt
     ) {
     }
 }

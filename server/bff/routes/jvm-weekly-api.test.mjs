@@ -656,33 +656,17 @@ describe('JVM weekly API BFF proxy', () => {
       .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
       .expect(200)
       .expect((response) => {
-        // 진행 바용 마감이 함께 실린다(표시 전용). 2026-08 은 1일이 토요일이라 1주차에 목요일이 없고,
-        // 그 주 마지막 날(8/2) 다음날 0시 KST 가 마감이다 - JVM financeWeekDeadline 과 같은 표.
+        // 마감은 JVM 이 실어 보낸다 - BFF 는 상태만 정렬하고 항목을 그대로 통과시킨다.
         expect(response.body.items).toEqual([
-          {
-            period: 'MONTH',
-            status: 'PENDING_APPROVAL',
-            deadlineAt: '2026-09-10T15:00:00.000Z',
-            approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-          },
-          {
-            period: 'WEEK_1',
-            status: 'COMPLETED',
-            deadlineAt: '2026-08-02T15:00:00.000Z',
-            approverDeadlineAt: '2026-08-03T04:00:00.000Z',
-          },
+          { period: 'MONTH', status: 'PENDING_APPROVAL' },
+          { period: 'WEEK_1', status: 'COMPLETED' },
         ]);
       });
     await request(app)
       .post('/api/v1/cashflow/settlement-statuses/batch')
       .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
       .expect(200)
-      .expect((response) => expect(response.body.items[0].items[0]).toEqual({
-        period: 'MONTH',
-        status: 'PENDING_APPROVAL',
-        deadlineAt: '2026-09-10T15:00:00.000Z',
-        approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-      }));
+      .expect((response) => expect(response.body.items[0].items[0]).toEqual({ period: 'MONTH', status: 'PENDING_APPROVAL' }));
   });
 
   it('blocks an administrator from submitting an uncompleted settlement', async () => {
@@ -815,18 +799,8 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월' });
     expect(response.body.items[0].settlementStatuses.items).toEqual([
-      {
-        period: 'MONTH',
-        status: 'PENDING_APPROVAL',
-        deadlineAt: '2026-09-10T15:00:00.000Z',
-        approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-      },
-      {
-        period: 'WEEK_1',
-        status: 'COMPLETED',
-        deadlineAt: '2026-08-02T15:00:00.000Z',
-        approverDeadlineAt: '2026-08-03T04:00:00.000Z',
-      },
+      { period: 'MONTH', status: 'PENDING_APPROVAL' },
+      { period: 'WEEK_1', status: 'COMPLETED' },
     ]);
     expect(response.body.errors).toEqual([]);
 

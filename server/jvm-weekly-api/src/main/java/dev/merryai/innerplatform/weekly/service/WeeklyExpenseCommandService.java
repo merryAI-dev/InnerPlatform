@@ -1,5 +1,7 @@
 package dev.merryai.innerplatform.weekly.service;
 
+import dev.merryai.innerplatform.weekly.domain.ApproverDeadlineCalculator;
+import dev.merryai.innerplatform.weekly.domain.CashflowFinanceWeekDeadline;
 import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
 import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApplyCommand;
 import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
@@ -107,8 +109,11 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.Clock;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -158,6 +163,11 @@ public class WeeklyExpenseCommandService {
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
 
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
+    private static final Pattern SETTLEMENT_WEEK = Pattern.compile("WEEK_([1-5])");
+    // 보람 2026-08-20: 주간 조직장 마감 = 실무자 마감 +13시간(금 13:00), 월간 = +3일(익월 14일 0시).
+    private static final Duration SETTLEMENT_WEEK_APPROVAL_DELAY = Duration.ofHours(13);
+    private static final long SETTLEMENT_MONTH_APPROVAL_DAYS = 3;
     private static final Pattern SHORT_WEEK_LABEL_PATTERN = Pattern.compile("^(\\d{2})-(\\d{1,2})-([1-6])$");
     private static final int ROW_REINDEX_TEMPORARY_OFFSET = 1_000_000;
     private static final String CASHFLOW_SHEET_LAB_ACTUAL_SOURCE = "cashflow-sheet-lab";
@@ -257,6 +267,39 @@ public class WeeklyExpenseCommandService {
         );
     }
 
+    // 저장된 실무자 마감 문자열에서 조직장 마감을 만든다. 마감을 못 읽으면 지어내지 않는다.
+    private static String weeklyApproverDeadline(String practitionerDeadline) {
+        if (practitionerDeadline == null || practitionerDeadline.isBlank()) return "";
+        try {
+            return ApproverDeadlineCalculator
+                .weekly(Instant.parse(practitionerDeadline), SETTLEMENT_WEEK_APPROVAL_DELAY)
+                .toString();
+        } catch (java.time.format.DateTimeParseException invalid) {
+            return "";
+        }
+    }
+
+    // 주정산 실무자 마감은 그 주의 목요일 자정, 월결산은 익월 10일 자정(= 11일 0시).
+    private static Instant settlementPractitionerDeadline(String yearMonth, String period) {
+        if ("MONTH".equals(period)) {
+            return YearMonth.parse(yearMonth).plusMonths(1).atDay(11).atStartOfDay(SEOUL).toInstant();
+        }
+        Matcher week = SETTLEMENT_WEEK.matcher(period == null ? "" : period);
+        return week.matches()
+            ? CashflowFinanceWeekDeadline.of(yearMonth, Integer.parseInt(week.group(1)))
+            : null;
+    }
+
+    // 조직장 승인 마감. 주간은 실무자 마감 +13시간, 월간은 실무자 마감 +3일.
+    private static Instant settlementApproverDeadline(String yearMonth, String period, Instant practitioner) {
+        if ("MONTH".equals(period)) {
+            return ApproverDeadlineCalculator.monthly(yearMonth, SETTLEMENT_MONTH_APPROVAL_DAYS);
+        }
+        return practitioner == null
+            ? null
+            : ApproverDeadlineCalculator.weekly(practitioner, SETTLEMENT_WEEK_APPROVAL_DELAY);
+    }
+
     private CashflowSettlementStatusesResponse settlementStatusesResponse(
         String projectId,
         String yearMonth,
@@ -265,10 +308,16 @@ public class WeeklyExpenseCommandService {
         return new CashflowSettlementStatusesResponse(
             projectId,
             yearMonth,
-            records.stream().map(record -> new CashflowSettlementStatusesResponse.Item(
-                record.period(), record.status(), record.submittedAt(), record.submittedBy(),
-                record.approvedAt(), record.approvedBy(), record.revision()
-            )).toList()
+            records.stream().map(record -> {
+                Instant practitioner = settlementPractitionerDeadline(yearMonth, record.period());
+                Instant approver = settlementApproverDeadline(yearMonth, record.period(), practitioner);
+                return new CashflowSettlementStatusesResponse.Item(
+                    record.period(), record.status(), record.submittedAt(), record.submittedBy(),
+                    record.approvedAt(), record.approvedBy(), record.revision(),
+                    practitioner == null ? "" : practitioner.toString(),
+                    approver == null ? "" : approver.toString()
+                );
+            }).toList()
         );
     }
 
@@ -400,7 +449,8 @@ public class WeeklyExpenseCommandService {
                 ? new CashflowSettlementStatusesResponse.Item(
                     item.period(),
                     CashflowMonthSettlementLifecycle.resolveMonthStatus(item.status(), monthCloseRequestStatus),
-                    item.submittedAt(), item.submittedBy(), item.approvedAt(), item.approvedBy(), item.revision()
+                    item.submittedAt(), item.submittedBy(), item.approvedAt(), item.approvedBy(), item.revision(),
+                    item.deadlineAt(), item.approverDeadlineAt()
                 )
                 : item
             ).toList()
@@ -1310,7 +1360,9 @@ public class WeeklyExpenseCommandService {
         }
         return new CashflowWeeklyComplianceHistoryResponse(
             page.items().stream().map(item -> new CashflowWeeklyComplianceHistoryResponse.Item(
-                item.yearMonth(), item.weekNo(), item.deadline(), item.status(), item.completedAt(),
+                item.yearMonth(), item.weekNo(), item.deadline(),
+                weeklyApproverDeadline(item.deadline()),
+                item.status(), item.completedAt(),
                 item.completedBy(), item.operationId(), item.auditId(), item.updateResult(), item.lockState()
             )).toList(),
             page.nextCursor(),
