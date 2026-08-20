@@ -33,9 +33,12 @@ import dev.merryai.innerplatform.weekly.service.command.CashflowSheetAnnualApply
 import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.query.CashflowMonthDashboardQueryService;
 import dev.merryai.innerplatform.weekly.domain.CashflowAnnualCellSet;
+import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -582,7 +585,25 @@ public class WeeklyExpenseController {
             new CashflowMonthDashboardSourceResponse.ActionCapability(
                 result.reopenRequest().enabled(),
                 result.reopenRequest().reasonCode()
-            )
+            ),
+            operationalCycle(yearMonth, operationalStatus, latestRun)
+        );
+    }
+
+    private static CashflowMonthDashboardSourceResponse.OperationalCycle operationalCycle(
+        String yearMonth,
+        String operationalStatus,
+        CashflowMonthCloseResponse latestRun
+    ) {
+        YearMonth cycleMonth = YearMonth.parse(yearMonth);
+        YearMonth targetMonth = cycleMonth.minusMonths(1);
+        LocalDate evaluatedBusinessDate = LocalDate.parse(latestRun.evaluatedBusinessDate());
+        LocalDate closeDeadline = CashflowCloseDeadline.forCumulativeCycle(cycleMonth);
+        boolean open = "OPEN".equals(operationalStatus);
+        return new CashflowMonthDashboardSourceResponse.OperationalCycle(
+            cycleMonth.toString(), targetMonth.toString(), closeDeadline.toString(),
+            open && targetMonth.isBefore(YearMonth.from(evaluatedBusinessDate)),
+            open ? evaluatedBusinessDate.isAfter(closeDeadline) : latestRun.late()
         );
     }
 

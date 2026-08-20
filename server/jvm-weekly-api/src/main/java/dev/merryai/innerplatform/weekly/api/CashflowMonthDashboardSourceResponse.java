@@ -13,7 +13,8 @@ public record CashflowMonthDashboardSourceResponse(
     CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary,
     List<Blocker> blockers,
     List<SectionError> sectionErrors,
-    ActionCapability reopenRequest
+    ActionCapability reopenRequest,
+    OperationalCycle operationalCycle
 ) {
     public CashflowMonthDashboardSourceResponse(
         CashflowMonthCloseResponse monthClose,
@@ -26,7 +27,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, cumulativeClose,
-            projectionActualSummary, blockers, List.of(), ActionCapability.unavailable()
+            projectionActualSummary, blockers, List.of(), ActionCapability.unavailable(), null
         );
     }
 
@@ -40,7 +41,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, cumulativeClose,
-            projectionActualSummary, List.of(), List.of(), ActionCapability.unavailable()
+            projectionActualSummary, List.of(), List.of(), ActionCapability.unavailable(), null
         );
     }
 
@@ -52,7 +53,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, CumulativeClose.missing(),
-            null, List.of(), List.of(), ActionCapability.unavailable()
+            null, List.of(), List.of(), ActionCapability.unavailable(), null
         );
     }
 
@@ -80,6 +81,14 @@ public record CashflowMonthDashboardSourceResponse(
             return new ActionCapability(false, "CUMULATIVE_CLOSE_AUTHORITY_UNAVAILABLE");
         }
     }
+
+    public record OperationalCycle(
+        String cycleYearMonth,
+        String targetYearMonth,
+        String closeDeadline,
+        boolean closeEligible,
+        boolean late
+    ) {}
 
     public record MonthStatusEvidence(
         String authority,
