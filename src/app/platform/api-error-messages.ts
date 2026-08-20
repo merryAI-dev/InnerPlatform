@@ -48,6 +48,14 @@ const presentations = new Map<string, ApiErrorPresentation>([
     guide: '먼저 시트 값을 가져와 최신 고정본을 만든 뒤 진행해 주세요.',
     resolution: 'contact',
   }],
+  ['cashflow_pending_approval_confirmation_required', {
+    guide: '결재 중인 누적 결산과 달라지는 값이 있어요. 달라지는 전체 값을 확인한 뒤 반영해 주세요.',
+    resolution: 'contact',
+  }],
+  ['cashflow_pending_approval_evidence_stale', {
+    guide: '확인하는 동안 결재 중인 누적 결산이 변경됐어요. 시트 값을 다시 가져와 검토해 주세요.',
+    resolution: 'retry',
+  }],
   ['cashflow_formula_mismatch_confirmation_required', {
     guide: '시트의 합계·잔액과 MYSCube 계산 결과가 달라요. 차이를 확인한 뒤 그대로 반영하거나 시트 값을 다시 가져와 주세요.',
     resolution: 'contact',
