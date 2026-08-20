@@ -54,6 +54,16 @@ describe('cashflow section error presentation', () => {
     })).toBe(tone);
   });
 
+  // 라이브 사고(2026-08, JLIN IBS · GGGI): 완료 문서 55건 전부에 lockState 가 없었는데
+  // JVM 이 없는 값을 LOCKED 로 읽어, 확정한 적 없는 주가 "완료" 로 보이고 회수까지 막혔다.
+  // 고친 자리는 JVM 이다. BFF 는 받은 값을 옮기기만 하고 빈 값을 재해석하지 않는다 -
+  // 여기서 한 번 더 판정하면 두 곳이 조용히 갈린다.
+  it('maps lockState it receives without reinterpreting a blank one', () => {
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED')).toBe('확정 대기');
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'LOCKED')).toBe('기한 내 완료');
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, '')).toBe('기한 내 완료');
+  });
+
   it('never labels a known JVM weekly status as 확인 필요', () => {
     for (const status of ['ON_TIME', 'COMPLETED_LATE', 'MISSED', 'PENDING']) {
       expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel(status, true)).not.toBe('주간 정산 상태 확인 필요');
