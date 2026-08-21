@@ -31,8 +31,9 @@ function sheetErrorMessage(error: unknown): string {
   const status = error instanceof PlatformApiError ? error.status : 500;
   const code = error instanceof PlatformApiError ? error.code : '';
   const mapped = resolveApiErrorPresentation(code, status);
-  // 서버가 사람 말로 적어 준 안내가 있으면 그것이 더 구체적이다(어느 사업, 어느 기간).
-  const serverMessage = error instanceof PlatformApiError ? String(error.message || '').trim() : '';
+  // serverMessage 가 서버가 적어 준 안내다(어느 사업·어느 기간·누구에게 공유).
+  // message 는 상태코드별 일반 문구라 원인을 가린다.
+  const serverMessage = error instanceof PlatformApiError ? String(error.serverMessage || '').trim() : '';
   return serverMessage || mapped.guide;
 }
 
@@ -45,6 +46,8 @@ export function ParticipationSheetPreviewPanel({ tenantId, user, projects }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ParticipationSheetPreview | null>(null);
+  // 계약이 10년이면 월 칸이 120개다. 연도로 잘라야 표가 옆으로 터지지 않는다.
+  const [year, setYear] = useState('');
 
   const missingByRow = useMemo(() => {
     const map = new Map<number, number>();
@@ -60,12 +63,23 @@ export function ParticipationSheetPreviewPanel({ tenantId, user, projects }: {
     setError('');
     setPreview(null);
     void fetchParticipationSheetPreviewViaBff({ tenantId, actor: user, projectId })
-      .then(setPreview)
+      .then((next) => {
+        setPreview(next);
+        setYear(next.months[0]?.slice(0, 4) || '');
+      })
       .catch((cause) => setError(sheetErrorMessage(cause)))
       .finally(() => setLoading(false));
   };
 
   const summary = preview?.summary;
+  const years = useMemo(
+    () => [...new Set((preview?.months || []).map((month) => month.slice(0, 4)))],
+    [preview?.months],
+  );
+  const visibleMonths = useMemo(
+    () => (preview?.months || []).filter((month) => month.startsWith(year)),
+    [preview?.months, year],
+  );
 
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -127,6 +141,14 @@ export function ParticipationSheetPreviewPanel({ tenantId, user, projects }: {
             <span className={summary.missingCount > 0 ? 'font-semibold text-red-700' : 'text-muted-foreground'}>
               미입력 {summary.missingCount}칸
             </span>
+            <Select value={year} onValueChange={setYear}>
+              <SelectTrigger className="h-7 w-[110px] text-[12px]" aria-label="확인할 연도">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {years.map((option) => <SelectItem key={option} value={option}>{option}년</SelectItem>)}
+              </SelectContent>
+            </Select>
             <a
               href={preview.sheetLink}
               target="_blank"
@@ -178,7 +200,7 @@ export function ParticipationSheetPreviewPanel({ tenantId, user, projects }: {
                     <TableHead className="min-w-[110px] text-xs font-semibold">역할</TableHead>
                     <TableHead className="min-w-[150px] text-xs font-semibold">투입기간</TableHead>
                     <TableHead className="min-w-[90px] text-xs font-semibold">연결</TableHead>
-                    {preview.months.map((month) => (
+                    {visibleMonths.map((month) => (
                       <TableHead key={month} className="min-w-[64px] text-center text-xs font-semibold">
                         {month.slice(2)}
                       </TableHead>
@@ -202,7 +224,7 @@ export function ParticipationSheetPreviewPanel({ tenantId, user, projects }: {
                         <TableCell className={`text-xs ${row.linkState === 'LINKED' ? 'text-muted-foreground' : 'font-semibold text-amber-700'}`}>
                           {LINK_STATE_LABEL[row.linkState]}
                         </TableCell>
-                        {preview.months.map((month) => {
+                        {visibleMonths.map((month) => {
                           const inStint = Boolean(row.stintStart)
                             && month >= row.stintStart
                             && (!row.stintEnd || month <= row.stintEnd);

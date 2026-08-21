@@ -61,6 +61,7 @@ function createApp({ role = 'admin', documents = {}, ranges = sheetRanges(), she
 
   const requestedRanges = [];
   const googleSheetsService = {
+    getServiceAccountEmail: () => 'mysc-sheets@mysc.iam.gserviceaccount.com',
     getSheetValues: async ({ rangeA1 }) => {
       requestedRanges.push(rangeA1);
       if (sheetsError) throw new Error(sheetsError);
@@ -122,12 +123,25 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
     expect(response.body.message).toContain('등록·수정');
   });
 
-  it('시트를 못 읽으면 원인이 무엇이든 한 코드로 정규화한다', async () => {
+  // 가장 흔한 원인은 공유 누락이다. 주소를 모르면 사람은 무엇을 고쳐야 할지 알 수 없고
+  // "잠시 후 다시 시도" 만 되풀이하게 된다.
+  it('시트를 못 읽으면 한 코드로 정규화하고 누구에게 공유할지 알려준다', async () => {
     const { app } = createApp({ documents: withProject(), sheetsError: 'quota exceeded' });
     const response = await request(app).get(url);
     expect(response.status).toBe(502);
     expect(response.body.code).toBe('participation_sheet_unreachable');
-    expect(response.body.message).toContain('공유 권한');
+    expect(response.body.message).toContain('mysc-sheets@mysc.iam.gserviceaccount.com');
+    expect(response.body.message).toContain('quota exceeded');
+  });
+
+  it('공유해야 할 계정을 따로 물어볼 수 있다 - 링크를 넣는 자리에서 보여 준다', async () => {
+    const { app } = createApp({ documents: withProject() });
+    const response = await request(app).get('/api/v1/participation-dashboard/system-account');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      systemAccountEmail: 'mysc-sheets@mysc.iam.gserviceaccount.com',
+      configured: true,
+    });
   });
 
   it('사업이 없으면 404 다', async () => {
