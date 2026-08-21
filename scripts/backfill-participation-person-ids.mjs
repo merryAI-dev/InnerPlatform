@@ -26,6 +26,11 @@ function syncKey(member) {
   return `${segment(member?.memberNickname || member?.memberName, 'member')}__${segment(member?.role, 'role')}`;
 }
 
+/** 연결 키의 사람 부분. 역할 부분은 버린다. 두 조각 모두 `-` 로만 정규화돼 `__` 는 구분자로만 남는다. */
+function personSegment(value) {
+  return text(value).split('__')[0];
+}
+
 function add(index, value, personId) {
   const valueKey = key(value);
   if (!valueKey) return;
@@ -70,9 +75,13 @@ async function main() {
     add(peopleByNickname, person.nickname, personId);
   }
   const teamMemberByProjectKey = new Map();
+  // 사람 부분만으로도 찾을 수 있게 따로 모은다. 역할이 바뀌면 키가 통째로 어긋나기 때문이다.
+  const teamMembersByProjectPerson = new Map();
   for (const projectDoc of projectsSnap.docs) {
     for (const member of (Array.isArray(projectDoc.data()?.teamMembersDetailed) ? projectDoc.data().teamMembersDetailed : [])) {
       teamMemberByProjectKey.set(`${projectDoc.id}:${syncKey(member)}`, member);
+      const personKey = `${projectDoc.id}:${personSegment(syncKey(member))}`;
+      teamMembersByProjectPerson.set(personKey, [...(teamMembersByProjectPerson.get(personKey) || []), member]);
     }
   }
 
@@ -80,10 +89,20 @@ async function main() {
   const entryPlans = [];
   const resolvedByProjectKey = new Map();
   const unresolved = [];
+  let roleDriftMatches = 0;
   for (const entry of entries) {
     const projectId = text(entry.projectId);
     const entryKey = text(entry.projectTeamMemberKey);
-    const member = teamMemberByProjectKey.get(`${projectId}:${entryKey}`);
+    /*
+     * 참여행은 만들어질 때의 역할을 키에 담고 있어서, 사업의 역할명이 바뀌면 키가 통째로 어긋난다
+     * (참여행 `에이블__사업-총괄` vs 현재 팀원 `에이블__총괄책임자`). 사람은 그대로인데 연결만 끊긴다.
+     * 그래서 역할 키로 못 찾으면 사람 부분만 보고 다시 찾되, 그 사업 안에서 한 명으로 좁혀질 때만 쓴다.
+     * 같은 사람이 한 사업에 두 역할로 올라 있으면 어느 쪽인지 알 수 없으므로 잇지 않는다.
+     */
+    const exactMember = teamMemberByProjectKey.get(`${projectId}:${entryKey}`);
+    const personMatches = exactMember ? [] : (teamMembersByProjectPerson.get(`${projectId}:${personSegment(entryKey)}`) || []);
+    const member = exactMember || (personMatches.length === 1 ? personMatches[0] : null);
+    if (!exactMember && member) roleDriftMatches += 1;
     const existing = text(entry.personId);
     let personId = knownPersonIds.has(existing) ? existing : unique(peopleByUid, [entry.memberId]);
     let source = personId ? (existing ? 'EXISTING_PERSON_ID' : 'EXACT_UID') : '';
@@ -98,8 +117,8 @@ async function main() {
       continue;
     }
     if (existing !== personId) entryPlans.push({ entryId: entry.id, personId, source });
-    if (entryKey) {
-      const mapKey = `${projectId}:${entryKey}`;
+    // 옛 키와 현재 키 양쪽에 남긴다. 프로젝트 문서는 현재 키로 찾으므로 옛 키만 남기면 팀원이 안 채워진다.
+    for (const mapKey of new Set([entryKey && `${projectId}:${entryKey}`, member && `${projectId}:${syncKey(member)}`].filter(Boolean))) {
       const previous = resolvedByProjectKey.get(mapKey);
       resolvedByProjectKey.set(mapKey, previous && previous !== personId ? null : personId);
     }
@@ -124,6 +143,7 @@ async function main() {
     partEntriesToUpdate: entryPlans.length, projectsToUpdate: projectPlans.length,
     exactUidMatches: entryPlans.filter((plan) => plan.source === 'EXACT_UID').length,
     uniquePeopleIdentityMatches: entryPlans.filter((plan) => plan.source === 'UNIQUE_PEOPLE_IDENTITY').length,
+    roleDriftMatches,
     unresolvedCount: unresolved.length, unresolvedPreview: unresolved.slice(0, 20),
   };
   if (dumpDir) {
