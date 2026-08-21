@@ -1490,6 +1490,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
     businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
+    participationSheetLink: readOptionalText(payload.participationSheetLink) || undefined,
     department: normalizeProjectOrganizationLabel(payload.department),
     groupwareName: readOptionalText(payload.groupwareName) || undefined,
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),

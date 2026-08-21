@@ -86,6 +86,7 @@ export interface ProjectEditorDraft {
   description: string;
   clientOrg: string;
   businessManagementGoogleFolderLink: string;
+  participationSheetLink: string;
   department: string;
   projectPurpose: string;
   status: ProjectStatus;
@@ -172,6 +173,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   description: '',
   clientOrg: '',
   businessManagementGoogleFolderLink: '',
+  participationSheetLink: '',
   department: '',
   projectPurpose: '',
   status: 'CONTRACT_PENDING',
@@ -490,6 +492,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'officialContractName', label: '공식 계약명', before: (project) => normalizeChangeValue(project.officialContractName), after: (draft) => normalizeChangeValue(draft.officialContractName) },
   { key: 'clientOrg', label: '계약 대상', before: (project) => normalizeChangeValue(project.clientOrg), after: (draft) => normalizeChangeValue(draft.clientOrg) },
   { key: 'businessManagementGoogleFolderLink', label: '사업관리 구글폴더링크', before: (project) => normalizeChangeValue(project.businessManagementGoogleFolderLink), after: (draft) => normalizeChangeValue(draft.businessManagementGoogleFolderLink) },
+  { key: 'participationSheetLink', label: '참여율 시트 링크', before: (project) => normalizeChangeValue(project.participationSheetLink), after: (draft) => normalizeChangeValue(draft.participationSheetLink) },
   { key: 'department', label: '담당조직(CIC)', before: (project) => normalizeChangeValue(project.department), after: (draft) => normalizeChangeValue(draft.department) },
   { key: 'type', label: '프로젝트 유형', before: (project) => PROJECT_TYPE_LABELS[normalizeProjectType(project.type)] || '-', after: (draft) => PROJECT_TYPE_LABELS[normalizeProjectType(draft.type)] || '-' },
   { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEnd) },
@@ -665,6 +668,9 @@ export function buildProjectEditorDraftFromProject(
     businessManagementGoogleFolderLink: text(
       normalizedProject.businessManagementGoogleFolderLink || payload?.businessManagementGoogleFolderLink,
     ),
+    participationSheetLink: text(
+      normalizedProject.participationSheetLink || payload?.participationSheetLink,
+    ),
     department: normalizeProjectDepartment(
       normalizedProject.department || normalizedProject.cic || payload?.department,
     ),
@@ -780,6 +786,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     description: text(draft.description),
     clientOrg: text(draft.clientOrg),
     businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
+    participationSheetLink: text(draft.participationSheetLink),
     department: normalizeProjectDepartment(draft.department),
     groupwareName: text(draft.groupwareName),
     currency: normalizeProjectCurrency(draft.currency),
@@ -925,6 +932,7 @@ export function buildProjectEditorProjectPatch(
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
     businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
+    participationSheetLink: text(draft.participationSheetLink),
     groupwareName: text(draft.groupwareName),
     participantCondition: text(draft.participantCondition),
     teamMembersDetailed,

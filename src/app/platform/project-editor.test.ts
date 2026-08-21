@@ -901,3 +901,24 @@ describe('project editor draft mapping', () => {
     }]));
   });
 });
+
+// 참여율 시트를 사업에 묶는 지점. 시트 안에는 사업 식별자를 적지 않으므로(사람이 적는
+// 식별자는 어긋난다) 이 링크를 저장하는 것이 곧 바인딩이다. 왕복에서 사라지면 바인딩이 끊긴다.
+describe('참여율 시트 링크', () => {
+  it('불러오기 → 저장 왕복에서 값을 잃지 않는다', () => {
+    const link = 'https://docs.google.com/spreadsheets/d/abc123/edit';
+    const project = { ...baseProject, participationSheetLink: link };
+    const draft = buildProjectEditorDraftFromProject(project);
+    expect(draft.participationSheetLink).toBe(link);
+    const patch = buildProjectEditorProjectPatch(draft, {
+      mode: 'admin', actorId: 'u1', actorName: '보람', now: '2026-08-21T00:00:00.000Z',
+    });
+    expect(patch.participationSheetLink).toBe(link);
+    expect(buildProjectRequestPayloadFromDraft(draft).participationSheetLink).toBe(link);
+  });
+
+  it('값이 없으면 빈 문자열로 시작한다', () => {
+    expect(createProjectEditorDraft().participationSheetLink).toBe('');
+    expect(buildProjectEditorDraftFromProject(baseProject).participationSheetLink).toBe('');
+  });
+});
