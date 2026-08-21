@@ -62,10 +62,11 @@ function createApp({ role = 'admin', documents = {}, ranges = sheetRanges(), she
   const requestedRanges = [];
   const googleSheetsService = {
     getServiceAccountEmail: () => 'mysc-sheets@mysc.iam.gserviceaccount.com',
-    getSheetValues: async ({ rangeA1 }) => {
-      requestedRanges.push(rangeA1);
+    getSheetValues: async ({ sheetName, rangeA1 }) => {
+      const quotedRange = `'${sheetName}'!${rangeA1}`;
+      requestedRanges.push({ sheetName, rangeA1 });
       if (sheetsError) throw new Error(sheetsError);
-      return ranges[rangeA1] || [];
+      return ranges[quotedRange] || [];
     },
   };
 
@@ -108,8 +109,12 @@ describe('참여율 시트 검증 - 읽기 전용', () => {
   it('계약이 고정한 다섯 범위만 읽는다', async () => {
     const { app, requestedRanges } = createApp({ documents: withProject() });
     await request(app).get(url);
-    expect(requestedRanges.sort()).toEqual([
-      "'참여율 관리'!A3:F62", "'참여율 관리'!B1:D1", "'참여율 관리'!G2:DV2", "'참여율 관리'!G3:DV62", "'참조'!F1",
+    expect(requestedRanges.sort((left, right) => `${left.sheetName}!${left.rangeA1}`.localeCompare(`${right.sheetName}!${right.rangeA1}`))).toEqual([
+      { sheetName: '참여율 관리', rangeA1: 'A3:F62' },
+      { sheetName: '참여율 관리', rangeA1: 'B1:D1' },
+      { sheetName: '참여율 관리', rangeA1: 'G2:DV2' },
+      { sheetName: '참여율 관리', rangeA1: 'G3:DV62' },
+      { sheetName: '참조', rangeA1: 'F1' },
     ]);
   });
 });

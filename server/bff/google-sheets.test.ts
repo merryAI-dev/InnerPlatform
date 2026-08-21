@@ -89,6 +89,27 @@ describe('google-sheets helpers', () => {
     expect(fetchImpl.mock.calls[1]?.[0]).toContain(encodeURIComponent("'cashflow(사용내역 연동)'"));
   });
 
+  it('builds one valid A1 range from a spaced sheet name and local coordinates', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ values: [['2026-01']] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const service = createGoogleSheetsService({
+      fetchImpl,
+      authHeadersFactory: async () => ({ authorization: 'Bearer test-token' }),
+    });
+
+    await service.getSheetValues({
+      spreadsheetId: '1abcDEFghiJKlmnOPQ_rst-123',
+      sheetName: '참여율 관리',
+      rangeA1: 'B1:D1',
+    });
+
+    const requestUrl = decodeURIComponent(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(requestUrl).toContain("/values/'참여율 관리'!B1:D1?");
+    expect(requestUrl).not.toContain("'Sheet1'");
+  });
+
   it('prefers caller google access token over service account auth', async () => {
     const fetchImpl = vi
       .fn()

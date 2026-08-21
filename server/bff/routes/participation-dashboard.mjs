@@ -38,10 +38,9 @@ function participationSheetUnreachable(error, systemAccountEmail = '') {
 /** 다섯 범위를 함께 읽는다. 한 번에 읽어야 사람이 그 사이 고쳐도 한 장면으로 남는다. */
 async function readParticipationSheet(googleSheetsService, sheetLink) {
   const ranges = participationSheetRanges();
-  // 범위에 탭 이름이 들어 있으므로 sheetName 을 따로 넘기지 않는다. 둘 다 주면 어느 쪽이
-  // 이기는지 호출부마다 달라진다.
-  const readRange = (rangeA1) => googleSheetsService.getSheetValues({
+  const readRange = ({ sheetName, rangeA1 }) => googleSheetsService.getSheetValues({
     spreadsheetId: sheetLink,
+    sheetName,
     rangeA1,
   });
   try {
