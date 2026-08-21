@@ -15,22 +15,18 @@
 export const PARTICIPATION_SHEET_TAB = '참여율 관리';
 export const PARTICIPATION_REF_TAB = '참조';
 
-/** 탭 이름에 공백이 있어 범위에 인용부호가 필요하다. */
 export function participationSheetRanges() {
-  const tab = PARTICIPATION_SHEET_TAB;
-  const quoted = `'${tab.replace(/'/g, "''")}'`;
   return {
-    tab,
     /** 양식 식별자. 반영·검증의 첫 관문이다. */
-    format: `'${PARTICIPATION_REF_TAB}'!F1`,
+    format: { sheetName: PARTICIPATION_REF_TAB, rangeA1: 'F1' },
     /** 계약 기간 설정칸(B1 시작월, D1 종료월). C1 은 물결 표시라 함께 읽고 버린다. */
-    period: `${quoted}!B1:D1`,
+    period: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'B1:D1' },
     /** 월 머리글 2행. 파서는 이 행만 읽는다 - 1행 연도 표시는 사람 보기용 장식이다. */
-    header: `${quoted}!G2:DV2`,
+    header: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'G2:DV2' },
     /** 고정 열 A~F: 닉네임·이름·역할·투입시작월·투입종료월·기본투입률 */
-    meta: `${quoted}!A3:F62`,
+    meta: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'A3:F62' },
     /** 월 칸 본문 */
-    cells: `${quoted}!G3:DV62`,
+    cells: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'G3:DV62' },
   };
 }
 
