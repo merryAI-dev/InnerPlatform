@@ -651,18 +651,63 @@ describe('platform-bff-client', () => {
     expect(result).toEqual(page);
   });
 
-  it('reads each general activity source through an isolated bounded request', async () => {
+  it('reads one bounded aggregate activity page with cursor and cancellation', async () => {
     const events = Array.from({ length: 101 }, (_, index) => ({ id: `event-${index}` }));
-    const page = { projectId: 'p001', source: 'audit' as const, events };
+    const page = {
+      projectId: 'p001',
+      events,
+      errors: [{ source: 'sheet_refresh' as const, code: 'cashflow_activity_source_unavailable' as const }],
+      nextCursor: 'next/cursor',
+    };
     const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: page })), request: vi.fn() });
+    const controller = new AbortController();
 
     const result = await fetchCashflowActivityViaBff({
-      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', source: 'audit', client,
+      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001',
+      limit: 50, cursor: 'opaque/cursor', signal: controller.signal, client,
     });
 
-    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/activity?source=audit', expect.objectContaining({ retries: 0, timeoutMs: 12000 }));
+    expect(client.get).toHaveBeenCalledTimes(1);
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/activity?limit=50&cursor=opaque%2Fcursor', expect.objectContaining({
+      retries: 0,
+      timeoutMs: 12000,
+      signal: controller.signal,
+    }));
     expect(result).toBe(page);
     expect(result.events).toHaveLength(101);
+  });
+
+  it('defaults the initial aggregate activity request to 50 documents', async () => {
+    const page = { projectId: 'p001', events: [], errors: [], nextCursor: null };
+    const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: page })), request: vi.fn() });
+
+    await fetchCashflowActivityViaBff({
+      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/activity?limit=50', expect.objectContaining({
+      retries: 0,
+      timeoutMs: 12000,
+    }));
+  });
+
+  it('retries one failed activity source without reading the other sources', async () => {
+    const page = { projectId: 'p001', source: 'audit' as const, events: [], errors: [], nextCursor: null };
+    const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: page })), request: vi.fn() });
+    const controller = new AbortController();
+
+    const result = await fetchCashflowActivityViaBff({
+      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', source: 'audit', limit: 50, client,
+      signal: controller.signal,
+    });
+
+    expect(client.get).toHaveBeenCalledTimes(1);
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/activity?limit=50&source=audit', expect.objectContaining({
+      retries: 0,
+      timeoutMs: 12000,
+      signal: controller.signal,
+    }));
+    expect(result).toBe(page);
   });
 
   it('routes projection through the fenced JVM-owned BFF endpoint', async () => {

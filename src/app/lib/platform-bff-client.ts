@@ -879,6 +879,17 @@ export interface CashflowActivityEvent {
 
 export type CashflowActivitySource = 'legacy' | 'sheet_refresh' | 'audit';
 
+export interface CashflowActivityPage {
+  projectId: string;
+  source?: CashflowActivitySource;
+  events: CashflowActivityEvent[];
+  errors: Array<{
+    source: CashflowActivitySource;
+    code: 'cashflow_activity_source_unavailable';
+  }>;
+  nextCursor: string | null;
+}
+
 export interface CashflowAppliedCellChange {
   eventId: string;
   cellId: string;
@@ -1982,6 +1993,7 @@ export interface PlatformApiClientLike {
     headers?: HeadersInit;
     idempotencyKey?: string;
     requestId?: string;
+    signal?: AbortSignal;
     retries?: number;
     timeoutMs?: number;
   }): Promise<{ data: T }>;
@@ -3610,13 +3622,20 @@ export async function fetchCashflowActivityViaBff(params: {
   actor: ActorLike;
   projectId: string;
   source?: CashflowActivitySource;
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
   client?: PlatformApiClientLike;
-}): Promise<{ projectId: string; source?: CashflowActivitySource; events: CashflowActivityEvent[] }> {
-  const response = await resolveClient(params.client).get<{ projectId: string; source?: CashflowActivitySource; events: CashflowActivityEvent[] }>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/activity${params.source ? `?source=${params.source}` : ''}`,
+}): Promise<CashflowActivityPage> {
+  const query = new URLSearchParams({ limit: String(params.limit ?? 50) });
+  if (params.source) query.set('source', params.source);
+  if (params.cursor) query.set('cursor', params.cursor);
+  const response = await resolveClient(params.client).get<CashflowActivityPage>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/activity?${query.toString()}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      signal: params.signal,
       retries: 0,
       timeoutMs: 12000,
     },

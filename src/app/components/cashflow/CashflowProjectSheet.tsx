@@ -98,7 +98,16 @@ import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
 import { MemberPicker } from '../ui/member-picker';
 import { buildOrgMemberPickerOptions } from '../../data/project-team-member-options';
 import { usePersonRoster } from '../../data/use-person-roster';
-import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
+import {
+  cashflowActivitySourcesForMutations,
+  createCashflowActivityRequestGuard,
+  filterCashflowActivityErrorsAfterSuccess,
+  shouldStartCashflowActivityLoad,
+  takeCashflowActivityPendingWork,
+  updateCashflowActivityCursorQueue,
+  type CashflowActivityCursor,
+  type CashflowActivityMutation,
+} from './cashflow-activity-loader';
 import { describeCashflowMonthCloseIssue } from './cashflow-month-close-blocker-helpers';
 import { buildSheetApplyNotice } from './cashflow-sheet-apply-notice';
 import { pickCashflowMonthCloseNotice } from './cashflow-month-close-notice';
@@ -545,9 +554,44 @@ export function CashflowProjectSheet({
     setSavedExecutiveApproverId(approverId);
   }, [project?.executiveApproverId, projectId]);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
-  const [cashflowEventErrors, setCashflowEventErrors] = useState<Array<{ source: CashflowActivitySource; message: string }>>([]);
+  const [cashflowEventErrors, setCashflowEventErrors] = useState<Array<{
+    source: CashflowActivitySource;
+    message: string;
+    preservePagination?: boolean;
+  }>>([]);
+  const [cashflowEventLoading, setCashflowEventLoading] = useState(false);
   const [cashflowEventLoadingSources, setCashflowEventLoadingSources] = useState<CashflowActivitySource[]>([]);
-  const cashflowActivityGenerationRef = useRef(0);
+  const [cashflowActivityCursorQueue, setCashflowActivityCursorQueue] = useState<CashflowActivityCursor[]>([]);
+  const [cashflowEventLoadingMore, setCashflowEventLoadingMore] = useState(false);
+  const cashflowEventLoadingMoreRef = useRef(false);
+  const [cashflowActivityDrainVersion, setCashflowActivityDrainVersion] = useState(0);
+  const [cashflowEventLoadError, setCashflowEventLoadError] = useState('');
+  const cashflowActivityRequestGuardRef = useRef<ReturnType<typeof createCashflowActivityRequestGuard> | null>(null);
+  if (!cashflowActivityRequestGuardRef.current) {
+    cashflowActivityRequestGuardRef.current = createCashflowActivityRequestGuard();
+  }
+  const cashflowActivityRequestGuard = cashflowActivityRequestGuardRef.current;
+  const activityScope = `${orgId}:${projectId}`;
+  const cashflowActivityScopeRef = useRef(activityScope);
+  cashflowActivityScopeRef.current = activityScope;
+  const cashflowActivityOneClickRef = useRef({
+    scope: activityScope,
+    depth: 0,
+    pendingAggregate: false,
+    pendingSources: new Set<CashflowActivitySource>(),
+  });
+  if (cashflowActivityOneClickRef.current.scope !== activityScope) {
+    cashflowActivityOneClickRef.current = {
+      scope: activityScope,
+      depth: 0,
+      pendingAggregate: false,
+      pendingSources: new Set<CashflowActivitySource>(),
+    };
+  }
+  const opsTimelineRef = useRef<HTMLDivElement | null>(null);
+  const [opsTimelineVisible, setOpsTimelineVisible] = useState(false);
+  const opsTimelineVisibleRef = useRef(false);
+  opsTimelineVisibleRef.current = opsTimelineVisible;
   const [cashflowEventQuery, setCashflowEventQuery] = useState('');
   const [cashflowEventMode, setCashflowEventMode] = useState('ALL');
   const [cashflowEventMonth, setCashflowEventMonth] = useState('ALL');
@@ -561,8 +605,10 @@ export function CashflowProjectSheet({
     reopen: 0,
   });
   const selectedProjectIdRef = useRef(projectId);
+  const selectedOrgIdRef = useRef(orgId);
   const selectedYearMonthRef = useRef(yearMonth);
   selectedProjectIdRef.current = projectId;
+  selectedOrgIdRef.current = orgId;
   selectedYearMonthRef.current = yearMonth;
   const captureMonthCloseMutationScope = useCallback((operation: CashflowMonthCloseMutationOperation): CashflowMonthCloseMutationScope => {
     const generation = monthCloseMutationGenerationRef.current[operation] + 1;
@@ -1214,51 +1260,231 @@ export function CashflowProjectSheet({
     if (weeklyHistoryOpen) void loadWeeklyComplianceHistory();
   }, [loadWeeklyComplianceHistory, weeklyHistoryOpen]);
 
-  const loadCashflowEventSource = useCallback(async (source: CashflowActivitySource, generation = cashflowActivityGenerationRef.current): Promise<void> => {
-    if (!projectId || !orgId || !user?.uid) {
-      return;
+  const fetchCashflowActivityPage = useCallback(async (input: {
+    source?: CashflowActivitySource;
+    cursor?: string;
+    signal: AbortSignal;
+  }) => {
+    let actor = await resolveBffActor();
+    if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+    if (input.signal.aborted) throw new Error('활동 기록 요청이 중단되었습니다.');
+    const request = (requestActor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => fetchCashflowActivityViaBff({
+      tenantId: orgId,
+      actor: requestActor,
+      projectId,
+      limit: 50,
+      ...(input.source ? { source: input.source } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+      signal: input.signal,
+    });
+    try {
+      return await request(actor);
+    } catch (error) {
+      if (!isBffAuthRejection(error) || input.signal.aborted) throw error;
+      actor = await resolveBffActor({ forceRefresh: true });
+      if (!actor?.idToken || input.signal.aborted) throw error;
+      return request(actor);
     }
+  }, [orgId, projectId, resolveBffActor]);
+
+  const isCurrentCashflowActivityScope = useCallback(() => (
+    cashflowActivityScopeRef.current === activityScope
+    && selectedOrgIdRef.current === orgId
+    && selectedProjectIdRef.current === projectId
+  ), [activityScope, orgId, projectId]);
+
+  const cashflowActivityDeferred = useCallback(() => (
+    cashflowActivityOneClickRef.current.scope === activityScope
+    && cashflowActivityOneClickRef.current.depth > 0
+  ), [activityScope]);
+
+  const loadCashflowEventSource = useCallback(async (
+    source: CashflowActivitySource,
+    options: { preservePagination?: boolean } = {},
+  ): Promise<void> => {
+    if (cashflowEventLoading || cashflowEventLoadingMore || !projectId || !orgId || !user?.uid || !shouldStartCashflowActivityLoad({
+      visible: opsTimelineVisibleRef.current,
+      deferred: cashflowActivityDeferred(),
+      currentScope: isCurrentCashflowActivityScope(),
+    })) return;
+    const ticket = cashflowActivityRequestGuard.start(`source:${source}`);
     setCashflowEventLoadingSources((current) => current.includes(source) ? current : [...current, source]);
     try {
-      let actor = await resolveBffActor();
-      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      try {
-        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId, source });
-        if (cashflowActivityGenerationRef.current !== generation) return;
-        setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
-      } catch (error) {
-        if (!isBffAuthRejection(error)) throw error;
-        actor = await resolveBffActor({ forceRefresh: true });
-        if (!actor?.idToken) throw error;
-        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId, source });
-        if (cashflowActivityGenerationRef.current !== generation) return;
-        setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
+      const response = await fetchCashflowActivityPage({ source, signal: ticket.signal });
+      if (!cashflowActivityRequestGuard.isCurrent(ticket) || !isCurrentCashflowActivityScope()) return;
+      setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
+      setCashflowEventErrors((current) => filterCashflowActivityErrorsAfterSuccess(
+        current,
+        source,
+        Boolean(options.preservePagination),
+      ));
+      if (!options.preservePagination) {
+        setCashflowActivityCursorQueue((current) => updateCashflowActivityCursorQueue(current, source, response.nextCursor));
       }
-      setCashflowEventErrors((current) => current.filter((failure) => failure.source !== source));
     } catch (error) {
-      if (cashflowActivityGenerationRef.current !== generation) return;
+      if (!cashflowActivityRequestGuard.isCurrent(ticket) || !isCurrentCashflowActivityScope()) return;
       const message = resolveApiErrorMessage(error, `${CASHFLOW_ACTIVITY_SOURCE_LABELS[source]} 기록을 불러오지 못했습니다.`);
-      setCashflowEventErrors((current) => [...current.filter((failure) => failure.source !== source), { source, message }]);
+      setCashflowEventErrors((current) => [
+        ...current.filter((failure) => failure.source !== source),
+        { source, message, preservePagination: options.preservePagination },
+      ]);
     } finally {
-      if (cashflowActivityGenerationRef.current === generation) {
+      if (cashflowActivityRequestGuard.isCurrent(ticket) && isCurrentCashflowActivityScope()) {
         setCashflowEventLoadingSources((current) => current.filter((candidate) => candidate !== source));
       }
+      cashflowActivityRequestGuard.finish(ticket);
     }
-  }, [orgId, projectId, resolveBffActor, user?.uid]);
+  }, [cashflowActivityDeferred, cashflowActivityRequestGuard, cashflowEventLoading, cashflowEventLoadingMore, fetchCashflowActivityPage, isCurrentCashflowActivityScope, orgId, projectId, user?.uid]);
 
-  const loadCashflowEvents = useCallback(async (): Promise<void> => {
-    const generation = cashflowActivityGenerationRef.current + 1;
-    cashflowActivityGenerationRef.current = generation;
-    setCashflowEventErrors([]);
-    setCashflowEventLoadingSources([]);
-    await loadCashflowActivitySourcesSequentially(async (source) => {
-      await loadCashflowEventSource(source, generation);
-    });
+  const reloadCashflowActivitySources = useCallback(async (sources: readonly CashflowActivitySource[]): Promise<void> => {
+    await Promise.all([...new Set(sources)].map((source) => (
+      loadCashflowEventSource(source, { preservePagination: true })
+    )));
   }, [loadCashflowEventSource]);
 
+  const reloadCashflowActivityForMutations = useCallback(async (...mutations: CashflowActivityMutation[]): Promise<void> => {
+    const sources = cashflowActivitySourcesForMutations(mutations);
+    if (sources.length === 0) return;
+    if (!opsTimelineVisibleRef.current) return;
+    sources.forEach((source) => cashflowActivityOneClickRef.current.pendingSources.add(source));
+    setCashflowActivityDrainVersion((current) => current + 1);
+  }, []);
+
+  // Frozen apply flow keeps this symbol. A successful apply writes only the JVM audit source.
+  const loadCashflowEvents = useCallback(async (): Promise<void> => {
+    await reloadCashflowActivityForMutations('sheet_values_applied');
+  }, [reloadCashflowActivityForMutations]);
+
+  const loadCashflowActivityAggregate = useCallback(async (): Promise<void> => {
+    if (!projectId || !orgId || !user?.uid || !shouldStartCashflowActivityLoad({
+      visible: opsTimelineVisibleRef.current,
+      deferred: cashflowActivityDeferred(),
+      currentScope: isCurrentCashflowActivityScope(),
+    })) return;
+    if (cashflowActivityOneClickRef.current.scope === activityScope) {
+      cashflowActivityOneClickRef.current.pendingAggregate = false;
+      cashflowActivityOneClickRef.current.pendingSources.clear();
+    }
+    const ticket = cashflowActivityRequestGuard.start('aggregate', { reset: true });
+    cashflowEventLoadingMoreRef.current = false;
+    setCashflowEventLoading(true);
+    setCashflowEventLoadingMore(false);
+    setCashflowEventLoadError('');
+    setCashflowEventErrors([]);
+    setCashflowEventLoadingSources([]);
+    setCashflowActivityCursorQueue([]);
+    try {
+      const response = await fetchCashflowActivityPage({ signal: ticket.signal });
+      if (!cashflowActivityRequestGuard.isCurrent(ticket) || !isCurrentCashflowActivityScope()) return;
+      setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
+      setCashflowEventErrors(response.errors.map((failure) => ({
+        source: failure.source,
+        message: '기록 일부를 일시적으로 불러오지 못했습니다.',
+      })));
+      setCashflowActivityCursorQueue(updateCashflowActivityCursorQueue([], undefined, response.nextCursor));
+    } catch (error) {
+      if (!cashflowActivityRequestGuard.isCurrent(ticket) || !isCurrentCashflowActivityScope()) return;
+      setCashflowEventLoadError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
+    } finally {
+      if (cashflowActivityRequestGuard.isCurrent(ticket) && isCurrentCashflowActivityScope()) {
+        setCashflowEventLoading(false);
+      }
+      cashflowActivityRequestGuard.finish(ticket);
+    }
+  }, [activityScope, cashflowActivityDeferred, cashflowActivityRequestGuard, fetchCashflowActivityPage, isCurrentCashflowActivityScope, orgId, projectId, user?.uid]);
+
+  useEffect(() => {
+    const pendingWork = takeCashflowActivityPendingWork(cashflowActivityOneClickRef.current, {
+      scope: activityScope,
+      visible: opsTimelineVisible,
+      busy: cashflowEventLoading || cashflowEventLoadingMore || cashflowEventLoadingSources.length > 0,
+    });
+    if (pendingWork?.kind === 'aggregate') void loadCashflowActivityAggregate();
+    else if (pendingWork?.kind === 'sources') void reloadCashflowActivitySources(pendingWork.sources);
+  }, [
+    activityScope,
+    cashflowActivityDrainVersion,
+    cashflowEventLoading,
+    cashflowEventLoadingMore,
+    cashflowEventLoadingSources.length,
+    loadCashflowActivityAggregate,
+    opsTimelineVisible,
+    reloadCashflowActivitySources,
+  ]);
+
+  const loadMoreCashflowEvents = useCallback(async (): Promise<void> => {
+    if (cashflowActivityCursorQueue.length === 0 || cashflowEventLoadingMoreRef.current || cashflowEventLoading || cashflowEventLoadingSources.length > 0 || !shouldStartCashflowActivityLoad({
+      visible: opsTimelineVisibleRef.current,
+      deferred: cashflowActivityDeferred(),
+      currentScope: isCurrentCashflowActivityScope(),
+    })) return;
+    const queuedCursors = [...cashflowActivityCursorQueue];
+    cashflowEventLoadingMoreRef.current = true;
+    setCashflowEventLoadingMore(true);
+    setCashflowEventLoadError('');
+    let generation: number | null = null;
+    await Promise.all(queuedCursors.map(async (queuedCursor) => {
+      const ticket = cashflowActivityRequestGuard.start(queuedCursor.source ? `source:${queuedCursor.source}` : 'aggregate');
+      generation ??= ticket.generation;
+      try {
+        const response = await fetchCashflowActivityPage({
+          ...(queuedCursor.source ? { source: queuedCursor.source } : {}),
+          cursor: queuedCursor.cursor,
+          signal: ticket.signal,
+        });
+        if (!cashflowActivityRequestGuard.isCurrent(ticket) || !isCurrentCashflowActivityScope()) return;
+        setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
+        const failedSources = new Set(response.errors.map((failure) => failure.source));
+        setCashflowEventErrors((current) => [
+          ...current.filter((failure) => failure.source !== queuedCursor.source && !failedSources.has(failure.source)),
+          ...response.errors.map((failure) => ({
+            source: failure.source,
+            message: '기록 일부를 일시적으로 불러오지 못했습니다.',
+          })),
+        ]);
+        if (response.nextCursor === queuedCursor.cursor) {
+          setCashflowEventLoadError('이력 페이지가 반복되어 추가 조회를 중단했습니다.');
+          setCashflowActivityCursorQueue((current) => updateCashflowActivityCursorQueue(current, queuedCursor.source, null));
+        } else {
+          setCashflowActivityCursorQueue((current) => updateCashflowActivityCursorQueue(current, queuedCursor.source, response.nextCursor));
+        }
+      } catch (error) {
+        if (!cashflowActivityRequestGuard.isCurrent(ticket) || !isCurrentCashflowActivityScope()) return;
+        const failedSource = queuedCursor.source;
+        if (failedSource) {
+          const message = resolveApiErrorMessage(error, `${CASHFLOW_ACTIVITY_SOURCE_LABELS[failedSource]} 기록을 불러오지 못했습니다.`);
+          setCashflowEventErrors((current) => [
+            ...current.filter((failure) => failure.source !== failedSource),
+            { source: failedSource, message },
+          ]);
+        } else {
+          setCashflowEventLoadError(resolveApiErrorMessage(error, '이전 변경 이력을 불러오지 못했습니다.'));
+        }
+      } finally {
+        cashflowActivityRequestGuard.finish(ticket);
+      }
+    }));
+    if (generation !== null && cashflowActivityRequestGuard.isGenerationCurrent(generation) && isCurrentCashflowActivityScope()) {
+      cashflowEventLoadingMoreRef.current = false;
+      setCashflowEventLoadingMore(false);
+    }
+  }, [cashflowActivityCursorQueue, cashflowActivityDeferred, cashflowActivityRequestGuard, cashflowEventLoading, cashflowEventLoadingSources.length, fetchCashflowActivityPage, isCurrentCashflowActivityScope]);
+
+  useEffect(() => {
+    setCashflowEvents([]);
+    setCashflowEventErrors([]);
+    setCashflowEventLoadError('');
+    setCashflowEventLoading(false);
+    setCashflowEventLoadingSources([]);
+    setCashflowActivityCursorQueue([]);
+    setCashflowEventLoadingMore(false);
+    cashflowEventLoadingMoreRef.current = false;
+    return () => {
+      cashflowActivityRequestGuard.invalidate();
+    };
+  }, [activityScope, cashflowActivityRequestGuard]);
+
   // 이력 타임라인은 화면 오른쪽/아래에 있다. 들어올 때 읽는다. 한 번 보이면 이후 갱신은 기존 경로대로.
-  const opsTimelineRef = useRef<HTMLDivElement | null>(null);
-  const [opsTimelineVisible, setOpsTimelineVisible] = useState(false);
   useEffect(() => {
     const node = opsTimelineRef.current;
     if (!node) return undefined;
@@ -1273,12 +1499,17 @@ export function CashflowProjectSheet({
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    setCashflowEvents([]);
     // 넓은 화면에선 타임라인이 처음부터 보여서 "보이면 읽는다"가 첫 발사에 끼었다(2026-08-19).
     // 보조 정보이니 month-close 가 끝난 뒤에만 읽는다.
     if (!opsTimelineVisible || !monthCloseSettled) return;
-    void loadCashflowEvents();
-  }, [loadCashflowEvents, monthCloseSettled, opsTimelineVisible]);
+    if (cashflowActivityDeferred()) {
+      if (cashflowActivityOneClickRef.current.scope === activityScope) {
+        cashflowActivityOneClickRef.current.pendingAggregate = true;
+      }
+      return;
+    }
+    void loadCashflowActivityAggregate();
+  }, [activityScope, cashflowActivityDeferred, loadCashflowActivityAggregate, monthCloseSettled, opsTimelineVisible]);
 
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;
@@ -1795,7 +2026,6 @@ export function CashflowProjectSheet({
       await Promise.all([
         loadCashflowMonthClose(),
         loadMonthCloseRequest(),
-        loadCashflowEvents(),
       ]);
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
       toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.');
@@ -1827,7 +2057,6 @@ export function CashflowProjectSheet({
     captureMonthCloseMutationScope,
     isCurrentMonthCloseMutation,
     monthClosePinnedSource,
-    loadCashflowEvents,
     loadCashflowMonthClose,
     loadMonthCloseRequest,
     monthCloseCellsState,
@@ -1875,7 +2104,7 @@ export function CashflowProjectSheet({
       setMonthCloseWithdrawOpen(false);
       setMonthCloseWithdrawReason('');
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
-      await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest(), loadCashflowEvents()]);
+      await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest()]);
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
       toast.success('월 결산 요청을 회수했어요.');
       logCashflowSettlement({
@@ -1904,7 +2133,6 @@ export function CashflowProjectSheet({
   }, [
     captureMonthCloseMutationScope,
     isCurrentMonthCloseMutation,
-    loadCashflowEvents,
     loadCashflowMonthClose,
     loadMonthCloseRequest,
     monthCloseActions?.withdrawMonthClose,
@@ -1966,6 +2194,7 @@ export function CashflowProjectSheet({
       setMonthCloseRequest(result.request);
       if (!isCurrentMonthCloseMutation(mutationScope, result.request)) return;
       void loadMonthCloseRequest();
+      void reloadCashflowActivityForMutations('month_reopen_completed');
       setReopenAction(null);
       setReopenReason('');
       if (portalMode) {
@@ -1980,7 +2209,7 @@ export function CashflowProjectSheet({
     } finally {
       if (isCurrentMonthCloseMutation(mutationScope)) setMonthCloseBusy(false);
     }
-  }, [canReviewReopen, captureMonthCloseMutationScope, isCurrentMonthCloseMutation, loadMonthCloseRequest, monthCloseActions?.requestMonthReopen, monthCloseRequest, orgId, portalMode, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
+  }, [canReviewReopen, captureMonthCloseMutationScope, isCurrentMonthCloseMutation, loadMonthCloseRequest, monthCloseActions?.requestMonthReopen, monthCloseRequest, orgId, portalMode, projectId, reloadCashflowActivityForMutations, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
   const handleRefreshSheetMirror = useCallback(async (): Promise<CashflowSheetLabMirrorResult | null> => {
     if (!cashflowSheetConfig?.value) {
@@ -2018,7 +2247,7 @@ export function CashflowProjectSheet({
           }
         : mirror);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
-        void loadCashflowEvents();
+        void reloadCashflowActivityForMutations('sheet_mirror_refreshed');
         } else if (mirror.status === 'STALE') {
         } else {
       }
@@ -2087,7 +2316,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor, selectedYear, yearMonth]);
+  }, [cashflowSheetConfig, orgId, projectId, reloadCashflowActivityForMutations, resolveBffActor, selectedYear, yearMonth]);
 
   const handleMonthClosePreparationAction = useCallback(async (): Promise<void> => {
     if (monthClosePreparation.status === 'STATUS_RETRY_REQUIRED') {
@@ -2410,6 +2639,28 @@ export function CashflowProjectSheet({
       summary: { completedStep: 'stage', nextStep: 'apply_or_confirmation' },
     });
   }, [handleRefreshSheetMirror, handleStagePinnedSheetValues, projectId, yearMonth]);
+
+  const handleDeferredRefreshAndApplySheetValues = useCallback(async (): Promise<void> => {
+    const oneClickActivityScope = activityScope;
+    if (cashflowActivityOneClickRef.current.scope !== oneClickActivityScope) {
+      cashflowActivityOneClickRef.current = {
+        scope: oneClickActivityScope,
+        depth: 0,
+        pendingAggregate: false,
+        pendingSources: new Set<CashflowActivitySource>(),
+      };
+    }
+    if (cashflowActivityOneClickRef.current.depth === 0) cashflowActivityOneClickRef.current.pendingSources.clear();
+    cashflowActivityOneClickRef.current.depth += 1;
+    try {
+      await handleRefreshAndApplySheetValues();
+    } finally {
+      if (cashflowActivityOneClickRef.current.scope === oneClickActivityScope) {
+        cashflowActivityOneClickRef.current.depth -= 1;
+        setCashflowActivityDrainVersion((current) => current + 1);
+      }
+    }
+  }, [activityScope, handleRefreshAndApplySheetValues]);
 
   const handleOpenSheetOnboarding = useCallback(() => {
     setSheetReviewDialogOpen(true);
@@ -2934,7 +3185,7 @@ export function CashflowProjectSheet({
                 </HoverExplain>
               </div>
               <div className="text-[12px] text-slate-500">
-                현금흐름 관리시트 A11:BS11 기준
+                현금흐름 관리시트 E11:BL11 주별 수식 기준
               </div>
             </div>
             <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">시트 수식값</Badge>
@@ -2952,34 +3203,26 @@ export function CashflowProjectSheet({
                 </tr>
               </thead>
               <tbody>
-                {!cashflowPresentation.comparison.changed ? (
-                  <tr>
-                    <td colSpan={columnCount + 1} className="px-3 py-8 text-center text-[12px] text-slate-500">
-                      Projection과 Actual 차이가 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  <tr className="border-t-[6px] border-white">
-                    <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2">
-                      <div className="truncate text-emerald-700">Projection - Actual 차이</div>
-                    </td>
-                    {comparisonCells.map((cell) => {
-                      const rowSurface = 'bg-white';
-                      const differenceClass = cell.difference === null || cell.difference === 0
-                        ? `${rowSurface} text-slate-300`
-                        : 'bg-[#EAF0F5] text-sky-700';
-                      return (
-                        <td
-                          key={`sheet-projection-actual-difference-${cell.yearMonth}-${cell.weekNo}`}
-                          className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`}
-                          title={cell.difference === null ? `${cell.weekRange}\n시트 수식값 없음` : `${cell.weekRange}\n시트 차이 ${fmtSigned(cell.difference)}`}
-                        >
-                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                )}
+                <tr className="border-t-[6px] border-white">
+                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2">
+                    <div className="truncate text-emerald-700">Projection - Actual 차이</div>
+                  </td>
+                  {comparisonCells.map((cell) => {
+                    const rowSurface = 'bg-white';
+                    const differenceClass = cell.difference === null || cell.difference === 0
+                      ? `${rowSurface} text-slate-500`
+                      : 'bg-[#EAF0F5] text-sky-700';
+                    return (
+                      <td
+                        key={`sheet-projection-actual-difference-${cell.yearMonth}-${cell.weekNo}`}
+                        className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`}
+                        title={cell.difference === null ? `${cell.weekRange}\n시트 수식값 없음` : `${cell.weekRange}\n시트 차이 ${fmtSigned(cell.difference)}`}
+                      >
+                        {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
+                      </td>
+                    );
+                  })}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -3276,7 +3519,7 @@ export function CashflowProjectSheet({
                       : 'border-slate-300 bg-white text-[#17324D] hover:bg-accent'
                   }`}
                   disabled={sheetRefreshLoading}
-                  onClick={() => void handleRefreshAndApplySheetValues()}
+                  onClick={() => void handleDeferredRefreshAndApplySheetValues()}
                 >
                   {sheetRefreshLoading ? <span aria-hidden="true" className="pointer-events-none absolute -inset-1 rounded-md border-2 border-transparent border-t-[#17324D] motion-safe:animate-spin" /> : null}
                   {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
@@ -3699,11 +3942,35 @@ export function CashflowProjectSheet({
           {cashflowEventErrors.map((failure) => (
             <div key={failure.source} role="alert" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
               <span>{CASHFLOW_ACTIVITY_SOURCE_LABELS[failure.source]}: {failure.message}</span>
-              <Button type="button" size="sm" variant="outline" disabled={cashflowEventLoadingSources.includes(failure.source)} onClick={() => void loadCashflowEventSource(failure.source)}>다시 시도</Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={cashflowEventLoading || cashflowEventLoadingMore || cashflowEventLoadingSources.includes(failure.source)}
+                onClick={() => void loadCashflowEventSource(failure.source, {
+                  preservePagination: Boolean(failure.preservePagination),
+                })}
+              >
+                다시 시도
+              </Button>
             </div>
           ))}
+          {cashflowEventLoadError ? (
+            <div role="alert" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+              <span>{cashflowEventLoadError}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={cashflowEventLoading || cashflowEventLoadingMore}
+                onClick={() => void (cashflowActivityCursorQueue.length > 0 ? loadMoreCashflowEvents() : loadCashflowActivityAggregate())}
+              >
+                다시 시도
+              </Button>
+            </div>
+          ) : null}
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-md border border-slate-200 bg-slate-50 px-2 py-2 pr-1">
-            {cashflowEventLoadingSources.length > 0 && filteredEvents.length === 0 ? (
+            {(cashflowEventLoading || cashflowEventLoadingSources.length > 0) && filteredEvents.length === 0 ? (
               <div role="status" className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">실제 반영 기록을 불러오는 중입니다.</div>
             ) : filteredEvents.length === 0 ? (
               <div className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">
@@ -3758,6 +4025,11 @@ export function CashflowProjectSheet({
               );
             })}
           </div>
+          {cashflowActivityCursorQueue.length > 0 ? (
+            <Button type="button" variant="outline" className="mt-2 w-full" disabled={cashflowEventLoading || cashflowEventLoadingMore || cashflowEventLoadingSources.length > 0} onClick={() => void loadMoreCashflowEvents()}>
+              {cashflowEventLoadingMore ? '이전 기록 불러오는 중…' : '이전 기록 더 불러오기'}
+            </Button>
+          ) : null}
         </CardContent>
       </Card>
     );

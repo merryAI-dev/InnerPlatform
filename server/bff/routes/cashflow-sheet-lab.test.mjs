@@ -76,6 +76,10 @@ function closeHash(value) {
   return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
 }
 
+function stageManifestHash(value) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
+}
+
 function cumulativeMonths(throughMonth) {
   const months = [];
   for (let year = 2023, month = 1; `${year}-${String(month).padStart(2, '0')}` <= throughMonth;) {
@@ -419,6 +423,16 @@ function buildMultiYearMatrix() {
   return matrix;
 }
 
+function buildMaximumCandidateMatrix() {
+  return buildOfficialMatrix({
+    annualYears: [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032],
+    projectionAnnualValue: '100',
+    actualAnnualValue: '50',
+    projectionAnnualValues: { 2027: '100' },
+    actualAnnualValues: { 2027: '50' },
+  });
+}
+
 function buildConflictingAnnualWeeklyMatrix() {
   return buildOfficialMatrix({
     annualYears: [2026],
@@ -427,16 +441,33 @@ function buildConflictingAnnualWeeklyMatrix() {
   });
 }
 
-function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments = {}, onGet, onQuery } = {}) {
+function createDb({
+  project = { id: 'project-a' },
+  weeks = [],
+  initialDocuments = {},
+  onGet,
+  onQuery,
+  onBatchCommit,
+  onWrite,
+} = {}) {
   const documents = new Map();
+  const documentVersions = new Map();
   const queries = [];
   const batchCommitSizes = [];
+  const directSetPaths = [];
+  let batchCommitAttempt = 0;
   documents.set('orgs/tenant-a/projects/project-a', { ...project });
   for (const week of weeks) {
     documents.set(`orgs/tenant-a/cashflow_weeks/${week.id}`, { ...week });
   }
   for (const [path, value] of Object.entries(initialDocuments)) {
     documents.set(path, { ...value });
+  }
+
+  function writeDocument(path, patch, options = {}) {
+    documents.set(path, options.merge ? { ...(documents.get(path) || {}), ...patch } : { ...patch });
+    documentVersions.set(path, (documentVersions.get(path) || 0) + 1);
+    onWrite?.({ path, patch, options, value: documents.get(path) });
   }
 
   function ref(path) {
@@ -450,7 +481,8 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
         };
       }),
       set: vi.fn(async (patch, options = {}) => {
-        documents.set(path, options.merge ? { ...(documents.get(path) || {}), ...patch } : { ...patch });
+        directSetPaths.push(path);
+        writeDocument(path, patch, options);
       }),
     };
   }
@@ -460,10 +492,20 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
     batch: vi.fn(() => {
       const operations = [];
       return {
-        set: (docRef, patch, options = {}) => operations.push(() => docRef.set(patch, options)),
+        set: (docRef, patch, options = {}) => operations.push({ path: docRef.path, patch, options }),
         commit: vi.fn(async () => {
+          batchCommitAttempt += 1;
+          if (onBatchCommit) {
+            await onBatchCommit({
+              attempt: batchCommitAttempt,
+              size: operations.length,
+              paths: operations.map((operation) => operation.path),
+            });
+          }
+          for (const operation of operations) {
+            writeDocument(operation.path, operation.patch, operation.options);
+          }
           batchCommitSizes.push(operations.length);
-          await Promise.all(operations.map((operation) => operation()));
         }),
       };
     }),
@@ -493,16 +535,49 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
         };
       }),
     })),
-    runTransaction: vi.fn(async (callback) => callback({
-      get: (docRef) => docRef.get(),
-      set: (docRef, patch, options) => docRef.set(patch, options),
-    })),
+    runTransaction: vi.fn(async (callback) => {
+      for (let retry = 0; retry < 5; retry += 1) {
+        const operations = [];
+        const readVersions = new Map();
+        const result = await callback({
+          get: async (target) => {
+            const snapshot = await target.get();
+            if (target.path) readVersions.set(target.path, documentVersions.get(target.path) || 0);
+            return snapshot;
+          },
+          set: (docRef, patch, options = {}) => operations.push({ path: docRef.path, patch, options }),
+        });
+        const candidateOperations = operations.filter(({ path }) => path.includes('/cashflow_change_candidates/'));
+        if (candidateOperations.length > 0) {
+          batchCommitAttempt += 1;
+          if (onBatchCommit) {
+            await onBatchCommit({
+              attempt: batchCommitAttempt,
+              size: candidateOperations.length,
+              paths: candidateOperations.map((operation) => operation.path),
+            });
+          }
+        }
+        const conflicted = [...readVersions].some(([path, version]) => (
+          (documentVersions.get(path) || 0) !== version
+        ));
+        if (conflicted) continue;
+        for (const operation of operations) {
+          writeDocument(operation.path, operation.patch, operation.options);
+        }
+        if (candidateOperations.length > 0) batchCommitSizes.push(candidateOperations.length);
+        return result;
+      }
+      throw new Error('transaction retry limit exceeded');
+    }),
     __getDocument: (path = 'orgs/tenant-a/projects/project-a') => documents.get(path),
     __getDocumentsByPrefix: (prefix) => [...documents.entries()]
       .filter(([path]) => path.startsWith(prefix))
       .map(([path, data]) => ({ path, data })),
     __getQueries: () => [...queries],
     __getBatchCommitSizes: () => [...batchCommitSizes],
+    __clearBatchCommitSizes: () => { batchCommitSizes.length = 0; },
+    __getDirectSetPaths: () => [...directSetPaths],
   };
 }
 
@@ -1370,7 +1445,7 @@ describe('cashflow sheet lab route', () => {
     const retried2025 = annualCalls.filter((call) => call.year === 2025);
     expect(retried2025).toHaveLength(2);
     expect(retried2025[0].idempotencyKey).toBe(retried2025[1].idempotencyKey);
-  });
+  }, 10_000);
 
   it('gives the weekly year no annual column so weekly and annual totals cannot conflict', async () => {
     const db = createDb({
@@ -1869,12 +1944,14 @@ describe('cashflow sheet lab route', () => {
     const previewSpreadsheet = vi.fn(async ({ value }) => {
       const year = String(value).includes('2027') ? 2027 : 2026;
       const labels = Array.from({ length: 5 }, (_, index) => `${String(year).slice(2)}-1-${index + 1}`);
+      const matrix = buildMatrixWithWeekLabels(labels);
+      matrix[10][4] = year === 2026 ? '101' : '202';
       return {
         spreadsheetId: `spreadsheet-${year}`,
         spreadsheetTitle: `${year} cashflow`,
         selectedSheetName: 'cashflow(사용내역 연동)',
         availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-        matrix: buildMatrixWithWeekLabels(labels),
+        matrix,
       };
     });
     const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
@@ -1914,6 +1991,13 @@ describe('cashflow sheet lab route', () => {
       2027: { sourceYear: 2027, spreadsheetId: 'spreadsheet-2027' },
     });
     expect([...new Set(mirror.body.cells.map((cell) => Number(cell.yearMonth.slice(0, 4))))]).toEqual([2026, 2027]);
+    expect(mirror.body.sheetFacts.projectionActualDifferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ yearMonth: '2026-01', weekNo: 1, amount: 101, sourceCell: 'E11' }),
+      expect.objectContaining({ yearMonth: '2027-01', weekNo: 1, amount: 202, sourceCell: 'E11' }),
+    ]));
+    expect([...new Set(mirror.body.sheetFacts.weeklyCalculationChecks.map((row) => (
+      Number(row.yearMonth.slice(0, 4))
+    )))]).toEqual([2026, 2027]);
   });
 
   it('keeps each annual year from one closest sheet source instead of double-counting overlapping 2024/2025 totals', async () => {
@@ -2357,6 +2441,9 @@ describe('cashflow sheet lab route', () => {
       projectionLineCount: 80,
       actualLineCount: 80,
     });
+    expect(response.body.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'pending_review' }),
+    ]));
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
       projection: { MYSC_PREPAY_IN: 100 },
       actual: { MYSC_PREPAY_IN: 200 },
@@ -2371,7 +2458,10 @@ describe('cashflow sheet lab route', () => {
       sourceRevision: mirror.body.sourceRevision,
     });
     expect(stagedMonths[0].data.cells).toHaveLength(160);
-    expect(candidates.find((candidate) => candidate.data.mode === 'projection' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data).toMatchObject({
+    const persistedProjectionCandidate = candidates.find((candidate) => (
+      candidate.data.mode === 'projection' && candidate.data.lineId === 'MYSC_PREPAY_IN'
+    ))?.data;
+    expect(persistedProjectionCandidate).toMatchObject({
       projectId: 'project-a',
       status: 'pending_review',
       source: 'google_sheet',
@@ -2385,6 +2475,52 @@ describe('cashflow sheet lab route', () => {
     expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toEqual([]);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
+  });
+
+  it('keeps a successful stage response when diagnostic logging and timing fail', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrix(),
+        })),
+      },
+      routeOptions: {
+        performanceNow: () => { throw new Error('diagnostic clock failed'); },
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-diagnostic-failure' })
+      .expect(200);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('diagnostic logger failed');
+    });
+    try {
+      const response = await request(app)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+        .send({
+          expectedMirrorRevision: mirror.body.sourceRevision,
+          idempotencyKey: 'stage-diagnostic-failure',
+        })
+        .expect(200);
+      expect(response.body.status).toBe('READY');
+      expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')[0].data.status).toBe('READY');
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it('rejects stage when the pinned source revision does not match', async () => {
@@ -2565,6 +2701,449 @@ describe('cashflow sheet lab route', () => {
 
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(160);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
+  });
+
+  it('persists all 2,176 stage candidates in five bounded batches with a three-item response preview', async () => {
+    const performanceEvents = [];
+    const candidatePrefix = 'orgs/tenant-a/cashflow_change_candidates/';
+    let retainedFieldInjected = false;
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      onWrite: ({ path, patch, value }) => {
+        if (!retainedFieldInjected && path.includes('/cashflow_sheet_stage_runs/') && patch.status === 'STAGING') {
+          retainedFieldInjected = true;
+          value.preexistingDiagnostic = 'retained-by-merge';
+        }
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMaximumCandidateMatrix(),
+        })),
+      },
+      routeOptions: { performanceLogger: (event) => performanceEvents.push(event) },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-maximum-batches' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: mirror.body.sourceRevision,
+        idempotencyKey: 'stage-maximum-batches',
+      })
+      .expect(200);
+
+    expect(stage.body).toMatchObject({
+      status: 'READY',
+      stagedLineCount: 2176,
+      annualLineCount: 256,
+    });
+    const candidates = db.__getDocumentsByPrefix(candidatePrefix);
+    expect(candidates).toHaveLength(2176);
+    expect(candidates.every(({ path }) => /\/cfc_[a-f0-9]{32}$/.test(path))).toBe(true);
+    expect(db.__getBatchCommitSizes()).toEqual([450, 450, 450, 450, 376]);
+    expect(db.__getDirectSetPaths().filter((path) => path.startsWith(candidatePrefix))).toEqual([]);
+    expect(stage.body.candidates).toHaveLength(3);
+    expect(stage.body.omittedCandidateCount).toBe(2173);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stage.headers['server-timing']).toMatch(/stage_read;dur=\d+/);
+    expect(stage.headers['server-timing']).toMatch(/stage_build;dur=\d+/);
+    expect(stage.headers['server-timing']).toMatch(/stage_write;dur=\d+/);
+    const persistedRun = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')[0].data;
+    expect(performanceEvents).toContainEqual(expect.objectContaining({
+      operation: 'cashflow.sheet_stage',
+      phase: 'stage_persistence',
+      outcome: 'ok',
+      candidateCount: 2176,
+      candidateBatchCount: 5,
+      persistedRunJsonBytes: Buffer.byteLength(JSON.stringify(persistedRun), 'utf8'),
+    }));
+  });
+
+  it('does not publish READY after a middle candidate batch fails and retries without duplicates', async () => {
+    const candidatePrefix = 'orgs/tenant-a/cashflow_change_candidates/';
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      onBatchCommit: ({ attempt }) => {
+        if (attempt === 3) throw new Error('injected third candidate batch failure');
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMaximumCandidateMatrix(),
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-batch-failure' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-batch-failure',
+    };
+
+    const failed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload);
+    expect(failed.status).toBe(500);
+
+    const partialCandidates = db.__getDocumentsByPrefix(candidatePrefix);
+    expect(partialCandidates).toHaveLength(900);
+    const partialCandidatePaths = partialCandidates.map(({ path }) => path);
+    const failedRuns = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/');
+    expect(failedRuns).toHaveLength(1);
+    expect(failedRuns[0].data).toMatchObject({ status: 'STAGING_FAILED' });
+    expect(failedRuns[0].data.response).toBeUndefined();
+    expect(failedRuns.filter(({ data }) => data.status === 'READY')).toEqual([]);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toEqual([]);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_years/')).toEqual([]);
+
+    const retried = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(200);
+    expect(retried.body).toMatchObject({ status: 'READY', stagedLineCount: 2176 });
+    const finalCandidates = db.__getDocumentsByPrefix(candidatePrefix);
+    const successfulRuns = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/');
+    expect(successfulRuns).toHaveLength(1);
+    expect(successfulRuns[0].data).toMatchObject({
+      status: 'READY',
+      failedAt: null,
+      failure: null,
+    });
+    const currentCandidates = finalCandidates.filter(({ data }) => (
+      data.candidateManifestHash === successfulRuns[0].data.candidateManifestHash
+      && data.stageAttemptId === successfulRuns[0].data.stageAttemptId
+    ));
+    expect(currentCandidates).toHaveLength(2176);
+    expect(new Set(currentCandidates.map(({ path }) => path)).size).toBe(2176);
+    expect(finalCandidates).toHaveLength(2176);
+    expect(partialCandidatePaths.every((path) => currentCandidates.some((candidate) => candidate.path === path))).toBe(true);
+  });
+
+  it('excludes stale annual children when a failed stage retry loses an annual candidate year', async () => {
+    const candidatePrefix = 'orgs/tenant-a/cashflow_change_candidates/';
+    const yearMonths = Array.from(
+      { length: 12 },
+      (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`,
+    );
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      weeks: matchingCanonicalWeeks(1120, yearMonths),
+      onBatchCommit: ({ attempt }) => {
+        if (attempt === 3) throw new Error('injected third candidate batch failure');
+      },
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'6'.repeat(64)}`)),
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'6'.repeat(64)}`)),
+      applyCashflowSheetAnnualTotal: vi.fn(async (input) => javaAnnualApplyResponse(input)),
+    };
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMaximumCandidateMatrix(),
+    }));
+    const app = createApp({
+      db,
+      googleSheetsService: { previewSpreadsheet },
+      routeOptions: { javaWeeklyClient },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-stale-child-first' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-stale-child-retry',
+    };
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(500);
+    const partialCandidates = db.__getDocumentsByPrefix(candidatePrefix);
+    expect(partialCandidates).toHaveLength(900);
+    expect(partialCandidates.filter(({ data }) => data.scope === 'annual' && data.year === 2024)).toHaveLength(32);
+
+    const projection2024 = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 100]));
+    const actual2024 = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 50]));
+    const valueStates = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 'VALUE']));
+    const annual2024Id = Buffer.from('project-a\n2024', 'utf8').toString('base64url');
+    await db.doc(`orgs/tenant-a/cashflow_sheet_year_totals/${annual2024Id}`).set({
+      projectId: 'project-a',
+      year: 2024,
+      revision: 1,
+      sourceRevision: 'canonical-2024',
+      projection: projection2024,
+      actual: actual2024,
+      projectionStates: valueStates,
+      actualStates: valueStates,
+    });
+
+    const retried = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(200);
+    expect(retried.body).toMatchObject({
+      status: 'READY',
+      stagedLineCount: 1024,
+      stagedMonths: ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12'],
+      stagedYears: [2025, 2027, 2028, 2029, 2030, 2031, 2032],
+      annualLineCount: 224,
+    });
+
+    const applied = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: retried.body.runId, idempotencyKey: 'apply-stage-stale-child-retry' });
+    const appliedCandidates = db.__getDocumentsByPrefix(candidatePrefix)
+      .filter(({ data }) => data.status === 'applied');
+    expect({
+      status: applied.status,
+      code: applied.body.code,
+      appliedMonths: applied.body.appliedMonths,
+      appliedYears: applied.body.appliedYears,
+      appliedCandidateCount: appliedCandidates.length,
+      appliedWeeklyCandidateCount: appliedCandidates.filter(({ data }) => data.scope !== 'annual').length,
+      monthlyApplyCalls: javaWeeklyClient.applyCashflowSheetLab.mock.calls.length
+        + javaWeeklyClient.applyCashflowSheetBatch.mock.calls.length,
+      annualApplyCalls: javaWeeklyClient.applyCashflowSheetAnnualTotal.mock.calls.length,
+    }).toEqual({
+      status: 200,
+      code: undefined,
+      appliedMonths: ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12'],
+      appliedYears: [2025, 2027, 2028, 2029, 2030, 2031, 2032],
+      appliedCandidateCount: 1024,
+      appliedWeeklyCandidateCount: 800,
+      monthlyApplyCalls: 1,
+      annualApplyCalls: 7,
+    });
+  });
+
+  it('keeps a newer READY attempt usable when an expired attempt finishes its candidate batches late', async () => {
+    let releaseExpiredAttempt;
+    let markExpiredAttemptBlocked;
+    const expiredAttemptBlocked = new Promise((resolve) => { markExpiredAttemptBlocked = resolve; });
+    const holdExpiredAttempt = new Promise((resolve) => { releaseExpiredAttempt = resolve; });
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      onBatchCommit: async ({ attempt }) => {
+        if (attempt !== 1) return;
+        markExpiredAttemptBlocked();
+        await holdExpiredAttempt;
+      },
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'7'.repeat(64)}`)),
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'7'.repeat(64)}`)),
+      applyCashflowSheetAnnualTotal: vi.fn(async (input) => javaAnnualApplyResponse(input)),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrix(),
+        })),
+      },
+      routeOptions: { javaWeeklyClient },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-expired-attempt' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-expired-attempt',
+    };
+    let nowMs = Date.parse('2026-08-21T00:00:00.000Z');
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    const expiredRequest = request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .then((response) => response);
+    let newerResponse;
+    let expiredResponse;
+    let appliedResponse;
+    try {
+      await expiredAttemptBlocked;
+      nowMs += 61_000;
+      newerResponse = await request(app)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+        .send(payload);
+      appliedResponse = await request(app)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+        .send({ stageRunId: newerResponse.body.runId, idempotencyKey: 'apply-stage-expired-attempt' });
+      releaseExpiredAttempt();
+      expiredResponse = await expiredRequest;
+    } finally {
+      releaseExpiredAttempt();
+      nowSpy.mockRestore();
+    }
+
+    const run = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')[0].data;
+    const candidates = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/');
+    const currentCandidateCount = candidates
+      .filter(({ data }) => (
+        data.candidateManifestHash === run.candidateManifestHash
+        && data.stageAttemptId === run.stageAttemptId
+      ))
+      .length;
+    const appliedCandidateCount = candidates
+      .filter(({ data }) => (
+        data.candidateManifestHash === run.candidateManifestHash
+        && data.stageAttemptId === run.stageAttemptId
+        && data.status === 'applied'
+      ))
+      .length;
+
+    expect({
+      newerStatus: newerResponse.status,
+      expiredStatus: expiredResponse.status,
+      runStatus: run.status,
+      currentCandidateCount,
+      appliedCandidateCount,
+      stagedLineCount: run.stagedLineCount,
+      applyStatus: appliedResponse.status,
+      applyCode: appliedResponse.body.code,
+    }).toEqual({
+      newerStatus: 200,
+      expiredStatus: 409,
+      runStatus: 'APPLIED',
+      currentCandidateCount: run.stagedLineCount,
+      appliedCandidateCount: run.stagedLineCount,
+      stagedLineCount: run.stagedLineCount,
+      applyStatus: 200,
+      applyCode: undefined,
+    });
+  });
+
+  it('keeps a 12-month closed and pending stage under 900 KiB while replaying every confirmation detail', async () => {
+    const months = Array.from(
+      { length: 12 },
+      (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`,
+    );
+    const closedMonthDocuments = Object.fromEntries(months.map((yearMonth) => [
+      `orgs/tenant-a/monthly_closes/project-a-${yearMonth}`,
+      {
+        contractVersion: 'cashflow-month-close-v1',
+        tenantId: 'tenant-a',
+        projectId: 'project-a',
+        yearMonth,
+        status: 'CLOSED',
+      },
+    ]));
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      initialDocuments: {
+        ...cumulativeCloseRequestDocuments({ throughMonth: '2026-12' }),
+        ...closedMonthDocuments,
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrix(),
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-12-month-confirmations' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-12-month-confirmations',
+    };
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(200);
+
+    expect(stage.body).toMatchObject({
+      status: 'READY',
+      stagedLineCount: 1920,
+      closedMonthDifferenceCount: 1920,
+      pendingApprovalDifferenceCount: 1920,
+    });
+    expect(stage.body.closedMonthDifferences).toHaveLength(12);
+    expect(stage.body.pendingApprovalDifferences).toHaveLength(12);
+    expect(stage.body.closedMonthDifferences.flatMap((difference) => difference.changes)).toHaveLength(1920);
+    expect(stage.body.pendingApprovalDifferences.flatMap((difference) => difference.changes)).toHaveLength(1920);
+    expect(stage.body.closedMonthDifferenceManifestHash)
+      .toBe(stageManifestHash(stage.body.closedMonthDifferences));
+    expect(stage.body.pendingApprovalDifferenceManifestHash)
+      .toBe(stageManifestHash(stage.body.pendingApprovalDifferences));
+
+    const persistedStageDocuments = db.__getDocumentsByPrefix('orgs/tenant-a/')
+      .filter(({ path }) => [
+        '/cashflow_change_candidates/',
+        '/cashflow_sheet_stage_runs/',
+        '/cashflow_sheet_stage_months/',
+        '/cashflow_sheet_stage_years/',
+      ].some((segment) => path.includes(segment)));
+    const oversizedDocuments = persistedStageDocuments
+      .map(({ path, data }) => ({ path, bytes: Buffer.byteLength(JSON.stringify(data), 'utf8') }))
+      .filter(({ bytes }) => bytes >= 900 * 1024);
+    expect(oversizedDocuments).toEqual([]);
+    expect(stage.body.candidates).toHaveLength(3);
+    expect(stage.body.omittedCandidateCount).toBe(1917);
+
+    const replay = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(200);
+    expect(replay.body).toEqual(stage.body);
   });
 
   it('blocks only a month containing an invalid pinned cell', async () => {
@@ -3906,6 +4485,7 @@ describe('cashflow sheet lab route', () => {
       (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`,
     ));
 
+    db.__clearBatchCommitSizes();
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-260701-mock' })

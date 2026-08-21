@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   asyncHandler,
   chunkArray,
@@ -235,14 +235,48 @@ function normalizeRouteError(error) {
 }
 
 function logCashflowSheetLab(event, req, details = {}, level = 'info') {
-  const write = typeof console[level] === 'function' ? console[level] : console.info;
-  write('[CashflowSheetLab]', event, {
-    requestId: req.context?.requestId || req.requestId || null,
-    tenantId: req.context?.tenantId || null,
-    actorId: req.context?.actorId || null,
-    actorRole: req.context?.actorRole || null,
-    ...details,
-  });
+  try {
+    const write = typeof console[level] === 'function' ? console[level] : console.info;
+    write('[CashflowSheetLab]', event, {
+      requestId: req.context?.requestId || req.requestId || null,
+      tenantId: req.context?.tenantId || null,
+      actorId: req.context?.actorId || null,
+      actorRole: req.context?.actorRole || null,
+      ...details,
+    });
+  } catch {
+    // Diagnostics must never affect a financial command.
+  }
+}
+
+function cashflowStageMetricNow(performanceNow) {
+  try {
+    const value = Number(typeof performanceNow === 'function' ? performanceNow() : Date.now());
+    return Number.isFinite(value) ? value : Date.now();
+  } catch {
+    return Date.now();
+  }
+}
+
+function cashflowStageJsonBytes(value) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    return 0;
+  }
+}
+
+function emitCashflowStageMetric(performanceLogger, payload) {
+  try {
+    if (typeof performanceLogger === 'function') {
+      performanceLogger(payload);
+    } else if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify(payload));
+    }
+  } catch {
+    // Diagnostics must never affect a financial stage.
+  }
 }
 
 function routeErrorDetails(error) {
@@ -634,6 +668,16 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     next?.sheetFacts?.depositScheduleRows,
     (row) => Number(readOptionalText(row?.yearMonth).slice(0, 4)),
   );
+  const projectionActualDifferences = replaceYearRows(
+    previous?.sheetFacts?.projectionActualDifferences,
+    next?.sheetFacts?.projectionActualDifferences,
+    (row) => Number(readOptionalText(row?.yearMonth).slice(0, 4)),
+  );
+  const weeklyCalculationChecks = replaceYearRows(
+    previous?.sheetFacts?.weeklyCalculationChecks,
+    next?.sheetFacts?.weeklyCalculationChecks,
+    (row) => Number(readOptionalText(row?.yearMonth).slice(0, 4)),
+  );
   const annualFinancialTotals = replaceYearRows(
     previous?.sheetFacts?.annualFinancialTotals,
     next?.sheetFacts?.annualFinancialTotals,
@@ -674,6 +718,8 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     sheetFacts: {
       ...(next.sheetFacts || {}),
       depositScheduleRows,
+      projectionActualDifferences,
+      weeklyCalculationChecks,
       annualFinancialTotals,
       annualCashflowTotals,
       cashflowGrandTotalsBySourceYear,
@@ -765,37 +811,104 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, project, pa
   return config;
 }
 
-async function saveCashflowChangeCandidates({ db, tenantId, candidates }) {
-  if (!db || candidates.length === 0) return;
+function cashflowChangeCandidateManifestHash(candidates) {
+  const normalized = candidates.map((candidate) => {
+    const {
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      actorUid: _actorUid,
+      actorName: _actorName,
+      actorEmail: _actorEmail,
+      ...stableCandidate
+    } = candidate;
+    return stripUndefinedDeep(stableCandidate);
+  }).sort((left, right) => {
+    const leftText = stableStringify(left);
+    const rightText = stableStringify(right);
+    if (leftText === rightText) return 0;
+    return leftText < rightText ? -1 : 1;
+  });
+  return `sha256:${stableHash(normalized)}`;
+}
+
+async function saveCashflowChangeCandidates({
+  db,
+  tenantId,
+  candidates,
+  candidateManifestHash,
+  stageAttemptId,
+  runRef,
+  requestHash,
+  reservationExpiresAt,
+}) {
+  if (!db || candidates.length === 0) return { candidateCount: candidates.length, batchCommitCount: 0 };
+  let batchCommitCount = 0;
   for (let offset = 0; offset < candidates.length; offset += 450) {
-    await Promise.all(candidates.slice(offset, offset + 450).map((candidate) => {
-      const id = `cfc_${stableHash({
-        runId: candidate.runId,
-        projectId: candidate.projectId,
-        scope: candidate.scope,
-        year: candidate.year,
-        mode: candidate.mode,
-        yearMonth: candidate.yearMonth,
-        weekNo: candidate.weekNo,
-        lineId: candidate.lineId,
-      }).slice(0, 32)}`;
-      return db.doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${id}`).set(stripUndefinedDeep({ ...candidate, id }));
-    }));
+    const chunk = candidates.slice(offset, offset + 450);
+    await db.runTransaction(async (transaction) => {
+      const currentRunSnap = await transaction.get(runRef);
+      const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+      if (
+        readOptionalText(currentRun.status) !== 'STAGING'
+        || readOptionalText(currentRun.requestHash) !== requestHash
+        || readOptionalText(currentRun.stageAttemptId) !== stageAttemptId
+        || readOptionalText(currentRun.candidateManifestHash) !== candidateManifestHash
+        || readOptionalText(currentRun.reservationExpiresAt) !== reservationExpiresAt
+      ) {
+        throw createHttpError(
+          409,
+          '시트 검토 완료 상태가 변경되었습니다. 다시 확인해 주세요.',
+          'cashflow_sheet_stage_completion_conflict',
+        );
+      }
+      for (const candidate of chunk) {
+        const id = `cfc_${stableHash({
+          runId: candidate.runId,
+          projectId: candidate.projectId,
+          scope: candidate.scope,
+          year: candidate.year,
+          mode: candidate.mode,
+          yearMonth: candidate.yearMonth,
+          weekNo: candidate.weekNo,
+          lineId: candidate.lineId,
+          candidateManifestHash,
+        }).slice(0, 32)}`;
+        transaction.set(
+          db.doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${id}`),
+          stripUndefinedDeep({ ...candidate, id, candidateManifestHash, stageAttemptId }),
+        );
+      }
+    });
+    batchCommitCount += 1;
   }
+  return { candidateCount: candidates.length, batchCommitCount };
 }
 
 async function readCashflowChangeCandidatesByRun({ db, tenantId, projectId, runId }) {
   if (!db) return [];
+  const run = await readCashflowSheetStageRun(db, tenantId, projectId, runId);
+  const candidateManifestHash = readOptionalText(run.candidateManifestHash);
+  const stageAttemptId = readOptionalText(run.stageAttemptId);
   const snap = await db.collection(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}`)
     .where('runId', '==', runId)
     .get();
-  return snap.docs
+  const candidates = snap.docs
     .map((doc) => ({ id: doc.id, ...doc.data() }))
     .filter((candidate) => (
       readOptionalText(candidate.projectId) === readOptionalText(projectId)
       && readOptionalText(candidate.runId) === readOptionalText(runId)
       && readOptionalText(candidate.status || 'pending_review') === 'pending_review'
+      && (!candidateManifestHash || readOptionalText(candidate.candidateManifestHash) === candidateManifestHash)
+      && (!stageAttemptId || readOptionalText(candidate.stageAttemptId) === stageAttemptId)
     ));
+  if (candidateManifestHash && candidates.length !== Number(run.stagedLineCount)) {
+    throw createHttpError(
+      409,
+      '검토 후보 저장이 완전하지 않습니다. 시트 값을 다시 검토해 주세요.',
+      'cashflow_sheet_stage_candidates_incomplete',
+    );
+  }
+  return candidates;
 }
 
 async function markCashflowChangeCandidatesStatus({ db, tenantId, candidates, status, now }) {
@@ -1036,13 +1149,39 @@ function stageRunInProgressError() {
   return createHttpError(409, '같은 시트 검토 요청이 이미 처리 중입니다.', 'idempotency_request_in_progress');
 }
 
+const CASHFLOW_STAGE_RESPONSE_RUN_FIELDS = [
+  'closedMonthDifferences',
+  'closedMonthDifferenceCount',
+  'closedMonthDifferenceManifestHash',
+  'pendingApprovalDifferences',
+  'pendingApprovalDifferenceCount',
+  'pendingApprovalDifferenceManifestHash',
+  'pendingApprovalContractIssues',
+];
+
+function compactCashflowSheetStageResponse(response) {
+  const compact = { ...response };
+  for (const field of CASHFLOW_STAGE_RESPONSE_RUN_FIELDS) delete compact[field];
+  return compact;
+}
+
+function hydrateCashflowSheetStageResponse(run) {
+  if (!run?.response || typeof run.response !== 'object' || Array.isArray(run.response)) return null;
+  const response = { ...run.response };
+  for (const field of CASHFLOW_STAGE_RESPONSE_RUN_FIELDS) {
+    if (Object.hasOwn(run, field)) response[field] = run[field];
+  }
+  return response;
+}
+
 async function reserveCashflowSheetStageRun({ db, runRef, requestHash, reservation }) {
   return db.runTransaction(async (transaction) => {
     const snap = await transaction.get(runRef);
     if (snap.exists) {
       const run = snap.data() || {};
       assertStageRunRequestMatches(run, requestHash);
-      if (run.response) return run.response;
+      const response = hydrateCashflowSheetStageResponse(run);
+      if (response) return response;
       const reservationExpiresAt = Date.parse(readOptionalText(run.reservationExpiresAt));
       if (readOptionalText(run.status) === 'STAGING' && reservationExpiresAt > Date.now()) {
         throw stageRunInProgressError();
@@ -1052,6 +1191,8 @@ async function reserveCashflowSheetStageRun({ db, runRef, requestHash, reservati
       ...reservation,
       requestHash,
       status: 'STAGING',
+      failedAt: null,
+      failure: null,
     }), { merge: true });
     return null;
   });
@@ -2205,11 +2346,8 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId, nowMs = D
       'cashflow_sheet_apply_recovery_invalid',
     );
   }
-  const stagedRun = (
-    stageRunDocument.response
-    && typeof stageRunDocument.response === 'object'
-    && !Array.isArray(stageRunDocument.response)
-  ) ? stageRunDocument.response : {
+  const persistedStageResponse = hydrateCashflowSheetStageResponse(stageRunDocument);
+  const stagedRun = persistedStageResponse || {
     ok: true,
     commandName: 'cashflowSheetLab.stage.firebase',
     projectId,
@@ -3593,7 +3731,34 @@ async function stagePinnedCashflowSheetLab({
   parsed = {},
   context = {},
   logger = () => {},
+  trace = null,
+  performanceNow,
+  onMetric = () => {},
 } = {}) {
+  const phaseDurationMs = { read: 0, build: 0, write: 0 };
+  let stageTimingsPublished = false;
+  const measureAsync = async (phase, task) => {
+    const startedAt = cashflowStageMetricNow(performanceNow);
+    try {
+      return await task();
+    } finally {
+      phaseDurationMs[phase] += Math.max(0, cashflowStageMetricNow(performanceNow) - startedAt);
+    }
+  };
+  const publishStageTimings = () => {
+    if (stageTimingsPublished) return;
+    stageTimingsPublished = true;
+    for (const phase of ['read', 'build', 'write']) {
+      try {
+        trace?.emit?.(`stage_${phase}`, {
+          outcome: 'ok',
+          durationMs: Math.round(phaseDurationMs[phase]),
+        });
+      } catch {
+        // Diagnostics must never affect a financial stage.
+      }
+    }
+  };
   logger('start', {
     projectId,
     expectedMirrorRevision: parsed.expectedMirrorRevision,
@@ -3607,7 +3772,7 @@ async function stagePinnedCashflowSheetLab({
   });
   const runId = `cfstage_${stableHash({ tenantId, projectId, idempotencyKey: parsed.idempotencyKey }).slice(0, 32)}`;
   const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${runId}`);
-  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+  const mirror = await measureAsync('read', () => readCashflowSheetMirror(db, tenantId, projectId));
   if (!mirror?.sourceRevision) {
     throw createHttpError(409, '먼저 시트 연동하기를 실행해 주세요.', 'cashflow_sheet_mirror_required');
   }
@@ -3616,17 +3781,22 @@ async function stagePinnedCashflowSheetLab({
   }
   assertFreshCashflowSheetMirror(mirror);
   const configRevision = readOptionalText(mirror.configRevision);
-  const existingRunSnap = await runRef.get();
+  const existingRunSnap = await measureAsync('read', () => runRef.get());
   if (existingRunSnap.exists) {
     const existingRun = existingRunSnap.data() || {};
     assertStageRunRequestMatches(existingRun, requestHash);
-    if (existingRun.response) return existingRun.response;
+    const response = hydrateCashflowSheetStageResponse(existingRun);
+    if (response) {
+      publishStageTimings();
+      return response;
+    }
     const reservationExpiresAt = Date.parse(readOptionalText(existingRun.reservationExpiresAt));
     if (readOptionalText(existingRun.status) === 'STAGING' && reservationExpiresAt > Date.now()) {
       throw stageRunInProgressError();
     }
   }
 
+  const initialBuildStartedAt = cashflowStageMetricNow(performanceNow);
   const stageYear = parsed.yearMonth ? Number(parsed.yearMonth.slice(0, 4)) : Number(mirror.sourceYear);
   const calculationCells = (mirror.cells || []).filter((cell) => parsed.yearMonth
     ? readOptionalText(cell.yearMonth) >= '2023-01' && readOptionalText(cell.yearMonth) <= parsed.yearMonth
@@ -3649,6 +3819,7 @@ async function stagePinnedCashflowSheetLab({
       }))
     : [];
   const hasAnnualCells = !parsed.yearMonth && (mirror.annualCells || []).length > 0;
+  phaseDurationMs.build += Math.max(0, cashflowStageMetricNow(performanceNow) - initialBuildStartedAt);
   if (pinnedMonths.length === 0 && !hasAnnualCells) {
     throw createHttpError(
       409,
@@ -3657,19 +3828,20 @@ async function stagePinnedCashflowSheetLab({
     );
   }
 
-  const cashflowSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
+  const cashflowSnapshot = await measureAsync('read', () => readCashflowWeeksSnapshot(db, tenantId, projectId));
   const currentTargetRevision = computeCashflowTargetRevision(cashflowSnapshot);
   // 시트가 진실(replaceAllActualSources)이어도, 팝업에서 본 diff 는 불러온 시점의 결산 상태 기준이다.
   // 그 사이 결산이 움직였으면 diff 가 거짓이 되므로 쓰기 모드와 무관하게 다시 불러오게 한다.
   if (currentTargetRevision !== readOptionalText(mirror.targetRevisionAtFetch)) {
     throw createHttpError(409, '시트 연동 후 캐시플로우 값이 변경되었습니다. 다시 연동해 주세요.', 'cashflow_sheet_target_revision_conflict');
   }
-  const closedMonths = await readCanonicalClosedCashflowMonths({
+  const closedMonths = await measureAsync('read', () => readCanonicalClosedCashflowMonths({
     db,
     tenantId,
     projectId,
     yearMonths: pinnedMonths,
-  });
+  }));
+  const candidateBuildStartedAt = cashflowStageMetricNow(performanceNow);
   const candidatePinnedCells = parsed.yearMonth
     ? pinnedCells.filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth
       || closedMonths.has(readOptionalText(cell.yearMonth)))
@@ -3696,16 +3868,20 @@ async function stagePinnedCashflowSheetLab({
     now,
   });
   const candidates = [...weekly.candidates, ...annual.candidates];
+  phaseDurationMs.build += Math.max(0, cashflowStageMetricNow(performanceNow) - candidateBuildStartedAt);
   // 결재 중인 회차 차단은 쓰기 모드와 무관하다. 7월에 replaceAllActualSources 에 묶여 꺼져 있었다.
-  const pendingApproval = await readPendingApprovalDifferences({
+  const pendingApproval = await measureAsync('read', () => readPendingApprovalDifferences({
     db, tenantId, projectId, candidates,
-  });
+  }));
+  const finalBuildStartedAt = cashflowStageMetricNow(performanceNow);
   const pendingBlockedMonths = new Set(pendingApproval.blockedMonths || []);
   const candidatesForStage = candidates.filter((candidate) => {
     if (pendingApproval.blockAllCandidates) return false;
     if (readOptionalText(candidate.scope) === 'annual') return true;
     return !pendingBlockedMonths.has(readOptionalText(candidate.yearMonth));
   });
+  const stageAttemptId = randomUUID();
+  const candidateManifestHash = cashflowChangeCandidateManifestHash(candidatesForStage);
   const annualForStage = pendingApproval.blockAllCandidates
     ? { candidates: [], documents: [], stagedYears: [] }
     : annual;
@@ -3744,7 +3920,10 @@ async function stagePinnedCashflowSheetLab({
       now,
     });
   });
-  const responseCandidates = candidatesForStage.slice(0, 500);
+  const responseCandidates = [
+    ...candidatesForStage.filter((candidate) => candidate.beforeHadValue),
+    ...candidatesForStage.filter((candidate) => !candidate.beforeHadValue),
+  ].slice(0, 3);
   const closedMonthDifferenceCount = weekly.closedMonthDifferences.reduce((sum, month) => sum + month.differenceCount, 0);
   const closedMonthDifferenceManifestHash = `sha256:${stableHash(weekly.closedMonthDifferences)}`;
   const response = {
@@ -3792,6 +3971,8 @@ async function stagePinnedCashflowSheetLab({
     projectId,
     idempotencyKey: parsed.idempotencyKey,
     requestHash,
+    stageAttemptId,
+    candidateManifestHash,
     reservationExpiresAt,
     configRevision,
     sourceRevision: mirror.sourceRevision,
@@ -3817,18 +3998,38 @@ async function stagePinnedCashflowSheetLab({
     createdAt: now,
     createdBy: response.lastStagedBy,
   });
+  const persistedResponse = response.status === 'NO_CHANGES'
+    ? response
+    : compactCashflowSheetStageResponse(response);
+  phaseDurationMs.build += Math.max(0, cashflowStageMetricNow(performanceNow) - finalBuildStartedAt);
+  const stageWriteStartedAt = cashflowStageMetricNow(performanceNow);
   const replay = await reserveCashflowSheetStageRun({
     db,
     runRef,
     requestHash,
     reservation: runDocument,
   });
-  if (replay) return replay;
+  if (replay) {
+    phaseDurationMs.write += Math.max(0, cashflowStageMetricNow(performanceNow) - stageWriteStartedAt);
+    publishStageTimings();
+    return replay;
+  }
+  let candidateBatchCount = 0;
+  let persistedRunJsonBytes = 0;
   try {
     if (response.status === 'NO_CHANGES') {
       const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
       const cashflowQuery = db.collection(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}`)
         .where('projectId', '==', projectId);
+      const finalRunDocument = stripUndefinedDeep({
+        ...runDocument,
+        status: 'APPLIED',
+        reservationExpiresAt: null,
+        appliedAt: now,
+        failedAt: null,
+        failure: null,
+        response: persistedResponse,
+      });
       await db.runTransaction(async (transaction) => {
         const currentRunSnap = await transaction.get(runRef);
         const currentMirrorSnap = await transaction.get(mirrorRef);
@@ -3839,6 +4040,8 @@ async function stagePinnedCashflowSheetLab({
         if (
           readOptionalText(currentRun.status) !== 'STAGING'
           || readOptionalText(currentRun.requestHash) !== requestHash
+          || readOptionalText(currentRun.stageAttemptId) !== stageAttemptId
+          || readOptionalText(currentRun.candidateManifestHash) !== candidateManifestHash
           || readOptionalText(currentRun.reservationExpiresAt) !== reservationExpiresAt
           || readOptionalText(currentMirror.configRevision) !== configRevision
           || readOptionalText(currentMirror.sourceRevision) !== readOptionalText(mirror.sourceRevision)
@@ -3849,13 +4052,8 @@ async function stagePinnedCashflowSheetLab({
         ) {
           throw createHttpError(409, '시트 검토 완료 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_stage_completion_conflict');
         }
-        transaction.set(runRef, stripUndefinedDeep({
-          ...runDocument,
-          status: 'APPLIED',
-          reservationExpiresAt: null,
-          appliedAt: now,
-          response,
-        }), { merge: true });
+        persistedRunJsonBytes = cashflowStageJsonBytes(stripUndefinedDeep({ ...currentRun, ...finalRunDocument }));
+        transaction.set(runRef, finalRunDocument, { merge: true });
         // 바뀐 것이 없다 = 이 시점의 시트와 결산이 같다. source 만 올리고 target 을 안 올리면
         // 월결산·주정산 뒤 첫 불러오기부터 영원히 리비전 불일치로 남는다.
         transaction.set(mirrorRef, {
@@ -3866,19 +4064,56 @@ async function stagePinnedCashflowSheetLab({
         }, { merge: true });
       });
     } else {
-      await saveCashflowChangeCandidates({ db, tenantId, candidates: candidatesForStage });
-      await Promise.all(stagedMonthDocuments.map((month) => db
-        .doc(cashflowSheetStageMonthDocPath(tenantId, runId, month.yearMonth))
-        .set(month)));
-      await Promise.all(annualForStage.documents.map((yearDocument) => db
-        .doc(cashflowSheetStageYearDocPath(tenantId, runId, yearDocument.year))
-        .set(yearDocument)));
-      await runRef.set(stripUndefinedDeep({
+      const candidatePersistence = await saveCashflowChangeCandidates({
+        db,
+        tenantId,
+        candidates: candidatesForStage,
+        candidateManifestHash,
+        stageAttemptId,
+        runRef,
+        requestHash,
+        reservationExpiresAt,
+      });
+      candidateBatchCount = candidatePersistence.batchCommitCount;
+      const finalRunDocument = stripUndefinedDeep({
         ...runDocument,
         status: response.status,
         reservationExpiresAt: null,
-        response,
-      }), { merge: true });
+        failedAt: null,
+        failure: null,
+        response: persistedResponse,
+      });
+      await db.runTransaction(async (transaction) => {
+        const currentRunSnap = await transaction.get(runRef);
+        const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+        if (
+          readOptionalText(currentRun.status) !== 'STAGING'
+          || readOptionalText(currentRun.requestHash) !== requestHash
+          || readOptionalText(currentRun.stageAttemptId) !== stageAttemptId
+          || readOptionalText(currentRun.candidateManifestHash) !== candidateManifestHash
+          || readOptionalText(currentRun.reservationExpiresAt) !== reservationExpiresAt
+        ) {
+          throw createHttpError(
+            409,
+            '시트 검토 완료 상태가 변경되었습니다. 다시 확인해 주세요.',
+            'cashflow_sheet_stage_completion_conflict',
+          );
+        }
+        persistedRunJsonBytes = cashflowStageJsonBytes(stripUndefinedDeep({ ...currentRun, ...finalRunDocument }));
+        for (const month of stagedMonthDocuments) {
+          transaction.set(
+            db.doc(cashflowSheetStageMonthDocPath(tenantId, runId, month.yearMonth)),
+            month,
+          );
+        }
+        for (const yearDocument of annualForStage.documents) {
+          transaction.set(
+            db.doc(cashflowSheetStageYearDocPath(tenantId, runId, yearDocument.year)),
+            yearDocument,
+          );
+        }
+        transaction.set(runRef, finalRunDocument, { merge: true });
+      });
     }
   } catch (error) {
     await db.runTransaction(async (transaction) => {
@@ -3886,6 +4121,7 @@ async function stagePinnedCashflowSheetLab({
       const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
       if (
         readOptionalText(currentRun.status) !== 'STAGING'
+        || readOptionalText(currentRun.stageAttemptId) !== stageAttemptId
         || readOptionalText(currentRun.reservationExpiresAt) !== reservationExpiresAt
       ) return;
       transaction.set(runRef, stripUndefinedDeep({
@@ -3896,6 +4132,19 @@ async function stagePinnedCashflowSheetLab({
       }), { merge: true });
     }).catch(() => null);
     throw error;
+  }
+  phaseDurationMs.write += Math.max(0, cashflowStageMetricNow(performanceNow) - stageWriteStartedAt);
+  publishStageTimings();
+  try {
+    onMetric({
+      phase: 'stage_persistence',
+      outcome: 'ok',
+      candidateCount: candidatesForStage.length,
+      candidateBatchCount,
+      persistedRunJsonBytes,
+    });
+  } catch {
+    // Diagnostics must never affect a financial stage.
   }
   logger('ok', {
     projectId,
@@ -4505,10 +4754,24 @@ export function mountCashflowSheetLabRoutes(app, {
         projectId,
         parsed,
         context: req.context,
+        trace,
+        performanceNow,
+        onMetric: (metric) => emitCashflowStageMetric(performanceLogger, {
+          severity: 'INFO',
+          message: 'cashflow.performance',
+          requestId: req.context?.requestId || req.requestId || 'unknown',
+          operation: 'cashflow.sheet_stage',
+          ...metric,
+        }),
         logger: (event, details = {}, level = 'info') => {
           logCashflowSheetLab(`stage.${event}`, req, details, level);
         },
       }));
+      try {
+        res.set('Server-Timing', trace.serverTiming());
+      } catch {
+        // Diagnostics must never affect a financial stage.
+      }
       res.status(200).json(result);
     } catch (error) {
       logCashflowSheetLab('stage.error', req, {

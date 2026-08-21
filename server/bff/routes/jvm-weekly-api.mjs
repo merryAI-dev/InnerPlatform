@@ -1180,128 +1180,398 @@ function parseAuditMetadata(value) {
   }
 }
 
-async function readCashflowActivityDocuments(db, tenantId, collectionId, projectId) {
-  if (!db?.collection) return [];
-  let query = db.collection(`orgs/${tenantId}/${collectionId}`)
-    .where('projectId', '==', projectId);
-  query = collectionId === 'weekly_api_audit_events'
-    ? query.limit(200)
-    : query.limit(200);
-  const snap = await query.get();
-  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+const CASHFLOW_ACTIVITY_SOURCES = ['sheet_refresh', 'audit', 'legacy'];
+const CASHFLOW_ACTIVITY_COLLECTIONS = {
+  sheet_refresh: 'cashflow_sheet_refresh_runs',
+  audit: 'weekly_api_audit_events',
+  legacy: 'cashflow_events',
+};
+const CASHFLOW_ACTIVITY_DEFAULT_LIMIT = 50;
+const CASHFLOW_ACTIVITY_MAX_CURSOR_LENGTH = 4096;
+const CASHFLOW_ACTIVITY_RESPONSE_EVENT_BUDGET_BYTES = 1_750_000;
+const CASHFLOW_ACTIVITY_DOCUMENT_ID = Symbol('cashflowActivityDocumentId');
+
+function cashflowActivityMetricNow(performanceNow) {
+  try {
+    const value = Number(typeof performanceNow === 'function' ? performanceNow() : Date.now());
+    return Number.isFinite(value) ? value : Date.now();
+  } catch {
+    return Date.now();
+  }
 }
 
-async function readCashflowActivity(db, tenantId, projectId, source = '') {
-  const [refreshRuns, monthlyAudits, legacyEvents] = await Promise.all([
-    source && source !== 'sheet_refresh' ? [] : readCashflowActivityDocuments(db, tenantId, 'cashflow_sheet_refresh_runs', projectId),
-    source && source !== 'audit' ? [] : readCashflowActivityDocuments(db, tenantId, 'weekly_api_audit_events', projectId),
-    source && source !== 'legacy' ? [] : readCashflowActivityDocuments(db, tenantId, 'cashflow_events', projectId),
-  ]);
-  const refreshEvents = refreshRuns
-    .filter((run) => readOptionalText(run.status) === 'COMPLETED' && readOptionalText(run.response?.status) === 'FRESH')
-    .map((run) => ({
-      id: `sheet-refresh:${run.id}`,
-      projectId,
-      runId: readOptionalText(run.idempotencyKey) || run.id,
-      type: 'sheet_refresh',
-      source: 'google_sheet_refresh',
-      actorUid: readOptionalText(run.createdBy?.uid),
-      actorName: readOptionalText(run.createdBy?.name),
-      actorEmail: readOptionalText(run.createdBy?.email),
-      createdAt: readOptionalText(run.completedAt) || readOptionalText(run.createdAt),
-      sheetName: readOptionalText(run.response?.selectedSheetName),
-    }));
-  const closeEvents = monthlyAudits
-    .filter((audit) => readOptionalText(audit.commandName).startsWith('cashflowMonth.'))
-    .map((audit) => {
-      const metadata = parseAuditMetadata(audit.metadataJson);
-      return {
-        id: `month-close:${audit.id}`,
+function cashflowActivityJsonBytes(value) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    return 0;
+  }
+}
+
+function cashflowActivityJsonArrayBytes(values) {
+  return values.reduce(
+    (total, value, index) => total + cashflowActivityJsonBytes(value) + (index > 0 ? 1 : 0),
+    2,
+  );
+}
+
+function emitCashflowActivityMetric(performanceLogger, payload) {
+  try {
+    if (typeof performanceLogger === 'function') {
+      performanceLogger(payload);
+    } else if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify(payload));
+    }
+  } catch {
+    // Diagnostics must never affect a financial read.
+  }
+}
+
+function cashflowActivityQueryInvalid() {
+  return createHttpError(400, '활동 기록 조회 범위가 올바르지 않습니다.', 'cashflow_activity_query_invalid');
+}
+
+function isCashflowActivityCursorInstant(value) {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
+  if (!match) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  const milliseconds = (match[2] || '').padEnd(3, '0').slice(0, 3);
+  return new Date(parsed).toISOString() === `${match[1]}.${milliseconds}Z`;
+}
+
+function isCashflowActivityCursorDocumentId(value) {
+  return Boolean(value)
+    && !value.includes('/')
+    && Buffer.byteLength(value, 'utf8') <= 1500;
+}
+
+function decodeCashflowActivityCursor(cursor, projectId, source) {
+  if (!cursor) return {};
+  if (cursor.length > CASHFLOW_ACTIVITY_MAX_CURSOR_LENGTH || !/^[A-Za-z0-9_-]+$/.test(cursor)) {
+    throw cashflowActivityQueryInvalid();
+  }
+  let decoded;
+  try {
+    decoded = objectValue(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')));
+  } catch {
+    throw cashflowActivityQueryInvalid();
+  }
+  if (
+    !decoded
+    || decoded.version !== 1
+    || readOptionalText(decoded.projectId) !== projectId
+    || readOptionalText(decoded.source) !== source
+  ) throw cashflowActivityQueryInvalid();
+  const rawBoundaries = objectValue(decoded.boundaries);
+  if (!rawBoundaries) throw cashflowActivityQueryInvalid();
+  const boundaries = {};
+  for (const sourceName of source ? [source] : CASHFLOW_ACTIVITY_SOURCES) {
+    const rawBoundary = objectValue(rawBoundaries[sourceName]);
+    if (!rawBoundary || typeof rawBoundary.done !== 'boolean') throw cashflowActivityQueryInvalid();
+    if (rawBoundary.done) {
+      boundaries[sourceName] = { done: true };
+      continue;
+    }
+    const createdAt = readOptionalText(rawBoundary.createdAt);
+    const id = readOptionalText(rawBoundary.id);
+    if (!createdAt && !id) {
+      boundaries[sourceName] = { done: false };
+      continue;
+    }
+    if (
+      createdAt.length > 128
+      || !isCashflowActivityCursorInstant(createdAt)
+      || !isCashflowActivityCursorDocumentId(id)
+    ) throw cashflowActivityQueryInvalid();
+    boundaries[sourceName] = { done: false, createdAt, id };
+  }
+  return boundaries;
+}
+
+function encodeCashflowActivityCursor(projectId, source, boundaries) {
+  return Buffer.from(JSON.stringify({
+    version: 1,
+    projectId,
+    source,
+    boundaries,
+  }), 'utf8').toString('base64url');
+}
+
+async function readCashflowActivityDocuments(db, tenantId, collectionId, projectId, limit, boundary) {
+  if (boundary?.done || !db?.collection) return { documents: [], exhausted: true, queryCount: 0 };
+  let query = db.collection(`orgs/${tenantId}/${collectionId}`)
+    .where('projectId', '==', projectId)
+    .orderBy('createdAt', 'desc')
+    .orderBy('__name__', 'desc');
+  if (boundary?.createdAt && boundary?.id) {
+    query = query.startAfter(boundary.createdAt, boundary.id);
+  }
+  const snap = await query.limit(limit).get();
+  const documents = snap.docs.map((doc) => ({
+    id: doc.id,
+    ...(doc.data() || {}),
+    [CASHFLOW_ACTIVITY_DOCUMENT_ID]: doc.id,
+  }));
+  return { documents, exhausted: snap.docs.length < limit, queryCount: 1 };
+}
+
+function cashflowActivityDocumentId(document) {
+  return readOptionalText(document?.[CASHFLOW_ACTIVITY_DOCUMENT_ID]) || readOptionalText(document?.id);
+}
+
+function compareCashflowActivityDocuments(left, right) {
+  const leftCreatedAt = readOptionalText(left.document.createdAt);
+  const rightCreatedAt = readOptionalText(right.document.createdAt);
+  if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt < rightCreatedAt ? 1 : -1;
+  const leftId = cashflowActivityDocumentId(left.document);
+  const rightId = cashflowActivityDocumentId(right.document);
+  if (leftId !== rightId) return leftId < rightId ? 1 : -1;
+  return CASHFLOW_ACTIVITY_SOURCES.indexOf(left.source) - CASHFLOW_ACTIVITY_SOURCES.indexOf(right.source);
+}
+
+function buildCashflowActivityDocumentEvents(source, document, projectId) {
+  const events = {
+    refresh: [],
+    sheetApply: [],
+    appliedCell: [],
+    close: [],
+    legacy: [],
+  };
+  if (source === 'sheet_refresh') {
+    if (readOptionalText(document.status) === 'COMPLETED' && readOptionalText(document.response?.status) === 'FRESH') {
+      events.refresh.push({
+        id: `sheet-refresh:${document.id}`,
         projectId,
-        runId: readOptionalText(audit.idempotencyKey) || audit.id,
-        type: 'month_close',
-        source: 'month_close',
-        yearMonth: readOptionalText(metadata.yearMonth),
-        status: readOptionalText(metadata.status),
-        actorUid: readOptionalText(audit.actorId),
-        actorEmail: readOptionalText(metadata.actorEmail),
-        actorName: readOptionalText(metadata.actorName),
-        createdAt: readOptionalText(audit.createdAt),
-      };
-    });
-  const sheetApplyEvents = monthlyAudits
-    .filter((audit) => readOptionalText(audit.commandName) === 'weeklyExpense.cashflowSheetLab.apply')
-    .map((audit) => {
-      const metadata = parseAuditMetadata(audit.metadataJson);
-      const projectionLineCount = Object.hasOwn(metadata, 'projectionLineCount')
-        ? safeAmount(metadata.projectionLineCount)
-        : 0;
-      const actualLineCount = Object.hasOwn(metadata, 'actualLineCount')
-        ? safeAmount(metadata.actualLineCount)
-        : 0;
-      return {
-        id: `sheet-apply:${audit.id}`,
-        projectId,
-        runId: readOptionalText(audit.idempotencyKey) || audit.id,
-        type: 'sheet_apply',
-        source: 'google_sheet_apply',
-        yearMonth: readOptionalText(metadata.yearMonth),
-        year: Number.isSafeInteger(Number(metadata.year)) ? Number(metadata.year) : undefined,
-        scope: readOptionalText(metadata.scope) || 'monthly',
-        projectionLineCount,
-        actualLineCount,
-        appliedLineCount: sumSafe([projectionLineCount, actualLineCount]),
-        actorUid: readOptionalText(audit.actorId),
-        actorEmail: readOptionalText(metadata.actorEmail),
-        actorName: readOptionalText(metadata.actorName),
-        createdAt: readOptionalText(audit.createdAt),
-      };
-    });
-  const appliedCellEvents = monthlyAudits
-    .filter((audit) => readOptionalText(audit.commandName) === 'weeklyExpense.cashflowSheetLab.apply')
-    .flatMap((audit) => {
-      const metadata = parseAuditMetadata(audit.metadataJson);
-      return (Array.isArray(metadata.appliedCellChanges) ? metadata.appliedCellChanges : []).map((rawChange, index) => {
-        const change = objectValue(rawChange) || {};
-        const before = objectValue(change.before) || {};
-        const after = objectValue(change.after) || {};
-        const mode = readOptionalText(change.mode).toLowerCase();
-        const beforeState = readOptionalText(before.cellState).toUpperCase();
-        const afterState = readOptionalText(after.cellState).toUpperCase();
-        const operationId = readOptionalText(change.operationId) || readOptionalText(metadata.operationId) || readOptionalText(audit.idempotencyKey);
-        return {
-          id: `sheet-apply-cell:${audit.id}:${index}`,
-          projectId,
-          runId: readOptionalText(change.idempotencyKey) || readOptionalText(audit.idempotencyKey) || operationId || audit.id,
-          type: mode === 'projection' ? 'projection_amount_change' : 'actual_amount_change',
-          source: 'google_sheet_apply',
-          sourceDetail: readOptionalText(change.source) || readOptionalText(metadata.source) || readOptionalText(audit.sheetKey),
-          operation: readOptionalText(change.operationType) || readOptionalText(change.operation) || readOptionalText(metadata.operationType) || readOptionalText(metadata.operation) || readOptionalText(audit.commandName),
-          operationId,
-          auditId: readOptionalText(change.auditId) || audit.id,
-          sourceRevision: readOptionalText(change.sourceRevision) || readOptionalText(metadata.sourceRevision),
-          targetRevision: readOptionalText(change.targetRevision) || readOptionalText(metadata.targetRevision),
-          yearMonth: readOptionalText(change.yearMonth),
-          weekNo: safeAmount(change.weekNo),
-          mode,
-          lineId: readOptionalText(change.lineId) || readOptionalText(change.cashflowLine),
-          beforeState,
-          beforeHadValue: beforeState !== 'EMPTY',
-          ...(beforeState !== 'EMPTY' ? { beforeAmount: safeAmount(before.amount) } : {}),
-          afterState,
-          afterHadValue: afterState !== 'EMPTY',
-          ...(afterState !== 'EMPTY' ? { afterAmount: safeAmount(after.amount) } : {}),
-          actorUid: readOptionalText(change.actorId) || readOptionalText(change.actorUid) || readOptionalText(audit.actorId),
-          actorName: readOptionalText(change.actorName) || readOptionalText(metadata.actorName),
-          actorEmail: readOptionalText(change.actorEmail) || readOptionalText(metadata.actorEmail),
-          reason: readOptionalText(change.reason) || readOptionalText(metadata.reason) || readOptionalText(metadata.amendmentReason),
-          createdAt: readOptionalText(change.changedAt) || readOptionalText(audit.createdAt),
-        };
+        runId: readOptionalText(document.idempotencyKey) || document.id,
+        type: 'sheet_refresh',
+        source: 'google_sheet_refresh',
+        actorUid: readOptionalText(document.createdBy?.uid),
+        actorName: readOptionalText(document.createdBy?.name),
+        actorEmail: readOptionalText(document.createdBy?.email),
+        createdAt: readOptionalText(document.createdAt),
+        sheetName: readOptionalText(document.response?.selectedSheetName),
       });
+    }
+    return events;
+  }
+  if (source === 'legacy') {
+    events.legacy.push(document);
+    return events;
+  }
+
+  const commandName = readOptionalText(document.commandName);
+  const metadata = parseAuditMetadata(document.metadataJson);
+  if (commandName.startsWith('cashflowMonth.')) {
+    events.close.push({
+      id: `month-close:${document.id}`,
+      projectId,
+      runId: readOptionalText(document.idempotencyKey) || document.id,
+      type: 'month_close',
+      source: 'month_close',
+      yearMonth: readOptionalText(metadata.yearMonth),
+      status: readOptionalText(metadata.status),
+      actorUid: readOptionalText(document.actorId),
+      actorEmail: readOptionalText(metadata.actorEmail),
+      actorName: readOptionalText(metadata.actorName),
+      createdAt: readOptionalText(document.createdAt),
     });
-  return [...legacyEvents, ...refreshEvents, ...sheetApplyEvents, ...appliedCellEvents, ...closeEvents]
-    .filter((event) => readOptionalText(event.createdAt))
-    .sort((left, right) => readOptionalText(right.createdAt).localeCompare(readOptionalText(left.createdAt)));
+    return events;
+  }
+  if (commandName !== 'weeklyExpense.cashflowSheetLab.apply') return events;
+
+  const projectionLineCount = Object.hasOwn(metadata, 'projectionLineCount')
+    ? safeAmount(metadata.projectionLineCount)
+    : 0;
+  const actualLineCount = Object.hasOwn(metadata, 'actualLineCount')
+    ? safeAmount(metadata.actualLineCount)
+    : 0;
+  events.sheetApply.push({
+    id: `sheet-apply:${document.id}`,
+    projectId,
+    runId: readOptionalText(document.idempotencyKey) || document.id,
+    type: 'sheet_apply',
+    source: 'google_sheet_apply',
+    yearMonth: readOptionalText(metadata.yearMonth),
+    year: Number.isSafeInteger(Number(metadata.year)) ? Number(metadata.year) : undefined,
+    scope: readOptionalText(metadata.scope) || 'monthly',
+    projectionLineCount,
+    actualLineCount,
+    appliedLineCount: sumSafe([projectionLineCount, actualLineCount]),
+    actorUid: readOptionalText(document.actorId),
+    actorEmail: readOptionalText(metadata.actorEmail),
+    actorName: readOptionalText(metadata.actorName),
+    createdAt: readOptionalText(document.createdAt),
+  });
+  events.appliedCell = (Array.isArray(metadata.appliedCellChanges) ? metadata.appliedCellChanges : [])
+    .map((rawChange, index) => {
+      const change = objectValue(rawChange) || {};
+      const before = objectValue(change.before) || {};
+      const after = objectValue(change.after) || {};
+      const mode = readOptionalText(change.mode).toLowerCase();
+      const beforeState = readOptionalText(before.cellState).toUpperCase();
+      const afterState = readOptionalText(after.cellState).toUpperCase();
+      const operationId = readOptionalText(change.operationId) || readOptionalText(metadata.operationId) || readOptionalText(document.idempotencyKey);
+      return {
+        id: `sheet-apply-cell:${document.id}:${index}`,
+        projectId,
+        runId: readOptionalText(change.idempotencyKey) || readOptionalText(document.idempotencyKey) || operationId || document.id,
+        type: mode === 'projection' ? 'projection_amount_change' : 'actual_amount_change',
+        source: 'google_sheet_apply',
+        sourceDetail: readOptionalText(change.source) || readOptionalText(metadata.source) || readOptionalText(document.sheetKey),
+        operation: readOptionalText(change.operationType) || readOptionalText(change.operation) || readOptionalText(metadata.operationType) || readOptionalText(metadata.operation) || commandName,
+        operationId,
+        auditId: readOptionalText(change.auditId) || document.id,
+        sourceRevision: readOptionalText(change.sourceRevision) || readOptionalText(metadata.sourceRevision),
+        targetRevision: readOptionalText(change.targetRevision) || readOptionalText(metadata.targetRevision),
+        yearMonth: readOptionalText(change.yearMonth),
+        weekNo: safeAmount(change.weekNo),
+        mode,
+        lineId: readOptionalText(change.lineId) || readOptionalText(change.cashflowLine),
+        beforeState,
+        beforeHadValue: beforeState !== 'EMPTY',
+        ...(beforeState !== 'EMPTY' ? { beforeAmount: safeAmount(before.amount) } : {}),
+        afterState,
+        afterHadValue: afterState !== 'EMPTY',
+        ...(afterState !== 'EMPTY' ? { afterAmount: safeAmount(after.amount) } : {}),
+        actorUid: readOptionalText(change.actorId) || readOptionalText(change.actorUid) || readOptionalText(document.actorId),
+        actorName: readOptionalText(change.actorName) || readOptionalText(metadata.actorName),
+        actorEmail: readOptionalText(change.actorEmail) || readOptionalText(metadata.actorEmail),
+        reason: readOptionalText(change.reason) || readOptionalText(metadata.reason) || readOptionalText(metadata.amendmentReason),
+        createdAt: readOptionalText(document.createdAt),
+      };
+    });
+  return events;
+}
+
+function cashflowActivityDocumentEventList(events) {
+  return [...events.legacy, ...events.refresh, ...events.sheetApply, ...events.appliedCell, ...events.close];
+}
+
+async function readCashflowActivity(db, tenantId, projectId, {
+  source = '', limit, boundaries, performanceNow, onSourceMetric = () => {},
+}) {
+  const selectedSources = source ? [source] : CASHFLOW_ACTIVITY_SOURCES;
+  const settled = await Promise.allSettled(selectedSources.map(async (sourceName) => {
+    const startedAt = cashflowActivityMetricNow(performanceNow);
+    try {
+      return {
+        source: sourceName,
+        page: await readCashflowActivityDocuments(
+          db,
+          tenantId,
+          CASHFLOW_ACTIVITY_COLLECTIONS[sourceName],
+          projectId,
+          limit,
+          boundaries[sourceName],
+        ),
+        durationMs: Math.max(0, Math.round(cashflowActivityMetricNow(performanceNow) - startedAt)),
+      };
+    } catch (error) {
+      onSourceMetric({
+        source: sourceName,
+        outcome: 'error',
+        queryCount: boundaries[sourceName]?.done ? 0 : 1,
+        documentCount: 0,
+        documentJsonBytes: 0,
+        responseJsonBytes: 0,
+        durationMs: Math.max(0, Math.round(cashflowActivityMetricNow(performanceNow) - startedAt)),
+      });
+      throw error;
+    }
+  }));
+  const pages = {};
+  const nextBoundaries = {};
+  const errors = [];
+  for (let index = 0; index < selectedSources.length; index += 1) {
+    const sourceName = selectedSources[index];
+    const result = settled[index];
+    if (result.status === 'rejected') {
+      if (source) throw result.reason;
+      errors.push({ source: sourceName, code: 'cashflow_activity_source_unavailable' });
+      nextBoundaries[sourceName] = { done: true };
+      continue;
+    }
+    pages[sourceName] = result.value.page;
+  }
+  const candidateDocuments = selectedSources
+    .flatMap((sourceName) => (pages[sourceName]?.documents || []).map((document) => ({ source: sourceName, document })))
+    .sort(compareCashflowActivityDocuments)
+    .slice(0, limit);
+  const selectedDocuments = [];
+  const selectedDocumentEvents = [];
+  let selectedEventCount = 0;
+  let selectedEventJsonBytes = 0;
+  for (const entry of candidateDocuments) {
+    const documentEvents = buildCashflowActivityDocumentEvents(entry.source, entry.document, projectId);
+    const eventList = cashflowActivityDocumentEventList(documentEvents);
+    const eventJsonBytes = cashflowActivityJsonArrayBytes(eventList) - 2;
+    const separatorBytes = selectedEventCount > 0 && eventList.length > 0 ? 1 : 0;
+    if (
+      selectedEventCount > 0
+      && eventList.length > 0
+      && selectedEventJsonBytes + separatorBytes + eventJsonBytes > CASHFLOW_ACTIVITY_RESPONSE_EVENT_BUDGET_BYTES
+    ) break;
+    selectedDocuments.push(entry);
+    selectedDocumentEvents.push(documentEvents);
+    selectedEventCount += eventList.length;
+    selectedEventJsonBytes += separatorBytes + eventJsonBytes;
+  }
+  for (const sourceName of selectedSources) {
+    if (!pages[sourceName]) continue;
+    const selectedForSource = selectedDocuments.filter((entry) => entry.source === sourceName);
+    const last = selectedForSource.at(-1)?.document;
+    const createdAt = readOptionalText(last?.createdAt);
+    if (last && createdAt) {
+      nextBoundaries[sourceName] = {
+        done: selectedForSource.length === pages[sourceName].documents.length && pages[sourceName].exhausted,
+        createdAt,
+        id: cashflowActivityDocumentId(last),
+      };
+    } else if (pages[sourceName].documents.length === 0) {
+      nextBoundaries[sourceName] = { done: true };
+    } else {
+      nextBoundaries[sourceName] = boundaries[sourceName]?.done === false
+        ? boundaries[sourceName]
+        : { done: false };
+    }
+  }
+  const refreshEvents = selectedDocumentEvents.flatMap((events) => events.refresh);
+  const sheetApplyEvents = selectedDocumentEvents.flatMap((events) => events.sheetApply);
+  const appliedCellEvents = selectedDocumentEvents.flatMap((events) => events.appliedCell);
+  const closeEvents = selectedDocumentEvents.flatMap((events) => events.close);
+  const legacyEvents = selectedDocumentEvents.flatMap((events) => events.legacy);
+  const responseEventsBySource = {
+    sheet_refresh: refreshEvents,
+    audit: [...sheetApplyEvents, ...appliedCellEvents, ...closeEvents],
+    legacy: legacyEvents,
+  };
+  for (const sourceName of selectedSources) {
+    const page = pages[sourceName];
+    if (!page) continue;
+    const settledPage = settled.find((entry) => (
+      entry.status === 'fulfilled' && entry.value.source === sourceName
+    ));
+    const responseJsonBytes = cashflowActivityJsonArrayBytes(responseEventsBySource[sourceName]);
+    onSourceMetric({
+      source: sourceName,
+      outcome: 'ok',
+      queryCount: page.queryCount,
+      documentCount: page.documents.length,
+      documentJsonBytes: cashflowActivityJsonArrayBytes(page.documents),
+      responseJsonBytes,
+      responseBudgetExceeded: responseJsonBytes > CASHFLOW_ACTIVITY_RESPONSE_EVENT_BUDGET_BYTES,
+      durationMs: settledPage?.status === 'fulfilled' ? settledPage.value.durationMs : 0,
+    });
+  }
+  return {
+    events: [...legacyEvents, ...refreshEvents, ...sheetApplyEvents, ...appliedCellEvents, ...closeEvents]
+      .filter((event) => readOptionalText(event.createdAt))
+      .sort((left, right) => readOptionalText(right.createdAt).localeCompare(readOptionalText(left.createdAt))),
+    errors,
+    boundaries: nextBoundaries,
+  };
 }
 
 
@@ -3774,10 +4044,37 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (source && !['legacy', 'sheet_refresh', 'audit'].includes(source)) {
       throw createHttpError(400, '활동 기록 조회 출처가 올바르지 않습니다.', 'cashflow_activity_source_invalid');
     }
+    const limit = req.query.limit === undefined ? CASHFLOW_ACTIVITY_DEFAULT_LIMIT : Number(req.query.limit);
+    const cursor = readOptionalText(req.query.cursor);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > CASHFLOW_ACTIVITY_DEFAULT_LIMIT) {
+      throw cashflowActivityQueryInvalid();
+    }
+    const boundaries = decodeCashflowActivityCursor(cursor, projectId, source);
+    const requestId = req.context?.requestId || req.requestId || 'unknown';
+    const activity = await readCashflowActivity(db, readOptionalText(req.context?.tenantId), projectId, {
+      source,
+      limit,
+      boundaries,
+      performanceNow,
+      onSourceMetric: (metric) => emitCashflowActivityMetric(performanceLogger, {
+        severity: metric.outcome === 'error' ? 'WARNING' : 'INFO',
+        message: 'cashflow.performance',
+        requestId,
+        operation: 'cashflow.activity.read',
+        phase: 'activity_source_read',
+        ...metric,
+      }),
+    });
+    const selectedSources = source ? [source] : CASHFLOW_ACTIVITY_SOURCES;
+    const hasNextPage = selectedSources.some((sourceName) => activity.boundaries[sourceName]?.done === false);
     res.status(200).json({
       projectId,
       ...(source ? { source } : {}),
-      events: await readCashflowActivity(db, readOptionalText(req.context?.tenantId), projectId, source),
+      events: activity.events,
+      errors: activity.errors,
+      nextCursor: hasNextPage
+        ? encodeCashflowActivityCursor(projectId, source, activity.boundaries)
+        : null,
     });
   }));
 
