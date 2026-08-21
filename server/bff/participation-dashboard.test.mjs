@@ -13,8 +13,16 @@ const project = {
   contractStart: '2026-01-01', contractEnd: '2026-12-31',
 };
 const secondProject = {
-  id: 'hongsi-2026', clientOrg: '한국경영혁신중소기업협회', settlementSystem: 'ENARA',
+  id: 'hongsi-2026', clientOrg: '한국경영혁신중소기업협회', settlementSystem: 'E_NARA_DOUM',
   contractStart: '2026-01-01', contractEnd: '2026-12-31',
+};
+const legacySettlementProject = {
+  id: 'koica-legacy',
+  clientOrg: 'KOICA',
+  settlementType: 'TYPE5',
+  accountType: 'DEDICATED',
+  contractStart: '2026-01-01',
+  contractEnd: '2026-12-31',
 };
 
 describe('participation dashboard', () => {
@@ -54,6 +62,36 @@ describe('participation dashboard', () => {
     expect(snapshot.availableYears).toContain('2026');
     expect(result.unlinkedEntryCount).toBe(1);
     expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용' }]));
+  });
+
+  it('legacy 정산 필드도 저장 경로와 같은 플랫폼으로 분류한다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [legacySettlementProject],
+      people: [{ personId: 'psn-legacy', name: '레거시 참여자' }],
+      rules: [{
+        id: 'koica-enara',
+        kind: 'USER_DEFINED',
+        alias: 'KOICA · e나라도움',
+        clientOrgs: ['KOICA'],
+        settlementSystems: ['E_NARA_DOUM'],
+      }],
+      entries: [{
+        id: 'legacy-entry',
+        projectId: legacySettlementProject.id,
+        personId: 'psn-legacy',
+        rate: 20,
+        periodStart: '2026-01',
+        periodEnd: '2026-12',
+      }],
+    });
+
+    expect(selectParticipationDashboardYear(snapshot, '2026', 'koica-enara').members).toEqual([
+      expect.objectContaining({ memberId: 'psn-legacy', projectCount: 1 }),
+    ]);
+    expect(snapshot.filterOptions.settlementSystems).toContainEqual({
+      value: 'E_NARA_DOUM',
+      label: 'e나라도움',
+    });
   });
 
   it('sheet-backed 월별 맵의 빈칸을 legacy 기본률로 되살리지 않는다', () => {
@@ -249,7 +287,7 @@ describe('participation dashboard routes', () => {
     const docs = (items) => items.map((data) => ({ id: data.id, data: () => data }));
     const db = {
       collection(path) {
-        const items = path.endsWith('/projects') ? [project, secondProject] : path.endsWith('/partEntries') ? [{ id: 'entry-1', projectId: project.id, personId: 'psn-boram', rate: 75 }] : path.endsWith('/persons') ? [{ personId: 'psn-boram', name: '변민욱A' }] : [];
+        const items = path.endsWith('/projects') ? [project, legacySettlementProject] : path.endsWith('/partEntries') ? [{ id: 'entry-1', projectId: project.id, personId: 'psn-boram', rate: 75 }] : path.endsWith('/persons') ? [{ personId: 'psn-boram', name: '변민욱A' }] : [];
         return { get: async () => ({ docs: docs(items) }) };
       },
       doc(path) {
@@ -267,5 +305,7 @@ describe('participation dashboard routes', () => {
     expect(snapshot.body).toMatchObject({ projectId: project.id, headcount: 1, totalRate: 75, averageRate: 75, hasMembers: true });
     const response = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'key').send({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg], settlementSystems: [project.settlementSystem] }).expect(200);
     expect(saved.get(`orgs/mysc/participation_rules/${response.body.id}`)).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg], settlementSystems: [project.settlementSystem], kind: 'USER_DEFINED' });
+    const legacyResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'legacy-key').send({ alias: 'KOICA · e나라도움', clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] }).expect(200);
+    expect(saved.get(`orgs/mysc/participation_rules/${legacyResponse.body.id}`)).toMatchObject({ clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] });
   });
 });

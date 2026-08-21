@@ -9,6 +9,12 @@ import {
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { extractTextFromPdfBuffer } from '../pdf-text.mjs';
 import { normalizeProjectRevenueFields } from '../project-financials.mjs';
+import {
+  normalizeBasis,
+  normalizeSettlementSystemCode,
+  resolveParticipationSettlementSystem,
+  SETTLEMENT_SYSTEM_CODES,
+} from '../participation-settlement-system.mjs';
 import { stableStringify } from '../utils.mjs';
 import {
   PROJECT_INFO_DOCUMENT_KINDS,
@@ -769,11 +775,6 @@ const REGISTRATION_V2_SETTLEMENT_BASES = new Set([
   'SUPPLY_AMOUNT', '공급가액', 'SUPPLY_PRICE', '공급대가', 'NONE',
 ]);
 const REGISTRATION_ACCOUNT_TYPES = new Set(['DEDICATED', 'OPERATING', 'NONE', 'OTHER']);
-const SETTLEMENT_SYSTEM_CODES = new Set([
-  'E_NARA_DOUM', 'IRIS', 'RCMS', 'EZBARO', 'E_HIJO', 'EDUFINE',
-  'HAPPYEUM', 'AGRIX', 'BOTAEM_E', 'SMTECH', 'KOCCA_PMS', 'NIPA',
-  'ACCOUNTANT', 'PRIVATE', 'OTHER', 'NONE',
-]);
 const LABOR_SETTLEMENT_BASES = new Set([
   'INCLUDE_ACTUAL_SALARY', 'EXCLUDE_ACTUAL_SALARY', 'FIXED_AMOUNT', 'NONE',
 ]);
@@ -1002,11 +1003,6 @@ function assertRegistrationV2PaymentPlan(payload) {
 function registrationAmount(value) {
   const amount = Number(value);
   return Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
-}
-
-function normalizeSettlementSystemCode(value) {
-  const normalized = readOptionalText(value);
-  return SETTLEMENT_SYSTEM_CODES.has(normalized) ? normalized : 'NONE';
 }
 
 function normalizeLaborSettlementBasis(value) {
@@ -1720,13 +1716,6 @@ export function buildProjectRegistrationCanonicalDocuments({
 
 function normalizeSettlementType(value) {
   return ['TYPE1', 'TYPE2', 'TYPE3', 'TYPE4', 'TYPE5'].includes(value) ? value : 'NONE';
-}
-
-function normalizeBasis(value) {
-  if (value === 'SUPPLY_AMOUNT' || value === '공급가액') return '공급가액';
-  if (value === 'SUPPLY_PRICE' || value === '공급대가') return '공급대가';
-  if (value === 'OTHER' || value === '기타') return '기타';
-  return 'NONE';
 }
 
 function normalizeAccountType(value) {
@@ -2616,22 +2605,6 @@ export async function tryEnsureProjectRootFolder({
     logger.error('[BFF] managed project root provision skipped:', error);
     return null;
   }
-}
-
-function resolveParticipationSettlementSystem(project) {
-  if (
-    Number(project?.registrationRequirementsVersion) === 2
-    && normalizeBasis(project?.basis) === 'NONE'
-  ) return 'NONE';
-  const selectedSystem = normalizeSettlementSystemCode(project?.settlementSystem);
-  if (selectedSystem !== 'NONE') return selectedSystem;
-  if (project?.settlementType === 'TYPE5' || project?.accountType === 'DEDICATED') {
-    return 'E_NARA_DOUM';
-  }
-  if (project?.settlementType === 'NONE' && project?.accountType === 'NONE') {
-    return 'NONE';
-  }
-  return 'PRIVATE';
 }
 
 export async function syncProjectParticipationEntries({

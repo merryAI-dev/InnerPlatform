@@ -1,4 +1,5 @@
 import { readOptionalText } from './bff-utils.mjs';
+import { resolveParticipationSettlementSystem } from './participation-settlement-system.mjs';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_RULE_FILTER_VALUES = 4;
@@ -61,7 +62,7 @@ function matchesRule(project, rule) {
   const clientOrgs = rule.clientOrgs || [];
   const settlementSystems = rule.settlementSystems || [];
   return (!clientOrgs.length || clientOrgs.includes(readOptionalText(project.clientOrg)))
-    && (!settlementSystems.length || settlementSystems.includes(readOptionalText(project.settlementSystem) || 'NONE'));
+    && (!settlementSystems.length || settlementSystems.includes(resolveParticipationSettlementSystem(project)));
 }
 
 export function buildParticipationDashboardSnapshot({ projects = [], entries = [], people = [], rules: savedRules = [], generatedAt = '' } = {}) {
@@ -179,7 +180,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     rules: serializedRules,
     filterOptions: {
       clientOrgs: [...new Set(projects.map((project) => readOptionalText(project?.clientOrg)).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ko')),
-      settlementSystems: [...new Set(['NONE', ...projects.map((project) => readOptionalText(project?.settlementSystem) || 'NONE')])]
+      settlementSystems: [...new Set(['NONE', ...projects.map(resolveParticipationSettlementSystem)])]
         .sort().map((value) => ({ value, label: SETTLEMENT_SYSTEM_LABELS[value] || value })),
     },
     unlinkedEntryCount,
