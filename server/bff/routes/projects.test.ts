@@ -14,6 +14,7 @@ import {
   tryEnsureProjectRootFolder,
   tryRenameManagedProjectRootFolder,
 } from './projects.mjs';
+import { upsertVersionedDoc } from '../bff-utils.mjs';
 
 const registrationV2AttachmentKinds = [
   'contract',
@@ -45,6 +46,7 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
     managerName: 'PM A',
     contractStart: '2026-01-01',
     contractEnd: '2027-12-31',
+    participationSheetLink: 'https://docs.google.com/spreadsheets/d/default-participation-sheet/edit',
     contractAmount: 300_000,
     salesVatAmount: 30_000,
     totalRevenueAmount: 120_000,
@@ -298,6 +300,478 @@ describe('project route helpers', () => {
         memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50, isDocumentOnly: false,
       }],
     }))).not.toThrow();
+  });
+
+  it('accepts role-free sheet-backed rows and preserves null, zero, changed, and multi-year rates', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2027-12',
+        monthlyRates: {
+          '2026-01': null,
+          '2026-02': 0,
+          '2026-03': 10,
+          '2027-01': 5,
+        },
+      }],
+    }));
+
+    expect(canonical.project.teamMembersDetailed).toEqual([
+      expect.objectContaining({
+        role: '',
+        monthlyRates: {
+          '2026-01': null,
+          '2026-02': 0,
+          '2026-03': 10,
+          '2027-01': 5,
+        },
+      }),
+    ]);
+  });
+
+  it('does not apply manual settlement-support assignment rules to sheet-backed rows', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [{
+        memberName: '새 정산 담당자',
+        memberNickname: '',
+        role: '정산지원',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2026-12',
+        monthlyRates: { '2026-01': 20 },
+      }],
+    }))).not.toThrow();
+  });
+
+  it('accepts an open-ended sheet-backed stint and preserves its monthly rates', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20, '2027-01': null },
+      }],
+    }));
+
+    expect(canonical.project.teamMembersDetailed).toEqual([
+      expect.objectContaining({
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20, '2027-01': null },
+      }),
+    ]);
+  });
+
+  it('rejects an open-ended sheet-backed rate after the project contract end month', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      contractEnd: '2027-12-31',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2099-01': 20 },
+      }],
+    }))).toThrowError(/outside the labor allocation period/);
+  });
+
+  it('rejects an explicitly long sheet stint that extends past the project contract end month', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      contractEnd: '2027-12-31',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2099-12',
+        monthlyRates: { '2099-01': 20 },
+      }],
+    }))).toThrowError(/outside the project contract period/);
+  });
+
+  it.each([
+    ['starts before the project contract', '2025-01', '2026-12'],
+    ['ends after the project contract', '2026-01', '2028-12'],
+  ])('rejects a sheet stint that %s even when its saved rate month is inside the contract', (
+    _label,
+    laborAllocationStartMonth,
+    laborAllocationEndMonth,
+  ) => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      contractStart: '2026-01-01',
+      contractEnd: '2027-12-31',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth,
+        laborAllocationEndMonth,
+        monthlyRates: { '2026-01': 20 },
+      }],
+    }))).toThrowError(/outside the project contract period/);
+  });
+
+  it('requires a sheet link whenever the saved roster contains sheet-backed monthly rates', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: '',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20 },
+      }],
+    }))).toThrowError(/participationSheetLink/);
+  });
+
+  it.each([
+    ['a legacy manual roster', [{
+      memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50,
+    }]],
+    ['a placeholder-only empty roster', []],
+  ])('requires the participation sheet link for V2 even with %s', (_label, teamMembersDetailed) => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: '',
+      teamMembersDetailed,
+    }))).toThrowError(/participationSheetLink/);
+  });
+
+  it('accepts a linked nickname-only row and an all-placeholder sheet mapped to an empty roster', () => {
+    const participationSheetLink = 'https://docs.google.com/spreadsheets/d/sheet-a/edit';
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink,
+      teamMembersDetailed: [{
+        personId: 'person-able',
+        memberName: '',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20 },
+      }],
+    }))).not.toThrow();
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink,
+      teamMembersDetailed: [],
+    }))).not.toThrow();
+  });
+
+  it.each([
+    ['the same linked person under different labels', [
+      {
+        personId: 'person-able',
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-02': 20 },
+      },
+      {
+        personId: 'person-able',
+        memberName: '김정태',
+        memberNickname: 'ABLE',
+        role: '',
+        participationRate: 30,
+        laborAllocationStartMonth: '2026-02',
+        monthlyRates: { '2026-02': 30 },
+      },
+    ]],
+    ['the same pending identity', [
+      {
+        memberName: '김혜령',
+        memberNickname: '테일러',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-03': 0 },
+      },
+      {
+        memberName: '김혜령',
+        memberNickname: '테일러',
+        role: '',
+        participationRate: 30,
+        laborAllocationStartMonth: '2026-03',
+        monthlyRates: { '2026-03': 30 },
+      },
+    ]],
+    ['a linked and pending row with the same sheet identity', [
+      {
+        personId: 'person-able',
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-04': 20 },
+      },
+      {
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 30,
+        laborAllocationStartMonth: '2026-04',
+        monthlyRates: { '2026-04': 30 },
+      },
+    ]],
+  ])('rejects duplicate sheet month ownership for %s', (_label, teamMembersDetailed) => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed,
+    }))).toThrowError(/duplicate monthlyRates ownership/);
+  });
+
+  it('accepts two non-overlapping sheet stints for the same person', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [
+        {
+          personId: 'person-able',
+          memberName: '김정태',
+          memberNickname: '에이블',
+          role: '',
+          participationRate: 20,
+          laborAllocationStartMonth: '2026-01',
+          laborAllocationEndMonth: '2026-01',
+          monthlyRates: { '2026-01': 20 },
+        },
+        {
+          personId: 'person-able',
+          memberName: '김정태',
+          memberNickname: '에이블',
+          role: '',
+          participationRate: 30,
+          laborAllocationStartMonth: '2026-02',
+          monthlyRates: { '2026-02': 30 },
+        },
+      ],
+    }))).not.toThrow();
+  });
+
+  it('keeps parser semantics when one overlapping sheet stint is still missing', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [
+        {
+          personId: 'person-able', memberName: '김정태', memberNickname: '에이블', role: '',
+          participationRate: 20, laborAllocationStartMonth: '2026-01',
+          monthlyRates: { '2026-02': null },
+        },
+        {
+          personId: 'person-able', memberName: '김정태', memberNickname: 'ABLE', role: '',
+          participationRate: 30, laborAllocationStartMonth: '2026-02',
+          monthlyRates: { '2026-02': 30 },
+        },
+      ],
+    }))).not.toThrow();
+  });
+
+  it('treats distinct canonical person IDs as distinct even when their normalized text collides', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [
+        {
+          personId: 'person.a',
+          memberName: '사람 A',
+          memberNickname: 'A',
+          role: '',
+          participationRate: 20,
+          laborAllocationStartMonth: '2026-01',
+          monthlyRates: { '2026-01': 20 },
+        },
+        {
+          personId: 'person-a',
+          memberName: '사람 B',
+          memberNickname: 'B',
+          role: '',
+          participationRate: 30,
+          laborAllocationStartMonth: '2026-01',
+          monthlyRates: { '2026-01': 30 },
+        },
+      ],
+    }))).not.toThrow();
+  });
+
+  it.each([
+    ['invalid month', { '2026-1': 20 }],
+    ['out-of-range rate', { '2026-01': 101 }],
+    ['month before stint', { '2025-12': 20 }],
+  ])('rejects sheet-backed monthlyRates with %s', (_label, monthlyRates) => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2027-12',
+        monthlyRates,
+      }],
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+    }))).toThrowError(/monthlyRates/);
+  });
+
+  it('preserves the participation sheet link through a portal change request and approved project patch', () => {
+    const currentLink = 'https://docs.google.com/spreadsheets/d/sheet-a/edit';
+    const nextLink = 'https://docs.google.com/spreadsheets/d/sheet-b/edit';
+    const canonical = registrationV2Canonical(
+      registrationV2Payload({ participationSheetLink: currentLink }),
+      registrationV2AttachmentKinds,
+      registrationV2AttachmentKinds,
+    );
+    const payload = {
+      ...canonical.projectRequest.payload,
+      participationSheetLink: nextLink,
+    };
+    const submission = buildProjectInfoChangeSubmission({
+      tenantId: 'mysc',
+      project: canonical.project,
+      previousRequest: canonical.projectRequest,
+      payload,
+      attachmentRefs: [],
+      actorId: 'pm-a',
+      actorName: 'PM A',
+      actorEmail: 'pm-a@example.com',
+      timestamp: '2026-08-21T00:00:00.000Z',
+      targetProjectVersion: 2,
+    });
+
+    expect(canonical.project.participationSheetLink).toBe(currentLink);
+    expect(canonical.projectRequest.payload.participationSheetLink).toBe(currentLink);
+    expect(submission.projectRequest.proposedSnapshot.participationSheetLink).toBe(nextLink);
+    expect(buildProjectPatchFromChangeRequestPayload(payload, canonical.project).participationSheetLink).toBe(nextLink);
+  });
+
+  it('rejects a portal change patch that carries sheet rates without a participation sheet link', () => {
+    const currentProject = registrationV2Canonical(registrationV2Payload()).project;
+    const payload = {
+      ...registrationV2Payload(),
+      participationSheetLink: '',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20 },
+      }],
+    };
+
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/participationSheetLink/);
+  });
+
+  it('rejects a V2 portal change patch with a manual roster but no participation sheet link', () => {
+    const currentProject = registrationV2Canonical(registrationV2Payload()).project;
+    const payload = registrationV2Payload({
+      participationSheetLink: '',
+      teamMembersDetailed: [{
+        memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50,
+      }],
+    });
+
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/participationSheetLink/);
+  });
+
+  it('preserves the current participation roster when a portal change does not touch it', () => {
+    const currentProject = registrationV2Canonical(registrationV2Payload()).project;
+
+    const patch = buildProjectPatchFromChangeRequestPayload({ name: '이름만 변경' }, currentProject);
+
+    expect({ ...currentProject, ...patch }.teamMembersDetailed).toEqual(currentProject.teamMembersDetailed);
+    expect({ ...currentProject, ...patch }.participationSheetLink).toBe(currentProject.participationSheetLink);
+  });
+
+  it('grandfathers an unrelated edit to a V2 project created before sheet links existed', () => {
+    const currentProject = {
+      ...registrationV2Canonical(registrationV2Payload()).project,
+      participationSheetLink: '',
+    };
+
+    const patch = buildProjectPatchFromChangeRequestPayload({ name: '이름만 변경' }, currentProject);
+
+    expect({ ...currentProject, ...patch }.teamMembersDetailed).toEqual(currentProject.teamMembersDetailed);
+    expect({ ...currentProject, ...patch }.participationSheetLink).toBe('');
+  });
+
+  it('requires sheet onboarding when a pre-link V2 project changes its contract period', () => {
+    const currentProject = {
+      ...registrationV2Canonical(registrationV2Payload()).project,
+      participationSheetLink: '',
+    };
+
+    expect(() => buildProjectPatchFromChangeRequestPayload({ contractEnd: '2028-12-31' }, currentProject))
+      .toThrowError(/participationSheetLink/);
+  });
+
+  it('requires a participation sheet link when a legacy project is upgraded to V2', () => {
+    const currentProject = {
+      registrationRequirementsVersion: 1,
+      participationSheetLink: '',
+      teamMembersDetailed: [{
+        memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50,
+      }],
+    };
+
+    expect(() => buildProjectPatchFromChangeRequestPayload({
+      registrationRequirementsVersion: 2,
+    }, currentProject)).toThrowError(/participationSheetLink/);
+  });
+
+  it('rejects a portal change patch whose sheet-backed row has no person identity', () => {
+    const currentProject = registrationV2Canonical(registrationV2Payload()).project;
+    const payload = {
+      ...registrationV2Payload(),
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      teamMembersDetailed: [{
+        memberName: '',
+        memberNickname: '',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20 },
+      }],
+    };
+
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/identity is required/);
+  });
+
+  it('uses the current project contract end when a partial change omits contractEnd', () => {
+    const currentProject = {
+      ...registrationV2Canonical(registrationV2Payload()).project,
+      contractEnd: '2027-12-31',
+    };
+    const payload = {
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2099-01': 20 },
+      }],
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+    };
+
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/outside the labor allocation period/);
   });
 
   it('allows only 도담 or 써니 as settlement support', () => {
@@ -651,6 +1125,119 @@ describe('project route helpers', () => {
     expect(response.status).toBe(403);
     expect(response.body.error).toBe('project_registration_draft_required');
     expect(idempotencyService.complete).not.toHaveBeenCalled();
+  });
+
+  it('requires a participation sheet link when an admin creates a project directly', async () => {
+    const db = {
+      doc: vi.fn(() => ({ get: vi.fn(async () => ({ exists: false, data: () => undefined })) })),
+      runTransaction: vi.fn(),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc', actorId: 'admin-a', actorRole: 'admin', actorEmail: 'admin-a@example.com',
+        requestId: 'request-a', idempotencyKey: 'admin-create-without-participation-sheet',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-08-21T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects').send({
+      id: 'project-new',
+      name: '신규 사업',
+      registrationRequirementsVersion: 2,
+    });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error).toBe('project_registration_invalid');
+    expect(db.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['sheet rates', undefined, [{
+      memberName: '김정태',
+      memberNickname: '에이블',
+      role: '',
+      participationRate: 20,
+      laborAllocationStartMonth: '2026-01',
+      monthlyRates: { '2026-01': 20 },
+    }]],
+    ['a V2 manual roster', 2, [{
+      memberName: '변민욱',
+      memberNickname: '보람',
+      role: '운영매니저',
+      participationRate: 50,
+    }]],
+  ])('rejects direct project updates with %s and no participation sheet link', async (
+    _label,
+    registrationRequirementsVersion,
+    teamMembersDetailed,
+  ) => {
+    const projectRef = {
+      path: 'orgs/mysc/projects/project-a',
+      get: vi.fn(async () => ({
+        exists: true,
+        data: () => ({ id: 'project-a', version: 1, contractEnd: '2027-12-31' }),
+      })),
+    };
+    const db = {
+      doc: vi.fn(() => projectRef),
+      runTransaction: vi.fn(),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'admin-a',
+        actorRole: 'admin',
+        actorEmail: 'admin-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'project-sheet-link-required',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-08-21T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects').send({
+      id: 'project-a',
+      name: '시트 링크 누락 사업',
+      expectedVersion: 1,
+      contractStart: '2026-01-01',
+      contractEnd: '2027-12-31',
+      ...(registrationRequirementsVersion ? { registrationRequirementsVersion } : {}),
+      participationSheetLink: '',
+      teamMembersDetailed,
+    });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error).toBe('project_registration_invalid');
+    expect(db.runTransaction).not.toHaveBeenCalled();
   });
 
   it('applies checkout state and private evidence fields when a change request is approved', () => {
@@ -1361,6 +1948,67 @@ describe('project route helpers', () => {
       approvedProjectId: 'p001',
     }, { merge: true });
     expect(result).toMatchObject({ version: 3, data: { executiveReviewStatus: 'APPROVED' } });
+  });
+
+  it('does not write a project when its transactional participation sync fails', async () => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const tx = {
+      get: vi.fn(async () => ({ exists: false, data: () => null })),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn(() => projectRef),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+
+    await expect(upsertVersionedDoc({
+      db,
+      path: projectRef.path,
+      payload: { id: 'p001', name: '원자 저장 사업' },
+      tenantId: 'mysc',
+      actorId: 'admin-1',
+      now: '2026-08-21T00:00:00.000Z',
+      expectedVersion: 0,
+      stageTransactionWrites: async () => {
+        throw new Error('participation sync failed');
+      },
+    })).rejects.toThrow('participation sync failed');
+
+    expect(tx.set).not.toHaveBeenCalled();
+  });
+
+  it('does not write review decisions when their transactional participation sync fails', async () => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const requestRef = { path: 'orgs/mysc/project_requests/pr001' };
+    const tx = {
+      get: vi.fn(async (ref) => ({
+        exists: true,
+        data: () => ref === projectRef
+          ? { id: 'p001', version: 2, executiveReviewStatus: 'PENDING' }
+          : { requestKind: 'CHANGE', status: 'PENDING', baseProjectVersion: 1, targetProjectVersion: 2 },
+      })),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn(() => projectRef),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+
+    await expect(mergeProjectAndRequestDocs({
+      db,
+      projectPath: projectRef.path,
+      buildProjectPatch: () => ({ executiveReviewStatus: 'APPROVED' }),
+      buildRequestPatch: () => ({ status: 'APPROVED' }),
+      requestRefs: [requestRef],
+      tenantId: 'mysc',
+      actorId: 'admin-1',
+      now: '2026-08-21T00:00:00.000Z',
+      stageTransactionWrites: async () => {
+        throw new Error('participation sync failed');
+      },
+    })).rejects.toThrow('participation sync failed');
+
+    expect(tx.set).not.toHaveBeenCalled();
   });
 
   it('only lets the designated executive approver approve and records the server-side approver name', async () => {

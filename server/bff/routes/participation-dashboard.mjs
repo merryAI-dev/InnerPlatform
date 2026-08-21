@@ -2,8 +2,13 @@ import {
   asyncHandler, assertActorRoleAllowed, createHttpError, createMutatingRoute, ROUTE_ROLES, readOptionalText,
 } from '../bff-utils.mjs';
 import { buildParticipationDashboardSnapshot, buildProjectParticipationSnapshot, selectParticipationDashboardYear } from '../participation-dashboard.mjs';
+import { resolveParticipationSettlementSystem } from '../participation-settlement-system.mjs';
 import { analyzeParticipationSheet } from '../participation-sheet-ingest.mjs';
-import { participationSheetRanges, toParticipationSheetInput } from '../participation-sheet-ranges.mjs';
+import {
+  isSupportedParticipationFormat,
+  participationSheetRanges,
+  toParticipationSheetInput,
+} from '../participation-sheet-ranges.mjs';
 
 /** 캐시플로우 시트 연동과 같은 방식으로 서비스 계정 주소를 얻는다. */
 function resolveSystemAccountEmail(googleSheetsService) {
@@ -37,15 +42,20 @@ function participationSheetUnreachable(error, systemAccountEmail = '') {
 
 /** 다섯 범위를 함께 읽는다. 한 번에 읽어야 사람이 그 사이 고쳐도 한 장면으로 남는다. */
 async function readParticipationSheet(googleSheetsService, sheetLink) {
-  const ranges = participationSheetRanges();
   const readRange = ({ sheetName, rangeA1 }) => googleSheetsService.getSheetValues({
     spreadsheetId: sheetLink,
     sheetName,
     rangeA1,
   });
   try {
-    const [format, period, header, meta, cells] = await Promise.all([
-      readRange(ranges.format),
+    const bootstrapRanges = participationSheetRanges();
+    const format = await readRange(bootstrapRanges.format);
+    const formatId = String(format?.[0]?.[0] || '').trim();
+    if (!isSupportedParticipationFormat(formatId)) {
+      return { format, period: [], header: [], meta: [], cells: [] };
+    }
+    const ranges = participationSheetRanges(formatId);
+    const [period, header, meta, cells] = await Promise.all([
       readRange(ranges.period),
       readRange(ranges.header),
       readRange(ranges.meta),
@@ -247,7 +257,7 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
     const projectsSnap = await db.collection(`orgs/${tenantId}/projects`).get();
     const projects = projectsSnap.docs.map((doc) => doc.data() || {});
     const validClientOrgs = new Set(projects.map((project) => readOptionalText(project.clientOrg)).filter(Boolean));
-    const validSettlementSystems = new Set(projects.map((project) => readOptionalText(project.settlementSystem) || 'NONE'));
+    const validSettlementSystems = new Set(projects.map(resolveParticipationSettlementSystem));
     if (clientOrgs.some((value) => !validClientOrgs.has(value)) || settlementSystems.some((value) => !validSettlementSystems.has(value))) throw createHttpError(422, '규칙 조건에 사용할 수 없는 값이 포함되어 있습니다.', 'invalid_participation_rule_filter');
     const ruleId = requestedId || `participation-rule-${crypto.randomUUID()}`;
     if (!/^participation-rule-[a-zA-Z0-9-]{1,80}$/.test(ruleId)) throw createHttpError(422, '규칙 식별자가 올바르지 않습니다.', 'invalid_participation_rule_id');

@@ -243,7 +243,17 @@ export async function ensureDocumentExists(db, path, notFoundMessage) {
   return snap.data();
 }
 
-export async function upsertVersionedDoc({ db, path, payload, tenantId, actorId, now, expectedVersion, outboxEvent }) {
+export async function upsertVersionedDoc({
+  db,
+  path,
+  payload,
+  tenantId,
+  actorId,
+  now,
+  expectedVersion,
+  outboxEvent,
+  stageTransactionWrites,
+}) {
   const ref = db.doc(path);
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -257,9 +267,13 @@ export async function upsertVersionedDoc({ db, path, payload, tenantId, actorId,
         ...payload, tenantId, version: nextVersion,
         createdBy: actorId, createdAt: now, updatedBy: actorId, updatedAt: now,
       };
-      tx.set(ref, stripUndefinedDeep(document), { merge: true });
+      const sanitizedDocument = stripUndefinedDeep(document);
+      if (typeof stageTransactionWrites === 'function') {
+        await stageTransactionWrites({ tx, document: sanitizedDocument, current: null, created: true });
+      }
+      tx.set(ref, sanitizedDocument, { merge: true });
       if (outboxEvent) enqueueOutboxEventInTransaction(tx, db, outboxEvent);
-      return { created: true, version: nextVersion, data: stripUndefinedDeep(document) };
+      return { created: true, version: nextVersion, data: sanitizedDocument };
     }
 
     const current = snap.data() || {};
@@ -278,9 +292,13 @@ export async function upsertVersionedDoc({ db, path, payload, tenantId, actorId,
       createdBy: current.createdBy || actorId, createdAt: current.createdAt || now,
       updatedBy: actorId, updatedAt: now,
     };
-    tx.set(ref, stripUndefinedDeep(document), { merge: true });
+    const sanitizedDocument = stripUndefinedDeep(document);
+    if (typeof stageTransactionWrites === 'function') {
+      await stageTransactionWrites({ tx, document: sanitizedDocument, current, created: false });
+    }
+    tx.set(ref, sanitizedDocument, { merge: true });
     if (outboxEvent) enqueueOutboxEventInTransaction(tx, db, outboxEvent);
-    return { created: false, version: nextVersion, data: stripUndefinedDeep(document) };
+    return { created: false, version: nextVersion, data: sanitizedDocument };
   });
 }
 

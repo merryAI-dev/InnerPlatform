@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
 const { default: express } = await import('express');
 const { default: request } = await import('supertest');
 const { mountParticipationDashboardRoutes } = await import('./participation-dashboard.mjs');
-const { PARTICIPATION_FORMAT_ID } = await import('../participation-sheet-ingest.mjs');
+const { PARTICIPATION_FORMAT_V1_ID: PARTICIPATION_FORMAT_ID } = await import('../participation-sheet-ingest.mjs');
+const PARTICIPATION_FORMAT_V2 = 'MYSC-PARTICIPATION-V2';
 
 const PROJECT = {
   name: 'JLIN IBS',
@@ -34,7 +35,33 @@ function sheetRanges(overrides = {}) {
   };
 }
 
-function createApp({ role = 'admin', documents = {}, ranges = sheetRanges(), sheetsError = null } = {}) {
+function longContractMonths() {
+  return Array.from({ length: 123 }, (_, index) => {
+    const absoluteMonth = 3 + index;
+    const year = 2025 + Math.floor(absoluteMonth / 12);
+    const month = (absoluteMonth % 12) + 1;
+    return `${year}-${String(month).padStart(2, '0')}`;
+  });
+}
+
+function v2SheetRanges() {
+  const months = longContractMonths();
+  return {
+    "'참조'!F1": [[PARTICIPATION_FORMAT_V2]],
+    "'참여율 관리'!B1:D1": [['2025-04', '~', '2035-06']],
+    "'참여율 관리'!G2:IX2": [months],
+    "'참여율 관리'!A3:F62": [['에이블', '김정태', '총괄책임자', '2025-04', '2035-06', '30']],
+    "'참여율 관리'!G3:IX62": [months.map(() => '30')],
+  };
+}
+
+function createApp({
+  role = 'admin',
+  documents = {},
+  ranges = sheetRanges(),
+  sheetsError = null,
+  requireFormatBeforeBody = false,
+} = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -60,12 +87,23 @@ function createApp({ role = 'admin', documents = {}, ranges = sheetRanges(), she
   };
 
   const requestedRanges = [];
+  let formatResolved = false;
   const googleSheetsService = {
     getServiceAccountEmail: () => 'mysc-sheets@mysc.iam.gserviceaccount.com',
     getSheetValues: async ({ sheetName, rangeA1 }) => {
       const quotedRange = `'${sheetName}'!${rangeA1}`;
       requestedRanges.push({ sheetName, rangeA1 });
       if (sheetsError) throw new Error(sheetsError);
+      if (quotedRange === "'참조'!F1") {
+        // Promise.all 목록에 F1을 첫 번째로 두는 것만으로는 부족하다.
+        // 마커 값을 실제로 받은 뒤에야 V1/V2 본문 좌표를 고를 수 있다.
+        if (requireFormatBeforeBody) await Promise.resolve();
+        formatResolved = true;
+        return ranges[quotedRange] || [];
+      }
+      if (requireFormatBeforeBody && !formatResolved) {
+        throw new Error('body range requested before participation format marker resolved');
+      }
       return ranges[quotedRange] || [];
     },
   };
@@ -117,6 +155,29 @@ describe('참여율 시트 검증 - 읽기 전용', () => {
       { sheetName: '참조', rangeA1: 'F1' },
     ]);
   });
+
+  it('F1 마커를 먼저 해석한 뒤 V2 본문을 252개월 G:IX 좌표에서 읽는다', async () => {
+    const { app, requestedRanges } = createApp({
+      documents: withProject({ contractStart: '2025-04-01', contractEnd: '2035-06-30' }),
+      ranges: v2SheetRanges(),
+      requireFormatBeforeBody: true,
+    });
+
+    const response = await request(app).get(url);
+
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    expect(response.body.months).toHaveLength(123);
+    expect(response.body.months[0]).toBe('2025-04');
+    expect(response.body.months[122]).toBe('2035-06');
+    expect(requestedRanges[0]).toEqual({ sheetName: '참조', rangeA1: 'F1' });
+    expect(requestedRanges.slice(1).sort((left, right) => left.rangeA1.localeCompare(right.rangeA1))).toEqual([
+      { sheetName: '참여율 관리', rangeA1: 'A3:F62' },
+      { sheetName: '참여율 관리', rangeA1: 'B1:D1' },
+      { sheetName: '참여율 관리', rangeA1: 'G2:IX2' },
+      { sheetName: '참여율 관리', rangeA1: 'G3:IX62' },
+    ]);
+  });
 });
 
 describe('막히는 경우 - 조용히 끝나지 않는다', () => {
@@ -155,7 +216,7 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
   });
 
   it('양식이 다르면 행을 읽기 전에 막는다', async () => {
-    const { app } = createApp({
+    const { app, requestedRanges } = createApp({
       documents: withProject(),
       ranges: sheetRanges({ "'참조'!F1": [['OTHER-V9']] }),
     });
@@ -164,6 +225,7 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
     expect(response.body.ok).toBe(false);
     expect(response.body.blocking[0].code).toBe('participation_format_mismatch');
     expect(response.body.rows).toEqual([]);
+    expect(requestedRanges).toEqual([{ sheetName: '참조', rangeA1: 'F1' }]);
   });
 
   it('시트 기간이 계약 기간과 다르면 막고 양쪽을 알려준다', async () => {

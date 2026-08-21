@@ -20,8 +20,10 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import ExcelJS from 'exceljs';
 import { createFirestoreDb, resolveProjectId } from '../server/bff/firestore.mjs';
+import { PARTICIPATION_FORMAT_CURRENT_ID } from '../server/bff/participation-sheet-ranges.mjs';
 
 function flag(name, fallback = '') {
   const index = process.argv.indexOf(name);
@@ -39,13 +41,9 @@ function columnLetter(index) { // 1-based
   return letters;
 }
 
-const firebaseProjectId = flag('--firebase-project', resolveProjectId());
-const tenantId = flag('--tenant', 'mysc');
-const outDir = flag('--out', '.');
-
 const FIXED_HEADERS = ['닉네임', '이름', '역할', '투입시작월', '투입종료월', '기본투입률(%)'];
 const FIRST_MONTH_COL = FIXED_HEADERS.length + 1; // G
-const MONTH_COLS = 120;      // 10년치 열을 미리 깐다. 기간 밖 열은 헤더가 비고 회색이다.
+const MONTH_COLS = 252;      // 최대 21개 연도 범위를 담고, 화면은 선택 연도 12개월만 보여 준다.
 const DATA_ROWS = 60;        // 명단 + 교체·재투입용 여유 줄
 // 아직 누구인지 모르는 자리. 시트가 플랫폼보다 먼저 만들어지고 매번 갱신되지도 않으므로
 // 채용 예정·미배정·확인 중을 한 가지 말로 담는다.
@@ -57,19 +55,11 @@ const PLACEHOLDER_KINDS = ['미정'];
 const PLACEHOLDER_COUNT = 10;
 // 양식 이름·버전. 숨김 참조 탭 F1 에 새겨지고, 반영 파이프라인이 이 값으로 양식을 검증한다.
 // 형식이 바뀌면 버전을 올린다 - 옛 복사본은 옛 버전으로 식별되므로 조용히 잘못 읽히지 않는다.
-const TEMPLATE_FORMAT_ID = 'MYSC-PARTICIPATION-V1';
-const SETTING_MONTHS_FROM = 2022;
-const SETTING_MONTHS_TO = 2035;
+const TEMPLATE_FORMAT_ID = PARTICIPATION_FORMAT_CURRENT_ID;
+const SETTING_MONTHS_FROM = 2000;
+const SETTING_MONTHS_TO = 2099;
 
-async function main() {
-  const db = createFirestoreDb({ projectId: firebaseProjectId });
-  const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
-  const people = peopleSnap.docs
-    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
-    .map((person) => ({ nickname: text(person.nickname), name: text(person.name) }))
-    .filter((person) => person.nickname)
-    .sort((left, right) => left.nickname.localeCompare(right.nickname, 'ko'));
-
+export function buildParticipationSheetWorkbook({ people = [] } = {}) {
   const workbook = new ExcelJS.Workbook();
 
   // ── 안내 탭 ──
@@ -163,7 +153,7 @@ async function main() {
   // 살아있는 상태줄. 값(수식 아닌 입력)이 하나라도 생기면 시작월 변경 금지 경고로 바뀐다.
   sheet.getCell('E1').value = {
     formula: `IF(OR($B$1="",$D$1=""),"← 시작월·종료월을 고르면 월 칸이 저절로 생깁니다",`
-      + `IF(SUMPRODUCT(--NOT(ISFORMULA(${'G'}3:${'DV'}62)))>0,`
+      + `IF(SUMPRODUCT(--NOT(ISFORMULA(${firstMonthLetter}3:${lastColLetter}62)))>0,`
       + `"⚠ 값을 적은 뒤에는 시작월을 바꾸지 마세요 - 달이 어긋납니다. 연장·단축은 종료월만.",`
       + `"기간 설정됨 - 아래에 명단과 기본투입률을 입력하세요"))`,
   };
@@ -295,12 +285,34 @@ async function main() {
   widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   for (let col = FIRST_MONTH_COL; col <= lastCol; col += 1) sheet.getColumn(col).width = 8.5;
 
+  return workbook;
+}
+
+async function main() {
+  const firebaseProjectId = flag('--firebase-project', resolveProjectId());
+  const tenantId = flag('--tenant', 'mysc');
+  const outDir = flag('--out', '.');
+  const db = createFirestoreDb({ projectId: firebaseProjectId });
+  const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
+  const people = peopleSnap.docs
+    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+    .map((person) => ({ nickname: text(person.nickname), name: text(person.name) }))
+    .filter((person) => person.nickname)
+    .sort((left, right) => left.nickname.localeCompare(right.nickname, 'ko'));
+  const workbook = buildParticipationSheetWorkbook({ people });
+
   mkdirSync(outDir, { recursive: true });
-  const filePath = join(outDir, 'MYSC_참여율_표준양식_v1.xlsx');
+  const filePath = join(outDir, 'MYSC_참여율_표준양식_v2.xlsx');
   await workbook.xlsx.writeFile(filePath);
   console.log(JSON.stringify({
     file: filePath, format: TEMPLATE_FORMAT_ID, monthColumns: MONTH_COLS, dataRows: DATA_ROWS, people: people.length,
   }, null, 2));
 }
 
-main().catch((error) => { console.error(error?.stack || String(error)); process.exit(1); });
+export function isDirectRun(moduleUrl, entrypoint) {
+  return Boolean(entrypoint) && moduleUrl === pathToFileURL(entrypoint).href;
+}
+
+if (isDirectRun(import.meta.url, process.argv[1])) {
+  main().catch((error) => { console.error(error?.stack || String(error)); process.exit(1); });
+}

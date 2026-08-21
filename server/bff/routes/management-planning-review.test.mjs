@@ -21,15 +21,28 @@ function createDb(seed = {}) {
       documents.set(path, options.merge && current ? { ...current, ...clone(value) } : clone(value));
     },
   });
-  const collection = (path) => ({ path, kind: 'query' });
-  const querySnapshot = (path) => {
+  const querySnapshot = (path, filters = []) => {
     const prefix = `${path}/`;
     const docs = [...documents.entries()].flatMap(([documentPath, value]) => {
       const relativePath = documentPath.startsWith(prefix) ? documentPath.slice(prefix.length) : '';
       if (!relativePath || relativePath.includes('/')) return [];
-      return [{ id: relativePath, data: () => clone(value) }];
+      if (filters.some(({ field, expected }) => value?.[field] !== expected)) return [];
+      return [{ id: relativePath, ref: doc(documentPath), data: () => clone(value) }];
     });
     return { docs, empty: docs.length === 0, size: docs.length };
+  };
+  const collection = (path) => {
+    const query = (filters = []) => ({
+      path,
+      kind: 'query',
+      filters,
+      get: async () => querySnapshot(path, filters),
+      where: (field, operator, expected) => {
+        if (operator !== '==') throw new Error(`unsupported query operator: ${operator}`);
+        return query([...filters, { field, expected }]);
+      },
+    });
+    return query();
   };
 
   return {
@@ -39,7 +52,7 @@ function createDb(seed = {}) {
     async runTransaction(callback) {
       const writes = [];
       const tx = {
-        get: async (ref) => ref.kind === 'query' ? querySnapshot(ref.path) : snapshot(ref.path),
+        get: async (ref) => ref.kind === 'query' ? querySnapshot(ref.path, ref.filters) : snapshot(ref.path),
         set: (ref, value, options = {}) => writes.push({ ref, value: clone(value), options }),
       };
       const result = await callback(tx);
@@ -51,6 +64,26 @@ function createDb(seed = {}) {
         );
       }
       return result;
+    },
+    batch() {
+      const writes = [];
+      return {
+        set: (ref, value, options = {}) => writes.push({ kind: 'set', ref, value: clone(value), options }),
+        delete: (ref) => writes.push({ kind: 'delete', ref }),
+        commit: async () => {
+          for (const write of writes) {
+            if (write.kind === 'delete') {
+              documents.delete(write.ref.path);
+              continue;
+            }
+            const current = documents.get(write.ref.path);
+            documents.set(
+              write.ref.path,
+              write.options.merge && current ? { ...current, ...write.value } : write.value,
+            );
+          }
+        },
+      };
     },
   };
 }
@@ -205,6 +238,7 @@ describe('management planning project review route', () => {
       seed: reviewSeed(
         approvedProject({
           name: '보완 전 프로젝트 A',
+          registrationRequirementsVersion: 2,
           managementPlanningReviewStatus: 'REVISION_REJECTED',
           executiveReviewHistory: executiveHistory,
         }),
@@ -259,7 +293,10 @@ describe('management planning project review route', () => {
   it('does not agree to a resubmitted change while its attachments are still private draft files', async () => {
     const { app, db } = createRouteApp({
       seed: reviewSeed(
-        approvedProject({ managementPlanningReviewStatus: 'REVISION_REJECTED' }),
+        approvedProject({
+          registrationRequirementsVersion: 2,
+          managementPlanningReviewStatus: 'REVISION_REJECTED',
+        }),
         approvedRequest({
           requestKind: 'CHANGE',
           status: 'PENDING',

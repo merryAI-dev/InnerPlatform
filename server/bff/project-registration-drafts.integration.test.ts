@@ -191,6 +191,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       registeredByName: 'Actor A',
       registeredByEmail: 'actor-a@example.com',
       teamName: 'AXR',
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/participation-registration-fixture/edit',
       teamMembersDetailed: [{
         memberName: 'Actor A',
         role: '운영매니저',

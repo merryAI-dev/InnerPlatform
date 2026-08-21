@@ -11,7 +11,16 @@
  *      진행한다. 신원의 권위는 언제나 People 이고 시트가 아니다.
  */
 
-export const PARTICIPATION_FORMAT_ID = 'MYSC-PARTICIPATION-V1';
+import {
+  isSupportedParticipationFormat,
+  participationFormatMonthCapacity,
+  PARTICIPATION_FORMAT_CURRENT_ID,
+  PARTICIPATION_FORMAT_V1_ID,
+  PARTICIPATION_FORMAT_V2_ID,
+} from './participation-sheet-ranges.mjs';
+
+export const PARTICIPATION_FORMAT_ID = PARTICIPATION_FORMAT_CURRENT_ID;
+export { PARTICIPATION_FORMAT_V1_ID, PARTICIPATION_FORMAT_V2_ID };
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 /*
  * 자리표시자 닉네임. 시트가 플랫폼보다 먼저 만들어지기도 하고 매번 갱신되지도 않으므로,
@@ -168,7 +177,7 @@ export function parseParticipationSheet({
  */
 export function validateParticipationFormat({ formatId, period, months } = {}) {
   const issues = [];
-  if (text(formatId) !== PARTICIPATION_FORMAT_ID) {
+  if (!isSupportedParticipationFormat(text(formatId))) {
     issues.push(issue(
       'participation_format_mismatch',
       `참여율 표준양식이 아닙니다. 확인된 양식: ${text(formatId) || '없음'}`,
@@ -182,6 +191,20 @@ export function validateParticipationFormat({ formatId, period, months } = {}) {
     issues.push(issue(
       'participation_period_invalid',
       '시트 맨 위의 계약 시작월·종료월을 확인해 주세요.',
+    ));
+    return issues;
+  }
+
+  const [startYear, startMonth] = start.split('-').map(Number);
+  const [endYear, endMonth] = end.split('-').map(Number);
+  const periodMonthCount = (endYear - startYear) * 12 + endMonth - startMonth + 1;
+  const monthCapacity = participationFormatMonthCapacity(formatId);
+  if (periodMonthCount > monthCapacity) {
+    issues.push(issue(
+      'participation_period_too_long',
+      text(formatId) === PARTICIPATION_FORMAT_V1_ID
+        ? '계약 기간이 V1 양식의 120개월 범위를 넘습니다. V2 표준양식으로 교체해 주세요.'
+        : '참여율 시트의 계약 기간은 최대 252개월까지 입력할 수 있습니다.',
     ));
     return issues;
   }
@@ -296,10 +319,10 @@ export function validateStintRows({ rows = [], months = [] } = {}) {
     const filled = Object.keys(row.monthlyRates);
 
     if (!row.stintStart) {
-      if (filled.length) {
+      if (filled.length || row.linkState !== 'PLACEHOLDER') {
         errors.push(issue(
           'participation_stint_start_required',
-          `${label}: 참여율을 적었는데 투입시작월이 없습니다.`,
+          `${label}: 참여인력 행에 투입시작월이 없습니다.`,
           { rowIndex: row.rowIndex },
         ));
       }

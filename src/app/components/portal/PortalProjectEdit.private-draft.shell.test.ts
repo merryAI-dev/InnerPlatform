@@ -63,9 +63,20 @@ describe('PortalProjectEdit private draft boundary', () => {
     expect(source).not.toContain('contractAnalysis: null }');
   });
 
-  it('upgrades canonical and private legacy edit drafts to the registration-v2 contract', () => {
-    expect(source).toContain('registrationRequirementsVersion: 2');
-    expect(source).toContain('...buildProjectEditorDraftFromProject(');
+  it('upgrades the private draft while retaining the canonical project version for the participation gate', () => {
+    const privateDraftSource = source.slice(
+      source.indexOf('function editorDraftFromPrivate'),
+      source.indexOf('function previewAttachmentsFromPrivateDraft'),
+    );
+    const canonicalDraftSource = source.slice(
+      source.indexOf('const canonicalDraft = useMemo'),
+      source.indexOf("if (!project && portalLoading)"),
+    );
+
+    expect(privateDraftSource).toContain('registrationRequirementsVersion: 2');
+    expect(canonicalDraftSource).toContain('...buildProjectEditorDraftFromProject(');
+    expect(canonicalDraftSource).not.toContain('registrationRequirementsVersion: 2');
+    expect(source).toContain('trustedParticipationSheetDraft={canonicalDraft}');
     expect(source).toContain('previewAttachmentsFromPrivateDraft');
     expect(source).toContain('attachments: previewAttachments');
     expect(source).toContain('[...attachments.values()]');

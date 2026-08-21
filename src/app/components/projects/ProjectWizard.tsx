@@ -226,6 +226,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         { id: 'save', label: '프로젝트 저장', icon: Save },
       ]}
       busyActionId={busyActionId}
+      trustedParticipationSheetDraft={editProject ? initialDraft : undefined}
       onContractFileUpload={handleContractFileUpload}
       contractAnalysisMergeMode="none"
       canRemoveContractDocument

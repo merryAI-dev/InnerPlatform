@@ -22,4 +22,23 @@ describe('ParticipationPage server snapshot contract', () => {
     expect(source).not.toContain('교차검증');
     expect(source).not.toContain('PARTICIPATION_RISK_RULESET');
   });
+
+  it('renders confirmed zero separately from missing sheet input', () => {
+    expect(source).toContain('month.isConfirmed');
+    expect(source).toContain('month.hasMissing');
+    expect(source).toContain("`${month.rate}%`");
+    expect(source).toContain('미입력 있음');
+    expect(source).toContain("'미입력'");
+  });
+
+  it('explains that saved rule filters can leave either dimension open', () => {
+    expect(source).toContain('선택하지 않은 조건은 해당 구분을 제한하지 않습니다.');
+    expect(source).toContain('같은 조건 안에서는 여러 값을 함께 선택할 수 있습니다.');
+  });
+
+  it('exposes saved rules and years as explicit View filters', () => {
+    expect(source).toContain('aria-label="참여율 View"');
+    expect(source).toContain('aria-label="참여율 연도"');
+    expect(source).toContain('View');
+  });
 });

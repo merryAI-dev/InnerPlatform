@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../data/types';
+import type { Project, ProjectTeamMemberAssignment } from '../data/types';
 import {
   ACCOUNT_TYPE_LABELS,
   getProjectTypeSelectableOptions,
@@ -920,5 +920,52 @@ describe('참여율 시트 링크', () => {
   it('값이 없으면 빈 문자열로 시작한다', () => {
     expect(createProjectEditorDraft().participationSheetLink).toBe('');
     expect(buildProjectEditorDraftFromProject(baseProject).participationSheetLink).toBe('');
+  });
+});
+
+describe('참여율 월별 저장 경로', () => {
+  it('keeps blank, zero, changed, and multi-year monthly rates through draft and both write payloads', () => {
+    const assignment: ProjectTeamMemberAssignment = {
+      personId: 'person-yuja',
+      memberName: '유자인',
+      memberNickname: '유자',
+      role: '',
+      participationRate: 20,
+      laborAllocationStartMonth: '2026-11',
+      laborAllocationEndMonth: '2027-02',
+      monthlyRates: {
+        '2026-11': 20,
+        '2026-12': 0,
+        '2027-01': null,
+        '2027-02': 5,
+      },
+    };
+    const expected = [assignment];
+
+    const draft = createProjectEditorDraft({
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit',
+      contractStart: '2026-01-01',
+      contractEnd: '2027-01-01',
+      teamMembersDetailed: expected,
+    });
+    const hydratedDraft = buildProjectEditorDraftFromProject({
+      ...baseProject,
+      participationSheetLink: draft.participationSheetLink,
+      contractStart: draft.contractStart,
+      contractEnd: draft.contractEnd,
+      teamMembersDetailed: expected,
+    });
+    const payload = buildProjectRequestPayloadFromDraft(draft);
+    const patch = buildProjectEditorProjectPatch(draft, {
+      mode: 'admin',
+      actorId: 'admin-1',
+      actorName: '관리자',
+      now: '2026-08-21T00:00:00.000Z',
+    });
+
+    expect(draft.teamMembersDetailed).toEqual(expected);
+    expect(hydratedDraft.teamMembersDetailed).toEqual(expected);
+    expect(payload.teamMembersDetailed).toEqual(expected);
+    expect(patch.teamMembersDetailed).toEqual(expected);
   });
 });
