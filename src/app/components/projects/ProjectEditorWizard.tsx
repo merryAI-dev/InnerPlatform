@@ -9,7 +9,7 @@ import {
   ClipboardList,
   FileText,
   Loader2,
-  Plus,
+  RefreshCw,
   Save,
   Trash2,
   Upload,
@@ -18,6 +18,11 @@ import {
   Wallet,
 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useAuth } from '../../data/auth-store';
+import { useFirebase } from '../../lib/firebase-context';
+import { PlatformApiError } from '../../platform/api-client';
+import { resolveApiErrorPresentation } from '../../platform/api-error-messages';
+import { previewParticipationSheetByLinkViaBff } from '../../lib/platform-bff-client';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -58,8 +63,6 @@ import { PROJECT_DEPARTMENT_OPTIONS, dedupeProjectDepartmentLabels } from '../..
 import { checkContractAmount } from '../../platform/project-contract-amount-check';
 import type { DirectoryPerson } from '../../platform/person-directory';
 import {
-  buildProjectTeamMemberOptions,
-  type ProjectTeamMemberOption,
 } from '../../data/project-team-member-options';
 import {
   CONTRACT_AMOUNT_ITEM_FIELDS,
@@ -105,7 +108,6 @@ import {
 import {
   formatProjectTeamMembersSummary,
   hasIncompleteProjectTeamMembers,
-  hasProjectOperatingManager,
   isProjectSettlementSupportMember,
   normalizeProjectTeamMemberDraftRows,
   parseProjectTeamMemberIdentityInput,
@@ -401,7 +403,7 @@ const STEP_PREPARATION_NOTES: Record<ProjectEditorStep, string[]> = {
   ],
   team: [
     '사업 담당자와 최종 결재자를 구성원 원장에서 고를 수 있어야 합니다.',
-    '참여인력은 운영매니저 1인 이상이 필요합니다.',
+    '참여인력은 참여율 시트에서 연동합니다. 시트 링크를 먼저 넣어 주세요.',
   ],
   review: [
     '저장 전 마지막 확인 단계입니다.',
@@ -533,19 +535,6 @@ function updateFlag(flags: ProjectFinancialInputFlags, key: keyof ProjectFinanci
   return {
     ...normalizeProjectFinancialInputFlags(flags),
     [key]: hasExplicitProjectAmountInput(rawValue),
-  };
-}
-
-function createEmptyTeamMember(): ProjectTeamMemberAssignment {
-  return {
-    inputMode: 'search',
-    memberName: '',
-    memberNickname: '',
-    role: '',
-    participationRate: 0,
-    isDocumentOnly: false,
-    laborAllocationStartMonth: '',
-    laborAllocationEndMonth: '',
   };
 }
 
@@ -710,119 +699,6 @@ function ProjectComputedValue({ value, numeric = true }: { value: string; numeri
   );
 }
 
-interface TeamMemberSearchComboboxProps {
-  member: ProjectTeamMemberAssignment;
-  options: ProjectTeamMemberOption[];
-  optionMap: Record<string, ProjectTeamMemberOption>;
-  selectedNames: Set<string>;
-  currentTeamMemberOptionExists: boolean;
-  onSelect: (patch: Partial<ProjectTeamMemberAssignment>) => void;
-}
-
-function TeamMemberSearchCombobox({
-  member,
-  options,
-  optionMap,
-  selectedNames,
-  currentTeamMemberOptionExists,
-  onSelect,
-}: TeamMemberSearchComboboxProps) {
-  const [open, setOpen] = useState(false);
-  const selectedLabel = member.memberName
-    ? (member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName)
-    : '';
-
-  const handleSelect = (value: string) => {
-    if (value === 'none') {
-      onSelect({ personId: undefined, memberName: '', memberNickname: '' });
-      setOpen(false);
-      return;
-    }
-    const option = optionMap[value];
-    if (!option) return;
-    onSelect({
-      inputMode: 'search',
-      identityInput: undefined,
-      personId: option.personId,
-      memberName: option.name,
-      memberNickname: option.nickname,
-    });
-    setOpen(false);
-  };
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-label={selectedLabel ? `팀원 선택: ${selectedLabel}` : '팀원 검색'}
-          aria-expanded={open}
-          className={cn('h-9 w-full justify-between px-3 text-left font-normal', FORM_VALUE_CLASS)}
-        >
-          <span className={cn('truncate', !selectedLabel && 'text-muted-foreground')}>
-            {selectedLabel || '팀원 검색'}
-          </span>
-          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
-        <Command>
-          <CommandInput placeholder="이름/닉네임으로 검색" />
-          <CommandList className="max-h-[260px]">
-            <CommandEmpty>검색 결과가 없습니다</CommandEmpty>
-            <CommandGroup heading="선택">
-              <CommandItem value="none 선택 안 함" onSelect={() => handleSelect('none')}>
-                <Check className={cn('h-4 w-4', !member.memberName ? 'opacity-100' : 'opacity-0')} />
-                선택 안 함
-              </CommandItem>
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading={`${options.length}명 중 검색`}>
-              {!currentTeamMemberOptionExists && member.memberName ? (
-                <CommandItem
-                  value={`${member.memberName} ${member.memberNickname}`}
-                  onSelect={() => {
-                    onSelect({
-                      memberName: member.memberName,
-                      memberNickname: member.memberNickname,
-                    });
-                    setOpen(false);
-                  }}
-                >
-                  <Check className="h-4 w-4 opacity-100" />
-                  <span className="truncate">
-                    {member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName}
-                  </span>
-                </CommandItem>
-              ) : null}
-              {options.map((option) => {
-                    const disabled = selectedNames.has(option.personId);
-                    const selected = option.personId === member.personId;
-                return (
-                  <CommandItem
-                    key={option.value}
-                    value={`${option.name} ${option.nickname} ${option.label}`}
-                    disabled={disabled}
-                    onSelect={() => handleSelect(option.value)}
-                  >
-                    <Check className={cn('h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />
-                    <span className="truncate">{option.label}</span>
-                    {disabled ? (
-                      <span className={cn('ml-auto shrink-0', FORM_HINT_CLASS)}>이미 추가됨</span>
-                    ) : null}
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 export function ProjectEditorWizard({
   mode,
   initialDraft,
@@ -853,6 +729,11 @@ export function ProjectEditorWizard({
   onLeave,
   onSubmit,
 }: ProjectEditorWizardProps) {
+  const { user } = useAuth();
+  const { orgId } = useFirebase();
+  const [teamSyncing, setTeamSyncing] = useState(false);
+  const [teamSyncNotice, setTeamSyncNotice] = useState('');
+  const [teamSyncError, setTeamSyncError] = useState('');
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
   const [documentUploadState, setDocumentUploadState] = useState<Record<ProjectRequestDocumentKind, ContractUploadState>>({
@@ -1234,15 +1115,6 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
-  // 팀원 후보의 출처는 인력 명부(roster) 하나다. 배정에는 이름·별명만 저장되므로 계정이
-  // 없어도 되고, 인턴은 근로형태로 걸러진다. members 는 명부를 못 읽었을 때의 안전망.
-  const teamMemberOptions = useMemo(
-    () => buildProjectTeamMemberOptions(roster, members),
-    [roster, members],
-  );
-  const teamMemberOptionMap = useMemo(() => Object.fromEntries(
-    teamMemberOptions.map((option) => [option.value, option]),
-  ) as Record<string, ProjectTeamMemberOption>, [teamMemberOptions]);
   // The ledger list decides whether a stored value is still linked, so the "not in the
   // member ledger" warning keeps working. The picker lists carry the stored value on top
   // of it so opening an old project never silently drops its owner or approver.
@@ -1400,27 +1272,69 @@ export function ProjectEditorWizard({
     });
   };
 
-  const addTeamMember = () => {
-    setDraft((prev) => ({
-      ...prev,
-      teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()],
-    }));
+  /*
+   * 참여율 시트에서 참여인력을 읽어 명단을 채운다.
+   *
+   * 사람이 두 곳에 같은 내용을 적지 않게 하는 것이 목적이다. 월별 참여율의 원천은 시트이고,
+   * 여기에는 승인 서류·인력 현황·사업 검색이 쓰는 명단(이름·역할·투입기간·기본투입률)만 남긴다.
+   * 저장 전에도 눌러야 하므로 화면의 링크와 계약 기간을 그대로 보낸다.
+   */
+  const syncTeamFromSheet = () => {
+    if (teamSyncing) return;
+    const sheetLink = String(draft.participationSheetLink || '').trim();
+    setTeamSyncNotice('');
+    if (!sheetLink) {
+      setTeamSyncError('참여율 시트 링크를 먼저 입력해 주세요.');
+      return;
+    }
+    if (!draft.contractStart || !draft.contractEnd) {
+      setTeamSyncError('계약 시작일과 종료일을 먼저 입력해 주세요. 시트의 기간과 대조합니다.');
+      return;
+    }
+    if (!orgId || !user) {
+      setTeamSyncError('로그인 정보를 확인하지 못했습니다.');
+      return;
+    }
+    setTeamSyncing(true);
+    setTeamSyncError('');
+    void previewParticipationSheetByLinkViaBff({
+      tenantId: orgId,
+      actor: user,
+      sheetLink,
+      contractStart: draft.contractStart,
+      contractEnd: draft.contractEnd,
+    })
+      .then((preview) => {
+        if (!preview.ok) {
+          // 막는 이유를 서버가 적어 준 대로 보여 준다. 화면이 다시 판정하지 않는다.
+          setTeamSyncError(preview.blocking.map((issue) => issue.message).slice(0, 3).join(' / ')
+            || '시트를 반영할 수 없는 상태입니다.');
+          return;
+        }
+        update('teamMembersDetailed', preview.rows.map((row) => ({
+          personId: row.personId || undefined,
+          memberName: row.name,
+          memberNickname: row.nickname,
+          role: row.role,
+          participationRate: row.baseRate ?? 0,
+          laborAllocationStartMonth: row.stintStart,
+          laborAllocationEndMonth: row.stintEnd,
+        })));
+        const pending = preview.summary?.pendingLinkCount || 0;
+        setTeamSyncNotice(pending > 0
+          ? `참여인력 ${preview.rows.length}명을 가져왔습니다. 그중 ${pending}명은 People 등록 전이라 연결 대기입니다.`
+          : `참여인력 ${preview.rows.length}명을 가져왔습니다.`);
+      })
+      .catch((error) => {
+        const status = error instanceof PlatformApiError ? error.status : 500;
+        const code = error instanceof PlatformApiError ? error.code : '';
+        const serverMessage = error instanceof PlatformApiError ? String(error.message || '').trim() : '';
+        setTeamSyncError(serverMessage || resolveApiErrorPresentation(code, status).guide);
+      })
+      .finally(() => setTeamSyncing(false));
   };
 
-  const updateTeamMember = (index: number, patch: Partial<ProjectTeamMemberAssignment>) => {
-    setDraft((prev) => {
-      const next = [...prev.teamMembersDetailed];
-      next[index] = { ...next[index], ...patch };
-      return createProjectEditorWizardDraft({ ...prev, teamMembersDetailed: next });
-    });
-  };
 
-  const removeTeamMember = (index: number) => {
-    setDraft((prev) => createProjectEditorWizardDraft({
-      ...prev,
-      teamMembersDetailed: prev.teamMembersDetailed.filter((_, itemIndex) => itemIndex !== index),
-    }));
-  };
 
   const getDocumentInputRef = (kind: ProjectRequestDocumentKind) => ({
     contract: contractUploadInputRef,
@@ -1679,11 +1593,10 @@ export function ProjectEditorWizard({
     if (!draft.executiveApproverId || !selectedExecutiveApprover) {
       issues.push({ step: 'team', label: '최종 결재자 지정 (사업총괄)' });
     }
-    if (usesRegistrationV2 && hasIncompleteProjectTeamMembers(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '참여인력 이름·역할' });
-    }
-    if (usesRegistrationV2 && !hasProjectOperatingManager(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '운영매니저 1인 이상' });
+    // 참여인력은 시트에서 온다. 역할 구성(운영매니저 1인 이상)은 시트를 보고 사람이 판단할
+    // 일이라 저장을 막지 않는다. 대신 시트 링크가 없으면 참여율을 적을 곳 자체가 없어 막는다.
+    if (usesRegistrationV2 && !draft.participationSheetLink.trim()) {
+      issues.push({ step: 'team', label: '참여율 시트 링크' });
     }
     // 정산지원 담당자는 저장을 막지 않는다. 담당이 정해져 있다는 안내일 뿐이고,
     // 담당자가 바뀌거나 자리를 비운 사이에 프로젝트 등록 자체가 막히면 안 된다.
@@ -2914,9 +2827,9 @@ export function ProjectEditorWizard({
         title="참여인력 (서류상·실제)"
         description="계약·협약서에 남길 참여인력과 역할을 저장합니다."
         action={(
-          <Button type="button" onClick={addTeamMember} className="gap-2">
-            <Plus className="h-4 w-4" />
-            팀원 추가
+          <Button type="button" onClick={syncTeamFromSheet} disabled={teamSyncing} className="gap-2">
+            {teamSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {teamSyncing ? '연동 중' : '연동하기'}
           </Button>
         )}
       >
@@ -2939,10 +2852,10 @@ export function ProjectEditorWizard({
           />
         </ProjectFormRow>
 
-        <div data-issue-label="참여인력 이름·역할" className={FORM_FIELD_STACK_CLASS}>
-          {fieldIssues('참여인력 이름·역할', '운영매니저 1인 이상').length > 0 ? (
+        <div data-issue-label="참여율 시트 링크" className={FORM_FIELD_STACK_CLASS}>
+          {fieldIssues('참여율 시트 링크').length > 0 ? (
             <ul className={cn('space-y-1', FORM_ERROR_CLASS)} role="alert">
-              {fieldIssues('참여인력 이름·역할', '운영매니저 1인 이상').map((message) => (
+              {fieldIssues('참여율 시트 링크').map((message) => (
                 <li key={message} className="flex gap-1.5">
                   <span aria-hidden className="shrink-0">•</span>
                   <span className="min-w-0">{describeSubmitIssue(message)}</span>
@@ -2950,112 +2863,55 @@ export function ProjectEditorWizard({
               ))}
             </ul>
           ) : null}
+          {teamSyncError ? (
+            <p className={cn('rounded-lg border border-red-200 bg-red-50 px-4 py-3', FORM_ERROR_CLASS)} role="alert">
+              {teamSyncError}
+            </p>
+          ) : null}
+          {teamSyncNotice ? (
+            <p className={cn('rounded-lg border border-slate-200 bg-slate-50 px-4 py-3', FORM_HINT_CLASS)}>
+              {teamSyncNotice}
+            </p>
+          ) : null}
           {draft.teamMembersDetailed.length === 0 ? (
             <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-4 py-5', FORM_HINT_CLASS)}>
-              아직 추가된 팀원이 없습니다.
+              시트 링크를 넣고 연동하기를 누르면 참여인력이 여기에 표시됩니다.
             </p>
           ) : (
-            <div className={FORM_FIELD_STACK_CLASS}>
-          {draft.teamMembersDetailed.map((member, index) => {
-            const teamMemberInputMode = member.inputMode === 'manual' ? 'manual' : 'search';
-            const selectedNames = new Set(
-              draft.teamMembersDetailed
-                .map((item, itemIndex) => (itemIndex === index ? '' : item.personId))
-                .filter((personId): personId is string => Boolean(personId)),
-            );
-            // 정산지원이라고 후보를 두 사람으로 좁히지 않는다. 담당이 바뀌거나 그 두 분이
-            // 자리를 비우면 아무도 고를 수 없게 된다. 담당자 안내는 아래 문구로 남긴다.
-            const availableTeamMemberOptions = teamMemberOptions;
-            const availableTeamMemberOptionMap = teamMemberOptionMap;
-            const currentTeamMemberOptionExists = !member.personId
-              || availableTeamMemberOptions.some((option) => option.personId === member.personId);
-            return (
-              <div key={`team-member-${index}`} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className={FORM_LABEL_CLASS}>팀원 {index + 1}</div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`팀원 ${index + 1} 삭제`}
-                    className="h-7 px-2 text-slate-500 hover:text-red-700"
-                    onClick={() => removeTeamMember(index)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                {/* 팀원 한 명이 곧 짧은 값 세 개다. 라벨 열을 다시 쓰면 세로로만 길어지므로
-                    오른쪽 입력 영역과 같은 규칙(라벨 12/600 · 값 13)으로 한 줄에 놓는다. */}
-                <div className="mt-2 grid gap-4 md:grid-cols-3">
-                  <div className="grid gap-2">
-                    <Label className={FORM_LABEL_CLASS}>입력 방식</Label>
-                    <Select
-                      value={teamMemberInputMode}
-                      onValueChange={(value) => updateTeamMember(index, {
-                        inputMode: value === 'manual' ? 'manual' : 'search',
-                        identityInput: value === 'manual' ? '' : undefined,
-                        personId: undefined,
-                        memberName: '',
-                        memberNickname: '',
-                      })}
-                    >
-                      <SelectTrigger className={FORM_CONTROL_CLASS}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="search">팀원 검색</SelectItem>
-                        <SelectItem value="manual">직접 입력</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label className={FORM_LABEL_CLASS}>팀원</Label>
-                    {teamMemberInputMode === 'search' ? (
-                      <TeamMemberSearchCombobox
-                        member={member}
-                        options={availableTeamMemberOptions}
-                        optionMap={availableTeamMemberOptionMap}
-                        selectedNames={selectedNames}
-                        currentTeamMemberOptionExists={currentTeamMemberOptionExists}
-                        onSelect={(patch) => updateTeamMember(index, patch)}
-                      />
-                    ) : (
-                      <Input
-                        value={member.identityInput ?? formatTeamMemberIdentityInput(member)}
-                        onChange={(event) => updateTeamMember(index, {
-                          inputMode: 'manual',
-                          identityInput: event.target.value,
-                          ...parseProjectTeamMemberIdentityInput(event.target.value),
-                        })}
-                        placeholder="이름(별명)"
-                        className={FORM_CONTROL_CLASS}
-                      />
-                    )}
-                  </div>
-                  <div className="grid gap-2">
-                    <Label className={FORM_LABEL_CLASS}>역할</Label>
-                    <div>
-                      <Select value={member.role || undefined} onValueChange={(value) => updateTeamMember(index, { role: value })}>
-                        <SelectTrigger className={FORM_CONTROL_CLASS}><SelectValue placeholder="역할 선택" /></SelectTrigger>
-                        <SelectContent>
-                          {PROJECT_TEAM_MEMBER_ROLES.map((role) => <SelectItem key={role} value={role}>{role}</SelectItem>)}
-                          {RETIRED_PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof RETIRED_PROJECT_TEAM_MEMBER_ROLES[number]) ? (
-                            <SelectItem value={member.role} disabled>{member.role} (기존값 · 선택 불가)</SelectItem>
-                          ) : null}
-                        </SelectContent>
-                      </Select>
-                      {/* 담당 안내일 뿐 저장을 막지 않는다. 오류 색을 쓰지 않는 이유다. */}
-                      {member.role === '정산지원' && !isProjectSettlementSupportMember(member) ? (
-                        <p className={cn('mt-2 text-amber-700', FORM_HINT_CLASS)}>
-                          정산지원은 보통 도담 또는 써니가 맡습니다. 다른 분으로 지정하려면 그대로 두셔도 됩니다.
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="w-full min-w-[640px] text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">이름</th>
+                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">역할</th>
+                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">투입기간</th>
+                    <th className="px-3 py-2 text-right text-[12px] font-semibold text-slate-700">기본투입률</th>
+                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">People 연결</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draft.teamMembersDetailed.map((member, index) => (
+                    <tr key={`team-member-${index}`} className="border-b border-slate-100 last:border-b-0">
+                      <td className="px-3 py-2 text-[13px] font-medium text-slate-800">
+                        {member.memberName || member.memberNickname || '이름 없음'}
+                        {member.memberName && member.memberNickname
+                          ? <span className="ml-1 text-slate-500">({member.memberNickname})</span>
+                          : null}
+                      </td>
+                      <td className="px-3 py-2 text-[13px] text-slate-600">{member.role || '―'}</td>
+                      <td className="px-3 py-2 text-[13px] text-slate-600">
+                        {member.laborAllocationStartMonth || '미입력'} ~ {member.laborAllocationEndMonth || '진행 중'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-[13px] tabular-nums text-slate-800">
+                        {member.participationRate ? `${member.participationRate}%` : '―'}
+                      </td>
+                      <td className={cn('px-3 py-2 text-[13px]', member.personId ? 'text-slate-600' : 'font-semibold text-amber-700')}>
+                        {member.personId ? '연결됨' : '연결 대기'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

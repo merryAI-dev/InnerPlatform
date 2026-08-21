@@ -194,3 +194,49 @@ describe('사람이 확인할 것', () => {
     expect(response.body.candidates).toEqual([]);
   });
 });
+
+
+// 등록 중에는 사업 문서가 아직 없고, 수정 중에는 화면의 링크가 저장본과 다를 수 있다.
+// 그래서 저장 전에도 확인할 수 있어야 한다 - 저장해야만 확인되면 사람이 저장부터 하게 된다.
+describe('저장 전 연동 - 링크와 기간을 요청에 담는다', () => {
+  const linkUrl = '/api/v1/participation-dashboard/sheet-preview';
+  const body = {
+    sheetLink: 'https://docs.google.com/spreadsheets/d/sheet-abc/edit',
+    contractStart: '2026-01-01',
+    contractEnd: '2026-03-31',
+  };
+
+  it('사업이 저장돼 있지 않아도 확인된다', async () => {
+    const { app } = createApp({ documents: PEOPLE });
+    const response = await request(app).post(linkUrl).send(body);
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    expect(response.body.rows[0]).toMatchObject({ name: '김정태', linkState: 'LINKED' });
+  });
+
+  it('명단을 채울 수 있게 personId 와 기본투입률을 함께 준다', async () => {
+    const { app } = createApp({ documents: PEOPLE });
+    const response = await request(app).post(linkUrl).send(body);
+    expect(response.body.rows[0]).toMatchObject({ personId: 'p-kim', baseRate: 30 });
+  });
+
+  it('화면의 계약 기간과 다르면 막는다 - 저장본이 아니라 지금 값과 맞춰야 한다', async () => {
+    const { app } = createApp({ documents: PEOPLE });
+    const response = await request(app).post(linkUrl).send({ ...body, contractEnd: '2026-06-30' });
+    expect(response.body.ok).toBe(false);
+    expect(response.body.blocking[0].code).toBe('participation_period_mismatch');
+  });
+
+  it('링크가 없으면 무엇을 넣어야 하는지 알려준다', async () => {
+    const { app } = createApp({ documents: PEOPLE });
+    const response = await request(app).post(linkUrl).send({ ...body, sheetLink: '' });
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('participation_sheet_link_missing');
+  });
+
+  it('확인만으로 아무것도 쓰지 않는다', async () => {
+    const { app, writes } = createApp({ documents: PEOPLE });
+    await request(app).post(linkUrl).send(body);
+    expect(writes).toEqual([]);
+  });
+});

@@ -100,6 +100,9 @@ export interface ParticipationSheetPreview {
     role: string;
     stintStart: string;
     stintEnd: string;
+    /** 시트의 기본투입률. 월별 값은 monthlyRates 가 원천이다. */
+    baseRate: number | null;
+    personId: string;
     linkState: 'LINKED' | 'PENDING_LINK' | 'PLACEHOLDER';
     monthlyRates: Record<string, number>;
   }>;
@@ -2197,6 +2200,39 @@ export async function fetchParticipationSheetPreviewViaBff(params: {
   const response = await resolveClient(params.client).get<ParticipationSheetPreview>(
     `/api/v1/participation-dashboard/projects/${encodeURIComponent(params.projectId)}/sheet-preview`,
     { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 30_000 },
+  );
+  return response.data;
+}
+
+/**
+ * 저장 전 시트 연동. 등록 중에는 사업 문서가 아직 없고, 수정 중에는 화면의 링크가 저장본과
+ * 다를 수 있어 링크와 계약 기간을 함께 보낸다. 읽기만 하며 아무것도 쓰지 않는다.
+ */
+export async function previewParticipationSheetByLinkViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  sheetLink: string;
+  contractStart: string;
+  contractEnd: string;
+  projectId?: string;
+  client?: PlatformApiClientLike;
+}): Promise<ParticipationSheetPreview> {
+  // 캐시플로우 시트 연동과 같은 모양으로 부른다(라이브에서 도는 경로).
+  // retries: 0 - 시트 읽기는 쿼터를 쓴다. 실패를 자동으로 되풀이하면 쿼터만 더 먹는다.
+  const response = await resolveClient(params.client).post<ParticipationSheetPreview>(
+    '/api/v1/participation-dashboard/sheet-preview',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        sheetLink: params.sheetLink,
+        contractStart: params.contractStart,
+        contractEnd: params.contractEnd,
+        projectId: params.projectId || '',
+      },
+      timeoutMs: 30000,
+      retries: 0,
+    },
   );
   return response.data;
 }
