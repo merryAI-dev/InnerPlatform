@@ -2773,7 +2773,7 @@ describe('cashflow sheet lab route', () => {
     }));
   });
 
-  it('returns the full immutable PENDING-close shard differences and rejects forged acceptance evidence', async () => {
+  it('requires closed-month reason before pending-approval confirmation and rejects forged evidence', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -2784,7 +2784,16 @@ describe('cashflow sheet lab route', () => {
           endWeek: '26-1-5',
         },
       },
-      initialDocuments: cumulativeCloseRequestDocuments(),
+      initialDocuments: {
+        ...cumulativeCloseRequestDocuments(),
+        'orgs/tenant-a/monthly_closes/project-a-2026-01': {
+          contractVersion: 'cashflow-month-close-v1',
+          tenantId: 'tenant-a',
+          projectId: 'project-a',
+          yearMonth: '2026-01',
+          status: 'CLOSED',
+        },
+      },
     });
     const javaWeeklyClient = {
       applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'7'.repeat(64)}`)),
@@ -2811,6 +2820,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(stage.body.pendingApprovalDifferenceCount).toBe(160);
+    expect(stage.body.closedMonthDifferenceCount).toBe(160);
     expect(stage.body.pendingApprovalDifferenceManifestHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(stage.body.pendingApprovalDifferences).toEqual([expect.objectContaining({
       requestId: 'project-a-2026-01',
@@ -2833,6 +2843,13 @@ describe('cashflow sheet lab route', () => {
       afterHadValue: true, afterState: 'VALUE', afterAmount: 999,
     }));
 
+    const closedMonthRejected = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-closed-before-pending' })
+      .expect(409);
+    expect(closedMonthRejected.body.code).toBe('cashflow_closed_month_reason_required');
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+
     for (const forged of [
       { pendingApprovalDifferenceCount: 159, pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash },
       { pendingApprovalDifferenceCount: 160, pendingApprovalDifferenceManifestHash: `sha256:${'0'.repeat(64)}` },
@@ -2841,6 +2858,9 @@ describe('cashflow sheet lab route', () => {
         .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
         .send({
           stageRunId: stage.body.runId,
+          closedMonthChangeReason: '결산 완료 월 변경 확인',
+          closedMonthDifferenceCount: stage.body.closedMonthDifferenceCount,
+          closedMonthDifferenceManifestHash: stage.body.closedMonthDifferenceManifestHash,
           acceptPendingApprovalDifferences: true,
           ...forged,
           idempotencyKey: `apply-pending-forged-${forged.pendingApprovalDifferenceCount}-${forged.pendingApprovalDifferenceManifestHash.slice(-1)}`,
@@ -2854,6 +2874,9 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({
         stageRunId: stage.body.runId,
+        closedMonthChangeReason: '결산 완료 월 변경 확인',
+        closedMonthDifferenceCount: stage.body.closedMonthDifferenceCount,
+        closedMonthDifferenceManifestHash: stage.body.closedMonthDifferenceManifestHash,
         acceptPendingApprovalDifferences: true,
         pendingApprovalDifferenceCount: stage.body.pendingApprovalDifferenceCount,
         pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash,
@@ -2882,7 +2905,14 @@ describe('cashflow sheet lab route', () => {
     expect(forceStage.body.pendingApprovalDifferenceManifestHash).toBe(stage.body.pendingApprovalDifferenceManifestHash);
     const forcedWithoutEvidence = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ stageRunId: forceStage.body.runId, replaceAllActualSources: true, idempotencyKey: 'apply-pending-force' })
+      .send({
+        stageRunId: forceStage.body.runId,
+        replaceAllActualSources: true,
+        closedMonthChangeReason: '결산 완료 월 변경 확인',
+        closedMonthDifferenceCount: forceStage.body.closedMonthDifferenceCount,
+        closedMonthDifferenceManifestHash: forceStage.body.closedMonthDifferenceManifestHash,
+        idempotencyKey: 'apply-pending-force',
+      })
       .expect(409);
     expect(forcedWithoutEvidence.body.code).toBe('cashflow_pending_approval_confirmation_required');
     await request(app)
@@ -2890,6 +2920,9 @@ describe('cashflow sheet lab route', () => {
       .send({
         stageRunId: forceStage.body.runId,
         replaceAllActualSources: true,
+        closedMonthChangeReason: '결산 완료 월 변경 확인',
+        closedMonthDifferenceCount: forceStage.body.closedMonthDifferenceCount,
+        closedMonthDifferenceManifestHash: forceStage.body.closedMonthDifferenceManifestHash,
         acceptPendingApprovalDifferences: true,
         pendingApprovalDifferenceCount: forceStage.body.pendingApprovalDifferenceCount,
         pendingApprovalDifferenceManifestHash: forceStage.body.pendingApprovalDifferenceManifestHash,

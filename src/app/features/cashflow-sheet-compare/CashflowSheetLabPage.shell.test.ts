@@ -84,6 +84,64 @@ describe('CashflowSheetLabPage shell', () => {
     expect(draftReset).not.toContain('actor.idToken');
   });
 
+  it('drops delayed stage and apply responses after the selected project changes', () => {
+    expect(pageSource).toContain('shouldApplyCashflowSheetLabProjectResult');
+    expect(pageSource).toContain('const sheetOperationGenerationRef = useRef(0);');
+    expect(pageSource).toContain('const selectedProjectIdRef = useRef(projectId);');
+    expect(pageSource).toContain('selectedProjectIdRef.current = projectId;');
+    expect(pageSource).toContain('const selectedSourceYearRef = useRef(sourceYear);');
+    expect(pageSource).toContain('selectedSourceYearRef.current = sourceYear;');
+
+    const draftReset = pageSource.slice(
+      pageSource.indexOf('이전 시트 draft를 남기지 않는다'),
+      pageSource.indexOf('}, [projectId, sourceYear]);'),
+    );
+    expect(draftReset).toContain('sheetOperationGenerationRef.current += 1;');
+    expect(draftReset).toContain('setLoadingOperation(null);');
+    expect(draftReset).toContain('setAccountLoading(false);');
+
+    const configLoadFlow = pageSource.slice(
+      pageSource.indexOf('async function handleLoadShareAccount('),
+      pageSource.indexOf('// 프로젝트나 연동 연도가 바뀌면 이전 시트 draft를 남기지 않는다'),
+    );
+    expect(configLoadFlow).toContain('const isCurrentRequest = () => shouldApplyCashflowSheetLabProjectResult({');
+    expect(configLoadFlow).toContain('if (!result || !isCurrentRequest()) return;');
+    expect(configLoadFlow).toContain('if (isCurrentRequest()) setErrorMessage(formatError(error));');
+    expect(configLoadFlow).toContain('if (isCurrentRequest()) setAccountLoading(false);');
+
+    const saveFlow = pageSource.slice(
+      pageSource.indexOf('async function handleSaveSheetConfig()'),
+      pageSource.indexOf('async function handleRefreshSheetMirror()'),
+    );
+    expect(saveFlow).toContain('const requestedProjectId = projectId;');
+    expect(saveFlow).toContain('const requestGeneration = ++sheetOperationGenerationRef.current;');
+    expect(saveFlow).toContain('if (!isCurrentRequest()) return null;');
+    expect(saveFlow).toContain('if (!isCurrentRequest()) return;');
+    expect(saveFlow).toContain('if (isCurrentRequest()) setLoadingOperation(null);');
+
+    const refreshFlow = pageSource.slice(
+      pageSource.indexOf('async function handleRefreshSheetMirror()'),
+      pageSource.indexOf('async function handleOverwriteSheetValues('),
+    );
+    expect(refreshFlow).toContain('const requestedProjectId = projectId;');
+    expect(refreshFlow).toContain('const requestGeneration = ++sheetOperationGenerationRef.current;');
+    expect(refreshFlow).toContain('if (!isCurrentRequest()) return null;');
+    expect(refreshFlow).toContain('if (!isCurrentRequest()) return;');
+    expect(refreshFlow).toContain('if (isCurrentRequest()) setLoadingOperation(null);');
+
+    const overwriteFlow = pageSource.slice(
+      pageSource.indexOf('async function handleOverwriteSheetValues('),
+      pageSource.indexOf('const isCurrentSheetConfigSaved'),
+    );
+    expect(overwriteFlow).toContain('const requestedProjectId = projectId;');
+    expect(overwriteFlow).toContain('const requestGeneration = ++sheetOperationGenerationRef.current;');
+    expect(overwriteFlow).toContain('const isCurrentRequest = () => shouldApplyCashflowSheetLabProjectResult({');
+    expect(overwriteFlow).toContain('selectedProjectId: selectedProjectIdRef.current,');
+    expect(overwriteFlow).toContain('selectedSourceYear: selectedSourceYearRef.current,');
+    expect(overwriteFlow.match(/if \(!isCurrentRequest\(\)\) return;/g)?.length || 0).toBeGreaterThanOrEqual(3);
+    expect(overwriteFlow).toContain('if (isCurrentRequest()) setLoadingOperation(null);');
+  });
+
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).not.toContain('getCashflowSheetLabMirrorViaBff');
     expect(pageSource).toContain('refreshCashflowSheetLabMirrorViaBff');
@@ -95,8 +153,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('주간 정산 값과 다릅니다');
     expect(pageSource).toContain('cashflow_closed_month_reason_required');
     expect(pageSource).toContain('cashflow_formula_mismatch_confirmation_required');
+    expect(pageSource).toContain('cashflow_pending_approval_confirmation_required');
     expect(pageSource).toContain('cashflowFormulaMismatchesFromError');
     expect(pageSource).toContain('pending.acceptPendingApprovalDifferences');
+    expect(pageSource).toContain('pendingApprovalClosedMonthChangeReason');
+    expect(pageSource).toContain('pendingApprovalFormulaAccepted');
     expect(pageSource).toContain('stageRunId: staged.runId');
     expect(pageSource).toContain('closedMonthFormulaAccepted,');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
@@ -134,7 +195,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('reflectResult');
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
-    expect(pageSource).toContain('buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName })');
+    expect(pageSource).toContain('buildSourceKey({ projectId: requestedProjectId, sourceYear: requestedSourceYear, value: sheetLink, sheetName: nextSheetName })');
     expect(pageSource).not.toContain('startWeek');
     expect(pageSource).not.toContain('endWeek');
     expect(pageSource).toContain('선택한 탭 전체를 불러옵니다.');
@@ -183,7 +244,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('시트 연결');
     expect(pageSource).toContain('시트 정보 저장');
     expect(pageSource).toContain('forceHydrate || !hasSheetDraft || scopedConfig.sourceYear !== savedConfig?.sourceYear');
-    expect(pageSource).toContain('generation !== configLoadGenerationRef.current');
+    expect(pageSource).toContain('currentGeneration: configLoadGenerationRef.current');
     expect(pageSource).toContain('연동 연도');
     expect(pageSource).not.toContain('캐시플로우 값은 바뀌지 않습니다.');
     expect(pageSource).toContain('시트 값 가져오기');
@@ -255,12 +316,32 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('markSheetSourceApplied');
   });
 
+  it('presents initial confirmation gates in the same order as the BFF apply contract', () => {
+    const stageStart = pageSource.indexOf("if (staged.stagedLineCount === 0)");
+    const stageFlow = pageSource.slice(stageStart, pageSource.indexOf("activeStep = 'apply'", stageStart));
+    const closedMonthGate = stageFlow.indexOf('staged.closedMonthDifferences?.length');
+    const pendingApprovalGate = stageFlow.indexOf('staged.pendingApprovalDifferences?.length');
+    expect(closedMonthGate).toBeGreaterThan(-1);
+    expect(pendingApprovalGate).toBeGreaterThan(-1);
+    expect(closedMonthGate).toBeLessThan(pendingApprovalGate);
+  });
+
   it('recovers BFF auth failures with a popup retry instead of redirecting', () => {
     expect(pageSource).toContain('requestBffActorAfterAuth');
     expect(pageSource).toContain('bffAuth.popup.required');
     expect(pageSource).toContain('bffAuth.rejected');
     expect(pageSource).toContain('firebaseToken || actor.idToken');
     expect(pageSource).toContain('getIdToken(Boolean(options.forceRefresh))');
+    const loginFlow = pageSource.slice(
+      pageSource.indexOf('const requestLoginFlow'),
+      pageSource.indexOf('const resolveBffActor'),
+    );
+    expect(loginFlow).toContain('if (selectedProjectIdRef.current !== projectId) return false;');
+    const retryFlow = pageSource.slice(
+      pageSource.indexOf('const requestBffActorAfterAuth'),
+      pageSource.indexOf('const requireBffActor'),
+    );
+    expect(retryFlow).toContain('if (selectedProjectIdRef.current !== projectId) return null;');
     expect(pageSource).not.toContain('actor.idToken || firebaseToken');
     expect(pageSource).not.toContain("navigate('/login'");
   });

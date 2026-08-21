@@ -330,8 +330,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('result.appliedLineCount.toLocaleString');
     expect(source).toContain("toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.')");
     expect(source).toContain("toast.success('월 결산 요청을 회수했어요.')");
-    expect(source).not.toContain('toast.error');
-    expect(source).not.toContain('toast.info');
+    expect(source).toContain("toast.error(resolveApiErrorMessage(finalError, '시트 값을 반영하지 못했습니다. 잠시 후 다시 시도해 주세요.'))");
+    expect(source).toContain("toast.info('시트와 MYSCube 값이 이미 같습니다. 반영할 변경이 없습니다.')");
     expect(source).not.toContain('toast.warning');
     expect(source).not.toContain('월 결산 승인 조직장을 선택하세요');
     expect(source).toContain('saveCashflowMonthCloseApproverViaBff');
@@ -632,6 +632,33 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('!resumeRequired && (');
   });
 
+  it('does not carry a recovered closed-month reason into a later staged apply', () => {
+    const applyStart = source.indexOf('const handleApplyStagedSheetValues');
+    const applyFlow = source.slice(applyStart, source.indexOf('const handleStagePinnedSheetValues', applyStart));
+    const rememberStart = applyFlow.indexOf('const rememberApplyResult');
+    const rememberFlow = applyFlow.slice(rememberStart, applyFlow.indexOf('setSheetStageApplyLoading(true)', rememberStart));
+    const uncertainStart = applyFlow.indexOf('if (isCashflowSheetApplyResultUncertain(finalError))');
+    const uncertainFlow = applyFlow.slice(uncertainStart, applyFlow.indexOf('} else {', uncertainStart));
+    expect(rememberFlow).toContain("setLateSheetResumeReason('');");
+    expect(uncertainFlow).toContain('setLateSheetResumeReason(closedMonthChangeReason);');
+
+    const stageStart = source.indexOf('const applyStageResult = async');
+    const stageFlow = source.slice(stageStart, source.indexOf('setSheetRefreshLoading(true)', stageStart));
+    const closedStart = stageFlow.indexOf('if (result.closedMonthDifferences?.length)');
+    const closedFlow = stageFlow.slice(closedStart, stageFlow.indexOf('return;', closedStart));
+    expect(closedFlow).toContain("setLateSheetResumeReason('');");
+
+    const dialogKey = source.indexOf("key={lateSheetApply?.runId || 'closed-month'}");
+    const dialogStart = source.lastIndexOf('<CashflowLateSheetChangeDialog', dialogKey);
+    const dialogFlow = source.slice(dialogStart, source.indexOf('/>', dialogStart));
+    expect(dialogFlow).toContain("setLateSheetResumeReason('');");
+  });
+
+  it('remounts each change dialog for a new staged run so local reason and filters reset', () => {
+    expect(source).toContain("key={pendingApprovalStage?.runId || 'pending-approval'}");
+    expect(source).toContain("key={lateSheetApply?.runId || 'closed-month'}");
+  });
+
   it('uses the sheets-lab one-way apply contract and does not turn post-apply reads into a failed save', () => {
     const applyStart = source.indexOf('const handleApplyStagedSheetValues');
     const applyFlow = source.slice(applyStart, source.indexOf('const handleStagePinnedSheetValues', applyStart));
@@ -675,8 +702,42 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(action).toContain('await handleStagePinnedSheetValues(true, mirror)');
     expect(source).toContain('result.pendingApprovalDifferences?.length');
     expect(source).toContain('setPendingApprovalStage(result)');
-    expect(source).toContain("handleApplyStagedSheetValues(stage, '', false, true)");
+    expect(source).toContain('pendingApprovalClosedMonthChangeReason');
+    expect(source).toContain('pendingApprovalFormulaAccepted');
+    const stageResultStart = source.indexOf('const applyStageResult');
+    const stageResultFlow = source.slice(stageResultStart, source.indexOf('setSheetRefreshLoading(true)', stageResultStart));
+    const closedMonthGate = stageResultFlow.indexOf('result.closedMonthDifferences?.length');
+    const pendingApprovalGate = stageResultFlow.indexOf('result.pendingApprovalDifferences?.length');
+    expect(closedMonthGate).toBeGreaterThan(-1);
+    expect(pendingApprovalGate).toBeGreaterThan(-1);
+    expect(closedMonthGate).toBeLessThan(pendingApprovalGate);
     expect(source).toContain("operation: 'cashflow.sheet_sync.one_click'");
+    expect(action).toContain("toast.error(mirror?.lastRefreshError?.message || '시트 최신값을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.');");
+  });
+
+  it('continues a closed-month apply through a later pending-approval confirmation', () => {
+    const applyStart = source.indexOf('const handleApplyStagedSheetValues');
+    const applyFlow = source.slice(applyStart, source.indexOf('const handleStagePinnedSheetValues', applyStart));
+    expect(applyFlow).toContain("bffErrorCode(finalError) === 'cashflow_pending_approval_confirmation_required'");
+    expect(applyFlow).toContain('pendingApprovalDifferences: details?.pendingApprovalDifferences?.length');
+    expect(source).toContain('pendingApprovalClosedMonthChangeReason');
+    expect(source).toContain('pendingApprovalFormulaAccepted');
+    expect(source).toContain('lateSheetPendingApprovalAccepted');
+    expect(source).toContain('setLateSheetPendingApprovalAccepted(acceptPendingApprovalDifferences);');
+    const closedDialogKey = source.indexOf("key={lateSheetApply?.runId || 'closed-month'}");
+    const closedDialogStart = source.lastIndexOf('<CashflowLateSheetChangeDialog', closedDialogKey);
+    const closedMonthDialog = source.slice(
+      closedDialogStart,
+      source.indexOf('<AlertDialog\n        open={blocker.state', closedDialogStart),
+    );
+    expect(closedMonthDialog).toContain('handleApplyStagedSheetValues(');
+    expect(closedMonthDialog).toContain('lateSheetFormulaAccepted,');
+    expect(closedMonthDialog).toContain('lateSheetPendingApprovalAccepted,');
+    expect(source).toContain("setPendingApprovalClosedMonthChangeReason('');");
+    expect(source).toContain('setPendingApprovalFormulaAccepted(false);');
+    expect(source).toContain('toast.error(');
+    expect(applyFlow).toContain("toast.error('로그인 정보를 확인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.');");
+    expect(source).toContain("toast.error(resolveApiErrorMessage(error, '시트 변경 검토를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'))");
   });
 
   it('keeps transport failure handling separate while server actions own month-close eligibility', () => {

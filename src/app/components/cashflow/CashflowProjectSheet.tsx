@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, LockKeyhole, RefreshCw, Save, Undo2 } from 'lucide-react';
 import { useBlocker, useNavigate } from 'react-router';
-// 성공 확인만 우측 하단에 띄운다(2026-08-19 보람: 반영·요청·회수가 됐는지 확인할 길이 없음).
-// 에러는 그 자리 인라인 배너로 남긴다.
+// 반영 결과는 화면을 닫아도 놓치지 않도록 우측 하단에 알린다.
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -432,6 +431,7 @@ export function CashflowProjectSheet({
   const [sheetApplyResumeRequired, setSheetApplyResumeRequired] = useState(false);
   const [lateSheetResumeReason, setLateSheetResumeReason] = useState('');
   const [lateSheetFormulaAccepted, setLateSheetFormulaAccepted] = useState(false);
+  const [lateSheetPendingApprovalAccepted, setLateSheetPendingApprovalAccepted] = useState(false);
   const [formulaMismatchPrompt, setFormulaMismatchPrompt] = useState<{
     stage: CashflowSheetLabStageResult;
     issues: CashflowFormulaMismatch[];
@@ -439,6 +439,8 @@ export function CashflowProjectSheet({
     acceptPendingApprovalDifferences: boolean;
   } | null>(null);
   const [pendingApprovalStage, setPendingApprovalStage] = useState<CashflowSheetLabStageResult | null>(null);
+  const [pendingApprovalClosedMonthChangeReason, setPendingApprovalClosedMonthChangeReason] = useState('');
+  const [pendingApprovalFormulaAccepted, setPendingApprovalFormulaAccepted] = useState(false);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   // 조직장은 로그인해서 승인해야 하므로 계정이 필수지만, 명부에 없는 사람(퇴사 후 계정이
   // 남은 경우)은 후보에서 빠져야 한다. 명부는 문지기로만 쓴다.
@@ -1868,8 +1870,13 @@ export function CashflowProjectSheet({
       } : current);
       setLateSheetApply(null);
       setSheetApplyResumeRequired(false);
+      setLateSheetResumeReason('');
       setLateSheetFormulaAccepted(false);
+      setLateSheetPendingApprovalAccepted(false);
       setFormulaMismatchPrompt(null);
+      setPendingApprovalStage(null);
+      setPendingApprovalClosedMonthChangeReason('');
+      setPendingApprovalFormulaAccepted(false);
     };
 
     setSheetStageApplyLoading(true);
@@ -1882,6 +1889,7 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
+        toast.error('로그인 정보를 확인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.');
         return;
       }
       const result = await apply(actor);
@@ -1907,6 +1915,8 @@ export function CashflowProjectSheet({
       if (bffErrorCode(finalError) === 'cashflow_formula_mismatch_confirmation_required') {
         const issues = cashflowFormulaMismatchesFromError(finalError);
         if (issues.length > 0) {
+          setLateSheetApply(null);
+          setSheetApplyResumeRequired(false);
           setFormulaMismatchPrompt({ stage, issues, closedMonthChangeReason, acceptPendingApprovalDifferences });
           return;
         }
@@ -1922,16 +1932,39 @@ export function CashflowProjectSheet({
             : stage.closedMonthDifferences,
         });
         setLateSheetFormulaAccepted(acceptFormulaMismatches);
+        setLateSheetPendingApprovalAccepted(acceptPendingApprovalDifferences);
         setSheetApplyResumeRequired(false);
+        return;
+      }
+      if (bffErrorCode(finalError) === 'cashflow_pending_approval_confirmation_required') {
+        const details = (finalError as {
+          body?: { details?: Pick<CashflowSheetLabStageResult, 'pendingApprovalDifferences' | 'pendingApprovalDifferenceCount' | 'pendingApprovalDifferenceManifestHash'> };
+        }).body?.details;
+        setLateSheetApply(null);
+        setSheetApplyResumeRequired(false);
+        setPendingApprovalStage({
+          ...stage,
+          pendingApprovalDifferences: details?.pendingApprovalDifferences?.length
+            ? details.pendingApprovalDifferences
+            : stage.pendingApprovalDifferences,
+          pendingApprovalDifferenceCount: details?.pendingApprovalDifferenceCount ?? stage.pendingApprovalDifferenceCount,
+          pendingApprovalDifferenceManifestHash: details?.pendingApprovalDifferenceManifestHash || stage.pendingApprovalDifferenceManifestHash,
+        });
+        setPendingApprovalClosedMonthChangeReason(closedMonthChangeReason);
+        setPendingApprovalFormulaAccepted(acceptFormulaMismatches);
         return;
       }
       if (isCashflowSheetApplyResultUncertain(finalError)) {
         setLateSheetApply(stage);
+        setLateSheetResumeReason(closedMonthChangeReason);
         setLateSheetFormulaAccepted(acceptFormulaMismatches);
+        setLateSheetPendingApprovalAccepted(acceptPendingApprovalDifferences);
         setSheetApplyResumeRequired(true);
       } else {
         setLateSheetApply(null);
         setSheetApplyResumeRequired(false);
+        setLateSheetPendingApprovalAccepted(false);
+        toast.error(resolveApiErrorMessage(finalError, '시트 값을 반영하지 못했습니다. 잠시 후 다시 시도해 주세요.'));
       }
     } finally {
       setSheetStageApplyLoading(false);
@@ -1950,6 +1983,7 @@ export function CashflowProjectSheet({
         setLateSheetApply(status.stagedRun);
         setLateSheetResumeReason(status.applyInput?.closedMonthChangeReason || '');
         setLateSheetFormulaAccepted(status.applyInput?.acceptFormulaMismatches === true);
+        setLateSheetPendingApprovalAccepted(status.applyInput?.acceptPendingApprovalDifferences === true);
         setSheetApplyResumeRequired(true);
       } catch {
         // 복구 상태 조회 실패는 일반 조회를 막지 않는다. 실제 반영 시 서버가 다시 차단한다.
@@ -1982,20 +2016,27 @@ export function CashflowProjectSheet({
       if (result.status === 'BLOCKED') {
         const contractIssue = result.pendingApprovalContractIssues?.[0];
         const blockedMonths = (contractIssue?.blockedMonths || result.blockedMonths || []).join(', ');
+        toast.error(contractIssue?.message || (blockedMonths
+          ? `${blockedMonths}의 결산 상태를 확인한 뒤 시트 값을 반영해 주세요.`
+          : '현재 결산 상태에서는 시트 값을 반영할 수 없습니다.'));
         return;
       }
       if (result.stagedLineCount <= 0) {
-        // 없으면 없다고 말한다. 조용히 끝나면 반영이 중간에 멈춘 것처럼 보인다.
-        return;
-      }
-      if (result.pendingApprovalDifferences?.length) {
-        setPendingApprovalStage(result);
+        toast.info('시트와 MYSCube 값이 이미 같습니다. 반영할 변경이 없습니다.');
         return;
       }
       if (result.closedMonthDifferences?.length) {
         setLateSheetApply(result);
+        setLateSheetResumeReason('');
         setLateSheetFormulaAccepted(false);
+        setLateSheetPendingApprovalAccepted(false);
         setSheetApplyResumeRequired(false);
+        return;
+      }
+      if (result.pendingApprovalDifferences?.length) {
+        setPendingApprovalStage(result);
+        setPendingApprovalClosedMonthChangeReason('');
+        setPendingApprovalFormulaAccepted(false);
         return;
       }
       await handleApplyStagedSheetValues(result);
@@ -2010,6 +2051,7 @@ export function CashflowProjectSheet({
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) {
+        toast.error('로그인 정보를 확인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.');
         return;
       }
       const stage = await stageMirror(actor);
@@ -2033,8 +2075,10 @@ export function CashflowProjectSheet({
           await applyStageResult(await stageMirror(actor));
           return;
         } catch (retryError) {
-          return;
+          toast.error(resolveApiErrorMessage(retryError, '시트 변경 검토를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'));
         }
+      } else {
+        toast.error(resolveApiErrorMessage(error, '시트 변경 검토를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'));
       }
     } finally {
       setSheetRefreshLoading(false);
@@ -2052,6 +2096,7 @@ export function CashflowProjectSheet({
     });
     const mirror = await handleRefreshSheetMirror();
     if (mirror?.status !== 'FRESH' || !mirror.sourceRevision) {
+      toast.error(mirror?.lastRefreshError?.message || '시트 최신값을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.');
       logCashflowSettlement({
         phase: 'error',
         operation: 'cashflow.sheet_sync.one_click',
@@ -3456,14 +3501,25 @@ export function CashflowProjectSheet({
       />
 
       <CashflowLateSheetChangeDialog
+        key={pendingApprovalStage?.runId || 'pending-approval'}
         kind="pendingApproval"
         stage={pendingApprovalStage}
         submitting={sheetStageApplyLoading}
-        onCancel={() => { if (!sheetStageApplyLoading) setPendingApprovalStage(null); }}
+        onCancel={() => {
+          if (sheetStageApplyLoading) return;
+          setPendingApprovalStage(null);
+          setPendingApprovalClosedMonthChangeReason('');
+          setPendingApprovalFormulaAccepted(false);
+        }}
         onSubmit={() => {
           const stage = pendingApprovalStage;
           setPendingApprovalStage(null);
-          if (stage) void handleApplyStagedSheetValues(stage, '', false, true);
+          if (stage) void handleApplyStagedSheetValues(
+            stage,
+            pendingApprovalClosedMonthChangeReason,
+            pendingApprovalFormulaAccepted,
+            true,
+          );
         }}
       />
 
@@ -3650,6 +3706,7 @@ export function CashflowProjectSheet({
       </AlertDialog>
 
       <CashflowLateSheetChangeDialog
+        key={lateSheetApply?.runId || 'closed-month'}
         stage={lateSheetApply}
         resumeRequired={sheetApplyResumeRequired}
         resumeReason={lateSheetResumeReason}
@@ -3658,9 +3715,16 @@ export function CashflowProjectSheet({
           if (sheetStageApplyLoading || sheetApplyResumeRequired) return;
           setLateSheetApply(null);
           setSheetApplyResumeRequired(false);
+          setLateSheetResumeReason('');
           setLateSheetFormulaAccepted(false);
+          setLateSheetPendingApprovalAccepted(false);
         }}
-        onSubmit={(reason) => lateSheetApply && void handleApplyStagedSheetValues(lateSheetApply, reason, lateSheetFormulaAccepted)}
+        onSubmit={(reason) => lateSheetApply && void handleApplyStagedSheetValues(
+          lateSheetApply,
+          reason,
+          lateSheetFormulaAccepted,
+          lateSheetPendingApprovalAccepted,
+        )}
       />
 
 
