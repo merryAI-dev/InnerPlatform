@@ -70,6 +70,41 @@ export interface ParticipationDashboardSnapshot {
   hasWarnings: boolean;
   unlinkedEntryCount: number;
   filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string }> };
+  projects: Array<{ id: string; name: string; clientOrg: string }>;
+}
+
+/** 참여율 시트 검증 결과. 읽기 전용이라 무엇도 바뀌지 않는다. */
+export interface ParticipationSheetPreview {
+  projectId: string;
+  projectName: string;
+  sheetLink: string;
+  checkedAt: string;
+  ok: boolean;
+  summary: {
+    period: { start: string; end: string };
+    monthCount: number;
+    rowCount: number;
+    linkedCount: number;
+    pendingLinkCount: number;
+    placeholderCount: number;
+    missingCount: number;
+    candidateCount: number;
+    errorCount: number;
+  } | null;
+  blocking: Array<{ code: string; message: string; rowIndex?: number; month?: string }>;
+  months: string[];
+  rows: Array<{
+    rowIndex: number;
+    nickname: string;
+    name: string;
+    role: string;
+    stintStart: string;
+    stintEnd: string;
+    linkState: 'LINKED' | 'PENDING_LINK' | 'PLACEHOLDER';
+    monthlyRates: Record<string, number>;
+  }>;
+  missing: Array<{ rowIndex: number; label: string; month: string }>;
+  candidates: Array<{ key: string; name: string; nickname: string; rowIndexes: number[]; monthCount: number }>;
 }
 
 export interface ProjectParticipationSnapshot {
@@ -2148,6 +2183,20 @@ export async function fetchProjectParticipationViaBff(params: {
   const response = await resolveClient(params.client).get<ProjectParticipationSnapshot>(
     `/api/v1/participation-dashboard/projects/${encodeURIComponent(params.projectId)}`,
     { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 10_000 },
+  );
+  return response.data;
+}
+
+export async function fetchParticipationSheetPreviewViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ParticipationSheetPreview> {
+  // 시트를 다섯 범위 읽고 해석하므로 목록 조회보다 느리다. 넉넉히 준다.
+  const response = await resolveClient(params.client).get<ParticipationSheetPreview>(
+    `/api/v1/participation-dashboard/projects/${encodeURIComponent(params.projectId)}/sheet-preview`,
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 30_000 },
   );
   return response.data;
 }
