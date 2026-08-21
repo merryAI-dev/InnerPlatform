@@ -22,6 +22,55 @@ function participationSheetUnreachable(error) {
   );
 }
 
+/** 다섯 범위를 함께 읽는다. 한 번에 읽어야 사람이 그 사이 고쳐도 한 장면으로 남는다. */
+async function readParticipationSheet(googleSheetsService, sheetLink) {
+  const readRange = (rangeA1) => googleSheetsService.getSheetValues({
+    spreadsheetId: sheetLink,
+    sheetName: PARTICIPATION_SHEET_TAB,
+    rangeA1,
+  });
+  try {
+    const [format, period, header, meta, cells] = await Promise.all([
+      readRange(PARTICIPATION_FORMAT_RANGE),
+      readRange(PARTICIPATION_PERIOD_RANGE),
+      readRange(PARTICIPATION_HEADER_RANGE),
+      readRange(PARTICIPATION_META_RANGE),
+      readRange(PARTICIPATION_CELL_RANGE),
+    ]);
+    return { format, period, header, meta, cells };
+  } catch (error) {
+    throw participationSheetUnreachable(error);
+  }
+}
+
+/**
+ * 화면이 그대로 그릴 수 있는 모양. 참여행(entries)은 반영 단계의 재료라 돌려주지 않는다.
+ * personId·기본투입률은 등록/수정 화면이 명단을 채우는 데 쓴다.
+ */
+function participationPreviewBody(analysis, extra = {}) {
+  return {
+    ok: analysis.ok,
+    summary: analysis.summary,
+    blocking: analysis.blocking,
+    months: analysis.parsed.months,
+    rows: analysis.rows.map((row) => ({
+      rowIndex: row.rowIndex,
+      nickname: row.nickname,
+      name: row.name,
+      role: row.role,
+      stintStart: row.stintStart,
+      stintEnd: row.stintEnd,
+      baseRate: row.baseRate,
+      personId: row.personId || '',
+      linkState: row.linkState,
+      monthlyRates: row.monthlyRates,
+    })),
+    missing: analysis.missing,
+    candidates: analysis.candidates,
+    ...extra,
+  };
+}
+
 export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsService, idempotencyService } = {}) {
   app.get('/api/v1/participation-dashboard', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read participation dashboard');
@@ -95,26 +144,7 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
       );
     }
 
-    const readRange = (rangeA1) => googleSheetsService.getSheetValues({
-      spreadsheetId: sheetLink,
-      sheetName: PARTICIPATION_SHEET_TAB,
-      rangeA1,
-    });
-    let sheetValues;
-    try {
-      // 다섯 범위를 함께 읽는다. 한 번에 읽어야 사람이 그 사이에 고쳐도 한 장면으로 남는다.
-      const [format, period, header, meta, cells] = await Promise.all([
-        readRange(PARTICIPATION_FORMAT_RANGE),
-        readRange(PARTICIPATION_PERIOD_RANGE),
-        readRange(PARTICIPATION_HEADER_RANGE),
-        readRange(PARTICIPATION_META_RANGE),
-        readRange(PARTICIPATION_CELL_RANGE),
-      ]);
-      sheetValues = { format, period, header, meta, cells };
-    } catch (error) {
-      throw participationSheetUnreachable(error);
-    }
-
+    const sheetValues = await readParticipationSheet(googleSheetsService, sheetLink);
     const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
     const analysis = analyzeParticipationSheet({
       sheet: toParticipationSheetInput(sheetValues),
@@ -124,29 +154,50 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
       projectId,
     });
 
-    // 참여행(entries)은 반영 단계의 재료라 여기서는 돌려주지 않는다. 이 화면은 읽기 전용이다.
-    res.status(200).json({
+    res.status(200).json(participationPreviewBody(analysis, {
       projectId,
       projectName: readOptionalText(project.name) || projectId,
       sheetLink,
       checkedAt: now ? now() : new Date().toISOString(),
-      ok: analysis.ok,
-      summary: analysis.summary,
-      blocking: analysis.blocking,
-      months: analysis.parsed.months,
-      rows: analysis.rows.map((row) => ({
-        rowIndex: row.rowIndex,
-        nickname: row.nickname,
-        name: row.name,
-        role: row.role,
-        stintStart: row.stintStart,
-        stintEnd: row.stintEnd,
-        linkState: row.linkState,
-        monthlyRates: row.monthlyRates,
-      })),
-      missing: analysis.missing,
-      candidates: analysis.candidates,
+    }));
+  }));
+
+  /*
+   * 저장 전에도 확인할 수 있는 경로. 등록 중에는 사업 문서가 아직 없고, 수정 중에는 화면의
+   * 링크가 저장본과 다를 수 있다. 그래서 링크와 계약 기간을 요청에 담아 받는다.
+   * 읽기만 하므로 GET 과 같은 권한이고 아무것도 쓰지 않는다.
+   */
+  app.post('/api/v1/participation-dashboard/sheet-preview', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview participation sheet by link');
+    if (!db) throw createHttpError(503, '참여율 시트를 확인할 수 없습니다.', 'firestore_unconfigured');
+    const tenantId = readOptionalText(req.context?.tenantId);
+    if (!tenantId) throw createHttpError(400, 'tenantId is required.', 'tenant_required');
+    if (!googleSheetsService?.getSheetValues) {
+      throw createHttpError(503, 'Google Sheets 연동이 설정되지 않았습니다.', 'google_sheets_unconfigured');
+    }
+    const sheetLink = readOptionalText(req.body?.sheetLink);
+    if (!sheetLink) {
+      throw createHttpError(400, '참여율 시트 링크를 입력해 주세요.', 'participation_sheet_link_missing');
+    }
+
+    const sheetValues = await readParticipationSheet(googleSheetsService, sheetLink);
+    const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
+    const analysis = analyzeParticipationSheet({
+      sheet: toParticipationSheetInput(sheetValues),
+      // 계약 기간은 화면의 초안 값이다. 저장된 사업이 아직 없을 수 있다.
+      project: {
+        contractStart: readOptionalText(req.body?.contractStart),
+        contractEnd: readOptionalText(req.body?.contractEnd),
+      },
+      people: peopleSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
+      tenantId,
+      projectId: readOptionalText(req.body?.projectId),
     });
+
+    res.status(200).json(participationPreviewBody(analysis, {
+      sheetLink,
+      checkedAt: now ? now() : new Date().toISOString(),
+    }));
   }));
 
   app.post('/api/v1/participation-dashboard/rules', createMutatingRoute(idempotencyService, async (req) => {

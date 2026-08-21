@@ -94,9 +94,6 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('· 기존 선택');
     // Linkage is still judged against the ledger, so the unlinked warning keeps firing.
     expect(source).toContain('ledgerMemberOptions.find((member) => member.uid === draft.registeredById)');
-    expect(source).toContain("onSelect({ personId: undefined, memberName: '', memberNickname: '' })");
-    expect(source).toContain('currentTeamMemberOptionExists');
-    expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
   });
 
   it('uses a member select for project owner instead of free text manager input', () => {
@@ -130,30 +127,38 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('const executiveApproverOptions = useMemo');
   });
 
-  it('uses a searchable team member picker for registration and edit flows', () => {
-    expect(source).toContain('function TeamMemberSearchCombobox');
-    expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');
-    // 후보의 출처는 인력 명부(roster) 하나다. 계정 원장을 출처로 쓰면 퇴사 후 계정이
-    // 남은 사람이 계속 뜨고, 명부에만 있는 사람은 안 뜬다. members 는 명부를 못 읽었을
-    // 때의 안전망으로만 남는다.
-    expect(source).toContain('buildProjectTeamMemberOptions(roster, members)');
-    // PM·조직장은 계정이 필수라 계정 원장이 출처지만, 명부가 문지기 역할을 한다.
-    expect(source).toContain('buildOrgMemberPickerOptions(members, roster)');
-    expect(source).toContain('options.length}명 중 검색');
-    expect(source).toContain('options={availableTeamMemberOptions}');
-    expect(source).toContain('<TeamMemberSearchCombobox');
-    expect(source).toContain("aria-label={selectedLabel ? `팀원 선택: ${selectedLabel}` : '팀원 검색'}");
-    expect(source).toContain('selectedNames={selectedNames}');
-    expect(source).toContain('이미 추가됨');
-    expect(source).not.toContain("value={member.memberName || 'none'}");
+  /*
+   * 참여인력은 참여율 시트에서 온다. 사람이 같은 내용을 두 곳에 적지 않게 하려고 수기 입력을
+   * 걷어냈다. 여기서는 연동 경로가 살아 있는지와, 걷어낸 수기 입력이 되살아나지 않는지를 본다.
+   */
+  it('syncs the participation roster from the sheet instead of manual entry', () => {
+    expect(source).toContain('const syncTeamFromSheet = () => {');
+    expect(source).toContain('previewParticipationSheetByLinkViaBff(');
+    expect(source).toContain("{teamSyncing ? '연동 중' : '연동하기'}");
+    // 저장 전에도 눌러야 하므로 화면의 링크·계약 기간을 그대로 보낸다.
+    expect(source).toContain('contractStart: draft.contractStart,');
+    expect(source).toContain('contractEnd: draft.contractEnd,');
+    // 명단은 승인 서류·인력 현황·사업 검색이 쓴다. 연동이 그것까지 채워야 끊기지 않는다.
+    expect(source).toContain("update('teamMembersDetailed', preview.rows.map((row) => ({");
+    expect(source).toContain('personId: row.personId || undefined,');
+    expect(source).toContain('participationRate: row.baseRate ?? 0,');
+    expect(source).toContain('laborAllocationStartMonth: row.stintStart,');
   });
 
-  it('allows manual team member identity entry when the picker is missing a member', () => {
-    expect(source).toContain('팀원 검색');
-    expect(source).toContain('직접 입력');
-    expect(source).toContain('placeholder="이름(별명)"');
-    expect(source).toContain('parseProjectTeamMemberIdentityInput');
-    expect(source).toContain("inputMode: 'manual'");
+  it('does not judge the sheet again in the browser', () => {
+    // 막는 이유는 서버가 적어 준 대로 보여 준다. 화면이 다시 판정하면 두 곳이 어긋난다.
+    expect(source).toContain('preview.blocking.map((issue) => issue.message)');
+    expect(source).not.toContain('function TeamMemberSearchCombobox');
+    expect(source).not.toContain('const addTeamMember');
+    expect(source).not.toContain('createEmptyTeamMember');
+  });
+
+  it('requires the sheet link instead of an operating manager headcount', () => {
+    // 역할 구성은 시트를 보고 사람이 판단할 일이라 저장을 막지 않는다. 대신 참여율을 적을 곳
+    // 자체가 없는 상태는 막는다.
+    expect(source).toContain("issues.push({ step: 'team', label: '참여율 시트 링크' });");
+    expect(source).not.toContain("label: '운영매니저 1인 이상'");
+    expect(source).not.toContain('hasProjectOperatingManager');
   });
 
   it('uses project operations terminology and exposes currency selection', () => {
@@ -177,12 +182,6 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(adminWizardSource).toContain('departmentOptions={departmentOptions}');
   });
 
-  it('keeps manual team member input bound to the raw typed value instead of reparsing formatted text', () => {
-    expect(source).toContain('formatTeamMemberIdentityInput(member)');
-    expect(source).toContain('identityInput: event.target.value');
-    expect(source).toContain('value={member.identityInput ?? formatTeamMemberIdentityInput(member)}');
-  });
-
   it('does not key editable team member rows by typed member name', () => {
     expect(source).toContain("key={`team-member-${index}`}");
     expect(source).not.toContain("key={`${member.memberName || 'member'}-${index}`}");
@@ -197,20 +196,16 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('<ReviewRow label="참여 조건"');
   });
 
-  it('keeps team member add rows editable and aligns the add button with the primary next action', () => {
-    const addTeamMemberBlock = source.slice(source.indexOf('const addTeamMember'), source.indexOf('const updateTeamMember'));
-
+  // 팀원 줄은 시트에서 오므로 추가·수정 버튼이 없다. 투입기간은 시트의 투입시작·종료월이
+  // 그대로 들어오고, 저장 경로의 정규화는 그대로 남아 있어야 한다.
+  it('keeps the roster normalization while the rows come from the sheet', () => {
     expect(source).toContain('createProjectEditorWizardDraft');
     expect(source).toContain('normalizeProjectTeamMemberDraftRows');
-    expect(addTeamMemberBlock).toContain('teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()]');
-    expect(addTeamMemberBlock).not.toContain('createProjectEditorDraft');
-    expect(source).not.toContain('<Label className="text-xs">인건비 시작월</Label>');
-    expect(source).not.toContain('<Label className="text-xs">인건비 종료월</Label>');
     expect(source).toContain('laborAllocationStartMonth');
     expect(source).toContain('laborAllocationEndMonth');
-    expect(source).toContain('<Plus className="h-4 w-4" />');
-    expect(source).toContain('<Button type="button" onClick={addTeamMember} className="gap-2">');
-    expect(source).not.toContain('variant="outline" size="sm" onClick={addTeamMember}');
+    expect(source).toContain("key={`team-member-${index}`}");
+    expect(source).not.toContain('<Label className="text-xs">인건비 시작월</Label>');
+    expect(source).not.toContain('onClick={addTeamMember}');
   });
 
   it('treats zero-won payment split values as explicit editable values', () => {
@@ -412,17 +407,15 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('고객사 사업자등록증 PDF');
     expect(source).toContain('계약 종료일은 시작일 이후여야 합니다.');
     expect(source).not.toContain('인건비 투입 종료월은 시작월 이후여야 합니다.');
-    expect(source).toContain('운영매니저 1인 이상');
+    expect(source).toContain('참여인력은 참여율 시트에서 연동합니다. 시트 링크를 먼저 넣어 주세요.');
     // 정산지원 담당자는 저장을 막지 않는다. 예전에는 submitIssues 에 들어가 최종 저장을
     // 막았고, 후보 드롭다운도 두 사람으로 좁혀 다른 사람을 아예 고를 수 없었다. 담당이
     // 바뀌거나 그 두 분이 자리를 비우면 프로젝트 등록 자체가 멈춘다.
     expect(source).not.toContain("issues.push({ step: 'team', label: '정산지원은 도담 또는 써니를 선택' })");
     expect(source).not.toContain('hasInvalidProjectSettlementSupportMember');
     expect(source).not.toContain('정산지원은 도담 또는 써니를 선택해 주세요.');
-    expect(source).toContain('const availableTeamMemberOptions = teamMemberOptions;');
     expect(source).toContain("const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE'");
     expect(source).not.toContain('정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.');
-    expect(source).toContain('md:grid-cols-3');
     expect(source).not.toContain('xl:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_110px_120px_140px_140px]');
     expect(source).not.toContain('alternativeDocumentAttached');
     expect(source).not.toContain('특이사항 (메모란)');
@@ -483,8 +476,6 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('년 선금·중도금 합계 70% 미만 사유`}');
     expect(source).toContain("updateFinancialYear(financialYearIndex!, 'advanceInterimBelow70Reason'");
     expect(source).not.toContain('년 계약/재무 정산 완료');
-    expect(source).toContain('(기존값 · 선택 불가)');
-    expect(source).toContain('disabled>{member.role}');
     expect(source).not.toContain('최종 입금 주차 ${row.finalPaymentExpectedWeek || \'-\'}');
     expect(source).not.toContain('disabled={!financeWeekYear}');
     expect(source).not.toContain('계약 종료일을 입력하면 재무주차를 선택할 수 있습니다.');
@@ -712,10 +703,10 @@ describe('ProjectEditorWizard safe exit contract', () => {
 // 참여율 시트 링크는 참여인력 섹션 안에 있어야 한다. 기본 정보에 두면 참여율을 입력하는
 // 사람이 그 칸을 영영 만나지 못한다(보람: "거기 넣으면 아무도 모른다").
 describe('참여율 시트 링크 자리', () => {
-  it('참여인력 섹션 안에 있고 팀원 목록보다 먼저 나온다', () => {
+  it('참여인력 섹션 안에 있고 연동 결과 표보다 먼저 나온다', () => {
     const sectionAt = source.indexOf('title="참여인력 (서류상·실제)"');
     const linkAt = source.indexOf('label="참여율 시트 링크"');
-    const teamListAt = source.indexOf('data-issue-label="참여인력 이름·역할"');
+    const teamListAt = source.indexOf('시트 링크를 넣고 연동하기를 누르면');
     expect(sectionAt).toBeGreaterThan(-1);
     expect(linkAt).toBeGreaterThan(sectionAt);
     expect(linkAt).toBeLessThan(teamListAt);
