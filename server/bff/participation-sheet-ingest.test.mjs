@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeParticipationSheet,
+  buildPeopleLinkCandidates,
   buildStintEntries,
   PARTICIPATION_FORMAT_ID,
   parseParticipationSheet,
@@ -146,8 +147,28 @@ describe('신원 해석 - 못 찾는 것은 오류가 아니다', () => {
     expect(resolve([{ nickname: '테일러', name: '김혜령' }])[0].linkState).toBe('PENDING_LINK');
   });
 
-  it('채용예정-N 은 사람 미정 자리로 따로 센다', () => {
+  it('이름 없는 미정N 은 사람 미정 자리다', () => {
+    expect(resolve([{ nickname: '미정1', name: '' }])[0].linkState).toBe('PLACEHOLDER');
     expect(resolve([{ nickname: '채용예정-1', name: '' }])[0].linkState).toBe('PLACEHOLDER');
+  });
+
+  // 시트가 플랫폼보다 먼저 만들어지고 매번 갱신되지도 않는다. 닉네임은 미정인 채로
+  // 이름만 채워지는 일이 정상이므로, 이름이 붙으면 그때부터 실제 사람으로 다룬다.
+  it('미정N 에 이름이 붙으면 실제 사람으로 승격한다', () => {
+    expect(resolve([{ nickname: '미정1', name: '김정태' }])[0]).toMatchObject({
+      personId: 'p-kim', linkState: 'LINKED',
+    });
+  });
+
+  it('미정N 에 People 에 없는 이름이 붙으면 연결 대기다 - 막지 않는다', () => {
+    expect(resolve([{ nickname: '미정2', name: '김혜령' }])[0]).toMatchObject({
+      personId: '', linkState: 'PENDING_LINK',
+    });
+  });
+
+  it('미정N 이름은 닉네임과 대조하지 않는다 - 닉네임 칸은 아직 자리표시자다', () => {
+    // 일반 행이면 닉네임(에이블)과 이름(유자인)이 엇갈려 연결되지 않는 조합.
+    expect(resolve([{ nickname: '미정1', name: '유자인' }])[0].personId).toBe('p-yu');
   });
 });
 
@@ -198,6 +219,17 @@ describe('행 규칙 - 오류와 미입력을 나눈다', () => {
     expect(result.errors[0].code).toBe('participation_duplicate_month');
   });
 
+  it('같은 사람으로 연결됐으면 어떻게 적혔든 중복을 잡는다', () => {
+    const result = validateStintRows({
+      rows: [
+        { rowIndex: 0, nickname: '미정1', name: '김정태', personId: 'p-kim', stintStart: '2026-01', stintEnd: '2026-02', monthlyRates: { '2026-02': 30 } },
+        { rowIndex: 1, nickname: '에이블', name: '김정태', personId: 'p-kim', stintStart: '2026-02', stintEnd: '', monthlyRates: { '2026-02': 40 } },
+      ],
+      months,
+    });
+    expect(result.errors[0].code).toBe('participation_duplicate_month');
+  });
+
   it('교체는 오류가 아니다 - 달이 겹치지 않으면 통과한다', () => {
     const result = validateStintRows({
       rows: [
@@ -239,17 +271,73 @@ describe('참여행 생성 - 재실행이 안전해야 한다', () => {
     expect(entries[0].identity).toEqual({ nickname: '테일러', name: '김혜령' });
   });
 
-  it('채용예정 자리는 참여행을 만들지 않는다', () => {
+  it('이름 없는 미정 자리는 참여행을 만들지 않는다', () => {
     const entries = buildStintEntries({
       projectId: 'p1',
-      rows: [{ nickname: '채용예정-1', name: '', stintStart: '2026-01', stintEnd: '', monthlyRates: {}, linkState: 'PLACEHOLDER' }],
+      rows: [{ nickname: '미정1', name: '', stintStart: '2026-01', stintEnd: '', monthlyRates: {}, linkState: 'PLACEHOLDER' }],
     });
     expect(entries).toHaveLength(0);
+  });
+
+  it('미정N 의 참여행은 이름으로 묶는다 - 미정1 로 묶으면 서로 다른 사람이 합쳐진다', () => {
+    const entries = buildStintEntries({
+      projectId: 'p1',
+      rows: [
+        { nickname: '미정1', name: '김정태', stintStart: '2026-01', stintEnd: '', monthlyRates: {}, linkState: 'LINKED' },
+        { nickname: '미정2', name: '유자인', stintStart: '2026-01', stintEnd: '', monthlyRates: {}, linkState: 'LINKED' },
+      ],
+    });
+    expect(entries.map((entry) => entry.id)).toEqual([
+      'pts-p1-김정태-2026-01', 'pts-p1-유자인-2026-01',
+    ]);
   });
 
   it('사람 키는 백필과 같은 정규화를 쓴다', () => {
     expect(personKeyOf(' 에이블 ')).toBe('에이블');
     expect(personKeyOf('Lisa A')).toBe('lisa-a');
+  });
+});
+
+// 사전 등록을 놓치는 일은 늘 생긴다. 그때 이름이 어디에도 모이지 않으면 영영 연결되지 않는다.
+describe('People 등록 후보 - 사전 등록을 놓쳤을 때의 되돌아올 길', () => {
+  const candidatesOf = (rows) => buildPeopleLinkCandidates({ rows });
+
+  it('연결 대기만 후보로 올린다', () => {
+    const result = candidatesOf([
+      { rowIndex: 0, nickname: '에이블', name: '김정태', linkState: 'LINKED', monthlyRates: {} },
+      { rowIndex: 1, nickname: '테일러', name: '김혜령', linkState: 'PENDING_LINK', monthlyRates: { '2026-01': 30 } },
+      { rowIndex: 2, nickname: '미정1', name: '', linkState: 'PLACEHOLDER', monthlyRates: {} },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: '김혜령', nickname: '테일러', monthCount: 1 });
+  });
+
+  it('같은 사람이 여러 줄이면 한 후보로 묶고 줄 번호를 모은다', () => {
+    const result = candidatesOf([
+      { rowIndex: 1, nickname: '테일러', name: '김혜령', linkState: 'PENDING_LINK', monthlyRates: { '2026-01': 30 } },
+      { rowIndex: 4, nickname: '테일러', name: '김혜령', linkState: 'PENDING_LINK', monthlyRates: { '2026-05': 30 } },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].rowIndexes).toEqual([1, 4]);
+    expect(result[0].monthCount).toBe(2);
+  });
+
+  it('미정N 에 이름만 있는 사람도 후보가 된다 - 이것이 fallback 의 핵심이다', () => {
+    const result = candidatesOf([
+      { rowIndex: 0, nickname: '미정2', name: '강에나', linkState: 'PENDING_LINK', monthlyRates: {} },
+    ]);
+    expect(result[0]).toMatchObject({ name: '강에나', nickname: '' });
+  });
+
+  // People 은 사람이 등록한다. 시트 오타로 유령 인물이 생기면 되돌리기 어렵다.
+  it('후보를 돌려줄 뿐 입력을 건드리지 않는다', () => {
+    const rows = [{ rowIndex: 0, nickname: '테일러', name: '김혜령', linkState: 'PENDING_LINK', monthlyRates: { '2026-01': 30 } }];
+    const snapshot = JSON.parse(JSON.stringify(rows));
+    const first = buildPeopleLinkCandidates({ rows });
+    const second = buildPeopleLinkCandidates({ rows });
+    expect(rows).toEqual(snapshot);
+    expect(second).toEqual(first);
+    expect(first[0].personId).toBeUndefined();
   });
 });
 
@@ -283,5 +371,7 @@ describe('전체 분석', () => {
     });
     expect(result.ok).toBe(true);
     expect(result.summary.pendingLinkCount).toBe(1);
+    expect(result.summary.candidateCount).toBe(1);
+    expect(result.candidates[0]).toMatchObject({ name: '김혜령', nickname: '테일러' });
   });
 });
