@@ -36,6 +36,7 @@ export function PortalCashflowPage() {
         patchProjectSnapshot({ ...project, ...result });
       }}
       roleOverride={portalUser?.role}
+      portalMode
       onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
     />
   );

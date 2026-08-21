@@ -3,6 +3,7 @@ package dev.merryai.innerplatform.weekly.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyOverviewRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyOverviewResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
@@ -50,6 +51,12 @@ class CashflowWeeklyOverviewServiceTest {
         assertThat(response.items()).hasSize(2);
         assertThat(response.items().get(0).settlementStatuses().items().getFirst().status()).isEqualTo("COMPLETED");
         assertThat(response.items().get(1).settlementStatuses().items().getFirst().status()).isEqualTo("PENDING_APPROVAL");
+        assertThat(response.items()).allSatisfy(item -> assertThat(item.settlementStatuses().items().getFirst())
+            .extracting(
+                CashflowSettlementStatusesResponse.Item::deadlineAt,
+                CashflowSettlementStatusesResponse.Item::approverDeadlineAt
+            )
+            .containsExactly("2026-09-10T15:00:00Z", "2026-09-13T15:00:00Z"));
         assertThat(response.items()).allSatisfy(item -> assertThat(item.projectionActualSummary()).isNotNull());
         assertThat(response.errors()).isEmpty();
         verify(authorization).requireProjectsAllowedForCommands(

@@ -80,6 +80,9 @@ import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthSettlementLifecycle;
+import dev.merryai.innerplatform.weekly.domain.ApproverDeadlineCalculator;
+import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
+import dev.merryai.innerplatform.weekly.domain.CashflowWeekDeadline;
 import dev.merryai.innerplatform.weekly.domain.CashflowFormulaValidator;
 import dev.merryai.innerplatform.weekly.domain.ClipboardCell;
 import dev.merryai.innerplatform.weekly.domain.ClipboardPayload;
@@ -107,8 +110,10 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.Clock;
+import java.time.YearMonth;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -265,10 +270,34 @@ public class WeeklyExpenseCommandService {
         return new CashflowSettlementStatusesResponse(
             projectId,
             yearMonth,
-            records.stream().map(record -> new CashflowSettlementStatusesResponse.Item(
-                record.period(), record.status(), record.submittedAt(), record.submittedBy(),
-                record.approvedAt(), record.approvedBy(), record.revision()
-            )).toList()
+            records.stream().map(record -> settlementStatusItem(yearMonth, record)).toList()
+        );
+    }
+
+    private static CashflowSettlementStatusesResponse.Item settlementStatusItem(
+        String yearMonth,
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord record
+    ) {
+        String deadlineAt = null;
+        String approverDeadlineAt = null;
+        if ("MONTH".equals(record.period())) {
+            YearMonth targetMonth = YearMonth.parse(yearMonth);
+            deadlineAt = CashflowCloseDeadline.settlementDeadlineAt(targetMonth).toString();
+            approverDeadlineAt = ApproverDeadlineCalculator.monthly(yearMonth, 3).toString();
+        } else if (record.period() != null && record.period().matches("WEEK_[1-5]")) {
+            // 주정산도 JVM 이 기한의 단일 소스다. 이전에는 BFF 가 같은 규칙 사본으로 채웠는데,
+            // 사본만 살아 있으면 규칙이 조용히 갈린다 (CashflowWeekDeadline Javadoc 참고).
+            int weekNo = record.period().charAt(5) - '0';
+            Instant practitionerDeadline =
+                CashflowWeekDeadline.practitionerDeadlineAt(YearMonth.parse(yearMonth), weekNo);
+            deadlineAt = practitionerDeadline.toString();
+            // 조직장 승인은 실무자 마감 + 13시간 = 같은 날 13:00 KST.
+            approverDeadlineAt =
+                ApproverDeadlineCalculator.weekly(practitionerDeadline, Duration.ofHours(13)).toString();
+        }
+        return new CashflowSettlementStatusesResponse.Item(
+            record.period(), record.status(), record.submittedAt(), record.submittedBy(),
+            record.approvedAt(), record.approvedBy(), record.revision(), deadlineAt, approverDeadlineAt
         );
     }
 
@@ -400,7 +429,8 @@ public class WeeklyExpenseCommandService {
                 ? new CashflowSettlementStatusesResponse.Item(
                     item.period(),
                     CashflowMonthSettlementLifecycle.resolveMonthStatus(item.status(), monthCloseRequestStatus),
-                    item.submittedAt(), item.submittedBy(), item.approvedAt(), item.approvedBy(), item.revision()
+                    item.submittedAt(), item.submittedBy(), item.approvedAt(), item.approvedBy(), item.revision(),
+                    item.deadlineAt(), item.approverDeadlineAt()
                 )
                 : item
             ).toList()

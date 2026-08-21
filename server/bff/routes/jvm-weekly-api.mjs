@@ -40,7 +40,6 @@ import {
   CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
   CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
   cashflowCumulativeCloseScope,
-  cashflowCumulativeCloseCycle,
   cumulativeCloseMonthsOrNull,
   monthsBetween,
   previousYearMonth,
@@ -51,21 +50,14 @@ import {
   cashflowMonthCloseRequestPath,
   withdrawPendingCumulativeCloseRequest,
 } from '../cashflow-month-close-withdrawal.mjs';
-export { cashflowCumulativeCloseCycle };
 import {
   cashflowFinanceWeekDeadlineAt,
-  cashflowMonthCloseApproverDeadlineAt,
-  cashflowMonthCloseDeadline,
-  cashflowMonthCloseDeadlineAt,
   cashflowWeeklyApproverDeadlineAt,
-  isCashflowCloseOverdue,
 } from '../cashflow-close-deadline.mjs';
 import { cashflowMonthRequestCovers } from '../cashflow-month-state.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import * as z from 'zod/v4';
-
-export { cashflowMonthCloseDeadline };
 
 const CASHFLOW_LINE_INDEX = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
@@ -365,7 +357,10 @@ function cashflowSectionErrorsForResponse(sectionErrors) {
 // JVM 이 내는 주간 준수 상태는 ON_TIME · COMPLETED_LATE · MISSED · PENDING 넷이다
 // (FirestoreInheritedWeeklyExpensePersistence). 예전 이 표는 존재하지 않는 COMPLETED 를
 // 기다리고 ON_TIME 을 몰라서, 기한 내 완료한 주차를 "확인 필요" 로 그렸다.
-// lockState: SUBMITTED = 완료 요청됨(조직장 확정 대기). LOCKED/없음 = 준수 상태 그대로.
+// lockState: SUBMITTED = 완료 요청됨(조직장 확정 대기). LOCKED = 조직장 확정됨.
+// 빈 값을 여기서 재해석하지 않는다 - 판정 주체는 JVM 이고, 값이 없는 옛 기록을 무엇으로
+// 볼지는 JVM 이 정한다(FirestoreInheritedWeeklyExpensePersistence 의 기본값). 그 판정을
+// BFF 가 한 번 더 하면 두 곳이 조용히 갈린다.
 export function cashflowWeeklyStatusLabel(status, available, lockState = '') {
   if (!available) return '주간 정산 상태 확인 필요';
   if (lockState === 'SUBMITTED') return '확정 대기';
@@ -731,25 +726,18 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
         : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
           ? 'PENDING_APPROVAL'
           : 'WAITING_FOR_UPDATE';
-    // 진행 바용 마감(표시 전용). 주차 마감은 JVM financeWeekDeadline 의 사본(패리티 표),
-    // 조직장 마감은 표시 전용 규칙이라 BFF 에만 있다.
+    // 마감의 단일 소스는 JVM 이다 (CashflowWeekDeadline). JVM 이 보낸 값을 그대로 쓰고,
+    // 아직 값을 보내지 않는 구버전 응답에만 parity 표 사본으로 채운다. 사본이 판정을
+    // 이기기 시작하면 규칙이 조용히 갈린다 - 그래서 순서가 JVM 먼저다.
     const withDeadlines = (item) => {
       const period = readOptionalText(item?.period);
-      if (period === 'MONTH') {
-        return {
-          ...item,
-          deadlineAt: cashflowMonthCloseDeadlineAt(yearMonth),
-          approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(yearMonth),
-        };
-      }
       const weekMatch = /^WEEK_([1-5])$/.exec(period);
       if (!weekMatch) return item;
-      const deadlineAt = cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
-      return {
-        ...item,
-        deadlineAt,
-        approverDeadlineAt: cashflowWeeklyApproverDeadlineAt(deadlineAt),
-      };
+      const deadlineAt = readOptionalText(item?.deadlineAt)
+        || cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
+      const approverDeadlineAt = readOptionalText(item?.approverDeadlineAt)
+        || cashflowWeeklyApproverDeadlineAt(deadlineAt);
+      return { ...item, deadlineAt, approverDeadlineAt };
     };
     const alignedItems = statusItems
       .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item))
@@ -1039,6 +1027,9 @@ async function readCashflowRequestPartyNames({ db, tenantId, record }) {
 
 async function readCashflowMonthCloseRequest({ db, tenantId, projectId, yearMonth }) {
   if (!db?.doc) return null;
+  // 문서 ID 는 회차를 실행한 달이다. 그 회차가 덮는 대상 월(throughMonth)과 다를 수 있으나
+  // 여기서 걸러내지 않는다 - 회차 월로 조회해야 그 회차를 회수·승인할 수 있기 때문이다.
+  // "이 달의 결산이 끝났는가" 는 다른 질문이고, throughMonth 로 화면이 판단한다.
   const direct = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
   if (direct.exists) return direct.data() || null;
   if (typeof db.collection !== 'function') return null;
@@ -1077,6 +1068,72 @@ function commandBody(req) {
 
 function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function jvmMonthCloseResponseInvalid() {
+  return createHttpError(502, 'JVM 월 결산 달력 자료가 올바르지 않습니다.', 'jvm_weekly_response_invalid');
+}
+
+function validJvmIsoDate(value) {
+  if (typeof value !== 'string' || value.trim() !== value
+    || !/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function validJvmInstant(value) {
+  return typeof value === 'string'
+    && value.trim() === value
+    && value.length > 0
+    && /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value));
+}
+
+function readJvmOperationalCycle(source, yearMonth) {
+  if (!source || typeof source !== 'object' || !Object.hasOwn(source, 'operationalCycle')) {
+    throw jvmMonthCloseResponseInvalid();
+  }
+  const cycle = objectValue(source.operationalCycle);
+  if (!cycle || cycle.cycleYearMonth !== yearMonth
+    || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(cycle.targetYearMonth)
+    || !validJvmIsoDate(cycle.closeDeadline)
+    || typeof cycle.closeEligible !== 'boolean'
+    || typeof cycle.late !== 'boolean') {
+    throw jvmMonthCloseResponseInvalid();
+  }
+  return {
+    cycleYearMonth: cycle.cycleYearMonth,
+    targetYearMonth: cycle.targetYearMonth,
+    deadline: cycle.closeDeadline,
+    eligible: cycle.closeEligible,
+    late: cycle.late,
+  };
+}
+
+function readJvmMonthCloseCalendar(source, yearMonth) {
+  if (!source || typeof source !== 'object' || !Object.hasOwn(source, 'monthCloseCalendar')) {
+    throw jvmMonthCloseResponseInvalid();
+  }
+  const calendar = source.monthCloseCalendar;
+  if (!Array.isArray(calendar) || calendar.length !== 12) throw jvmMonthCloseResponseInvalid();
+  const expectedYear = yearMonth.slice(0, 4);
+  const expectedMonths = Array.from({ length: 12 }, (_unused, index) => (
+    `${expectedYear}-${String(index + 1).padStart(2, '0')}`
+  ));
+  if (calendar.some((item, index) => {
+    const value = objectValue(item);
+    return !value
+      || value.yearMonth !== expectedMonths[index]
+      || !validJvmIsoDate(value.closeDeadline)
+      || !validJvmInstant(value.closeDeadlineAt)
+      || !validJvmInstant(value.approverDeadlineAt);
+  })) throw jvmMonthCloseResponseInvalid();
+  return new Map(calendar.map((item) => [item.yearMonth, {
+    yearMonth: item.yearMonth,
+    closeDeadline: item.closeDeadline,
+    closeDeadlineAt: item.closeDeadlineAt,
+    approverDeadlineAt: item.approverDeadlineAt,
+  }]));
 }
 
 function amendedSheetFormulaSnapshot(mirror, amendmentEvidence) {
@@ -2179,7 +2236,7 @@ function assertCashflowSheetPublicationReady(state) {
 
 
 async function readCashflowMonthCloseStatuses({
-  db, tenantId, projectId, selectedYear, weeklyYear, cumulativeAuthority, businessDate = '',
+  db, tenantId, projectId, selectedYear, weeklyYear, cumulativeAuthority, monthCloseCalendar, businessDate = '',
 }) {
   const canonicalWeeklyYear = readWeeklyYear(weeklyYear);
   const authority = objectValue(cumulativeAuthority) || {};
@@ -2321,6 +2378,7 @@ async function readCashflowMonthCloseStatuses({
   const historyUnavailable = historyByMonth === null;
   const statuses = Array.from({ length: 12 }, (_unused, monthIndex) => {
     const yearMonth = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`;
+    const calendarItem = monthCloseCalendar.get(yearMonth);
     const status = selectedYear === canonicalWeeklyYear && closedThrough && yearMonth <= closedThrough
       ? 'CLOSED'
       : 'OPEN';
@@ -2339,12 +2397,13 @@ async function readCashflowMonthCloseStatuses({
     return {
       yearMonth,
       status,
-      closeDeadline: cashflowMonthCloseDeadline(yearMonth),
-      // 진행 바용 시각 표현: 실무자 = 익월 11일 0시 KST, 조직장 승인 = 14일 0시 KST(표시 전용, 누적 없음).
-      closeDeadlineAt: cashflowMonthCloseDeadlineAt(yearMonth),
-      approverDeadlineAt: cashflowMonthCloseApproverDeadlineAt(yearMonth),
-      // 기준일을 모르면 기한 초과를 단정하지 않는다.
-      closeOverdue: isCashflowCloseOverdue({ yearMonth, status, businessDate }),
+      closeDeadline: calendarItem.closeDeadline,
+      closeDeadlineAt: calendarItem.closeDeadlineAt,
+      approverDeadlineAt: calendarItem.approverDeadlineAt,
+      // 기한 자체는 JVM 계약이고, 여기서는 기존 status/history join 에 기준일을 표시한다.
+      closeOverdue: /^20\d{2}-(0[1-9]|1[0-2])-\d{2}$/.test(businessDate)
+        && status !== 'CLOSED'
+        && businessDate > calendarItem.closeDeadline,
       sheetCalculationChecks: historyUnavailable
         ? null
         : Array.isArray(calculationChecks)
@@ -2781,6 +2840,10 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
       lockState: readOptionalText(item.lockState) || null,
       deadline: item.deadline,
       approverDeadline: cashflowWeeklyApproverDeadlineAt(item.deadline),
+      // 완료 정보는 JVM 이 이미 주는 값이다(CashflowWeeklyComplianceHistoryResponse.Item).
+      // 여기서 떨어뜨리면 지난 주차가 "언제 완료했는지" 를 화면이 알 길이 없어진다.
+      completedAt: readOptionalText(item.completedAt) || null,
+      completedBy: readOptionalText(item.completedBy) || null,
       updateResult: item.updateResult,
       operationId: item.operationId,
       auditId: item.auditId,
@@ -2790,7 +2853,7 @@ function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYea
 
 async function composeCashflowMonthDashboard({
   db, req, projectId, yearMonth, close, cashflow, openingBalances, comparisonBoundary, weeklyCompliance,
-  projectionActualSummary, cumulativeAuthority, sectionErrors = [], sourceBlockers = [],
+  projectionActualSummary, cumulativeAuthority, monthCloseCalendar, sectionErrors = [], sourceBlockers = [],
   weeklyComplianceBoundary = comparisonBoundary,
 }) {
   const closedSnapshot = ['CLOSED', 'REOPEN_REQUESTED'].includes(readOptionalText(close?.status))
@@ -2833,7 +2896,7 @@ async function composeCashflowMonthDashboard({
     : readWeeklyYear(mirror?.weeklyYear);
   const [monthCloseStatusRead, annualTotals] = await Promise.all([
     readCashflowMonthCloseStatuses({
-      db, tenantId, projectId, selectedYear, weeklyYear, cumulativeAuthority, businessDate,
+      db, tenantId, projectId, selectedYear, weeklyYear, cumulativeAuthority, monthCloseCalendar, businessDate,
     }),
     readAnnualTotals({ db, tenantId, projectId, weeklyYear }),
   ]);
@@ -3219,6 +3282,8 @@ async function composeCashflowMonthDashboard({
       cycleYearMonth: readOptionalText(close?.cycleYearMonth) || yearMonth,
       targetYearMonth: readOptionalText(close?.targetYearMonth) || buildCumulativeCloseScope(yearMonth).throughMonth,
       closeDeadline: readOptionalText(close?.closeDeadline) || null,
+      closeDeadlineAt: readOptionalText(close?.closeDeadlineAt) || null,
+      approverDeadlineAt: readOptionalText(close?.approverDeadlineAt) || null,
       late: Boolean(close?.late),
     },
     validation: {
@@ -3896,6 +3961,9 @@ export function mountJvmWeeklyApiRoutes(app, {
         if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
           throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
         }
+        const monthCloseCalendar = readJvmMonthCloseCalendar(source, yearMonth);
+        const operationalCycle = readJvmOperationalCycle(source, yearMonth);
+        const selectedCalendar = monthCloseCalendar.get(yearMonth);
         const cycleBusinessDate = readOptionalText(result?.evaluatedBusinessDate) || localComparisonBoundary.asOfDate;
         let comparisonBoundary;
         try {
@@ -3910,20 +3978,16 @@ export function mountJvmWeeklyApiRoutes(app, {
             'jvm_weekly_response_invalid',
           );
         }
-        const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
-        if (!cumulativeCycle) {
-          throw createHttpError(502, '월 결산 회차 기준일을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
-        }
         const cumulativeClose = {
           ...result,
-          cycleYearMonth: cumulativeCycle.cycleYearMonth,
-          targetYearMonth: cumulativeCycle.targetYearMonth,
+          cycleYearMonth: operationalCycle.cycleYearMonth,
+          targetYearMonth: operationalCycle.targetYearMonth,
           evaluatedBusinessDate: cycleBusinessDate,
-          closeDeadline: cumulativeCycle.deadline,
-          closeEligible: readOptionalText(result?.status) === 'OPEN' && cumulativeCycle.eligible,
-          late: readOptionalText(result?.status) === 'OPEN'
-            ? cycleBusinessDate > cumulativeCycle.deadline
-            : Boolean(result?.late),
+          closeDeadline: operationalCycle.deadline,
+          closeDeadlineAt: selectedCalendar.closeDeadlineAt,
+          approverDeadlineAt: selectedCalendar.approverDeadlineAt,
+          closeEligible: operationalCycle.eligible,
+          late: operationalCycle.late,
           monthState: monthCloseRequest ? cashflowMonthCloseRequestView(monthCloseRequest) : null,
         };
         const cashflowSourceUnavailable = jvmPartial.unavailableSections.has('cashflow');
@@ -3943,6 +4007,7 @@ export function mountJvmWeeklyApiRoutes(app, {
               weeklyCompliance,
               projectionActualSummary: null,
               cumulativeAuthority: objectValue(source?.cumulativeClose),
+              monthCloseCalendar,
               sectionErrors,
               sourceBlockers: jvmPartial.blockers,
               weeklyComplianceBoundary: comparisonBoundary,
@@ -4469,9 +4534,11 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
       }
+      const monthCloseCalendar = readJvmMonthCloseCalendar(source, yearMonth);
+      const operationalCycle = readJvmOperationalCycle(source, yearMonth);
+      const selectedCalendar = monthCloseCalendar.get(yearMonth);
       const cycleBusinessDate = readOptionalText(sourceClose?.evaluatedBusinessDate) || comparisonBoundary.asOfDate;
-      const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
-      if (readOptionalText(sourceClose?.status) !== 'OPEN' || !cumulativeCycle?.eligible) {
+      if (readOptionalText(sourceClose?.status) !== 'OPEN' || !operationalCycle.eligible) {
         throw createHttpError(
           409,
           '현재 월 결산 회차는 승인 요청을 만들 수 없습니다. 최신 상태를 다시 확인해 주세요.',
@@ -4480,11 +4547,14 @@ export function mountJvmWeeklyApiRoutes(app, {
       }
       const validationClose = {
         ...sourceClose,
-        cycleYearMonth: cumulativeCycle.cycleYearMonth,
-        targetYearMonth: cumulativeCycle.targetYearMonth,
+        cycleYearMonth: operationalCycle.cycleYearMonth,
+        targetYearMonth: operationalCycle.targetYearMonth,
         evaluatedBusinessDate: cycleBusinessDate,
-        closeDeadline: cumulativeCycle.deadline,
-        closeEligible: true,
+        closeDeadline: operationalCycle.deadline,
+        closeDeadlineAt: selectedCalendar.closeDeadlineAt,
+        approverDeadlineAt: selectedCalendar.approverDeadlineAt,
+        closeEligible: operationalCycle.eligible,
+        late: operationalCycle.late,
       };
       const validationDashboard = await composeCashflowMonthDashboard({
         db,
@@ -4498,6 +4568,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         weeklyCompliance,
         projectionActualSummary: null,
         cumulativeAuthority: objectValue(source?.cumulativeClose),
+        monthCloseCalendar,
         sectionErrors: [],
         sourceBlockers: jvmPartial.blockers,
       });

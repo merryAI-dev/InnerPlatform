@@ -3934,7 +3934,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(before.items()).anySatisfy(item -> {
             assertThat(item.id()).isEqualTo("2026-07-w2");
             assertThat(item.status()).isEqualTo("ON_TIME");
-            // lockState 없는 옛 버전은 확정으로 본다
+            // lockState 없는 옛 버전은 확정으로 본다 (회수 판정은 status 가 한다)
             assertThat(item.lockState()).isEqualTo("LOCKED");
         });
         assertThat(before.onTimeCount()).isEqualTo(1L);

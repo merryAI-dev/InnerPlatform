@@ -3,6 +3,7 @@ package dev.merryai.innerplatform.weekly.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.time.YearMonth;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +38,14 @@ class CashflowCloseDeadlineTest {
         // 회차가 덮는 대상 월은 직전 월이므로 두 표현은 같은 날짜여야 한다.
         assertThat(CashflowCloseDeadline.forCumulativeCycle(YearMonth.parse("2026-08")))
             .isEqualTo(CashflowCloseDeadline.forTargetMonth(YearMonth.parse("2026-07")));
+    }
+
+    @Test
+    void settlementDeadlineAtIsTheEleventhAtMidnightInSeoul() {
+        assertThat(CashflowCloseDeadline.settlementDeadlineAt(YearMonth.parse("2026-08")))
+            .isEqualTo(Instant.parse("2026-09-10T15:00:00Z"));
+        assertThat(CashflowCloseDeadline.settlementDeadlineAt(YearMonth.parse("2026-12")))
+            .isEqualTo(Instant.parse("2027-01-10T15:00:00Z"));
     }
 
     @Test

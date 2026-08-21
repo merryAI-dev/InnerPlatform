@@ -23,7 +23,58 @@ describe('CashflowProjectSheet schedule bar', () => {
   it('does not invent a confirm timestamp, and drops withdrawn or rejected requests back to "not requested"', () => {
     expect(source).toContain("approverDone: current.lockState === 'LOCKED'");
     expect(source).not.toContain('current.confirmedAt || current.completedAt');
-    expect(source).toContain("const requested = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);");
+    // 회수·반려된 요청은 "요청 전" 으로 되돌아간다. 진행 중으로 보는 상태는 이 다섯뿐이다.
+    expect(source).toContain("const inFlight = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);");
+  });
+
+  // 회차 월과 덮는 대상 월은 다르다. 누적 결산을 8월에 돌려도 대상은 throughMonth 까지다.
+  // 회차가 있다는 것만 보고 그렸더니 아직 아무도 하지 않은 8월이 완료로 보였다(JLIN IBS).
+  // 덮이지 않는 달은 진행도를 빌리지 않고 예정 날짜만 그린다. 회차 자체는 건드리지 않는다 -
+  // 회수·승인은 회차 월로 하는 것이 맞고, 그 경로는 BFF 조회가 그대로 유지한다.
+  it('does not borrow a cycle progress for a month the cycle does not cover', () => {
+    expect(source).toContain('const monthCoveredByRequest =');
+    expect(source).toContain('return yearMonth <= through;');
+    expect(source).toContain('const requested = inFlight && monthCoveredByRequest;');
+  });
+
+  // 노드 하나가 두 회차를 그리던 문제. 배지는 8월에 돌린 7월분(완료)을, 단계는 8월분(9월 마감)을
+  // 봐서 "완료인데 진행 중" 이 됐다. 노드 하나는 회차 하나만 말한다.
+  it('splits the executed cycle out of the month it does not cover', () => {
+    // 실행된 회차는 그 달 안에서 일어난 일이므로 주정산 앞(월초)에 놓는다.
+    expect(source).toContain('const executedCycleNode: PortalTimelineNode | null');
+    expect(source).toContain('...(executedCycleNode ? [executedCycleNode] : []),\n      ...weeklyNodes,');
+    // 지난 회차의 마감은 이 화면의 관심이 아니다 - 완료 사실만 그리고 시각을 지어내지 않는다.
+    expect(source).toContain('practitionerDeadline: null,');
+    expect(source).toContain('practitionerDoneAt: monthCloseRequest.requestedAt,');
+    // 대상 월로 이름 붙인다. 사람은 "무엇을 결산했나" 로 기억한다.
+    expect(source).toContain("label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`");
+  });
+
+  it('keeps one month-close action button, on the node that owns the request', () => {
+    expect(source).toContain('{executedCycleSteps.length > 0 ? null : renderMonthlyAction()}');
+    expect(source).toContain('{renderScheduleDetails(executedCycleSteps, true)}');
+  });
+
+  // 배지와 단계가 서로 다른 근거를 보면 화면이 스스로 모순된다("월 결산 완료" 위 "결산 요청 · 진행 중").
+  // 시트 검토·반영이 실패해도 아무것도 띄우지 않고 끝나는 자리가 넷 있었다. 사람 눈에는 버튼만
+  // 원래대로 돌아오니 반영이 된 줄 안다. 성공은 토스트, 오류는 그 자리 인라인 배너(2026-08-19 결정).
+  it('never ends a sheet stage or apply in silence', () => {
+    expect(source).toContain('const [sheetOperationError, setSheetOperationError] = useState');
+    expect(source).toContain('function sheetOperationErrorMessage(error: unknown): string');
+    // 검토 실패 · 인증 재시도 실패 · 반영에서 어느 분기도 못 받은 오류, 셋 다 말한다.
+    expect(source.match(/setSheetOperationError\(sheetOperationErrorMessage\(/g)?.length).toBe(3);
+    // 반영할 수 없는 범위와 "이미 최신" 도 조용히 끝나지 않는다.
+    expect(source).toContain('반영할 수 없는 시트 범위가 있습니다.');
+    expect(source).toContain("toast.success('MYSCube가 이미 시트 최신값과 같습니다.');");
+    // 새 시도는 지난 오류를 지우고 시작한다.
+    expect(source.match(/setSheetOperationError\(''\)/g)?.length).toBe(2);
+    expect(source).toContain('{sheetOperationError ? (');
+  });
+
+  it('reads the month badge from the same source as the month schedule steps', () => {
+    expect(source).toContain('const monthOwnPresentation = useMemo(');
+    expect(source).toContain('const monthCloseStatusLabel = monthOwnPresentation.statusLabel;');
+    expect(source).not.toContain("const monthCloseStatusLabel = cashflowPresentation?.monthClose.statusLabel");
   });
 });
 
@@ -297,6 +348,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps Projection then ACTUAL row order and uses navy for difference rows', () => {
+    const cashflowTables = source.slice(source.indexOf('function renderProjectionCell'), source.indexOf('function renderPortalSettlementPanel()'));
     expect(source.indexOf('data-cashflow-block="projection"')).toBeLessThan(source.indexOf('data-cashflow-block="actual"'));
     expect(source).toMatch(/renderModeLineRows\(mode, CASHFLOW_IN_LINES[\s\S]*renderSummaryRow\(mode, 'totalIn'\)[\s\S]*renderModeLineRows\(mode, CASHFLOW_OUT_LINES[\s\S]*renderSummaryRow\(mode, 'totalOut'\)[\s\S]*renderSummaryRow\(mode, 'net'\)/);
     expect(source).toContain('Projection - Actual 차이');
@@ -331,7 +383,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.')");
     expect(source).toContain("toast.success('월 결산 요청을 회수했어요.')");
     expect(source).toContain("toast.error(resolveApiErrorMessage(finalError, '시트 값을 반영하지 못했습니다. 잠시 후 다시 시도해 주세요.'))");
-    expect(source).toContain("toast.info('시트와 MYSCube 값이 이미 같습니다. 반영할 변경이 없습니다.')");
+    expect(source).toContain("toast.success('MYSCube가 이미 시트 최신값과 같습니다.');");
     expect(source).not.toContain('toast.warning');
     expect(source).not.toContain('월 결산 승인 조직장을 선택하세요');
     expect(source).toContain('saveCashflowMonthCloseApproverViaBff');
@@ -341,7 +393,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('space-y-5 bg-background p-4');
     expect(source).not.toMatch(/FFF7DE|E4C974|D6A92C|FCE8A8/);
     expect(source).toContain('text-red-700');
-    expect(source).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
+    expect(cashflowTables).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
   });
 
   it('shows week codes without redundant date ranges in both cashflow tables', () => {
@@ -589,8 +641,37 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(operations).toContain('monthCloseActions?.requestMonthClose.enabled');
     expect(operations).not.toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
     expect(operations).toContain('monthCloseNotice ? (');
-    expect(operations).not.toContain('closeDeadline');
+    expect(source).toContain('closeDeadlineAt');
     expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
+  });
+
+  it('keeps the portal-only single-surface actions and server-owned settlement timeline', () => {
+    const portal = source.slice(source.indexOf('function renderPortalSettlementPanel()'), source.indexOf('function renderOperationsPanel()'));
+    const admin = source.slice(source.indexOf('function renderOperationsPanel()'), source.indexOf('function renderOpsTimeline()'));
+    expect(source).toContain('portalMode');
+    expect(source).toContain('data-cashflow-portal-settlement-timeline');
+    expect(source).toContain('portalWeeklyAction');
+    expect(source).toContain('portalMonthlyAction');
+    expect(source).not.toContain('monthCloseStatuses?.find');
+    expect(source).toContain('tone: week.surfaceTone');
+    expect(source).toContain("statusLabel: week.statusLabel || '확인 불가'");
+    expect(source).toContain('cashflowPresentation?.monthClose');
+    expect(source).toContain("statusLabel: monthlyPresentation?.statusLabel || '확인 불가'");
+    expect(source).toContain('project?.contractEnd');
+    expect(source).toContain('label: `${week.label} 주정산`');
+    expect(portal).toContain('data-cashflow-portal-weekly-node');
+    expect(portal).toContain('data-cashflow-portal-monthly-node');
+    expect(portal).toContain('renderScheduleDetails(monthScheduleSteps, true)');
+    expect(portal).toContain('data-cashflow-portal-settlement-annotations');
+    expect(portal).not.toContain('<CashflowScheduleBar');
+    expect(admin).toContain('<CashflowScheduleBar steps={weeklyScheduleSteps}');
+    expect(admin).toContain('<CashflowScheduleBar steps={monthScheduleSteps}');
+    expect(source).toContain('aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}');
+    expect(source).toContain('monthScheduleSteps.length > 0');
+    expect(source).toContain("if (portalMode) {");
+    expect(source).toContain('월 결산 재오픈 요청을 보냈어요.');
+    expect(portal).toContain('{!monthCloseError && !canReviewReopen ? (');
+    expect(portal).toContain(') : !monthCloseError && canReviewReopen ? (');
   });
 
   it('guides a blocked month close to the specific next action and records safe developer diagnostics', () => {

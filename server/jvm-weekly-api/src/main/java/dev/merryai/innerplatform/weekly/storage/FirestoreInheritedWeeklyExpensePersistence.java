@@ -42,6 +42,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmatio
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
+import dev.merryai.innerplatform.weekly.domain.CashflowWeekDeadline;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseHash;
@@ -1544,7 +1545,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(value.get("operationId"), ""),
                 text(value.get("auditId"), ""),
                 text(value.get("updateResult"), ""),
-                // lockState 도입 전 버전(확정 개념 없던 완료) 은 확정으로 본다.
+                /*
+                 * lockState 가 없는 완료는 확정(LOCKED)으로 본다.
+                 *
+                 * 2026-08-20 에 이 기본값을 SUBMITTED 로 바꿨다가 되돌렸다. 회수 가능
+                 * 여부를 판정하는 필드는 lockState 가 아니라 완료 문서의 status 이고
+                 * (jvm-weekly-api.mjs 의 reopen 라우트), 라이브 문서는 status="LOCKED" 다.
+                 * lockState 만 바꾸니 화면은 "확정 대기" 로 열리는데 회수는 400
+                 * (cashflow_weekly_reopen_reason_required) 으로 막히는 불일치가 났다.
+                 * 두 필드를 함께 다루기 전에는 이 기본값을 건드리지 않는다.
+                 */
                 text(value.get("lockState"), "LOCKED")
             ));
         }
@@ -2037,19 +2047,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private Instant financeWeekDeadline(String yearMonth, int weekNo) {
-        YearMonth month = YearMonth.parse(yearMonth);
-        LocalDate first = month.atDay(1);
-        LocalDate firstMonday = first.minusDays(first.getDayOfWeek().getValue() - 1L);
-        LocalDate start = weekNo == 1 ? first : firstMonday.plusWeeks(weekNo - 1L);
-        LocalDate end = weekNo == CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
-            ? month.atEndOfMonth()
-            : firstMonday.plusWeeks(weekNo).minusDays(1);
-        LocalDate thursday = start;
-        while (!thursday.isAfter(end) && thursday.getDayOfWeek() != java.time.DayOfWeek.THURSDAY) {
-            thursday = thursday.plusDays(1);
-        }
-        LocalDate deadlineDate = thursday.isAfter(end) ? end.plusDays(1) : thursday.plusDays(1);
-        return deadlineDate.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant();
+        // 규칙 본문은 CashflowWeekDeadline 로 옮겼다. 사본이 남으면 규칙이 조용히 갈린다.
+        return CashflowWeekDeadline.practitionerDeadlineAt(YearMonth.parse(yearMonth), weekNo);
     }
 
     private String weeklyComplianceStatus(String yearMonth, int weekNo, Instant completedAt, Instant deadline) {

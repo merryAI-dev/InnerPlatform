@@ -1735,6 +1735,21 @@ class WeeklyExpenseControllerTest {
             .isEqualTo("2026-07");
         assertThat(json.path("cumulativeClose").path("settlementMonth").asText())
             .isEqualTo("2026-08");
+        assertThat(json.path("operationalCycle")).isNotNull();
+        assertThat(json.path("operationalCycle").path("cycleYearMonth").asText()).isEqualTo("2026-08");
+        assertThat(json.path("operationalCycle").path("targetYearMonth").asText()).isEqualTo("2026-07");
+        assertThat(json.path("operationalCycle").path("closeDeadline").asText()).isEqualTo("2026-08-10");
+        assertThat(json.path("operationalCycle").path("closeEligible").asBoolean()).isTrue();
+        assertThat(json.path("operationalCycle").path("late").asBoolean()).isTrue();
+        assertThat(json.path("monthCloseCalendar")).hasSize(12);
+        assertThat(json.path("monthCloseCalendar").get(0).path("yearMonth").asText()).isEqualTo("2026-01");
+        assertThat(json.path("monthCloseCalendar").get(7).path("yearMonth").asText()).isEqualTo("2026-08");
+        assertThat(json.path("monthCloseCalendar").get(7).path("closeDeadline").asText())
+            .isEqualTo("2026-09-10");
+        assertThat(json.path("monthCloseCalendar").get(7).path("closeDeadlineAt").asText())
+            .isEqualTo("2026-09-10T15:00:00Z");
+        assertThat(json.path("monthCloseCalendar").get(7).path("approverDeadlineAt").asText())
+            .isEqualTo("2026-09-13T15:00:00Z");
         assertThat(json.path("reopenRequest").path("enabled").asBoolean()).isTrue();
     }
 

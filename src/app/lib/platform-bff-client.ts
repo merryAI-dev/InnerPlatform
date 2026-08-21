@@ -1108,6 +1108,8 @@ export interface CashflowMonthCloseDashboard {
     yearMonth: string;
     status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | string;
     closeDeadline?: string | null;
+    closeDeadlineAt?: string | null;
+    approverDeadlineAt?: string | null;
     closeOverdue?: boolean;
     sheetCalculationChecks?: CashflowMonthCloseDashboard['sheetCalculationChecks'] | null;
   }> | null;
@@ -3582,6 +3584,8 @@ export async function reopenCashflowWeeklyUpdateViaBff(params: {
   projectId: string;
   yearMonth: string;
   weekNo: number;
+  /** 조직장이 확정한 주를 되돌릴 때만 필요하다. BFF·JVM 은 이미 받고 있다. */
+  reason?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowWeeklyUpdateCompletionResult> {
   const response = await resolveClient(params.client).post<CashflowWeeklyUpdateCompletionResult>(
@@ -3592,6 +3596,7 @@ export async function reopenCashflowWeeklyUpdateViaBff(params: {
       body: {
         yearMonth: params.yearMonth,
         weekNo: params.weekNo,
+        ...(params.reason ? { reason: params.reason } : {}),
       },
       retries: 0,
       timeoutMs: 12000,

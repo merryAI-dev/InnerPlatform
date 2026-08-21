@@ -1,14 +1,9 @@
-// 누적 월 결산의 달력 규칙 (BFF 쪽 도메인).
+// 누적 월 결산의 범위·authority 문서 계약 (BFF 읽기/쓰기 경계).
 //
 // 누적 결산은 2023-01 을 기점으로 "선택한 회차 월의 직전 월"까지를 한 번에 덮는다.
-// 이 모듈은 그 범위 계산만 안다 - HTTP 상태코드도, Firestore 도 모른다. 범위가
+// 이 모듈은 deadline을 계산하지 않고 범위만 안다 - HTTP 상태코드도, Firestore 도 모른다. 범위가
 // 성립하지 않으면 null 을 돌려주고, 사용자에게 뭐라고 말할지는 라우트가 정한다.
 //
-// 회차 기한(회차 월의 10일)은 기한 규칙의 단일 소스인 cashflow-close-deadline 에서
-// 파생한다. 회차 월의 10일 == "직전 월을 대상 월로 본 기한" 이며, JVM 의
-// CashflowCloseDeadline.forCumulativeCycle 과 같은 표현이다.
-import { cashflowMonthCloseDeadline } from './cashflow-close-deadline.mjs';
-
 export const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
 export const CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH = '2023-01';
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -148,19 +143,5 @@ export function readCashflowCumulativeCloseScope(record = {}) {
     validRange: Boolean(expected && fromMonth === expected.fromMonth) || (legacy && legacyRange),
     strictRange: !legacy,
     legacy,
-  };
-}
-
-export function cashflowCumulativeCloseCycle(yearMonth, businessDate) {
-  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(yearMonth))
-    || !/^20\d{2}-(0[1-9]|1[0-2])-\d{2}$/.test(String(businessDate))) return null;
-  const targetYearMonth = previousYearMonth(yearMonth);
-  return {
-    cycleYearMonth: yearMonth,
-    targetYearMonth,
-    // 회차 월의 10일. 기한 규칙의 단일 소스에서 파생한다 - `${yearMonth}-10` 을
-    // 여기서 또 쓰면 기한 규칙이 세 번째로 복제된다.
-    deadline: cashflowMonthCloseDeadline(targetYearMonth),
-    eligible: targetYearMonth < String(businessDate).slice(0, 7),
   };
 }

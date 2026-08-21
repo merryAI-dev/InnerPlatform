@@ -6,8 +6,6 @@ import * as jvmWeeklyApiModule from './jvm-weekly-api.mjs';
 import {
   buildCashflowManagementChecks,
   buildCashflowMonthCloseRevisionChanges,
-  cashflowCumulativeCloseCycle,
-  cashflowMonthCloseDeadline,
   mountJvmWeeklyApiRoutes,
 } from './jvm-weekly-api.mjs';
 
@@ -54,6 +52,16 @@ describe('cashflow section error presentation', () => {
     expect(jvmWeeklyApiModule.cashflowWeekSurfaceTone({
       month: { tone: 'default' }, weeklyStatus, weeklyAvailable: true, isCurrent: false,
     })).toBe(tone);
+  });
+
+  // 라이브 사고(2026-08, JLIN IBS · GGGI): 완료 문서 55건 전부에 lockState 가 없었는데
+  // JVM 이 없는 값을 LOCKED 로 읽어, 확정한 적 없는 주가 "완료" 로 보이고 회수까지 막혔다.
+  // 고친 자리는 JVM 이다. BFF 는 받은 값을 옮기기만 하고 빈 값을 재해석하지 않는다 -
+  // 여기서 한 번 더 판정하면 두 곳이 조용히 갈린다.
+  it('maps lockState it receives without reinterpreting a blank one', () => {
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED')).toBe('확정 대기');
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'LOCKED')).toBe('기한 내 완료');
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, '')).toBe('기한 내 완료');
   });
 
   it('never labels a known JVM weekly status as 확인 필요', () => {
@@ -161,6 +169,29 @@ const ACTOR_MEMBER_ENTRY = ['orgs/tenant-a/members/pm-1', {
   uid: 'pm-1', email: 'pm@example.com', status: 'ACTIVE', role: 'pm', projectIds: ['project-a'],
 }];
 
+function monthCloseCalendarFor(yearMonth) {
+  const year = Number(String(yearMonth).slice(0, 4));
+  return Array.from({ length: 12 }, (_unused, monthIndex) => {
+    const month = monthIndex + 1;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const isoAtKstMidnight = (day) => new Date(Date.UTC(nextYear, nextMonth - 1, day) - 9 * 60 * 60 * 1000).toISOString();
+    return {
+      yearMonth: `${year}-${String(month).padStart(2, '0')}`,
+      closeDeadline: `${nextYear}-${String(nextMonth).padStart(2, '0')}-10`,
+      closeDeadlineAt: isoAtKstMidnight(11),
+      approverDeadlineAt: isoAtKstMidnight(14),
+    };
+  });
+}
+
+function previousMonthOf(yearMonth) {
+  const year = Number(String(yearMonth).slice(0, 4));
+  const month = Number(String(yearMonth).slice(5, 7));
+  const previous = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+  return `${previous.year}-${String(previous.month).padStart(2, '0')}`;
+}
+
 function monthDashboardSource(
   monthClose,
   cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months: [] } },
@@ -194,6 +225,7 @@ function monthDashboardSource(
   },
 ) {
   const liveCurrent = monthClose.status === 'OPEN' || snapshotCompatibility.status === 'LIVE_AMENDED';
+  const monthCloseCalendar = monthCloseCalendarFor(monthClose.yearMonth);
   return {
     monthClose,
     latestRun: monthClose,
@@ -210,6 +242,14 @@ function monthDashboardSource(
     snapshotCompatibility,
     cumulativeClose,
     reopenRequest,
+    operationalCycle: {
+      cycleYearMonth: monthClose.yearMonth,
+      targetYearMonth: previousMonthOf(monthClose.yearMonth),
+      closeDeadline: `${monthClose.yearMonth}-10`,
+      closeEligible: monthClose.status === 'OPEN',
+      late: false,
+    },
+    monthCloseCalendar,
     projectionActualSummary,
     weeklyCompliance: { items: [], nextCursor: '', onTimeCount: 0, missedCount: 0 },
   };
@@ -638,6 +678,33 @@ describe('JVM weekly API BFF proxy', () => {
     );
   });
 
+  it('keeps JVM-sent weekly deadlines instead of overwriting them with the BFF copy', async () => {
+    // 주간 마감의 단일 소스는 JVM CashflowWeekDeadline 이다. BFF parity 사본은 JVM 이
+    // 값을 보내지 않는 구버전 응답에만 채운다. 일부러 사본과 다른 값을 JVM 이 보내게 해서
+    // 어느 쪽이 이기는지 고정한다 - 사본이 이기면 규칙이 조용히 갈린다.
+    const source = fullMonthCloseSource();
+    const settlement = {
+      projectId: 'project-a', yearMonth: '2026-08',
+      items: [{
+        period: 'WEEK_1', status: 'COMPLETED',
+        deadlineAt: '2026-08-01T15:00:00.000Z', approverDeadlineAt: '2026-08-02T04:00:00.000Z',
+      }],
+    };
+    const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(
+      init.method === 'POST' ? { items: [structuredClone(settlement)], errors: [] } : structuredClone(settlement),
+    ), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        const week = response.body.items.find((item) => item.period === 'WEEK_1');
+        expect(week.deadlineAt).toBe('2026-08-01T15:00:00.000Z');
+        expect(week.approverDeadlineAt).toBe('2026-08-02T04:00:00.000Z');
+      });
+  });
+
   it('uses the canonical month-close request as the MONTH status source of truth', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
@@ -645,7 +712,10 @@ describe('JVM weekly API BFF proxy', () => {
     });
     const settlement = {
       projectId: 'project-a', yearMonth: '2026-08',
-      items: [{ period: 'MONTH', status: 'COMPLETED' }, { period: 'WEEK_1', status: 'COMPLETED' }],
+      items: [{
+        period: 'MONTH', status: 'COMPLETED',
+        deadlineAt: '2026-09-10T15:00:00.000Z', approverDeadlineAt: '2026-09-13T15:00:00.000Z',
+      }, { period: 'WEEK_1', status: 'COMPLETED' }],
     };
     const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(
       init.method === 'POST' ? { items: [structuredClone(settlement)], errors: [] } : structuredClone(settlement),
@@ -797,7 +867,10 @@ describe('JVM weekly API BFF proxy', () => {
         projectId: 'project-1',
         settlementStatuses: {
           projectId: 'project-1', yearMonth: '2026-08',
-          items: [{ period: 'MONTH', status: 'COMPLETED' }, { period: 'WEEK_1', status: 'COMPLETED' }],
+          items: [{
+            period: 'MONTH', status: 'COMPLETED',
+            deadlineAt: '2026-09-10T15:00:00.000Z', approverDeadlineAt: '2026-09-13T15:00:00.000Z',
+          }, { period: 'WEEK_1', status: 'COMPLETED' }],
         },
         projectionActualSummary: null,
       }],
@@ -8480,36 +8553,100 @@ describe('JVM weekly API BFF proxy', () => {
   });
 });
 
-describe('cashflowMonthCloseDeadline', () => {
-  it('is the tenth of the following month and rolls over the year in December', () => {
-    expect(cashflowMonthCloseDeadline('2026-07')).toBe('2026-08-10');
-    expect(cashflowMonthCloseDeadline('2026-09')).toBe('2026-10-10');
-    // 12월은 다음 해 1월로 넘어간다. 자릿수도 두 자리를 유지해야 문자열 비교가 성립한다.
-    expect(cashflowMonthCloseDeadline('2026-12')).toBe('2027-01-10');
-    expect(cashflowMonthCloseDeadline('2026-01')).toBe('2026-02-10');
+describe('JVM month-close calendar contract', () => {
+  function createCalendarApp(source) {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(source),
+    }));
+    return createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+      now: () => new Date('2026-07-10T00:00:00.000Z'),
+    });
+  }
+
+  it('passes JVM calendar deadlines through the monthly status join and summary', async () => {
+    const source = fullMonthCloseSource();
+    const jvmSource = monthDashboardSource({
+      ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+    });
+    jvmSource.monthCloseCalendar[5] = {
+      yearMonth: '2026-06',
+      closeDeadline: '2099-01-02',
+      closeDeadlineAt: '2099-01-03T00:00:00Z',
+      approverDeadlineAt: '2099-01-04T00:00:00Z',
+    };
+    const { app } = createCalendarApp({ ...jvmSource, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.monthCloseStatuses).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            yearMonth: '2026-06',
+            closeDeadline: '2099-01-02',
+            closeDeadlineAt: '2099-01-03T00:00:00Z',
+            approverDeadlineAt: '2099-01-04T00:00:00Z',
+          }),
+        ]));
+        expect(response.body.dashboard.summary).toMatchObject({
+          closeDeadline: '2026-06-10',
+          closeDeadlineAt: '2099-01-03T00:00:00Z',
+          approverDeadlineAt: '2099-01-04T00:00:00Z',
+        });
+      });
   });
 
-  it('returns null for a malformed month instead of guessing', () => {
-    expect(cashflowMonthCloseDeadline('not-a-month')).toBeNull();
-    expect(cashflowMonthCloseDeadline('')).toBeNull();
-  });
-});
+  it.each([
+    ['missing', (source) => { delete source.monthCloseCalendar; }],
+    ['wrong count', (source) => { source.monthCloseCalendar = source.monthCloseCalendar.slice(0, 11); }],
+    ['malformed item', (source) => { source.monthCloseCalendar[5].closeDeadlineAt = 'not-an-instant'; }],
+  ])('fails closed when the JVM calendar is %s', async (_label, mutate) => {
+    const source = fullMonthCloseSource();
+    const jvmSource = monthDashboardSource({
+      ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+    });
+    mutate(jvmSource);
+    const { app } = createCalendarApp({ ...jvmSource, db: source.db });
 
-describe('cashflowCumulativeCloseCycle', () => {
-  it('keeps the current cycle while closing through the previous month', () => {
-    expect(cashflowCumulativeCloseCycle('2026-08', '2026-08-04')).toEqual({
-      cycleYearMonth: '2026-08',
-      targetYearMonth: '2026-07',
-      deadline: '2026-08-10',
-      eligible: true,
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(502)
+      .expect((response) => expect(response.body.code).toBe('jvm_weekly_response_invalid'));
+  });
+
+  it('does not authorize a month-close write from the calendar alone', async () => {
+    const source = fullMonthCloseSource();
+    const jvmSource = monthDashboardSource({
+      ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
     });
-    expect(cashflowCumulativeCloseCycle('2026-01', '2026-01-04')).toEqual({
-      cycleYearMonth: '2026-01',
-      targetYearMonth: '2025-12',
-      deadline: '2026-01-10',
-      eligible: true,
-    });
-    expect(cashflowCumulativeCloseCycle('2026-08', '2026-07-31')?.eligible).toBe(false);
-    expect(cashflowCumulativeCloseCycle('2026-08', '2026-08-01')?.eligible).toBe(true);
+    jvmSource.operationalCycle.closeEligible = false;
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(jvmSource),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1', actorRole: 'pm',
+    }, { env: runtimeEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z') });
+    const read = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'calendar-ineligible')
+      .send({
+        yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_not_eligible'));
+    expect(source.documents.has('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06')).toBe(false);
   });
 });

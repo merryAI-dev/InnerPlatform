@@ -23,6 +23,22 @@ function liveJwt() {
   return `h.${payload}.s`;
 }
 
+function monthCloseCalendarFor(yearMonth) {
+  const year = Number(String(yearMonth).slice(0, 4));
+  return Array.from({ length: 12 }, (_unused, monthIndex) => {
+    const month = monthIndex + 1;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const isoAtKstMidnight = (day) => new Date(Date.UTC(nextYear, nextMonth - 1, day) - 9 * 60 * 60 * 1000).toISOString();
+    return {
+      yearMonth: `${year}-${String(month).padStart(2, '0')}`,
+      closeDeadline: `${nextYear}-${String(nextMonth).padStart(2, '0')}-10`,
+      closeDeadlineAt: isoAtKstMidnight(11),
+      approverDeadlineAt: isoAtKstMidnight(14),
+    };
+  });
+}
+
 function monthDashboardSource() {
   const monthClose = {
     ok: true,
@@ -53,6 +69,14 @@ function monthDashboardSource() {
       rootHash: `sha256:${'a'.repeat(64)}`,
       headRevision: 1,
     },
+    operationalCycle: {
+      cycleYearMonth: '2026-06',
+      targetYearMonth: '2026-05',
+      closeDeadline: '2026-06-10',
+      closeEligible: false,
+      late: false,
+    },
+    monthCloseCalendar: monthCloseCalendarFor('2026-06'),
     snapshotCompatibility: { status: 'LEGACY_EVIDENCE_ONLY', missingEvidence: ['OPENING_BALANCES', 'LEDGER_WEEKS'] },
     projectionActualSummary: {
       projectId: 'project-a',
