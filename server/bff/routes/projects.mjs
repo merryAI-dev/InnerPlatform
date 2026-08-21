@@ -2302,11 +2302,26 @@ function normalizeSyncKeySegment(value, fallback = 'na') {
   return normalized || fallback;
 }
 
-function buildProjectTeamMemberSyncKey(member) {
-  return [
-    normalizeSyncKeySegment(member.memberNickname || member.memberName, 'member'),
-    normalizeSyncKeySegment(member.role, 'role'),
-  ].join('__');
+/**
+ * 참여행 연결 키를 팀원 명단 전체에서 한 번에 만든다. 키는 **사람만으로** 만든다.
+ *
+ * 예전에는 `닉네임__역할` 이었다. 사업의 역할명을 고치면 키가 통째로 바뀌고, 참여행 문서 ID 가
+ * 이 키로 만들어지므로 같은 사람의 참여행 연결이 끊겼다(라이브 26건 중 16건이 이 경우).
+ * 참여율은 사람 단위로 합산해 보여주므로 키가 역할까지 구분할 이유가 없다.
+ *
+ * 다만 한 사업에 같은 사람이 두 역할로 올라 있으면 그때만 역할을 덧붙인다 - 키가 겹치면
+ * 참여행 문서 하나가 다른 하나를 덮어써 참여율이 조용히 사라지기 때문이다.
+ */
+export function buildProjectTeamMemberSyncKeys(teamMembers) {
+  const members = Array.isArray(teamMembers) ? teamMembers : [];
+  const personSegments = members.map((member) => normalizeSyncKeySegment(member?.memberNickname || member?.memberName, 'member'));
+  const occurrences = new Map();
+  for (const person of personSegments) occurrences.set(person, (occurrences.get(person) || 0) + 1);
+  return personSegments.map((person, index) => (
+    occurrences.get(person) > 1
+      ? `${person}__${normalizeSyncKeySegment(members[index]?.role, 'role')}`
+      : person
+  ));
 }
 
 export function resolveProjectTeamMemberLookupKeys(member) {
@@ -2410,10 +2425,11 @@ export async function syncProjectParticipationEntries({
   }
 
   const desiredEntries = new Map();
-  for (const member of teamMembers) {
+  const teamMemberSyncKeys = buildProjectTeamMemberSyncKeys(teamMembers);
+  for (const [index, member] of teamMembers.entries()) {
     const personId = readOptionalText(member?.personId);
     if (!member.role || (!personId && !member.memberName && !member.memberNickname)) continue;
-    const key = buildProjectTeamMemberSyncKey(member);
+    const key = teamMemberSyncKeys[index];
     const matchedMember = resolveProjectTeamMemberLookupKeys(member)
       .map((lookupKey) => memberByIdentity.get(lookupKey))
       .find(Boolean);
