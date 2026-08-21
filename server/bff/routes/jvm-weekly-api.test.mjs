@@ -615,6 +615,101 @@ function createApp(fetchImpl, idempotencyService = createIdempotencyService(), c
   return { app, idempotencyService };
 }
 
+function createCashflowActivityTestDb({ eventsByCollection = {}, failingCollections = [] } = {}) {
+  const queries = [];
+  const failures = new Set(failingCollections);
+  const fieldName = (field) => typeof field === 'string' ? field : String(field);
+  const compareValues = (left, right, direction) => {
+    const leftText = String(left ?? '');
+    const rightText = String(right ?? '');
+    const compared = leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
+    return direction === 'desc' ? -compared : compared;
+  };
+
+  return {
+    queries,
+    db: {
+      collection: (collectionPath) => {
+        const collectionId = collectionPath.split('/').at(-1);
+        const state = {
+          filters: [],
+          orderBys: [],
+          limit: null,
+          startAfter: [],
+        };
+        const query = {
+          where: (field, operator, expected) => {
+            state.filters.push([fieldName(field), operator, expected]);
+            return query;
+          },
+          orderBy: (field, direction) => {
+            state.orderBys.push([fieldName(field), direction]);
+            return query;
+          },
+          startAfter: (...values) => {
+            const [first] = values;
+            state.startAfter = values.length === 1 && first?.id && typeof first.data === 'function'
+              ? [first.data()?.createdAt, first.id]
+              : values;
+            return query;
+          },
+          limit: (value) => {
+            state.limit = value;
+            return query;
+          },
+          get: async () => {
+            queries.push({
+              collectionId,
+              filters: structuredClone(state.filters),
+              orderBys: structuredClone(state.orderBys),
+              limit: state.limit,
+              startAfter: structuredClone(state.startAfter),
+            });
+            if (failures.has(collectionId)) throw new Error(`${collectionId} unavailable`);
+
+            let documents = (eventsByCollection[collectionId] || []).map((entry) => {
+              const { __documentId, ...value } = entry;
+              return {
+                id: __documentId || entry.id,
+                value,
+              };
+            });
+            documents = documents.filter((document) => state.filters.every(([field, operator, expected]) => (
+              operator === '==' && document.value[field] === expected
+            )));
+            if (state.orderBys.length > 0) {
+              documents.sort((left, right) => {
+                for (const [field, direction] of state.orderBys) {
+                  const leftValue = field === '__name__' ? left.id : left.value[field];
+                  const rightValue = field === '__name__' ? right.id : right.value[field];
+                  const compared = compareValues(leftValue, rightValue, direction);
+                  if (compared !== 0) return compared;
+                }
+                return 0;
+              });
+            }
+            if (state.startAfter.length > 0) {
+              const [createdAt, id] = state.startAfter;
+              const boundary = documents.findIndex((document) => (
+                document.value.createdAt === createdAt && document.id === id
+              ));
+              documents = boundary >= 0 ? documents.slice(boundary + 1) : [];
+            }
+            if (Number.isSafeInteger(state.limit)) documents = documents.slice(0, state.limit);
+            return {
+              docs: documents.map((document) => ({
+                id: document.id,
+                data: () => document.value,
+              })),
+            };
+          },
+        };
+        return query;
+      },
+    },
+  };
+}
+
 async function createCumulativeMonthCloseFixture({
   source,
   fetchImpl,
@@ -2610,7 +2705,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('combines explicit sheet refresh and JVM month-close audit records for the activity timeline', async () => {
-    const activityQueries = [];
+    const performanceEvents = [];
     const eventsByCollection = {
       cashflow_sheet_refresh_runs: [{
         id: 'refresh-1', projectId: 'project-a', idempotencyKey: 'refresh-key', status: 'COMPLETED',
@@ -2643,27 +2738,12 @@ describe('JVM weekly API BFF proxy', () => {
       ],
       cashflow_events: [],
     };
-    const db = {
-      collection: (path) => ({
-        where: () => {
-          const query = { collectionId: path.split('/').at(-1), orderBy: null, limit: null };
-          activityQueries.push(query);
-          const chain = {
-            orderBy: (field, direction) => {
-              query.orderBy = [field, direction];
-              return chain;
-            },
-            limit: (limit) => {
-              query.limit = limit;
-              return chain;
-            },
-            get: async () => ({ docs: (eventsByCollection[query.collectionId] || []).map((data) => ({ id: data.id, data: () => data })) }),
-          };
-          return chain;
-        },
-      }),
-    };
-    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+    const { db, queries: activityQueries } = createCashflowActivityTestDb({ eventsByCollection });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db,
+      performanceLogger: (event) => performanceEvents.push(event),
+    });
 
     await request(app)
       .get('/api/v1/cashflow/project-a/activity')
@@ -2680,9 +2760,525 @@ describe('JVM weekly API BFF proxy', () => {
         ]);
       });
     expect(activityQueries.find((query) => query.collectionId === 'weekly_api_audit_events')).toMatchObject({
-      orderBy: null,
-      limit: 200,
+      filters: [['projectId', '==', 'project-a']],
+      orderBys: [['createdAt', 'desc'], ['__name__', 'desc']],
+      limit: 50,
     });
+    expect(performanceEvents.filter((event) => event.operation === 'cashflow.activity.read')).toEqual(
+      expect.arrayContaining(['sheet_refresh', 'audit', 'legacy'].map((source) => expect.objectContaining({
+        phase: 'activity_source_read',
+        source,
+        outcome: 'ok',
+        queryCount: 1,
+        documentCount: expect.any(Number),
+        documentJsonBytes: expect.any(Number),
+        responseJsonBytes: expect.any(Number),
+        durationMs: expect.any(Number),
+      }))),
+    );
+  });
+
+  it('reads at most 50 raw documents per activity source and returns one globally newest page', async () => {
+    const createdAt = (index) => new Date(Date.UTC(2026, 6, 2, 0, 0, index)).toISOString();
+    const eventsByCollection = {
+      cashflow_sheet_refresh_runs: Array.from({ length: 60 }, (_, index) => ({
+        id: `refresh-${String(index).padStart(2, '0')}`,
+        projectId: 'project-a',
+        status: 'COMPLETED',
+        createdAt: createdAt(index),
+        response: { status: 'FRESH', selectedSheetName: 'cashflow(사용내역 연동)' },
+      })),
+      weekly_api_audit_events: Array.from({ length: 60 }, (_, index) => ({
+        id: `audit-${String(index).padStart(2, '0')}`,
+        projectId: 'project-a',
+        commandName: 'weeklyExpense.cashflowSheetLab.apply',
+        createdAt: createdAt(index),
+        metadataJson: JSON.stringify({ yearMonth: '2026-06', projectionLineCount: 1, actualLineCount: 0 }),
+      })),
+      cashflow_events: Array.from({ length: 60 }, (_, index) => ({
+        id: `legacy-${String(index).padStart(2, '0')}`,
+        projectId: 'project-a',
+        runId: `legacy-run-${index}`,
+        type: 'projection_completed',
+        createdAt: createdAt(index),
+      })),
+    };
+    const { db, queries } = createCashflowActivityTestDb({ eventsByCollection });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const response = await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200);
+
+    expect(response.body.events).toHaveLength(50);
+    expect(queries.map((query) => ({
+      collectionId: query.collectionId,
+      filters: query.filters,
+      orderBys: query.orderBys,
+      limit: query.limit,
+    })).sort((left, right) => left.collectionId.localeCompare(right.collectionId))).toEqual([
+      'cashflow_events',
+      'cashflow_sheet_refresh_runs',
+      'weekly_api_audit_events',
+    ].map((collectionId) => ({
+      collectionId,
+      filters: [['projectId', '==', 'project-a']],
+      orderBys: [['createdAt', 'desc'], ['__name__', 'desc']],
+      limit: 50,
+    })));
+  });
+
+  it('does not return an older sparse-source event before the next newer audit page', async () => {
+    const auditDocuments = Array.from({ length: 51 }, (_, index) => ({
+      id: `audit-global-${String(index).padStart(2, '0')}`,
+      projectId: 'project-a',
+      commandName: 'weeklyExpense.cashflowSheetLab.apply',
+      createdAt: new Date(Date.UTC(2026, 6, 2, 0, 0, 59 - index)).toISOString(),
+      metadataJson: JSON.stringify({ yearMonth: '2026-06', projectionLineCount: 1, actualLineCount: 0 }),
+    }));
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: [],
+        weekly_api_audit_events: auditDocuments,
+        cashflow_events: [{
+          id: 'legacy-old', projectId: 'project-a', runId: 'legacy-old',
+          type: 'projection_completed', createdAt: '2024-01-01T00:00:00.000Z',
+        }],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200);
+    expect(first.body.events).toHaveLength(50);
+    expect(first.body.events.some((event) => event.id === 'legacy-old')).toBe(false);
+
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+    expect(second.body.events.map((event) => event.id)).toEqual([
+      'sheet-apply:audit-global-50',
+      'legacy-old',
+    ]);
+    expect(second.body.nextCursor).toBeNull();
+  });
+
+  it('uses one opaque aggregate cursor to return the second page without duplicating shorter sources', async () => {
+    const legacyEvents = Array.from({ length: 51 }, (_, index) => ({
+      id: `legacy-${String(index).padStart(2, '0')}`,
+      projectId: 'project-a',
+      runId: `legacy-run-${index}`,
+      type: 'projection_completed',
+      createdAt: new Date(Date.UTC(2026, 6, 2, 0, 0, 59 - index)).toISOString(),
+    }));
+    const eventsByCollection = {
+      cashflow_sheet_refresh_runs: [{
+        id: 'refresh-only', projectId: 'project-a', status: 'COMPLETED',
+        createdAt: '2026-07-03T00:00:00.000Z', response: { status: 'FRESH' },
+      }],
+      weekly_api_audit_events: [{
+        id: 'audit-only', projectId: 'project-a', commandName: 'cashflowMonth.close',
+        createdAt: '2026-07-03T00:00:01.000Z', metadataJson: JSON.stringify({ yearMonth: '2026-06', status: 'CLOSED' }),
+      }],
+      cashflow_events: legacyEvents,
+    };
+    const { db } = createCashflowActivityTestDb({ eventsByCollection });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    expect(first.body.nextCursor).not.toBe('legacy-49');
+
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+    const firstIds = new Set(first.body.events.map((event) => event.id));
+    const secondIds = second.body.events.map((event) => event.id);
+    expect(secondIds).toEqual(['legacy-48', 'legacy-49', 'legacy-50']);
+    expect(secondIds.filter((id) => firstIds.has(id))).toEqual([]);
+    expect([...firstIds, ...secondIds]).toHaveLength(53);
+  });
+
+  it('does not skip same-timestamp mixed-case document ids when an aggregate page cuts inside one source', async () => {
+    const tiedCreatedAt = '2026-07-02T00:00:00.000Z';
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: [{
+          id: 'refresh-newer', projectId: 'project-a', status: 'COMPLETED',
+          createdAt: '2026-07-03T00:00:00.000Z', response: { status: 'FRESH' },
+        }],
+        weekly_api_audit_events: ['a-audit', 'Z-audit'].map((id) => ({
+          id,
+          projectId: 'project-a',
+          commandName: 'weeklyExpense.cashflowSheetLab.apply',
+          createdAt: tiedCreatedAt,
+          metadataJson: JSON.stringify({ yearMonth: '2026-06', projectionLineCount: 1, actualLineCount: 0 }),
+        })),
+        cashflow_events: [],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity?limit=2')
+      .expect(200);
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+
+    expect([...first.body.events, ...second.body.events].map((event) => event.id)).toEqual([
+      'sheet-refresh:refresh-newer',
+      'sheet-apply:a-audit',
+      'sheet-apply:Z-audit',
+    ]);
+  });
+
+  it('pages by the Firestore document id when the stored activity payload has a different id', async () => {
+    const createdAt = '2026-07-02T00:00:00.000Z';
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_events: [
+          {
+            __documentId: 'firestore-b', id: 'event-newer', projectId: 'project-a',
+            type: 'projection_completed', createdAt,
+          },
+          {
+            __documentId: 'firestore-a', id: 'event-older', projectId: 'project-a',
+            type: 'projection_completed', createdAt,
+          },
+        ],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity?source=legacy&limit=1')
+      .expect(200);
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?source=legacy&limit=1&cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+    const third = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?source=legacy&limit=1&cursor=${encodeURIComponent(second.body.nextCursor)}`)
+      .expect(200);
+
+    expect(first.body.events.map((event) => event.id)).toEqual(['event-newer']);
+    expect(second.body.events.map((event) => event.id)).toEqual(['event-older']);
+    expect(third.body.events).toEqual([]);
+    expect(third.body.nextCursor).toBeNull();
+  });
+
+  it('keeps every derived activity timestamp inside the raw document cursor order across pages', async () => {
+    const rawCreatedAt = (index) => new Date(Date.UTC(2026, 6, 2, 0, 0, 59 - index)).toISOString();
+    const refreshDocuments = Array.from({ length: 51 }, (_, index) => ({
+      id: `refresh-order-${String(index).padStart(2, '0')}`,
+      projectId: 'project-a',
+      status: 'COMPLETED',
+      createdAt: rawCreatedAt(index),
+      completedAt: index === 50 ? '2030-01-01T00:00:00.000Z' : rawCreatedAt(index),
+      response: { status: 'FRESH' },
+    }));
+    const auditDocuments = Array.from({ length: 51 }, (_, index) => ({
+      id: `audit-order-${String(index).padStart(2, '0')}`,
+      projectId: 'project-a',
+      commandName: 'weeklyExpense.cashflowSheetLab.apply',
+      createdAt: rawCreatedAt(index),
+      metadataJson: JSON.stringify({
+        yearMonth: '2026-06',
+        projectionLineCount: 1,
+        actualLineCount: 0,
+        ...(index === 50 ? {
+          appliedCellChanges: [{
+            yearMonth: '2026-06', weekNo: 1, mode: 'projection', cashflowLine: 'SALES_IN',
+            before: { cellState: 'ZERO', amount: 0 },
+            after: { cellState: 'VALUE', amount: 1 },
+            changedAt: '2031-01-01T00:00:00.000Z',
+          }],
+        } : {}),
+      }),
+    }));
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: refreshDocuments,
+        weekly_api_audit_events: auditDocuments,
+        cashflow_events: [],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200);
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+
+    const oldestFirstPage = first.body.events
+      .map((event) => event.createdAt)
+      .sort()[0];
+    const newestSecondPage = second.body.events
+      .map((event) => event.createdAt)
+      .sort()
+      .at(-1);
+    expect(newestSecondPage.localeCompare(oldestFirstPage)).toBeLessThanOrEqual(0);
+  });
+
+  it.each([
+    { createdAt: 'not-an-instant', id: 'legacy-1' },
+    { createdAt: '2026-07-01T00:00:00.000Z', id: 'bad/id' },
+  ])('rejects malformed activity cursor boundaries before querying Firestore: %j', async (boundary) => {
+    const cursor = Buffer.from(JSON.stringify({
+      version: 1,
+      projectId: 'project-a',
+      source: 'legacy',
+      boundaries: { legacy: { done: false, ...boundary } },
+    }), 'utf8').toString('base64url');
+    const { db, queries } = createCashflowActivityTestDb();
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?source=legacy&cursor=${encodeURIComponent(cursor)}`)
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_activity_query_invalid'));
+    expect(queries).toEqual([]);
+  });
+
+  it('returns successful activity sources and a structured error when one aggregate source query fails', async () => {
+    const eventsByCollection = {
+      cashflow_sheet_refresh_runs: [{
+        id: 'refresh-success', projectId: 'project-a', status: 'COMPLETED',
+        createdAt: '2026-07-03T00:00:00.000Z', response: { status: 'FRESH' },
+      }],
+      cashflow_events: [{
+        id: 'legacy-success', projectId: 'project-a', runId: 'legacy-success',
+        type: 'actual_completed', createdAt: '2026-07-02T00:00:00.000Z',
+      }],
+    };
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection,
+      failingCollections: ['weekly_api_audit_events'],
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.events).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: 'sheet-refresh:refresh-success', type: 'sheet_refresh' }),
+          expect.objectContaining({ id: 'legacy-success', type: 'actual_completed' }),
+        ]));
+        expect(response.body.errors).toContainEqual({
+          source: 'audit',
+          code: 'cashflow_activity_source_unavailable',
+        });
+      });
+  });
+
+  it('keeps all 100 cell changes from one audit document together at a raw-document page boundary', async () => {
+    const appliedCellChanges = Array.from({ length: 100 }, (_, index) => ({
+      yearMonth: '2026-06', weekNo: (index % 5) + 1,
+      mode: index % 2 === 0 ? 'projection' : 'actual',
+      cashflowLine: `BOUNDARY_LINE_${index}`,
+      before: { cellState: 'ZERO', amount: 0 },
+      after: { cellState: 'VALUE', amount: index + 1 },
+      changedAt: '2026-07-01T00:00:10.000Z',
+    }));
+    const auditDocuments = Array.from({ length: 51 }, (_, index) => ({
+      id: `audit-boundary-${String(index).padStart(2, '0')}`,
+      projectId: 'project-a',
+      idempotencyKey: `audit-run-${index}`,
+      commandName: 'weeklyExpense.cashflowSheetLab.apply',
+      createdAt: new Date(Date.UTC(2026, 6, 2, 0, 0, 59 - index)).toISOString(),
+      metadataJson: JSON.stringify({
+        yearMonth: '2026-06', projectionLineCount: 1, actualLineCount: 0,
+        ...(index === 49 ? { appliedCellChanges } : {}),
+      }),
+    }));
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: [],
+        weekly_api_audit_events: auditDocuments,
+        cashflow_events: [],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200);
+    const firstBundle = first.body.events.filter((event) => event.id.startsWith('sheet-apply-cell:audit-boundary-49:'));
+    expect(firstBundle).toHaveLength(100);
+    expect(new Set(firstBundle.map((event) => event.id)).size).toBe(100);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+    expect(second.body.events.filter((event) => event.id.startsWith('sheet-apply-cell:audit-boundary-49:'))).toHaveLength(0);
+    expect(second.body.events).toEqual([
+      expect.objectContaining({ id: 'sheet-apply:audit-boundary-50', type: 'sheet_apply' }),
+    ]);
+  });
+
+  it('pages full-sheet audit bundles before the activity response exceeds its byte budget', async () => {
+    const appliedCellChanges = Array.from({ length: 1_920 }, (_, index) => ({
+      yearMonth: '2026-06', weekNo: (index % 5) + 1,
+      mode: index % 2 === 0 ? 'projection' : 'actual',
+      cashflowLine: `FULL_SHEET_LINE_${index}`,
+      before: { cellState: 'ZERO', amount: 0 },
+      after: { cellState: 'VALUE', amount: index + 1 },
+      changedAt: '2026-07-01T00:00:10.000Z',
+    }));
+    const auditDocuments = Array.from({ length: 5 }, (_, index) => ({
+      id: `audit-full-sheet-${index}`,
+      projectId: 'project-a',
+      idempotencyKey: `full-sheet-run-${index}`,
+      commandName: 'weeklyExpense.cashflowSheetLab.apply',
+      createdAt: new Date(Date.UTC(2026, 6, 2, 0, 0, 59 - index)).toISOString(),
+      metadataJson: JSON.stringify({
+        yearMonth: '2026-06', projectionLineCount: 960, actualLineCount: 960,
+        appliedCellChanges,
+      }),
+    }));
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: [],
+        weekly_api_audit_events: auditDocuments,
+        cashflow_events: [],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const eventIds = new Set();
+    let cursor = '';
+    let pageCount = 0;
+    do {
+      const response = await request(app)
+        .get(`/api/v1/cashflow/project-a/activity${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`)
+        .expect(200);
+      expect(Buffer.byteLength(JSON.stringify(response.body), 'utf8')).toBeLessThan(2 * 1024 * 1024);
+      for (const event of response.body.events) {
+        expect(eventIds.has(event.id)).toBe(false);
+        eventIds.add(event.id);
+      }
+      cursor = response.body.nextCursor || '';
+      pageCount += 1;
+      expect(pageCount).toBeLessThanOrEqual(5);
+    } while (cursor);
+
+    expect(pageCount).toBe(5);
+    expect(eventIds.size).toBe(5 * (1_920 + 1));
+  });
+
+  it('returns one oversized audit bundle whole and advances the cursor to older activity', async () => {
+    const oversizedChanges = Array.from({ length: 4_500 }, (_, index) => ({
+      yearMonth: '2026-06', weekNo: (index % 5) + 1,
+      mode: index % 2 === 0 ? 'projection' : 'actual',
+      cashflowLine: `OVERSIZED_LINE_${index}`,
+      before: { cellState: 'ZERO', amount: 0 },
+      after: { cellState: 'VALUE', amount: index + 1 },
+    }));
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: [],
+        weekly_api_audit_events: [{
+          id: 'audit-oversized', projectId: 'project-a',
+          commandName: 'weeklyExpense.cashflowSheetLab.apply',
+          createdAt: '2026-07-02T00:00:02.000Z',
+          metadataJson: JSON.stringify({
+            yearMonth: '2026-06', projectionLineCount: 2_250, actualLineCount: 2_250,
+            appliedCellChanges: oversizedChanges,
+          }),
+        }, {
+          id: 'audit-older', projectId: 'project-a',
+          commandName: 'weeklyExpense.cashflowSheetLab.apply',
+          createdAt: '2026-07-02T00:00:01.000Z',
+          metadataJson: JSON.stringify({ yearMonth: '2026-06', projectionLineCount: 1, actualLineCount: 0 }),
+        }],
+        cashflow_events: [],
+      },
+    });
+    const performanceEvents = [];
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db,
+      performanceLogger: (event) => performanceEvents.push(event),
+    });
+
+    const first = await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200);
+    const firstResponseBytes = Buffer.byteLength(JSON.stringify(first.body), 'utf8');
+    expect(first.body.events).toHaveLength(4_501);
+    expect(firstResponseBytes).toBeGreaterThan(2 * 1024 * 1024);
+    expect(firstResponseBytes).toBeLessThan(4 * 1024 * 1024);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    expect(performanceEvents).toContainEqual(expect.objectContaining({
+      operation: 'cashflow.activity.read',
+      source: 'audit',
+      responseBudgetExceeded: true,
+    }));
+
+    const second = await request(app)
+      .get(`/api/v1/cashflow/project-a/activity?cursor=${encodeURIComponent(first.body.nextCursor)}`)
+      .expect(200);
+    expect(second.body.events.map((event) => event.id)).toEqual(['sheet-apply:audit-older']);
+    expect(second.body.nextCursor).toBeNull();
+  });
+
+  it('keeps mixed-source newest order when a whole audit bundle reaches the byte boundary', async () => {
+    const fullSheetChanges = Array.from({ length: 1_920 }, (_, index) => ({
+      yearMonth: '2026-06', weekNo: (index % 5) + 1,
+      mode: index % 2 === 0 ? 'projection' : 'actual',
+      cashflowLine: `MIXED_LINE_${index}`,
+      before: { cellState: 'ZERO', amount: 0 },
+      after: { cellState: 'VALUE', amount: index + 1 },
+    }));
+    const { db } = createCashflowActivityTestDb({
+      eventsByCollection: {
+        cashflow_sheet_refresh_runs: [{
+          id: 'refresh-between', projectId: 'project-a', status: 'COMPLETED',
+          createdAt: '2026-07-02T00:00:03.000Z', response: { status: 'FRESH' },
+        }],
+        weekly_api_audit_events: ['04', '02'].map((second) => ({
+          id: `audit-mixed-${second}`, projectId: 'project-a',
+          commandName: 'weeklyExpense.cashflowSheetLab.apply',
+          createdAt: `2026-07-02T00:00:${second}.000Z`,
+          metadataJson: JSON.stringify({
+            yearMonth: '2026-06', projectionLineCount: 960, actualLineCount: 960,
+            appliedCellChanges: fullSheetChanges,
+          }),
+        })),
+        cashflow_events: [{
+          id: 'legacy-older', projectId: 'project-a', type: 'projection_completed',
+          createdAt: '2026-07-02T00:00:01.000Z',
+        }],
+      },
+    });
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
+
+    const summaries = [];
+    let cursor = '';
+    do {
+      const response = await request(app)
+        .get(`/api/v1/cashflow/project-a/activity${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`)
+        .expect(200);
+      expect(Buffer.byteLength(JSON.stringify(response.body), 'utf8')).toBeLessThan(2 * 1024 * 1024);
+      summaries.push(...response.body.events
+        .filter((event) => !event.id.startsWith('sheet-apply-cell:'))
+        .map((event) => event.id));
+      cursor = response.body.nextCursor || '';
+    } while (cursor);
+
+    expect(summaries).toEqual([
+      'sheet-apply:audit-mixed-04',
+      'sheet-refresh:refresh-between',
+      'sheet-apply:audit-mixed-02',
+      'legacy-older',
+    ]);
   });
 
   it('keeps malformed declared audit counts and cell amounts unavailable instead of coercing them to zero', async () => {
@@ -2709,6 +3305,7 @@ describe('JVM weekly API BFF proxy', () => {
       collection: () => ({
         where: () => {
           const chain = {
+            orderBy: () => chain,
             limit: () => chain,
             get: async () => ({ docs: [{ id: audit.id, data: () => audit }] }),
           };
@@ -2738,24 +3335,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('reads one bounded activity source without waiting for the other timeline sources', async () => {
-    const activityQueries = [];
-    const db = {
-      collection: (path) => ({
-        where: () => {
-          const query = { collectionId: path.split('/').at(-1), limit: null };
-          activityQueries.push(query);
-          const chain = {
-            orderBy: () => chain,
-            limit: (limit) => {
-              query.limit = limit;
-              return chain;
-            },
-            get: async () => ({ docs: [] }),
-          };
-          return chain;
-        },
-      }),
-    };
+    const { db, queries: activityQueries } = createCashflowActivityTestDb();
     const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: runtimeEnv, db });
 
     await request(app)
@@ -2765,7 +3345,13 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body).toMatchObject({ projectId: 'project-a', source: 'legacy', events: [] });
       });
 
-    expect(activityQueries).toEqual([{ collectionId: 'cashflow_events', limit: 200 }]);
+    expect(activityQueries).toEqual([{
+      collectionId: 'cashflow_events',
+      filters: [['projectId', '==', 'project-a']],
+      orderBys: [['createdAt', 'desc'], ['__name__', 'desc']],
+      limit: 50,
+      startAfter: [],
+    }]);
   });
 
   it('flattens all 100 exact applied cell changes from one JVM audit into General Activity', async () => {

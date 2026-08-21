@@ -15,7 +15,7 @@ const importEditorSource = readFileSync(
 describe('cashflow action chrome', () => {
   it('removes secondary cashflow toolbar actions and explanatory chrome', () => {
     expect(cashflowProjectSheetSource).toContain('Projection - Actual 차이');
-    expect(cashflowProjectSheetSource).toContain('현금흐름 관리시트 A11:BS11 기준');
+    expect(cashflowProjectSheetSource).toContain('현금흐름 관리시트 E11:BL11 주별 수식 기준');
     expect(cashflowProjectSheetSource).not.toContain('Actual - Projection');
     expect(cashflowProjectSheetSource).not.toContain('Actual에서 Projection을 뺀 값');
     expect(cashflowProjectSheetSource).not.toContain('actual - projection');

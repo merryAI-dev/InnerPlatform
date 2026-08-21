@@ -93,7 +93,9 @@ describe('CashflowProjectSheet staged loading', () => {
   });
   it('loads the activity timeline only when it scrolls into view, and the roster after month-close', () => {
     expect(source).toContain('new IntersectionObserver(');
-    expect(source).toContain('if (!opsTimelineVisible || !monthCloseSettled) return;\n    void loadCashflowEvents();');
+    expect(source).toContain('if (!opsTimelineVisible || !monthCloseSettled) return;');
+    expect(source).toContain('cashflowActivityOneClickRef.current.pendingAggregate = true;');
+    expect(source).toContain('void loadCashflowActivityAggregate();');
     expect(source).toContain('<div ref={opsTimelineRef} className="min-w-0">{renderOpsTimeline()}</div>');
     expect(source).toContain('usePersonRoster(monthCloseSettled)');
   });
@@ -896,27 +898,120 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(mergeSource).not.toContain('.slice(');
   });
 
-  it('loads and retries general activity sources independently without hiding loaded events', () => {
+  it('loads one aggregate activity page and retries only a failed source without hiding loaded events', () => {
     expect(source).toContain("from './cashflow-activity-loader'");
-    expect(source).toContain('fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId, source })');
+    expect(source).toContain("cashflowActivityRequestGuard.start('aggregate', { reset: true })");
+    expect(source).toContain("cashflowActivityRequestGuard.start(`source:${source}`)");
+    expect(source).toContain('cashflowEventLoading || cashflowEventLoadingMore || !projectId');
+    expect(source).toContain('limit: 50,');
+    expect(source).toContain('signal: ticket.signal,');
+    expect(source).toContain('response.errors.map');
     expect(source).toContain('setCashflowEvents((current) => mergeCashflowEvents(current, response.events))');
     expect(source).toContain('cashflowEventErrors.map');
-    expect(source).toContain('onClick={() => void loadCashflowEventSource(failure.source)}');
+    expect(source).toContain('onClick={() => void loadCashflowEventSource(failure.source, {');
+    expect(source).toContain('preservePagination: Boolean(failure.preservePagination)');
     expect(source).toContain('실제 반영 기록을 불러오는 중입니다.');
     expect(source).toContain('아직 표시할 변경 기록이 없습니다.');
     expect(source).toContain('role="alert"');
     expect(source).not.toContain("setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'))");
   });
 
-  it('awaits activity sources sequentially instead of starting them in parallel', () => {
-    expect(source).toContain('loadCashflowActivitySourcesSequentially(');
-    expect(source).toContain('await loadCashflowEventSource(source, generation)');
-    expect(source).not.toContain('CASHFLOW_ACTIVITY_SOURCES.forEach((source) => void loadCashflowEventSource(source, generation))');
+  it('removes the three-source helper loop and pages opaque aggregate and recovery cursors', () => {
+    expect(source).not.toContain('loadCashflowActivitySourcesSequentially');
+    expect(source).toContain('const [cashflowActivityCursorQueue, setCashflowActivityCursorQueue] = useState<CashflowActivityCursor[]>');
+    const rootLoadStart = source.indexOf('const loadCashflowEvents = useCallback');
+    const rootLoadFlow = source.slice(rootLoadStart, source.indexOf('const loadMoreCashflowEvents', rootLoadStart));
+    expect(rootLoadFlow).toContain('setCashflowActivityCursorQueue([]);');
+    expect(source).toContain('const loadMoreCashflowEvents = useCallback(async (): Promise<void> => {');
+    expect(source).toContain('cashflowEventLoadingMoreRef.current || cashflowEventLoading || cashflowEventLoadingSources.length > 0');
+    expect(source).toContain('disabled={cashflowEventLoading || cashflowEventLoadingMore || cashflowEventLoadingSources.length > 0}');
+    expect(source).toContain('cursor: queuedCursor.cursor,');
+    expect(source).toContain('updateCashflowActivityCursorQueue(');
+    expect(source).toContain('if (response.nextCursor === queuedCursor.cursor)');
+    expect(source).toContain('updateCashflowActivityCursorQueue(current, queuedCursor.source, null)');
+    expect(source).toContain("이전 기록 더 불러오기");
+    expect(source).toContain('cashflowActivityCursorQueue.length > 0 ? loadMoreCashflowEvents() : loadCashflowActivityAggregate()');
   });
 
-  it('defines the shared activity reload used after sheet and month-close mutations', () => {
-    expect(source).toContain('const loadCashflowEvents = useCallback(async (): Promise<void> => {');
-    expect(source).toContain('void loadCashflowEvents();');
+  it('aborts stale project activity and keeps mutation reloads behind timeline visibility', () => {
+    expect(source).toContain('const loadCashflowActivityAggregate = useCallback(async (): Promise<void> => {');
+    expect(source).toContain('cashflowActivityRequestGuard.invalidate();');
+    expect(source).toContain('shouldStartCashflowActivityLoad({');
+    expect(source).toContain('visible: opsTimelineVisibleRef.current,');
+    expect(source).toContain('cashflowActivityScopeRef.current === activityScope');
+    expect(source).toContain('currentScope: isCurrentCashflowActivityScope(),');
+    expect(source).toContain("if (input.signal.aborted) throw new Error('활동 기록 요청이 중단되었습니다.');");
+    expect(source).toContain('void loadCashflowActivityAggregate();');
+  });
+
+  it('reloads only Activity sources that each completed mutation can actually write', () => {
+    expect(source).toContain("reloadCashflowActivityForMutations('sheet_mirror_refreshed')");
+    expect(source).toContain("reloadCashflowActivityForMutations('sheet_values_applied')");
+    expect(source).toContain("reloadCashflowActivityForMutations('month_reopen_completed')");
+
+    const requestStart = source.indexOf('const handleFinalizeMonthClose');
+    const requestFlow = source.slice(requestStart, source.indexOf('const handleWithdrawMonthCloseRequest', requestStart));
+    const withdrawStart = source.indexOf('const handleWithdrawMonthCloseRequest');
+    const withdrawFlow = source.slice(withdrawStart, source.indexOf('const handleMonthReopenAction', withdrawStart));
+    expect(requestFlow).not.toContain('loadCashflowEvents()');
+    expect(requestFlow).not.toContain('reloadCashflowActivityForMutations(');
+    expect(withdrawFlow).not.toContain('loadCashflowEvents()');
+    expect(withdrawFlow).not.toContain('reloadCashflowActivityForMutations(');
+  });
+
+  it('defers every one-click activity read and drains only successful sources outside frozen confirmation flows', () => {
+    const frozenActionStart = source.indexOf('const handleRefreshAndApplySheetValues');
+    const wrapperStart = source.indexOf('const handleDeferredRefreshAndApplySheetValues', frozenActionStart);
+    const frozenAction = source.slice(frozenActionStart, wrapperStart);
+    const action = source.slice(wrapperStart, source.indexOf('const handleOpenSheetOnboarding', wrapperStart));
+    expect(frozenAction).not.toContain('cashflowActivityOneClickRef');
+    expect(frozenAction).toContain("toast.error(mirror?.lastRefreshError?.message || '시트 최신값을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.');");
+    expect(action).toContain('const oneClickActivityScope = activityScope;');
+    expect(action).toContain('cashflowActivityOneClickRef.current.depth += 1;');
+    expect(action).toContain('} finally {');
+    expect(action).toContain('cashflowActivityOneClickRef.current.scope === oneClickActivityScope');
+    expect(action).toContain('cashflowActivityOneClickRef.current.depth -= 1;');
+    expect(action).toContain('setCashflowActivityDrainVersion((current) => current + 1);');
+    const terminalDrain = action.slice(action.indexOf('} finally {'));
+    expect(terminalDrain).not.toContain('cashflowActivityOneClickRef.current.pendingSources.clear();');
+    expect(terminalDrain).not.toContain('void reloadCashflowActivitySources(pendingSources);');
+    expect(action).not.toContain('loadCashflowEvents()');
+
+    expect(source).toContain('takeCashflowActivityPendingWork(cashflowActivityOneClickRef.current');
+    expect(source).toContain('busy: cashflowEventLoading || cashflowEventLoadingMore || cashflowEventLoadingSources.length > 0');
+    expect(source).toContain("if (pendingWork?.kind === 'aggregate') void loadCashflowActivityAggregate();");
+    expect(source).toContain("else if (pendingWork?.kind === 'sources') void reloadCashflowActivitySources(pendingWork.sources);");
+    expect(source).toContain('cashflowActivityDrainVersion,');
+
+    const mutationReloadStart = source.indexOf('const reloadCashflowActivityForMutations');
+    const mutationReload = source.slice(mutationReloadStart, source.indexOf('const loadCashflowEvents', mutationReloadStart));
+    expect(mutationReload).toContain('if (!opsTimelineVisibleRef.current) return;');
+    expect(mutationReload).toContain('sources.forEach((source) => cashflowActivityOneClickRef.current.pendingSources.add(source));');
+    expect(mutationReload).toContain('setCashflowActivityDrainVersion((current) => current + 1);');
+    expect(mutationReload).not.toContain('await reloadCashflowActivitySources(sources);');
+
+    const applyStart = source.indexOf('const handleApplyStagedSheetValues');
+    const applyFlow = source.slice(applyStart, source.indexOf('const handleStagePinnedSheetValues', applyStart));
+    const stageStart = source.indexOf('const handleStagePinnedSheetValues');
+    const stageFlow = source.slice(stageStart, frozenActionStart);
+    expect(applyFlow).not.toContain('cashflowActivityOneClickRef');
+    expect(stageFlow).not.toContain('cashflowActivityOneClickRef');
+    expect(applyFlow.indexOf('cashflow_formula_mismatch_confirmation_required')).toBeLessThan(applyFlow.indexOf('cashflow_closed_month_reason_required'));
+    expect(applyFlow.indexOf('cashflow_closed_month_reason_required')).toBeLessThan(applyFlow.indexOf('cashflow_pending_approval_confirmation_required'));
+    expect(source).toContain('onClick={() => void handleDeferredRefreshAndApplySheetValues()}');
+  });
+
+  it('keeps mutation head pages out of the aggregate cursor and replays a deferred initial aggregate once', () => {
+    expect(source).toContain('pendingAggregate: false,');
+    expect(source).toContain('cashflowActivityOneClickRef.current.pendingAggregate = true;');
+    expect(source).toContain('const pendingWork = takeCashflowActivityPendingWork(');
+    expect(source).toContain("if (pendingWork?.kind === 'aggregate') void loadCashflowActivityAggregate();");
+    expect(source).toContain("else if (pendingWork?.kind === 'sources') void reloadCashflowActivitySources(pendingWork.sources);");
+
+    expect(source).toContain('loadCashflowEventSource(source, { preservePagination: true })');
+    expect(source).toContain('if (!options.preservePagination) {');
+    expect(source).toContain('preservePagination: options.preservePagination');
+    expect(source).toContain('preservePagination: Boolean(failure.preservePagination)');
   });
 
   it('uses the server KST comparison week and totals only the visible comparison scope', () => {
@@ -984,7 +1079,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
     expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
     expect(source).toContain('Projection - Actual 차이</div>');
-    expect(source).toContain('현금흐름 관리시트 A11:BS11 기준');
+    expect(source).toContain('현금흐름 관리시트 E11:BL11 주별 수식 기준');
+    expect(source).not.toContain('!cashflowPresentation.comparison.changed');
+    expect(source).not.toContain('Projection과 Actual 차이가 없습니다.');
+    expect(source).toContain('`${rowSurface} text-slate-500`');
     expect(source).toContain('const columnCount = comparisonCells.length');
     expect(source).not.toContain('difference: hasValue ? projection - actual : null');
   });

@@ -31,7 +31,16 @@ export function createCashflowPerformanceTrace({
   logger = defaultLogger,
   now = () => performance.now(),
 } = {}) {
-  const startedAt = now();
+  const readNow = () => {
+    try {
+      const value = Number(now());
+      if (Number.isFinite(value)) return value;
+    } catch {
+      // Diagnostics must never affect the request being measured.
+    }
+    return performance.now();
+  };
+  const startedAt = readNow();
   // 응답 헤더(Server-Timing)로 내보낼 span 기록. 로그를 못 보는 자리(브라우저)에서도 분해가 보이게.
   const spans = [];
 
@@ -52,7 +61,7 @@ export function createCashflowPerformanceTrace({
       ...(Number.isSafeInteger(details.itemCount) ? { itemCount: details.itemCount } : {}),
       ...(Number.isSafeInteger(details.issueCount) ? { issueCount: details.issueCount } : {}),
       durationMs: safeDuration(details.durationMs),
-      totalMs: safeDuration(now() - startedAt),
+      totalMs: safeDuration(readNow() - startedAt),
     };
     if (details.outcome) spans.push({ phase: payload.phase, attempt: payload.attempt, durationMs: payload.durationMs, outcome: payload.outcome });
     if (logger === defaultLogger && process.env.NODE_ENV === 'test') return;
@@ -74,10 +83,10 @@ export function createCashflowPerformanceTrace({
   };
 
   const measure = async (phase, task, details = {}) => {
-    const phaseStartedAt = now();
+    const phaseStartedAt = readNow();
     try {
       const result = await task();
-      emit(phase, { ...details, outcome: 'ok', durationMs: now() - phaseStartedAt });
+      emit(phase, { ...details, outcome: 'ok', durationMs: readNow() - phaseStartedAt });
       return result;
     } catch (error) {
       emit(phase, {
@@ -85,17 +94,17 @@ export function createCashflowPerformanceTrace({
         outcome: 'error',
         statusCode: error?.statusCode,
         errorCode: error?.code || error?.name,
-        durationMs: now() - phaseStartedAt,
+        durationMs: readNow() - phaseStartedAt,
       });
       throw error;
     }
   };
 
   const measureSync = (phase, task, details = {}) => {
-    const phaseStartedAt = now();
+    const phaseStartedAt = readNow();
     try {
       const result = task();
-      emit(phase, { ...details, outcome: 'ok', durationMs: now() - phaseStartedAt });
+      emit(phase, { ...details, outcome: 'ok', durationMs: readNow() - phaseStartedAt });
       return result;
     } catch (error) {
       emit(phase, {
@@ -103,7 +112,7 @@ export function createCashflowPerformanceTrace({
         outcome: 'error',
         statusCode: error?.statusCode,
         errorCode: error?.code || error?.name,
-        durationMs: now() - phaseStartedAt,
+        durationMs: readNow() - phaseStartedAt,
       });
       throw error;
     }
@@ -116,7 +125,7 @@ export function createCashflowPerformanceTrace({
       const desc = span.outcome === 'error' ? ';desc="error"' : '';
       return `${name};dur=${span.durationMs}${desc}`;
     });
-    entries.push(`total;dur=${safeDuration(now() - startedAt)}`);
+    entries.push(`total;dur=${safeDuration(readNow() - startedAt)}`);
     return entries.join(', ');
   };
 

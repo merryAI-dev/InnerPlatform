@@ -43,6 +43,19 @@ describe('cashflow performance trace', () => {
     await flushLogs();
   });
 
+  it('preserves the measured result and timing header when the diagnostic clock throws', async () => {
+    const trace = createCashflowPerformanceTrace({
+      requestId: 'req-clock',
+      operation: 'cashflow.read',
+      logger: () => {},
+      now: () => { throw new Error('clock failed'); },
+    });
+
+    await expect(trace.measure('body_read', async () => 'same-result')).resolves.toBe('same-result');
+    expect(() => trace.serverTiming()).not.toThrow();
+    expect(trace.serverTiming()).toMatch(/^body_read;dur=\d+, total;dur=\d+$/);
+  });
+
   it('logs a safe error code and rethrows the original error', async () => {
     const events = [];
     const error = Object.assign(new Error('contains private workbook value'), {
