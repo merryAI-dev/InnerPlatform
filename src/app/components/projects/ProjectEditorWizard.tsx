@@ -1858,6 +1858,21 @@ export function ProjectEditorWizard({
         />
       </ProjectFormRow>
 
+      {/* 참여율 시트를 이 사업에 묶는 지점. 시트 안에는 사업 식별자를 적지 않는다 -
+          사람이 적는 식별자는 어긋난다. 링크를 저장하는 것이 곧 바인딩이다. */}
+      <ProjectFormRow
+        label="참여율 시트 링크"
+        hints={['참여율 표준양식을 복사해 만든 이 사업 전용 시트 링크를 입력해 주세요.']}
+      >
+        <Input
+          type="url"
+          value={draft.participationSheetLink}
+          onChange={(event) => update('participationSheetLink', event.target.value)}
+          placeholder="https://docs.google.com/spreadsheets/d/..."
+          className={FORM_CONTROL_CLASS}
+        />
+      </ProjectFormRow>
+
       <ProjectFormRow
         label="프로젝트 목적"
         required={usesRegistrationV2}

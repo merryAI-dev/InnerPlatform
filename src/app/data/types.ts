@@ -721,6 +721,7 @@ export interface Project {
   // MYSC-specific fields
   clientOrg: string;             // 발주기관(계약기관)
   businessManagementGoogleFolderLink?: string;
+  participationSheetLink?: string; // 참여율 입력 시트(표준양식 사본) 링크
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
   note?: string;                  // PM/관리자 참고 메모
@@ -910,6 +911,7 @@ export interface ProjectRequestPayload {
   description: string;
   clientOrg: string;
   businessManagementGoogleFolderLink?: string;
+  participationSheetLink?: string;
   department: string;
   groupwareName?: string;
   currency?: ProjectCurrency;
