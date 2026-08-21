@@ -124,14 +124,37 @@ async function main() {
     }
   }
 
+  /*
+   * 참여행을 거치지 않고 People 에서 바로 잇는다.
+   *
+   * 팀원 personId 는 참여행에서 역으로 채워지는데, 참여행이 아직 없는 팀원은 손이 닿지 않아
+   * 계속 비어 있었다(라이브 75건). 새 참여행은 팀원행의 personId 로만 채워지므로, 비어 있으면
+   * 사업을 저장할 때마다 연결이 빈 참여행이 다시 생긴다.
+   *
+   * 팀원행이 이름과 닉네임을 둘 다 들고 있으면 둘이 같은 사람을 가리킬 때만 잇는다. 한쪽만 맞는 것은
+   * 받지 않는다 - People 에 아직 없는 동명이인일 수 있다.
+   * 애초에 한쪽만 적힌 팀원행은 모순될 신호 자체가 없으므로 그 한쪽으로 잇는다.
+   */
+  let teamMemberIdentityMatches = 0;
+  function personIdFromIdentity(member) {
+    const nameId = unique(peopleByName, [member?.memberName]);
+    const nicknameId = unique(peopleByNickname, [member?.memberNickname]);
+    if (text(member?.memberName) && text(member?.memberNickname)) {
+      return nameId && nicknameId && nameId === nicknameId ? nameId : '';
+    }
+    return nameId || nicknameId;
+  }
+
   const projectPlans = [];
   for (const projectDoc of projectsSnap.docs) {
     const current = Array.isArray(projectDoc.data()?.teamMembersDetailed) ? projectDoc.data().teamMembersDetailed : [];
     let changed = false;
     const next = current.map((member) => {
       if (text(member?.personId)) return member;
-      const personId = resolvedByProjectKey.get(`${projectDoc.id}:${syncKey(member)}`);
+      const fromEntry = resolvedByProjectKey.get(`${projectDoc.id}:${syncKey(member)}`);
+      const personId = fromEntry || personIdFromIdentity(member);
       if (!personId) return member;
+      if (!fromEntry) teamMemberIdentityMatches += 1;
       changed = true;
       return { ...member, personId };
     });
@@ -144,6 +167,7 @@ async function main() {
     exactUidMatches: entryPlans.filter((plan) => plan.source === 'EXACT_UID').length,
     uniquePeopleIdentityMatches: entryPlans.filter((plan) => plan.source === 'UNIQUE_PEOPLE_IDENTITY').length,
     roleDriftMatches,
+    teamMemberIdentityMatches,
     unresolvedCount: unresolved.length, unresolvedPreview: unresolved.slice(0, 20),
   };
   if (dumpDir) {
