@@ -47,7 +47,10 @@ const FIXED_HEADERS = ['닉네임', '이름', '역할', '투입시작월', '투�
 const FIRST_MONTH_COL = FIXED_HEADERS.length + 1; // G
 const MONTH_COLS = 120;      // 10년치 열을 미리 깐다. 기간 밖 열은 헤더가 비고 회색이다.
 const DATA_ROWS = 60;        // 명단 + 교체·재투입용 여유 줄
-const PLACEHOLDER_COUNT = 5; // 채용예정-N — People 미연결이 허용되는 유일한 이름
+// People 미연결이 허용되는 자리표시자. 채용예정-N = 뽑히면 실제 사람으로 교체.
+// 외부-N = People 에 없는 외부 파트너 - 이름 칸의 수식을 지우고 실명을 직접 적는다.
+const PLACEHOLDER_KINDS = ['채용예정', '외부'];
+const PLACEHOLDER_COUNT = 5;
 const SETTING_MONTHS_FROM = 2022;
 const SETTING_MONTHS_TO = 2035;
 
@@ -85,6 +88,8 @@ async function main() {
     ['', '  나갔다 다시 옴    → 새 줄(같은 사람 두 줄). 단 같은 달에 두 줄 다 값이 있으면 오류입니다'],
     ['', '  역할만 바뀜       → 역할 칸만 고치고 줄은 그대로'],
     ['', '  아직 채용 전 자리 → 닉네임에서 채용예정-1~5 를 고릅니다. 채용되면 실제 사람으로 바꿉니다'],
+    ['', '  신규 입사자       → People 등록이 먼저입니다. 등록 전까지는 채용예정-N 으로 적어 두었다가 바꿉니다'],
+    ['', '  외부 파트너       → 닉네임에서 외부-1~5 를 고르고, 이름 칸에 실명을 직접 적습니다(수식 덮어쓰기 허용)'],
     ['', ''],
     ['굵게', '하지 말아야 할 것'],
     ['', '  줄 삭제 · 열 추가/삭제 · 1~2행(머리글) 수정. 양식이 달라지면 반영이 거부됩니다.'],
@@ -103,8 +108,12 @@ async function main() {
     ref.getCell(index + 2, 1).value = person.nickname;
     ref.getCell(index + 2, 2).value = person.name;
   });
-  for (let index = 1; index <= PLACEHOLDER_COUNT; index += 1) {
-    ref.getCell(people.length + 1 + index, 1).value = `채용예정-${index}`;
+  let placeholderRow = people.length + 2;
+  for (const kind of PLACEHOLDER_KINDS) {
+    for (let index = 1; index <= PLACEHOLDER_COUNT; index += 1) {
+      ref.getCell(placeholderRow, 1).value = `${kind}-${index}`;
+      placeholderRow += 1;
+    }
   }
   let monthRow = 2;
   for (let year = SETTING_MONTHS_FROM; year <= SETTING_MONTHS_TO; year += 1) {
@@ -113,7 +122,7 @@ async function main() {
       monthRow += 1;
     }
   }
-  const nicknameListEnd = people.length + 1 + PLACEHOLDER_COUNT;
+  const nicknameListEnd = placeholderRow - 1;
   const settingMonthsEnd = monthRow - 1;
   ref.state = 'hidden';
 
@@ -195,7 +204,7 @@ async function main() {
   sheet.dataValidations.add(`A${dataStartRow}:A${dataEndRow}`, {
     type: 'list', allowBlank: true, formulae: [`참조!$A$2:$A$${nicknameListEnd}`],
     showErrorMessage: true, errorTitle: '드롭다운에서 골라 주세요',
-    error: 'People에 등록된 사람만 넣을 수 있습니다. 없는 사람은 People 등록 후, 채용 전 자리는 채용예정-N 을 쓰세요.',
+    error: 'People에 등록된 사람만 넣을 수 있습니다. 신규 입사자는 People 등록 후(임시로 채용예정-N), 외부 파트너는 외부-N 을 고르고 이름 칸에 실명을 적으세요.',
   });
   // 투입월 드롭다운의 출처는 월 헤더 행 자신 - ①에서 고른 기간 밖은 목록에 없다.
   sheet.dataValidations.add(`D${dataStartRow}:E${dataEndRow}`, {
