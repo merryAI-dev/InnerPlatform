@@ -2205,6 +2205,21 @@ export async function fetchParticipationSheetPreviewViaBff(params: {
 }
 
 /**
+ * 참여율 시트를 공유해야 할 상대. 전사 하나지만 공유는 사업마다 해야 하므로 폼에서 보여 준다.
+ */
+export async function fetchParticipationSystemAccountViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<{ systemAccountEmail: string; configured: boolean }> {
+  const response = await resolveClient(params.client).get<{ systemAccountEmail: string; configured: boolean }>(
+    '/api/v1/participation-dashboard/system-account',
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 10_000 },
+  );
+  return response.data;
+}
+
+/**
  * 저장 전 시트 연동. 등록 중에는 사업 문서가 아직 없고, 수정 중에는 화면의 링크가 저장본과
  * 다를 수 있어 링크와 계약 기간을 함께 보낸다. 읽기만 하며 아무것도 쓰지 않는다.
  */

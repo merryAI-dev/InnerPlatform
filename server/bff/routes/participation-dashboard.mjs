@@ -9,15 +9,32 @@ import {
   toParticipationSheetInput,
 } from '../participation-sheet-ranges.mjs';
 
+/** 캐시플로우 시트 연동과 같은 방식으로 서비스 계정 주소를 얻는다. */
+function resolveSystemAccountEmail(googleSheetsService) {
+  if (typeof googleSheetsService?.getServiceAccountEmail === 'function') {
+    return readOptionalText(googleSheetsService.getServiceAccountEmail());
+  }
+  return readOptionalText(googleSheetsService?.serviceAccountEmail);
+}
+
 /**
  * 시트 읽기 실패를 사람이 읽을 한 가지 코드로 정규화한다.
- * 권한·쿼터·삭제는 원인이 다르지만 사람이 할 일은 같다 - 링크와 공유를 확인하고 다시 시도한다.
+ * 권한·쿼터·삭제는 원인이 다르지만 사람이 할 일은 같다 - 공유를 확인하고 다시 시도한다.
+ *
+ * 가장 흔한 원인은 공유 누락이라 **누구에게 공유해야 하는지**를 함께 적는다. 주소를 모르면
+ * 사람은 무엇을 고쳐야 할지 알 수 없고, "잠시 후 다시 시도" 만 되풀이하게 된다.
  */
-function participationSheetUnreachable(error) {
+function participationSheetUnreachable(error, systemAccountEmail = '') {
   const detail = readOptionalText(error?.message) || '시트를 읽지 못했습니다.';
+  const share = systemAccountEmail
+    ? ` 시트를 ${systemAccountEmail} 에 보기 권한으로 공유했는지 확인해 주세요.`
+    : ' 시트 공유 권한을 확인해 주세요.';
+  const missingTab = /참여율|Unable to parse range|not found/i.test(detail)
+    ? ' 표준양식의 "참여율" 탭이 있는지도 확인해 주세요.'
+    : '';
   return createHttpError(
     502,
-    `참여율 시트를 읽지 못했습니다. 링크와 공유 권한을 확인해 주세요. (${detail})`,
+    `참여율 시트를 읽지 못했습니다.${share}${missingTab} (${detail})`,
     'participation_sheet_unreachable',
   );
 }
@@ -39,7 +56,7 @@ async function readParticipationSheet(googleSheetsService, sheetLink) {
     ]);
     return { format, period, header, meta, cells };
   } catch (error) {
-    throw participationSheetUnreachable(error);
+    throw participationSheetUnreachable(error, resolveSystemAccountEmail(googleSheetsService));
   }
 }
 
@@ -114,6 +131,21 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
       .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
       .filter((entry) => readOptionalText(entry.projectId) === projectId);
     res.status(200).json(buildProjectParticipationSnapshot({ project: { id: projectSnap.id, ...(projectSnap.data() || {}) }, entries }));
+  }));
+
+  /*
+   * 시트를 공유해야 할 상대. 사업마다 화면에 보여 준다.
+   *
+   * 서비스 계정은 전사 하나지만, 공유는 사업마다 새로 만든 시트에 대해 매번 해야 한다.
+   * 그래서 주소를 오류가 난 뒤에 알려주면 늦다 - 링크를 넣는 그 자리에 있어야 한다.
+   */
+  app.get('/api/v1/participation-dashboard/system-account', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read participation sheet system account');
+    const systemAccountEmail = resolveSystemAccountEmail(googleSheetsService);
+    res.status(200).json({
+      systemAccountEmail,
+      configured: Boolean(systemAccountEmail),
+    });
   }));
 
   /*

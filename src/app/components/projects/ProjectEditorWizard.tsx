@@ -22,7 +22,11 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { PlatformApiError } from '../../platform/api-client';
 import { resolveApiErrorPresentation } from '../../platform/api-error-messages';
-import { previewParticipationSheetByLinkViaBff } from '../../lib/platform-bff-client';
+import {
+  fetchParticipationSystemAccountViaBff,
+  previewParticipationSheetByLinkViaBff,
+  type ParticipationSheetPreview,
+} from '../../lib/platform-bff-client';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -734,6 +738,11 @@ export function ProjectEditorWizard({
   const [teamSyncing, setTeamSyncing] = useState(false);
   const [teamSyncNotice, setTeamSyncNotice] = useState('');
   const [teamSyncError, setTeamSyncError] = useState('');
+  // 표는 시트를 그대로 옮긴 것이다. 저장된 명단이 아니라 방금 읽은 시트를 보여 준다.
+  const [teamSyncPreview, setTeamSyncPreview] = useState<ParticipationSheetPreview | null>(null);
+  const [teamSyncYear, setTeamSyncYear] = useState('');
+  // 시트를 공유해야 할 상대. 오류가 난 뒤에 알려주면 늦다 - 링크를 넣는 그 자리에 있어야 한다.
+  const [sheetSystemAccount, setSheetSystemAccount] = useState('');
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
   const [documentUploadState, setDocumentUploadState] = useState<Record<ProjectRequestDocumentKind, ContractUploadState>>({
@@ -1279,6 +1288,15 @@ export function ProjectEditorWizard({
    * 여기에는 승인 서류·인력 현황·사업 검색이 쓰는 명단(이름·역할·투입기간·기본투입률)만 남긴다.
    * 저장 전에도 눌러야 하므로 화면의 링크와 계약 기간을 그대로 보낸다.
    */
+  useEffect(() => {
+    if (!orgId || !user) return;
+    let cancelled = false;
+    void fetchParticipationSystemAccountViaBff({ tenantId: orgId, actor: user })
+      .then((result) => { if (!cancelled) setSheetSystemAccount(result.systemAccountEmail || ''); })
+      .catch(() => { /* 안내 문구일 뿐이라 실패해도 화면을 막지 않는다. */ });
+    return () => { cancelled = true; };
+  }, [orgId, user]);
+
   const syncTeamFromSheet = () => {
     if (teamSyncing) return;
     const sheetLink = String(draft.participationSheetLink || '').trim();
@@ -1307,6 +1325,7 @@ export function ProjectEditorWizard({
       .then((preview) => {
         if (!preview.ok) {
           // 막는 이유를 서버가 적어 준 대로 보여 준다. 화면이 다시 판정하지 않는다.
+          setTeamSyncPreview(null);
           setTeamSyncError(preview.blocking.map((issue) => issue.message).slice(0, 3).join(' / ')
             || '시트를 반영할 수 없는 상태입니다.');
           return;
@@ -1320,15 +1339,20 @@ export function ProjectEditorWizard({
           laborAllocationStartMonth: row.stintStart,
           laborAllocationEndMonth: row.stintEnd,
         })));
+        setTeamSyncPreview(preview);
+        // 계약이 10년이면 월 칸이 120개다. 연도로 잘라야 표가 옆으로 터지지 않는다.
+        setTeamSyncYear(preview.months[0]?.slice(0, 4) || '');
         const pending = preview.summary?.pendingLinkCount || 0;
         setTeamSyncNotice(pending > 0
           ? `참여인력 ${preview.rows.length}명을 가져왔습니다. 그중 ${pending}명은 People 등록 전이라 연결 대기입니다.`
           : `참여인력 ${preview.rows.length}명을 가져왔습니다.`);
       })
       .catch((error) => {
+        setTeamSyncPreview(null);
         const status = error instanceof PlatformApiError ? error.status : 500;
         const code = error instanceof PlatformApiError ? error.code : '';
-        const serverMessage = error instanceof PlatformApiError ? String(error.message || '').trim() : '';
+        // serverMessage 가 서버가 적어 준 안내다. message 는 상태코드별 일반 문구라 원인을 가린다.
+        const serverMessage = error instanceof PlatformApiError ? String(error.serverMessage || '').trim() : '';
         setTeamSyncError(serverMessage || resolveApiErrorPresentation(code, status).guide);
       })
       .finally(() => setTeamSyncing(false));
@@ -2840,7 +2864,10 @@ export function ProjectEditorWizard({
           label="참여율 시트 링크"
           hints={[
             '월별 참여율은 이 시트에 적습니다. 표준양식을 복사해 이 사업 전용 시트를 만든 뒤 링크를 넣어 주세요.',
-            '저장하면 참여인력 대시보드의 "시트 확인"에서 입력 상태를 볼 수 있습니다.',
+            sheetSystemAccount
+              ? `만든 시트를 ${sheetSystemAccount} 에 보기 권한으로 공유해 주세요. 공유하지 않으면 연동이 되지 않습니다.`
+              : '만든 시트를 MYSC 시스템 계정에 보기 권한으로 공유해야 연동이 됩니다.',
+            '저장하면 참여인력 대시보드의 "시트 확인"에서도 입력 상태를 볼 수 있습니다.',
           ]}
         >
           <Input
@@ -2873,46 +2900,85 @@ export function ProjectEditorWizard({
               {teamSyncNotice}
             </p>
           ) : null}
-          {draft.teamMembersDetailed.length === 0 ? (
-            <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-4 py-5', FORM_HINT_CLASS)}>
-              시트 링크를 넣고 연동하기를 누르면 참여인력이 여기에 표시됩니다.
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="w-full min-w-[640px] text-left">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50">
-                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">이름</th>
-                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">역할</th>
-                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">투입기간</th>
-                    <th className="px-3 py-2 text-right text-[12px] font-semibold text-slate-700">기본투입률</th>
-                    <th className="px-3 py-2 text-[12px] font-semibold text-slate-700">People 연결</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {draft.teamMembersDetailed.map((member, index) => (
-                    <tr key={`team-member-${index}`} className="border-b border-slate-100 last:border-b-0">
-                      <td className="px-3 py-2 text-[13px] font-medium text-slate-800">
-                        {member.memberName || member.memberNickname || '이름 없음'}
-                        {member.memberName && member.memberNickname
-                          ? <span className="ml-1 text-slate-500">({member.memberNickname})</span>
-                          : null}
-                      </td>
-                      <td className="px-3 py-2 text-[13px] text-slate-600">{member.role || '―'}</td>
-                      <td className="px-3 py-2 text-[13px] text-slate-600">
-                        {member.laborAllocationStartMonth || '미입력'} ~ {member.laborAllocationEndMonth || '진행 중'}
-                      </td>
-                      <td className="px-3 py-2 text-right text-[13px] tabular-nums text-slate-800">
-                        {member.participationRate ? `${member.participationRate}%` : '―'}
-                      </td>
-                      <td className={cn('px-3 py-2 text-[13px]', member.personId ? 'text-slate-600' : 'font-semibold text-amber-700')}>
-                        {member.personId ? '연결됨' : '연결 대기'}
-                      </td>
+          {teamSyncPreview ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={FORM_HINT_CLASS}>
+                  {teamSyncPreview.summary?.period.start} ~ {teamSyncPreview.summary?.period.end}
+                  {' · '}참여인력 {teamSyncPreview.rows.length}명
+                </span>
+                {/* 계약이 10년이면 월 칸이 120개다. 연도로 잘라야 표가 옆으로 터지지 않는다. */}
+                <Select value={teamSyncYear} onValueChange={setTeamSyncYear}>
+                  <SelectTrigger className="h-8 w-[120px] text-[13px]" aria-label="확인할 연도">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[...new Set(teamSyncPreview.months.map((month) => month.slice(0, 4)))].map((year) => (
+                      <SelectItem key={year} value={year}>{year}년</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50">
+                      <th className="sticky left-0 z-10 min-w-[140px] bg-slate-50 px-3 py-2 text-[12px] font-semibold text-slate-700">이름</th>
+                      <th className="min-w-[110px] px-3 py-2 text-[12px] font-semibold text-slate-700">역할</th>
+                      <th className="min-w-[150px] px-3 py-2 text-[12px] font-semibold text-slate-700">투입기간</th>
+                      {teamSyncPreview.months.filter((month) => month.startsWith(teamSyncYear)).map((month) => (
+                        <th key={month} className="min-w-[56px] px-2 py-2 text-center text-[12px] font-semibold text-slate-700">
+                          {Number(month.slice(5))}월
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {teamSyncPreview.rows.map((row) => (
+                      <tr key={`sheet-row-${row.rowIndex}`} className="border-b border-slate-100 last:border-b-0">
+                        <td className="sticky left-0 z-10 bg-white px-3 py-2 text-[13px] font-medium text-slate-800">
+                          {row.name || row.nickname || '이름 없음'}
+                          {row.name && row.nickname ? <span className="ml-1 text-slate-500">({row.nickname})</span> : null}
+                          {row.linkState === 'LINKED'
+                            ? null
+                            : <span className="ml-1 text-[11px] font-semibold text-amber-700">
+                              {row.linkState === 'PLACEHOLDER' ? '사람 미정' : '연결 대기'}
+                            </span>}
+                        </td>
+                        <td className="px-3 py-2 text-[13px] text-slate-600">{row.role || '―'}</td>
+                        <td className="px-3 py-2 text-[13px] text-slate-600">
+                          {row.stintStart || '미입력'} ~ {row.stintEnd || '진행 중'}
+                        </td>
+                        {teamSyncPreview.months.filter((month) => month.startsWith(teamSyncYear)).map((month) => {
+                          const inStint = Boolean(row.stintStart)
+                            && month >= row.stintStart
+                            && (!row.stintEnd || month <= row.stintEnd);
+                          const value = row.monthlyRates[month];
+                          const hasValue = value !== undefined;
+                          // 시트의 색 규칙을 그대로 옮긴다. 미입력은 빨강, 투입기간 밖은 흐리게.
+                          return (
+                            <td
+                              key={month}
+                              className={cn(
+                                'px-2 py-2 text-center text-[13px] tabular-nums',
+                                hasValue ? 'font-semibold text-slate-800'
+                                  : inStint ? 'bg-red-50 font-semibold text-red-700' : 'text-slate-300',
+                              )}
+                            >
+                              {hasValue ? value : inStint ? '미입력' : '―'}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
+          ) : (
+            <p className={cn('rounded-lg border border-dashed border-slate-300 bg-white px-4 py-5', FORM_HINT_CLASS)}>
+              시트 링크를 넣고 연동하기를 누르면 시트 내용이 여기에 표로 나타납니다.
+            </p>
           )}
         </div>
       </ProjectFormSection>

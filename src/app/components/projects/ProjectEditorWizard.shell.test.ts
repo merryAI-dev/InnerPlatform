@@ -145,6 +145,20 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('laborAllocationStartMonth: row.stintStart,');
   });
 
+  // 표는 저장된 명단이 아니라 방금 읽은 시트다. 저장본을 그리면 연동 전 옛 값이 보인다.
+  it('draws the sheet itself, sliced by year so a ten-year contract fits', () => {
+    expect(source).toContain('const [teamSyncPreview, setTeamSyncPreview]');
+    expect(source).toContain('teamSyncPreview.rows.map((row) => (');
+    expect(source).toContain("teamSyncPreview.months.filter((month) => month.startsWith(teamSyncYear))");
+    expect(source).toContain('aria-label="확인할 연도"');
+    expect(source).not.toContain('{draft.teamMembersDetailed.map((member, index) => (');
+  });
+
+  it('shows which account the sheet must be shared with', () => {
+    expect(source).toContain('fetchParticipationSystemAccountViaBff(');
+    expect(source).toContain('에 보기 권한으로 공유해 주세요.');
+  });
+
   it('does not judge the sheet again in the browser', () => {
     // 막는 이유는 서버가 적어 준 대로 보여 준다. 화면이 다시 판정하면 두 곳이 어긋난다.
     expect(source).toContain('preview.blocking.map((issue) => issue.message)');
@@ -183,7 +197,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('does not key editable team member rows by typed member name', () => {
-    expect(source).toContain("key={`team-member-${index}`}");
+    expect(source).toContain("key={`sheet-row-${row.rowIndex}`}");
     expect(source).not.toContain("key={`${member.memberName || 'member'}-${index}`}");
   });
 
@@ -203,7 +217,6 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('normalizeProjectTeamMemberDraftRows');
     expect(source).toContain('laborAllocationStartMonth');
     expect(source).toContain('laborAllocationEndMonth');
-    expect(source).toContain("key={`team-member-${index}`}");
     expect(source).not.toContain('<Label className="text-xs">인건비 시작월</Label>');
     expect(source).not.toContain('onClick={addTeamMember}');
   });
