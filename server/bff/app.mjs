@@ -1573,7 +1573,7 @@ export function createBffApp(options = {}) {
     service: cashflowPeriodPolicyService,
     idempotencyService,
   });
-  mountParticipationDashboardRoutes(app, { db, now, idempotencyService });
+  mountParticipationDashboardRoutes(app, { db, now, googleSheetsService, idempotencyService });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,
