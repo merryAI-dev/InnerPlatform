@@ -53,6 +53,9 @@ const DATA_ROWS = 60;        // 명단 + 교체·재투입용 여유 줄
 // 반영 파이프라인이 그때 연결한다.
 const PLACEHOLDER_KINDS = ['채용예정'];
 const PLACEHOLDER_COUNT = 5;
+// 양식 이름·버전. 숨김 참조 탭 F1 에 새겨지고, 반영 파이프라인이 이 값으로 양식을 검증한다.
+// 형식이 바뀌면 버전을 올린다 - 옛 복사본은 옛 버전으로 식별되므로 조용히 잘못 읽히지 않는다.
+const TEMPLATE_FORMAT_ID = 'MYSC-PARTICIPATION-V1';
 const SETTING_MONTHS_FROM = 2022;
 const SETTING_MONTHS_TO = 2035;
 
@@ -131,6 +134,7 @@ async function main() {
   }
   const nicknameListEnd = placeholderRow - 1;
   const settingMonthsEnd = monthRow - 1;
+  ref.getCell(1, 6).value = TEMPLATE_FORMAT_ID;
   ref.state = 'hidden';
 
   // ── 참여율 탭 ──
@@ -270,10 +274,10 @@ async function main() {
   for (let col = FIRST_MONTH_COL; col <= lastCol; col += 1) sheet.getColumn(col).width = 8.5;
 
   mkdirSync(outDir, { recursive: true });
-  const filePath = join(outDir, '참여율_공통양식.xlsx');
+  const filePath = join(outDir, 'MYSC_참여율_표준양식_v1.xlsx');
   await workbook.xlsx.writeFile(filePath);
   console.log(JSON.stringify({
-    file: filePath, monthColumns: MONTH_COLS, dataRows: DATA_ROWS, people: people.length,
+    file: filePath, format: TEMPLATE_FORMAT_ID, monthColumns: MONTH_COLS, dataRows: DATA_ROWS, people: people.length,
   }, null, 2));
 }
 
