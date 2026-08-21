@@ -38,6 +38,7 @@ import { resolveApiErrorPresentation } from '../../platform/api-error-messages';
 import { resolvePortalProjectContextSync, resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from '../../components/cashflow/CashflowFormulaMismatchDialog';
+import { shouldApplyCashflowSheetLabProjectResult } from './cashflow-sheet-lab-project-scope';
 
 function formatError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string; statusCode?: number }; requestId?: string; status?: number };
@@ -197,6 +198,8 @@ export function CashflowSheetLabPage() {
   const [closedMonthFormulaAccepted, setClosedMonthFormulaAccepted] = useState(false);
   const [closedMonthPendingApprovalAccepted, setClosedMonthPendingApprovalAccepted] = useState(false);
   const [pendingApprovalStage, setPendingApprovalStage] = useState<CashflowSheetLabStageResult | null>(null);
+  const [pendingApprovalClosedMonthChangeReason, setPendingApprovalClosedMonthChangeReason] = useState('');
+  const [pendingApprovalFormulaAccepted, setPendingApprovalFormulaAccepted] = useState(false);
   const pendingApprovalDifferences = pendingApprovalStage?.pendingApprovalDifferences || [];
   const pendingApprovalChangeRows = pendingApprovalDifferences.flatMap((month) => month.changes || []);
   const pendingApprovalManifestComplete = Boolean(pendingApprovalStage?.pendingApprovalDifferenceManifestHash)
@@ -212,6 +215,7 @@ export function CashflowSheetLabPage() {
   const loading = loadingOperation !== null;
   const [accountLoading, setAccountLoading] = useState(false);
   const configLoadGenerationRef = useRef(0);
+  const sheetOperationGenerationRef = useRef(0);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const projectContextSync = resolvePortalProjectContextSync({
     routeProjectId,
@@ -219,6 +223,10 @@ export function CashflowSheetLabPage() {
     currentPath,
   });
   const projectId = projectContextSync.projectId;
+  const selectedProjectIdRef = useRef(projectId);
+  const selectedSourceYearRef = useRef(sourceYear);
+  selectedProjectIdRef.current = projectId;
+  selectedSourceYearRef.current = sourceYear;
   const projectContextAction = projectContextSync.action;
   const projectContextPath = projectContextSync.path;
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
@@ -257,6 +265,7 @@ export function CashflowSheetLabPage() {
       hasIdToken: Boolean(actor.idToken),
     }, 'warn');
     const result = await loginWithGoogle();
+    if (selectedProjectIdRef.current !== projectId) return false;
     if (!result.success) {
       logCashflowLab('auth.popup.error', {
         projectId,
@@ -309,6 +318,7 @@ export function CashflowSheetLabPage() {
     const popupOk = await requestLoginFlow();
     if (!popupOk) return null;
     const resolved = await resolveBffActor({ forceRefresh: true });
+    if (selectedProjectIdRef.current !== projectId) return null;
     if (!resolved?.idToken) {
       logCashflowLab(`${action}.bffAuth.token_missing`, { projectId }, 'warn');
       setErrorMessage('Google 로그인 후에도 서버 인증 토큰을 확인하지 못했습니다. 다시 시도해 주세요.');
@@ -371,6 +381,8 @@ export function CashflowSheetLabPage() {
     setClosedMonthFormulaAccepted(false);
     setClosedMonthPendingApprovalAccepted(false);
     setPendingApprovalStage(null);
+    setPendingApprovalClosedMonthChangeReason('');
+    setPendingApprovalFormulaAccepted(false);
     setFormulaMismatchPrompt(null);
     setApplyResumeRequired(false);
     setApplyStatusState('checking');
@@ -423,6 +435,7 @@ export function CashflowSheetLabPage() {
 
   function handleSourceYearChange(nextYear: number) {
     const nextConfig = savedConfigs.find((config) => config.sourceYear === nextYear) || null;
+    selectedSourceYearRef.current = nextYear;
     setSourceYear(nextYear);
     setSavedConfig(nextConfig);
     setSheetLink(nextConfig?.value || '');
@@ -438,18 +451,27 @@ export function CashflowSheetLabPage() {
     const requestedProjectId = projectId;
     const requestedSourceYear = sourceYear;
     const generation = ++configLoadGenerationRef.current;
+    const isCurrentRequest = () => shouldApplyCashflowSheetLabProjectResult({
+      requestGeneration: generation,
+      currentGeneration: configLoadGenerationRef.current,
+      requestedProjectId,
+      selectedProjectId: selectedProjectIdRef.current,
+      requestedSourceYear,
+      selectedSourceYear: selectedSourceYearRef.current,
+    });
     setAccountLoading(true);
     setStatusMessage('');
     try {
-      const result = await runWithBffAuthRetry('share_account.load', (requestActor) => (
-        getCashflowSheetLabShareAccountViaBff({
+      const result = await runWithBffAuthRetry('share_account.load', async (requestActor) => {
+        if (!isCurrentRequest()) return null;
+        return getCashflowSheetLabShareAccountViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId: requestedProjectId,
           sourceYear: requestedSourceYear,
-        })
-      ));
-      if (!result || generation !== configLoadGenerationRef.current) return;
+        });
+      });
+      if (!result || !isCurrentRequest()) return;
       const email = result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || '';
       if (!email) {
         setErrorMessage('서버의 Google Sheets 서비스 계정 이메일을 확인하지 못했습니다.');
@@ -467,20 +489,25 @@ export function CashflowSheetLabPage() {
       }
       if (!scopedConfig?.value) setStatusMessage('공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
-        projectId,
+        projectId: requestedProjectId,
         hasSystemAccountEmail: true,
       });
     } catch (error) {
-      logCashflowLab('share_account.load.error', { projectId, ...errorDiagnostics(error) }, 'warn');
-      if (generation === configLoadGenerationRef.current) setErrorMessage(formatError(error));
+      if (isCurrentRequest()) {
+        logCashflowLab('share_account.load.error', { projectId: requestedProjectId, ...errorDiagnostics(error) }, 'warn');
+      }
+      if (isCurrentRequest()) setErrorMessage(formatError(error));
     } finally {
-      if (generation === configLoadGenerationRef.current) setAccountLoading(false);
+      if (isCurrentRequest()) setAccountLoading(false);
     }
   }
 
   // 프로젝트나 연동 연도가 바뀌면 이전 시트 draft를 남기지 않는다.
   useEffect(() => {
     configLoadGenerationRef.current += 1;
+    sheetOperationGenerationRef.current += 1;
+    setLoadingOperation(null);
+    setAccountLoading(false);
     setSavedConfig(null);
     setSavedConfigs([]);
     setSheetLink('');
@@ -506,38 +533,65 @@ export function CashflowSheetLabPage() {
 
   async function handleSaveSheetConfig() {
     if (!projectId || loading || !spreadsheetId) return;
+    const requestedProjectId = projectId;
+    const requestedSourceYear = sourceYear;
+    const requestGeneration = ++sheetOperationGenerationRef.current;
+    const isCurrentRequest = () => shouldApplyCashflowSheetLabProjectResult({
+      requestGeneration,
+      currentGeneration: sheetOperationGenerationRef.current,
+      requestedProjectId,
+      selectedProjectId: selectedProjectIdRef.current,
+      requestedSourceYear,
+      selectedSourceYear: selectedSourceYearRef.current,
+    });
+    if (!isCurrentRequest()) return;
     setLoadingOperation('saving');
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
     setReflectResult(null);
     try {
-      const result = await runWithBffAuthRetry('settings.save', (requestActor) => (
-        saveCashflowSheetLabConfigViaBff({
+      const result = await runWithBffAuthRetry('settings.save', async (requestActor) => {
+        if (!isCurrentRequest()) return null;
+        return saveCashflowSheetLabConfigViaBff({
           tenantId: orgId,
           actor: requestActor,
-          projectId,
-          sourceYear,
+          projectId: requestedProjectId,
+          sourceYear: requestedSourceYear,
           value: sheetLink,
           sheetName: sheetName || undefined,
-        })
-      ));
+        });
+      });
+      if (!isCurrentRequest()) return;
       if (!result) return;
       setSavedConfig(result.config || null);
       setSavedConfigs(result.configs || []);
       setStatusMessage('시트 정보를 저장했습니다. 금액은 아직 MYSCube에 반영되지 않았습니다.');
-      logCashflowLab('settings.save.ok', { projectId, spreadsheetId, sheetName: sheetName || null });
+      logCashflowLab('settings.save.ok', { projectId: requestedProjectId, spreadsheetId, sheetName: sheetName || null });
     } catch (error) {
-      logCashflowLab('settings.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
+      if (!isCurrentRequest()) return;
+      logCashflowLab('settings.save.error', { projectId: requestedProjectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
       setErrorMessage(formatError(error));
     } finally {
-      setLoadingOperation(null);
+      if (isCurrentRequest()) setLoadingOperation(null);
     }
   }
   async function handleRefreshSheetMirror() {
     if (!projectId || loading || !spreadsheetId) return;
+    const requestedProjectId = projectId;
+    const requestedSourceYear = sourceYear;
+    const requestGeneration = ++sheetOperationGenerationRef.current;
+    const isCurrentRequest = () => shouldApplyCashflowSheetLabProjectResult({
+      requestGeneration,
+      currentGeneration: sheetOperationGenerationRef.current,
+      requestedProjectId,
+      selectedProjectId: selectedProjectIdRef.current,
+      requestedSourceYear,
+      selectedSourceYear: selectedSourceYearRef.current,
+    });
+    if (!isCurrentRequest()) return;
     const startedAt = Date.now();
-    const refreshIdempotencyKey = `cashflow-sheet-lab-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const refreshIdempotencyKey = `cashflow-sheet-lab-refresh:${requestedProjectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoadingOperation('refresh');
     setErrorMessage('');
     setStatusMessage('');
@@ -545,21 +599,23 @@ export function CashflowSheetLabPage() {
     setReflectResult(null);
     try {
       logCashflowLab('mirror.refresh.start', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId,
         sheetName: sheetName || null,
       });
-      const result = await runWithBffAuthRetry('mirror.refresh', (requestActor) => (
-        refreshCashflowSheetLabMirrorViaBff({
+      const result = await runWithBffAuthRetry('mirror.refresh', async (requestActor) => {
+        if (!isCurrentRequest()) return null;
+        return refreshCashflowSheetLabMirrorViaBff({
           tenantId: orgId,
           actor: requestActor,
-          projectId,
-          sourceYear,
+          projectId: requestedProjectId,
+          sourceYear: requestedSourceYear,
           value: sheetLink,
           sheetName: sheetName || undefined,
           idempotencyKey: refreshIdempotencyKey,
-        })
-      ));
+        });
+      });
+      if (!isCurrentRequest()) return;
       if (!result) return;
       const nextSheetName = sheetName || result.selectedSheetName || '';
       setMirror((current) => result.status === 'STALE' && current?.sourceRevision
@@ -573,7 +629,7 @@ export function CashflowSheetLabPage() {
           }
         : result);
       setReviewedSourceKey(result.status === 'FRESH' && result.sourceRevision
-        ? buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName })
+        ? buildSourceKey({ projectId: requestedProjectId, sourceYear: requestedSourceYear, value: sheetLink, sheetName: nextSheetName })
         : '');
       if (result.status === 'FRESH' && result.sourceRevision) {
         setStatusMessage('시트 최신값을 고정했습니다. 시트 값으로 덮어쓸 수 있습니다.');
@@ -583,7 +639,7 @@ export function CashflowSheetLabPage() {
         setErrorMessage(result.lastRefreshError?.message || '시트 연동에 실패했습니다.');
       }
       logCashflowLab('mirror.refresh.ok', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId: result.spreadsheetId,
         sheetName: result.selectedSheetName,
         mirrorStatus: result.status,
@@ -593,8 +649,9 @@ export function CashflowSheetLabPage() {
       });
       if (!sheetName && result.selectedSheetName) setSheetName(result.selectedSheetName);
     } catch (error) {
+      if (!isCurrentRequest()) return;
       logCashflowLab('mirror.refresh.error', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId,
         durationMs: Date.now() - startedAt,
         ...errorDiagnostics(error),
@@ -604,7 +661,7 @@ export function CashflowSheetLabPage() {
         void handleLoadShareAccount();
       }
     } finally {
-      setLoadingOperation(null);
+      if (isCurrentRequest()) setLoadingOperation(null);
     }
   }
 
@@ -622,10 +679,22 @@ export function CashflowSheetLabPage() {
       || (!stagedOverride && !spreadsheetId)
       || (!stagedOverride && (mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey))
     ) return;
+    const requestedProjectId = projectId;
+    const requestedSourceYear = sourceYear;
+    const requestGeneration = ++sheetOperationGenerationRef.current;
+    const isCurrentRequest = () => shouldApplyCashflowSheetLabProjectResult({
+      requestGeneration,
+      currentGeneration: sheetOperationGenerationRef.current,
+      requestedProjectId,
+      selectedProjectId: selectedProjectIdRef.current,
+      requestedSourceYear,
+      selectedSourceYear: selectedSourceYearRef.current,
+    });
+    if (!isCurrentRequest()) return;
     const startedAt = Date.now();
     const expectedMirrorRevision = mirror?.sourceRevision || '';
-    const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const stageIdempotencyKey = `cashflow-sheet-lab-stage:${requestedProjectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const applyIdempotencyKey = `cashflow-sheet-lab-apply:${requestedProjectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     let activeStep: 'stage' | 'apply' = stagedOverride ? 'apply' : 'stage';
     let staged = stagedOverride;
     let stageDurationMs = 0;
@@ -641,28 +710,30 @@ export function CashflowSheetLabPage() {
     }
     setReflectResult(null);
     logCashflowLab('overwrite.sheet_values.start', {
-      projectId,
+      projectId: requestedProjectId,
       spreadsheetId,
     });
     try {
       if (!staged) {
-        logCashflowLab('stage.sheet_values.start', { projectId, spreadsheetId });
+        logCashflowLab('stage.sheet_values.start', { projectId: requestedProjectId, spreadsheetId });
         const stageStartedAt = Date.now();
-        staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
-          stageCashflowSheetLabViaBff({
+        staged = await runWithBffAuthRetry('stage.sheet_values', async (requestActor) => {
+          if (!isCurrentRequest()) return null;
+          return stageCashflowSheetLabViaBff({
             tenantId: orgId,
             actor: requestActor,
-            projectId,
+            projectId: requestedProjectId,
             expectedMirrorRevision,
             replaceAllActualSources: true,
             idempotencyKey: stageIdempotencyKey,
-          })
-        ));
+          });
+        });
+        if (!isCurrentRequest()) return;
         stageDurationMs = Date.now() - stageStartedAt;
       }
       if (!staged) {
         logCashflowLab('overwrite.sheet_values.cancelled', {
-          projectId,
+          projectId: requestedProjectId,
           spreadsheetId,
           step: activeStep,
           durationMs: Date.now() - startedAt,
@@ -672,7 +743,7 @@ export function CashflowSheetLabPage() {
       if (!stagedOverride) {
         setReviewedSourceKey(sourceKey);
         logCashflowLab('stage.sheet_values.ok', {
-          projectId,
+          projectId: requestedProjectId,
           spreadsheetId: staged.spreadsheetId,
           sheetName: staged.selectedSheetName,
           stagedLineCount: staged.stagedLineCount,
@@ -685,7 +756,7 @@ export function CashflowSheetLabPage() {
       }
       if (staged.status === 'BLOCKED') {
         logCashflowLab('overwrite.sheet_values.blocked', {
-          projectId,
+          projectId: requestedProjectId,
           spreadsheetId,
           riskLineCount: staged.riskLineCount,
           durationMs: Date.now() - startedAt,
@@ -701,15 +772,11 @@ export function CashflowSheetLabPage() {
         setReflectResult({ appliedLineCount: 0, projectionLineCount: 0, actualLineCount: 0 });
         setStatusMessage('MYSCube가 이미 시트 최신값과 같습니다.');
         logCashflowLab('overwrite.sheet_values.noop', {
-          projectId,
+          projectId: requestedProjectId,
           spreadsheetId,
           durationMs: Date.now() - startedAt,
           stageDurationMs,
         });
-        return;
-      }
-      if (!acceptPendingApprovalDifferences && staged.pendingApprovalDifferences?.length) {
-        setPendingApprovalStage(staged);
         return;
       }
       if (!stagedOverride && staged.closedMonthDifferences?.length) {
@@ -717,6 +784,14 @@ export function CashflowSheetLabPage() {
         setClosedMonthWarning(staged.closedMonthDifferences);
         setApplyResumeRequired(false);
         setClosedMonthFormulaAccepted(false);
+        setClosedMonthPendingApprovalAccepted(false);
+        return;
+      }
+      if (!acceptPendingApprovalDifferences && staged.pendingApprovalDifferences?.length) {
+        closeClosedMonthDialog();
+        setPendingApprovalStage(staged);
+        setPendingApprovalClosedMonthChangeReason(monthCloseChangeReason);
+        setPendingApprovalFormulaAccepted(acceptFormulaMismatches);
         return;
       }
       activeStep = 'apply';
@@ -725,17 +800,18 @@ export function CashflowSheetLabPage() {
       const stagedRunId = staged.runId;
       const stagedEvidence = staged;
       logCashflowLab('apply.sheet_values.start', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId,
         stageRunId: staged.runId,
         stagedLineCount: staged.stagedLineCount,
         elapsedMs: applyStartedAt - startedAt,
       });
-      const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
-        applyCashflowSheetLabViaBff({
+      const result = await runWithBffAuthRetry('apply.sheet_values', async (requestActor) => {
+        if (!isCurrentRequest()) return null;
+        return applyCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
-          projectId,
+          projectId: requestedProjectId,
           stageRunId: stagedRunId,
           replaceAllActualSources: true,
           closedMonthChangeReason: monthCloseChangeReason,
@@ -746,11 +822,12 @@ export function CashflowSheetLabPage() {
           pendingApprovalDifferenceManifestHash: stagedEvidence.pendingApprovalDifferenceManifestHash,
           acceptFormulaMismatches,
           idempotencyKey: applyIdempotencyKey,
-        })
-      ));
+        });
+      });
+      if (!isCurrentRequest()) return;
       if (!result) {
         logCashflowLab('overwrite.sheet_values.cancelled', {
-          projectId,
+          projectId: requestedProjectId,
           spreadsheetId,
           step: activeStep,
           durationMs: Date.now() - startedAt,
@@ -777,7 +854,7 @@ export function CashflowSheetLabPage() {
       setFormulaMismatchPrompt(null);
       setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId: result.spreadsheetId,
         sheetName: result.selectedSheetName,
         appliedLineCount: result.appliedLineCount,
@@ -788,7 +865,7 @@ export function CashflowSheetLabPage() {
         stageDurationMs,
       });
       logCashflowLab('overwrite.sheet_values.ok', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId: result.spreadsheetId,
         appliedLineCount: result.appliedLineCount,
         durationMs: totalDurationMs,
@@ -797,8 +874,9 @@ export function CashflowSheetLabPage() {
         applyDurationMs,
       });
     } catch (error) {
+      if (!isCurrentRequest()) return;
       logCashflowLab('overwrite.sheet_values.error', {
-        projectId,
+        projectId: requestedProjectId,
         spreadsheetId,
         step: activeStep,
         durationMs: Date.now() - startedAt,
@@ -815,6 +893,7 @@ export function CashflowSheetLabPage() {
       if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_formula_mismatch_confirmation_required' && staged) {
         const issues = cashflowFormulaMismatchesFromError(error);
         if (issues.length > 0) {
+          closeClosedMonthDialog();
           setFormulaMismatchPrompt({
             stage: staged,
             issues,
@@ -823,6 +902,23 @@ export function CashflowSheetLabPage() {
           });
           return;
         }
+      }
+      if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_pending_approval_confirmation_required' && staged) {
+        const details = (error as {
+          body?: { details?: Pick<CashflowSheetLabStageResult, 'pendingApprovalDifferences' | 'pendingApprovalDifferenceCount' | 'pendingApprovalDifferenceManifestHash'> };
+        }).body?.details;
+        closeClosedMonthDialog();
+        setPendingApprovalStage({
+          ...staged,
+          pendingApprovalDifferences: details?.pendingApprovalDifferences?.length
+            ? details.pendingApprovalDifferences
+            : staged.pendingApprovalDifferences,
+          pendingApprovalDifferenceCount: details?.pendingApprovalDifferenceCount ?? staged.pendingApprovalDifferenceCount,
+          pendingApprovalDifferenceManifestHash: details?.pendingApprovalDifferenceManifestHash || staged.pendingApprovalDifferenceManifestHash,
+        });
+        setPendingApprovalClosedMonthChangeReason(monthCloseChangeReason);
+        setPendingApprovalFormulaAccepted(acceptFormulaMismatches);
+        return;
       }
       if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_closed_month_reason_required') {
         const serverDifferences = getClosedMonthDifferences(error);
@@ -854,7 +950,7 @@ export function CashflowSheetLabPage() {
         setErrorMessage(formatError(error));
       }
     } finally {
-      setLoadingOperation(null);
+      if (isCurrentRequest()) setLoadingOperation(null);
     }
   }
 
@@ -1087,7 +1183,13 @@ export function CashflowSheetLabPage() {
         }}
       />
 
-      <Dialog open={Boolean(pendingApprovalStage)} onOpenChange={(open) => { if (!open) setPendingApprovalStage(null); }}>
+      <Dialog open={Boolean(pendingApprovalStage)} onOpenChange={(open) => {
+        if (!open) {
+          setPendingApprovalStage(null);
+          setPendingApprovalClosedMonthChangeReason('');
+          setPendingApprovalFormulaAccepted(false);
+        }
+      }}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[760px] gap-4 overflow-y-auto rounded-xl p-5">
           <DialogHeader className="space-y-1 text-left">
             <DialogTitle className="text-[17px]">결재 중인 누적 결산과 값이 달라요</DialogTitle>
@@ -1119,7 +1221,11 @@ export function CashflowSheetLabPage() {
             ))}
           </div>
           <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" className="h-9" onClick={() => setPendingApprovalStage(null)}>닫기</Button>
+            <Button type="button" variant="outline" className="h-9" onClick={() => {
+              setPendingApprovalStage(null);
+              setPendingApprovalClosedMonthChangeReason('');
+              setPendingApprovalFormulaAccepted(false);
+            }}>닫기</Button>
             <Button
               type="button"
               className="h-9"
@@ -1127,7 +1233,12 @@ export function CashflowSheetLabPage() {
               onClick={() => {
                 const staged = pendingApprovalStage;
                 setPendingApprovalStage(null);
-                if (staged) void handleOverwriteSheetValues('', staged, false, true);
+                if (staged) void handleOverwriteSheetValues(
+                  pendingApprovalClosedMonthChangeReason,
+                  staged,
+                  pendingApprovalFormulaAccepted,
+                  true,
+                );
               }}
             >반영</Button>
           </DialogFooter>
