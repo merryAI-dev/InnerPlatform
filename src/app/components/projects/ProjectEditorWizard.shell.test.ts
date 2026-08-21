@@ -708,3 +708,28 @@ describe('ProjectEditorWizard safe exit contract', () => {
     expect(source).toContain('await onLeave?.();');
   });
 });
+
+// 참여율 시트 링크는 참여인력 섹션 안에 있어야 한다. 기본 정보에 두면 참여율을 입력하는
+// 사람이 그 칸을 영영 만나지 못한다(보람: "거기 넣으면 아무도 모른다").
+describe('참여율 시트 링크 자리', () => {
+  it('참여인력 섹션 안에 있고 팀원 목록보다 먼저 나온다', () => {
+    const sectionAt = source.indexOf('title="참여인력 (서류상·실제)"');
+    const linkAt = source.indexOf('label="참여율 시트 링크"');
+    const teamListAt = source.indexOf('data-issue-label="참여인력 이름·역할"');
+    expect(sectionAt).toBeGreaterThan(-1);
+    expect(linkAt).toBeGreaterThan(sectionAt);
+    expect(linkAt).toBeLessThan(teamListAt);
+  });
+
+  it('기본 정보 섹션에는 없다', () => {
+    const basicAt = source.indexOf('<ProjectFormSection title="기본 정보">');
+    const linkAt = source.indexOf('label="참여율 시트 링크"');
+    const folderAt = source.indexOf('label="사업관리 구글폴더링크"');
+    expect(folderAt).toBeGreaterThan(basicAt);
+    expect(linkAt).toBeGreaterThan(folderAt + 1000);
+  });
+
+  it('검토 요약에도 실려 승인자가 본다', () => {
+    expect(source).toContain('<ReviewRow label="참여율 시트 링크" value={draft.participationSheetLink} />');
+  });
+});
