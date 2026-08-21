@@ -2232,19 +2232,24 @@ export async function previewParticipationSheetByLinkViaBff(params: {
   projectId?: string;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationSheetPreview> {
-  // 캐시플로우 시트 연동과 같은 모양으로 부른다(라이브에서 도는 경로).
-  // retries: 0 - 시트 읽기는 쿼터를 쓴다. 실패를 자동으로 되풀이하면 쿼터만 더 먹는다.
-  const response = await resolveClient(params.client).post<ParticipationSheetPreview>(
-    '/api/v1/participation-dashboard/sheet-preview',
+  /*
+   * 조회이므로 GET 이다. BFF 는 POST 를 mutating 으로 보고 idempotency-key 헤더를 요구하며,
+   * 없으면 요청이 컨텍스트 미들웨어에서 끊긴다(본문 없는 502). 캐시플로우 시트 연동도 같은
+   * 규칙이다 - 미러·공유 계정 조회는 GET, stage·apply 는 POST + 멱등키.
+   *
+   * retries: 0 - 시트 읽기는 쿼터를 쓴다. 실패를 자동으로 되풀이하면 쿼터만 더 먹는다.
+   */
+  const query = new URLSearchParams({
+    sheetLink: params.sheetLink,
+    contractStart: params.contractStart,
+    contractEnd: params.contractEnd,
+    ...(params.projectId ? { projectId: params.projectId } : {}),
+  });
+  const response = await resolveClient(params.client).get<ParticipationSheetPreview>(
+    `/api/v1/participation-dashboard/sheet-preview?${query}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: {
-        sheetLink: params.sheetLink,
-        contractStart: params.contractStart,
-        contractEnd: params.contractEnd,
-        projectId: params.projectId || '',
-      },
       timeoutMs: 30000,
       retries: 0,
     },

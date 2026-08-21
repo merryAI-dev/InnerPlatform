@@ -79,7 +79,7 @@ async function main() {
     ['제목', '참여율 입력 안내 (공통 양식)'],
     ['', ''],
     ['굵게', '시작하기 - 순서 세 번이면 끝납니다'],
-    ['', '  ① 참여율 탭 맨 위에서 계약 시작월·종료월을 고릅니다 → 월 칸이 그 기간만큼 저절로 생깁니다.'],
+    ['', '  ① [참여율 관리] 탭 맨 위에서 계약 시작월·종료월을 고릅니다 → 월 칸이 그 기간만큼 저절로 생깁니다.'],
     ['', '  ② 닉네임을 드롭다운에서 고르고(이름 자동), 투입시작월과 기본투입률(%)을 넣습니다.'],
     ['', '  ③ 기본투입률과 다른 달만 그 칸에 숫자를 덮어씁니다. 다른 칸은 노랗게 표시됩니다.'],
     ['', ''],
@@ -147,8 +147,8 @@ async function main() {
   ref.getCell(1, 6).value = TEMPLATE_FORMAT_ID;
   ref.state = 'hidden';
 
-  // ── 참여율 탭 ──
-  const sheet = workbook.addWorksheet('참여율');
+  // ── 참여율 관리 탭 ──
+  const sheet = workbook.addWorksheet('참여율 관리');
   const lastCol = FIRST_MONTH_COL + MONTH_COLS - 1;
   const lastColLetter = columnLetter(lastCol);
   const firstMonthLetter = columnLetter(FIRST_MONTH_COL);

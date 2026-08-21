@@ -11,7 +11,7 @@
  *   onChange (설치 필요)  행/열 삽입 삭제 감지 - 메뉴에서 한 번 설치
  */
 
-var SHEET_NAME = '참여율';
+var SHEET_NAME = '참여율 관리';
 var REF_SHEET_NAME = '참조';
 var FORMAT_ID = 'MYSC-PARTICIPATION-V1';
 var FIRST_MONTH_COL = 7;
@@ -99,7 +99,7 @@ function checkSheetStatus() {
   var sheet = app.getSheetByName(SHEET_NAME);
   var refSheet = app.getSheetByName(REF_SHEET_NAME);
   if (!sheet) {
-    ui.alert('참여율 탭이 없습니다. 표준양식이 맞는지 확인해 주세요.');
+    ui.alert('참여율 관리 탭이 없습니다. 표준양식이 맞는지 확인해 주세요.');
     return;
   }
 
@@ -223,7 +223,7 @@ function restoreFormulasInSelection() {
   var sheet = app.getSheetByName(SHEET_NAME);
   var rangeList = app.getActiveRangeList();
   if (!sheet || !rangeList) {
-    ui.alert('참여율 탭에서 복구할 칸을 선택한 뒤 실행해 주세요.');
+    ui.alert('참여율 관리 탭에서 복구할 칸을 선택한 뒤 실행해 주세요.');
     return;
   }
 
@@ -284,7 +284,7 @@ function setupProtections() {
   var sheet = app.getSheetByName(SHEET_NAME);
   var refSheet = app.getSheetByName(REF_SHEET_NAME);
   if (!sheet) {
-    ui.alert('참여율 탭이 없습니다.');
+    ui.alert('참여율 관리 탭이 없습니다.');
     return;
   }
 

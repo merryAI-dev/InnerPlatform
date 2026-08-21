@@ -68,6 +68,7 @@ import {
   applyCashflowVarianceIntentViaBff,
   applyWeeklySubmissionStatusIntentViaBff,
   applyEvidenceRequiredMapIntentViaBff,
+  previewParticipationSheetByLinkViaBff,
 } from './platform-bff-client';
 
 const cashflowLease = { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 };
@@ -82,6 +83,39 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('previews a participation sheet with a read-only GET request', async () => {
+    const preview = { ok: true, rows: [], months: [], blocking: [] };
+    const client = asMockClient({
+      get: vi.fn().mockResolvedValue({ data: preview }),
+      post: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await expect(previewParticipationSheetByLinkViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin' },
+      sheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit?usp=sharing',
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      projectId: 'project-a',
+      client,
+    })).resolves.toEqual(preview);
+
+    expect(client.post).not.toHaveBeenCalled();
+    expect(client.get).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/v1\/participation-dashboard\/sheet-preview\?/),
+      expect.objectContaining({ tenantId: 'mysc', timeoutMs: 30000, retries: 0 }),
+    );
+    const requestPath = client.get.mock.calls[0][0] as string;
+    const query = new URL(requestPath, 'https://myscube.test').searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      sheetLink: 'https://docs.google.com/spreadsheets/d/sheet-a/edit?usp=sharing',
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      projectId: 'project-a',
+    });
+  });
+
   it('uses the canonical month-close review hook for MONTH and the status transition hook for WEEK', async () => {
     const status = { projectId: 'p001', yearMonth: '2026-08', items: [] };
     const monthRequest = {

@@ -2863,7 +2863,7 @@ export function ProjectEditorWizard({
         <ProjectFormRow
           label="참여율 시트 링크"
           hints={[
-            '월별 참여율은 이 시트에 적습니다. 표준양식을 복사해 이 사업 전용 시트를 만든 뒤 링크를 넣어 주세요.',
+            '월별 참여율은 이 시트의 [참여율 관리] 탭에 적습니다. 표준양식을 복사해 이 사업 전용 시트를 만든 뒤 링크를 넣어 주세요.',
             sheetSystemAccount
               ? `만든 시트를 ${sheetSystemAccount} 에 보기 권한으로 공유해 주세요. 공유하지 않으면 연동이 되지 않습니다.`
               : '만든 시트를 MYSC 시스템 계정에 보기 권한으로 공유해야 연동이 됩니다.',
