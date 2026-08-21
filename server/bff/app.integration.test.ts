@@ -67,6 +67,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
   async function resetTenantData(): Promise<void> {
     const collections = [
       'projects',
+      'partEntries',
       'project_code_registry',
       'project_requests',
       'projectRequests',
@@ -85,6 +86,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'outbox_deliveries',
       'idempotency_keys',
       'relation_rules',
+      'participation_rules',
     ];
 
     for (const collectionName of collections) {
@@ -93,6 +95,92 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     await clearCollection('outbox');
     await clearCollection('work_queue');
+  }
+
+  async function seedPortalParticipationChange({
+    targetProjectId,
+    requestId,
+    projectReviewState,
+  }: {
+    targetProjectId: string;
+    requestId: string;
+    projectReviewState: Record<string, unknown>;
+  }) {
+    const oldSyncRef = db.doc(`orgs/${tenantId}/partEntries/pte-${targetProjectId}-old`);
+    const manualRef = db.doc(`orgs/${tenantId}/partEntries/manual-${targetProjectId}`);
+    const oldSyncEntry = {
+      id: `pte-${targetProjectId}-old`,
+      tenantId,
+      projectId: targetProjectId,
+      memberId: 'project-team:old',
+      memberName: '기존 담당자',
+      source: 'PROJECT_TEAM_SYNC',
+      rate: 15,
+      monthlyRates: { '2026-01': 15 },
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    const manualEntry = {
+      id: `manual-${targetProjectId}`,
+      tenantId,
+      projectId: targetProjectId,
+      memberId: 'manual-member',
+      memberName: '수기 담당자',
+      source: 'MANUAL',
+      rate: 5,
+      monthlyRates: { '2026-01': 5 },
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    await db.doc(`orgs/${tenantId}/projects/${targetProjectId}`).set({
+      id: targetProjectId,
+      tenantId,
+      name: '기존 참여율 사업',
+      version: 2,
+      contractStart: '2026-01-01',
+      contractEnd: '2027-12-31',
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/portal-participation/edit',
+      teamMembersDetailed: [{
+        memberName: '기존 담당자',
+        memberNickname: 'old',
+        role: '',
+        participationRate: 15,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2026-12',
+        monthlyRates: { '2026-01': 15 },
+      }],
+      ...projectReviewState,
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/${requestId}`).set({
+      id: requestId,
+      tenantId,
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      targetProjectId,
+      approvedProjectId: targetProjectId,
+      baseProjectVersion: 1,
+      targetProjectVersion: 2,
+      proposedSnapshot: {
+        name: '시트 참여율 반영 사업',
+        executiveApproverId: actorId,
+        teamMembersDetailed: [{
+          personId: 'person-able',
+          memberName: '김정태',
+          memberNickname: 'able',
+          role: '',
+          participationRate: 20,
+          laborAllocationStartMonth: '2026-01',
+          laborAllocationEndMonth: '2027-12',
+          monthlyRates: {
+            '2026-01': null,
+            '2026-02': 0,
+            '2026-03': 10,
+            '2027-01': 5,
+          },
+        }],
+      },
+    });
+    await oldSyncRef.set(oldSyncEntry);
+    await manualRef.set(manualEntry);
+    return { oldSyncRef, manualRef, oldSyncEntry, manualEntry };
   }
 
   beforeAll(async () => {
@@ -294,6 +382,124 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect((await db.doc(`orgs/${tenantId}/projectCodeClaims/PRJ-2026-001`).get()).data()).toMatchObject({
       projectId: 'p_exec_review_001',
     });
+  });
+
+  it.each([
+    {
+      label: 'organization-head approval',
+      projectId: 'p_exec_participation_sync_001',
+      requestId: 'pr_exec_participation_sync_001',
+      path: '/api/v1/projects/p_exec_participation_sync_001/executive-review',
+      projectReviewState: {
+        executiveReviewStatus: 'PENDING',
+        executiveApproverId: actorId,
+      },
+      reviewBody: { reviewStatus: 'APPROVED' },
+    },
+    {
+      label: 'management-planning agreement',
+      projectId: 'p_management_participation_sync_001',
+      requestId: 'pr_management_participation_sync_001',
+      path: '/api/v1/projects/p_management_participation_sync_001/management-planning-review',
+      projectReviewState: {
+        executiveReviewStatus: 'APPROVED',
+        managementPlanningReviewStatus: 'PENDING',
+      },
+      reviewBody: { reviewStatus: 'AGREED', projectCode: 'PRJ-2026-431' },
+    },
+  ])('syncs approved portal change monthly rates through $label and preserves MANUAL entries', async ({
+    projectId: targetProjectId,
+    requestId,
+    path,
+    projectReviewState,
+    reviewBody,
+  }) => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    const { oldSyncRef, manualRef, manualEntry } = await seedPortalParticipationChange({
+      targetProjectId,
+      requestId,
+      projectReviewState,
+    });
+
+    const response = await reviewApi
+      .post(path)
+      .set({
+        ...defaultHeaders,
+        'idempotency-key': `idem-${targetProjectId}`,
+      })
+      .send({ requestId, ...reviewBody });
+
+    expect(response.status).toBe(200);
+    const synced = await db.doc(`orgs/${tenantId}/partEntries/pte-${targetProjectId}-able__2026-01`).get();
+    expect(synced.exists).toBe(true);
+    expect(synced.data()).toMatchObject({
+      projectId: targetProjectId,
+      projectName: '시트 참여율 반영 사업',
+      personId: 'person-able',
+      source: 'PROJECT_TEAM_SYNC',
+      rate: 20,
+      periodStart: '2026-01',
+      periodEnd: '2027-12',
+      monthlyRates: {
+        '2026-01': null,
+        '2026-02': 0,
+        '2026-03': 10,
+        '2027-01': 5,
+      },
+    });
+    expect((await oldSyncRef.get()).exists).toBe(false);
+    expect((await manualRef.get()).data()).toEqual(manualEntry);
+  });
+
+  it.each([
+    {
+      label: 'organization-head rejection',
+      projectId: 'p_exec_participation_reject_001',
+      requestId: 'pr_exec_participation_reject_001',
+      path: '/api/v1/projects/p_exec_participation_reject_001/executive-review',
+      projectReviewState: {
+        executiveReviewStatus: 'PENDING',
+        executiveApproverId: actorId,
+      },
+      reviewBody: { reviewStatus: 'REVISION_REJECTED', reviewComment: '참여율을 확인해 주세요' },
+    },
+    {
+      label: 'management-planning rejection',
+      projectId: 'p_management_participation_reject_001',
+      requestId: 'pr_management_participation_reject_001',
+      path: '/api/v1/projects/p_management_participation_reject_001/management-planning-review',
+      projectReviewState: {
+        executiveReviewStatus: 'APPROVED',
+        managementPlanningReviewStatus: 'PENDING',
+      },
+      reviewBody: { reviewStatus: 'REVISION_REJECTED', reviewComment: '참여율을 확인해 주세요' },
+    },
+  ])('does not sync portal change participation entries on $label', async ({
+    projectId: targetProjectId,
+    requestId,
+    path,
+    projectReviewState,
+    reviewBody,
+  }) => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    const { oldSyncRef, manualRef, oldSyncEntry, manualEntry } = await seedPortalParticipationChange({
+      targetProjectId,
+      requestId,
+      projectReviewState,
+    });
+
+    const response = await reviewApi
+      .post(path)
+      .set({
+        ...defaultHeaders,
+        'idempotency-key': `idem-${targetProjectId}`,
+      })
+      .send({ requestId, ...reviewBody });
+
+    expect(response.status).toBe(200);
+    expect((await oldSyncRef.get()).data()).toEqual(oldSyncEntry);
+    expect((await manualRef.get()).data()).toEqual(manualEntry);
+    expect((await db.doc(`orgs/${tenantId}/partEntries/pte-${targetProjectId}-able__2026-01`).get()).exists).toBe(false);
   });
 
   it('requires a rejection reason for executive rejection and discard', async () => {
@@ -778,6 +984,248 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       name: 'Zero Contract Project',
       contractAmount: 0,
     });
+  });
+
+  it('persists sheet monthly rates through project save and exposes the exact linked values in the dashboard', async () => {
+    const targetProjectId = 'p-participation-monthly-001';
+    const sheetLink = 'https://docs.google.com/spreadsheets/d/participation-monthly-001/edit';
+    await db.doc(`orgs/${tenantId}/persons/person-able`).set({
+      personId: 'person-able',
+      name: '김정태',
+      nickname: '에이블',
+    });
+
+    const teamMembersDetailed = [
+      {
+        personId: 'person-able',
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2027-02',
+        monthlyRates: {
+          '2026-01': 20,
+          '2026-02': null,
+          '2026-03': 0,
+          '2027-01': 5,
+        },
+      },
+      {
+        memberName: '김혜령',
+        memberNickname: '테일러',
+        role: '',
+        participationRate: 30,
+        laborAllocationStartMonth: '2026-01',
+        laborAllocationEndMonth: '2026-03',
+        monthlyRates: { '2026-01': 30, '2026-02': null, '2026-03': 10 },
+      },
+    ];
+    const projectPayload = {
+      id: targetProjectId,
+      name: '참여율 월별 저장 통합 사업',
+      registrationRequirementsVersion: 2,
+      clientOrg: 'KOICA',
+      basis: '공급가액',
+      settlementSystem: 'E_NARA_DOUM',
+      contractStart: '2026-01-01',
+      contractEnd: '2027-02-28',
+      participationSheetLink: sheetLink,
+      teamMembersDetailed,
+    };
+
+    const created = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-participation-monthly-create-001' })
+      .send(projectPayload);
+
+    expect(created.status).toBe(201);
+    const firstEntries = await db.collection(`orgs/${tenantId}/partEntries`)
+      .where('projectId', '==', targetProjectId)
+      .get();
+    expect(firstEntries.docs.map((doc) => doc.id).sort()).toEqual([
+      `pte-${targetProjectId}-에이블__2026-01`,
+      `pte-${targetProjectId}-테일러__2026-01`,
+    ]);
+    expect(firstEntries.docs.find((doc) => doc.id.endsWith('-에이블__2026-01'))?.data()).toMatchObject({
+      personId: 'person-able',
+      clientOrg: 'KOICA',
+      settlementSystem: 'E_NARA_DOUM',
+      monthlyRates: {
+        '2026-01': 20,
+        '2026-02': null,
+        '2026-03': 0,
+        '2027-01': 5,
+      },
+    });
+    expect(firstEntries.docs.find((doc) => doc.id.endsWith('-테일러__2026-01'))?.data()).not.toHaveProperty('personId');
+
+    const portfolioFixtures = [
+      { id: 'p-koica-rcms', name: 'KOICA RCMS 사업', clientOrg: 'KOICA', settlementSystem: 'RCMS', rate: 7 },
+      { id: 'p-koica-ezbaro', name: 'KOICA 이지바로 사업', clientOrg: 'KOICA', settlementSystem: 'EZBARO', rate: 3 },
+      { id: 'p-koica-other', name: 'KOICA 다른 정산 사업', clientOrg: 'KOICA', settlementSystem: 'ACCOUNTANT', rate: 11 },
+      { id: 'p-other-rcms', name: '타 고객 RCMS 사업', clientOrg: '다른 고객', settlementSystem: 'RCMS', rate: 13 },
+    ];
+    for (const fixture of portfolioFixtures) {
+      await db.doc(`orgs/${tenantId}/projects/${fixture.id}`).set({
+        id: fixture.id,
+        name: fixture.name,
+        clientOrg: fixture.clientOrg,
+        settlementSystem: fixture.settlementSystem,
+        contractStart: '2026-01-01',
+        contractEnd: '2026-01-31',
+      });
+      await db.doc(`orgs/${tenantId}/partEntries/pte-${fixture.id}-able__2026-01`).set({
+        id: `pte-${fixture.id}-able__2026-01`,
+        projectId: fixture.id,
+        projectName: fixture.name,
+        personId: 'person-able',
+        memberId: 'project-team:able__2026-01',
+        memberName: '김정태',
+        source: 'PROJECT_TEAM_SYNC',
+        rate: fixture.rate,
+        periodStart: '2026-01',
+        periodEnd: '2026-01',
+        monthlyRates: { '2026-01': fixture.rate },
+      });
+    }
+
+    await db.doc(`orgs/${tenantId}/participation_rules/participation-rule-koica-platforms`).set({
+      id: 'participation-rule-koica-platforms',
+      kind: 'USER_DEFINED',
+      alias: 'KOICA 정산 플랫폼 묶음',
+      clientOrgs: ['KOICA'],
+      settlementSystems: ['E_NARA_DOUM', 'RCMS', 'EZBARO'],
+    });
+    await db.doc(`orgs/${tenantId}/participation_rules/participation-rule-rcms-all`).set({
+      id: 'participation-rule-rcms-all',
+      kind: 'USER_DEFINED',
+      alias: '고객 무관 RCMS 전체',
+      clientOrgs: [],
+      settlementSystems: ['RCMS'],
+    });
+    await db.doc(`orgs/${tenantId}/participation_rules/participation-rule-koica-all`).set({
+      id: 'participation-rule-koica-all',
+      kind: 'USER_DEFINED',
+      alias: 'KOICA 전체 정산 플랫폼',
+      clientOrgs: ['KOICA'],
+      settlementSystems: [],
+    });
+    const dashboard = await api
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-koica-platforms')
+      .set(defaultHeaders);
+    expect(dashboard.status).toBe(200);
+    expect(dashboard.body.selectedRule).toMatchObject({
+      alias: 'KOICA 정산 플랫폼 묶음',
+      clientOrgs: ['KOICA'],
+      settlementSystems: ['E_NARA_DOUM', 'RCMS', 'EZBARO'],
+    });
+    expect(dashboard.body.unlinkedEntryCount).toBe(1);
+    expect(dashboard.body.months).toHaveLength(12);
+    expect(dashboard.body.months.map((month: { yearMonth: string }) => month.yearMonth)).toEqual([
+      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
+      '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
+    ]);
+    expect(dashboard.body.members).toEqual([
+      expect.objectContaining({
+        memberId: 'person-able',
+        projectCount: 3,
+        months: expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-01', rate: 30, isConfirmed: true, hasMissing: false }),
+          expect.objectContaining({ yearMonth: '2026-02', rate: 0, isConfirmed: false, hasMissing: true }),
+          expect.objectContaining({ yearMonth: '2026-03', rate: 0, isConfirmed: true, hasMissing: false }),
+        ]),
+      }),
+    ]);
+
+    const platformOnlyDashboard = await api
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-rcms-all')
+      .set(defaultHeaders);
+    expect(platformOnlyDashboard.status).toBe(200);
+    expect(platformOnlyDashboard.body.selectedRule).toMatchObject({
+      alias: '고객 무관 RCMS 전체',
+      clientOrgs: [],
+      settlementSystems: ['RCMS'],
+    });
+    expect(platformOnlyDashboard.body.members).toEqual([
+      expect.objectContaining({
+        memberId: 'person-able',
+        projectCount: 2,
+        months: expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-01', rate: 20 }),
+        ]),
+      }),
+    ]);
+
+    const clientOnlyDashboard = await api
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-koica-all')
+      .set(defaultHeaders);
+    expect(clientOnlyDashboard.status).toBe(200);
+    expect(clientOnlyDashboard.body.selectedRule).toMatchObject({
+      alias: 'KOICA 전체 정산 플랫폼',
+      clientOrgs: ['KOICA'],
+      settlementSystems: [],
+    });
+    expect(clientOnlyDashboard.body.members).toEqual([
+      expect.objectContaining({
+        memberId: 'person-able',
+        projectCount: 4,
+        months: expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-01', rate: 41 }),
+        ]),
+      }),
+    ]);
+
+    await db.doc(`orgs/${tenantId}/persons/person-taylor`).set({
+      personId: 'person-taylor',
+      name: '김혜령',
+      nickname: '테일러',
+    });
+    const updated = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-participation-monthly-update-001' })
+      .send({
+        ...projectPayload,
+        expectedVersion: 1,
+        teamMembersDetailed: [
+          {
+            ...teamMembersDetailed[0],
+            monthlyRates: { '2026-01': null, '2026-03': 10, '2027-01': 5 },
+          },
+          { ...teamMembersDetailed[1], personId: 'person-taylor' },
+        ],
+      });
+
+    expect(updated.status).toBe(200);
+    const secondEntries = await db.collection(`orgs/${tenantId}/partEntries`)
+      .where('projectId', '==', targetProjectId)
+      .get();
+    expect(secondEntries.size).toBe(2);
+    expect(secondEntries.docs.find((doc) => doc.id.endsWith('-에이블__2026-01'))?.data()?.monthlyRates).toEqual({
+      '2026-01': null,
+      '2026-03': 10,
+      '2027-01': 5,
+    });
+    expect(secondEntries.docs.find((doc) => doc.id.endsWith('-테일러__2026-01'))?.data()).toMatchObject({
+      personId: 'person-taylor',
+    });
+
+    const unrelatedUpdate = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-participation-unrelated-update-001' })
+      .send({
+        id: targetProjectId,
+        name: '참여율 월별 저장 통합 사업 이름 변경',
+        expectedVersion: 2,
+      });
+    expect(unrelatedUpdate.status).toBe(200);
+    const entriesAfterUnrelatedUpdate = await db.collection(`orgs/${tenantId}/partEntries`)
+      .where('projectId', '==', targetProjectId)
+      .get();
+    const byId = (docs: typeof secondEntries.docs) => docs
+      .map((doc) => ({ id: doc.id, data: doc.data() }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    expect(byId(entriesAfterUnrelatedUpdate.docs)).toEqual(byId(secondEntries.docs));
   });
 
   it('normalizes project revenue fields through project upsert', async () => {

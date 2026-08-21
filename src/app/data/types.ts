@@ -900,6 +900,8 @@ export interface ProjectTeamMemberAssignment {
   isDocumentOnly?: boolean;
   laborAllocationStartMonth?: string;
   laborAllocationEndMonth?: string;
+  /** YYYY-MM별 참여율. null은 시트의 미입력, 0은 명시적으로 입력한 0%다. */
+  monthlyRates?: Record<string, number | null>;
 }
 
 export interface ProjectRequestPayload {

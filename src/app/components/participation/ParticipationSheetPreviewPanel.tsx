@@ -46,7 +46,7 @@ export function ParticipationSheetPreviewPanel({ tenantId, user, projects }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ParticipationSheetPreview | null>(null);
-  // 계약이 10년이면 월 칸이 120개다. 연도로 잘라야 표가 옆으로 터지지 않는다.
+  // 저장은 전체 계약기간을 유지하고, 확인 화면만 선택 연도 12개월로 자른다.
   const [year, setYear] = useState('');
 
   const missingByRow = useMemo(() => {

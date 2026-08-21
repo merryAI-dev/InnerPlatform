@@ -30,6 +30,14 @@ function sheet(overrides = {}) {
   };
 }
 
+function consecutiveMonths(start, count) {
+  const [startYear, startMonth] = start.split('-').map(Number);
+  return Array.from({ length: count }, (_, index) => {
+    const absoluteMonth = startYear * 12 + startMonth - 1 + index;
+    return `${Math.floor(absoluteMonth / 12)}-${String((absoluteMonth % 12) + 1).padStart(2, '0')}`;
+  });
+}
+
 describe('셀 3상태', () => {
   it('빈칸은 값이 아니라 상태다 - 키 자체를 만들지 않는다', () => {
     const parsed = parseParticipationSheet(sheet({ cellValues: [['30', '', '30']] }));
@@ -77,6 +85,63 @@ describe('월 머리글', () => {
 });
 
 describe('양식 검증 - 어긋나면 적응하지 않고 거부한다', () => {
+  it('V1 복사본은 새 양식이 나와도 계속 검증한다', () => {
+    const parsed = parseParticipationSheet(sheet({ formatCellValue: 'MYSC-PARTICIPATION-V1' }));
+
+    expect(validateParticipationFormat(parsed)).toEqual([]);
+  });
+
+  it('V2는 실제 123개월 계약 머리글을 손실 없이 검증한다', () => {
+    const months = Array.from({ length: 123 }, (_, index) => {
+      const absoluteMonth = 3 + index;
+      const year = 2025 + Math.floor(absoluteMonth / 12);
+      const month = (absoluteMonth % 12) + 1;
+      return `${year}-${String(month).padStart(2, '0')}`;
+    });
+    const parsed = parseParticipationSheet(sheet({
+      formatCellValue: 'MYSC-PARTICIPATION-V2',
+      periodValues: { start: '2025-04', end: '2035-06' },
+      headerValues: months,
+      cellValues: [months.map(() => '')],
+    }));
+
+    expect(parsed.months).toHaveLength(123);
+    expect(validateParticipationFormat(parsed)).toEqual([]);
+  });
+
+  it('V1은 120개월을 넘기면 V2 양식으로 바꾸라고 명시한다', () => {
+    const months = consecutiveMonths('2026-01', 121);
+    const parsed = parseParticipationSheet(sheet({
+      formatCellValue: 'MYSC-PARTICIPATION-V1',
+      periodValues: { start: months[0], end: months.at(-1) },
+      headerValues: months,
+      cellValues: [months.map(() => '')],
+    }));
+
+    expect(validateParticipationFormat(parsed)).toEqual([
+      expect.objectContaining({
+        code: 'participation_period_too_long',
+        message: expect.stringContaining('V2'),
+      }),
+    ]);
+  });
+
+  it('V2는 최대 252개월은 허용하고 253개월은 명시적으로 거부한다', () => {
+    const maxMonths = consecutiveMonths('2020-01', 252);
+    const tooManyMonths = consecutiveMonths('2020-01', 253);
+    const parse = (months) => parseParticipationSheet(sheet({
+      formatCellValue: 'MYSC-PARTICIPATION-V2',
+      periodValues: { start: months[0], end: months.at(-1) },
+      headerValues: months,
+      cellValues: [months.map(() => '')],
+    }));
+
+    expect(validateParticipationFormat(parse(maxMonths))).toEqual([]);
+    expect(validateParticipationFormat(parse(tooManyMonths))).toEqual([
+      expect.objectContaining({ code: 'participation_period_too_long' }),
+    ]);
+  });
+
   it('식별자가 다르면 나머지 검사를 하지 않는다', () => {
     const parsed = parseParticipationSheet(sheet({ formatCellValue: 'OTHER-V9' }));
     const issues = validateParticipationFormat(parsed);
@@ -198,6 +263,40 @@ describe('행 규칙 - 오류와 미입력을 나눈다', () => {
       months,
     });
     expect(result.errors[0].code).toBe('participation_stint_start_required');
+  });
+
+  it('실제 사람 행은 월 값이 비어 있어도 투입시작월이 필요하다', () => {
+    const result = validateStintRows({
+      rows: [{
+        rowIndex: 0,
+        nickname: '에이블',
+        name: '김정태',
+        linkState: 'LINKED',
+        stintStart: '',
+        stintEnd: '',
+        monthlyRates: {},
+      }],
+      months,
+    });
+
+    expect(result.errors[0].code).toBe('participation_stint_start_required');
+  });
+
+  it('이름 없는 미정 자리는 투입시작월이 없어도 오류가 아니다', () => {
+    const result = validateStintRows({
+      rows: [{
+        rowIndex: 0,
+        nickname: '미정-1',
+        name: '',
+        linkState: 'PLACEHOLDER',
+        stintStart: '',
+        stintEnd: '',
+        monthlyRates: {},
+      }],
+      months,
+    });
+
+    expect(result.errors).toHaveLength(0);
   });
 
   it('시작월이 종료월보다 뒤면 오류다', () => {
@@ -362,6 +461,22 @@ describe('전체 분석', () => {
     const result = analyzeParticipationSheet({ sheet: sheet({ cellValues: [['30', '', '']] }), project, people: PEOPLE, projectId: 'p1' });
     expect(result.ok).toBe(true);
     expect(result.summary.missingCount).toBe(2);
+  });
+
+  it('사람 행에 투입시작월이 없으면 반영 가능으로 안내하지 않는다', () => {
+    const result = analyzeParticipationSheet({
+      sheet: sheet({
+        metaValues: [['에이블', '김정태', '', '', '', '30']],
+        cellValues: [['', '', '']],
+      }),
+      project,
+      people: PEOPLE,
+      projectId: 'p1',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.blocking[0].code).toBe('participation_stint_start_required');
+    expect(result.entries).toHaveLength(0);
   });
 
   it('연결 대기는 통과시키되 세어 준다', () => {

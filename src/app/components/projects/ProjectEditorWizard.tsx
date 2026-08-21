@@ -113,8 +113,12 @@ import {
   formatProjectTeamMembersSummary,
   hasIncompleteProjectTeamMembers,
   isProjectSettlementSupportMember,
+  mapParticipationSheetPreviewToProjectTeamMembers,
   normalizeProjectTeamMemberDraftRows,
   parseProjectTeamMemberIdentityInput,
+  participationSheetLinkRequired,
+  participationSheetSyncIssue,
+  participationSheetSyncSignature,
   PROJECT_TEAM_MEMBER_ROLES,
   RETIRED_PROJECT_TEAM_MEMBER_ROLES,
 } from '../../platform/project-team-members';
@@ -179,6 +183,7 @@ interface ProjectEditorWizardProps {
   actions: ProjectEditorAction[];
   busyActionId?: string | null;
   readOnly?: boolean;
+  trustedParticipationSheetDraft?: ProjectEditorDraft;
   onContractFileUpload?: (file: File) => Promise<{
     contractDocument: ProjectEditorDraft['contractDocument'];
     contractAnalysis: ProjectRequestContractAnalysis | null;
@@ -719,6 +724,7 @@ export function ProjectEditorWizard({
   actions,
   busyActionId,
   readOnly = false,
+  trustedParticipationSheetDraft,
   onContractFileUpload,
   onProjectDocumentFileUpload,
   documentPreviewUrls,
@@ -740,6 +746,7 @@ export function ProjectEditorWizard({
   const [teamSyncError, setTeamSyncError] = useState('');
   // 표는 시트를 그대로 옮긴 것이다. 저장된 명단이 아니라 방금 읽은 시트를 보여 준다.
   const [teamSyncPreview, setTeamSyncPreview] = useState<ParticipationSheetPreview | null>(null);
+  const [teamSyncSignature, setTeamSyncSignature] = useState<string | null>(null);
   const [teamSyncYear, setTeamSyncYear] = useState('');
   // 시트를 공유해야 할 상대. 오류가 난 뒤에 알려주면 늦다 - 링크를 넣는 그 자리에 있어야 한다.
   const [sheetSystemAccount, setSheetSystemAccount] = useState('');
@@ -867,6 +874,11 @@ export function ProjectEditorWizard({
     draftRef.current = nextDraft;
     setDraft(nextDraft);
     if (isNewEditorSession) setStepIndex(0);
+    setTeamSyncPreview(null);
+    setTeamSyncSignature(null);
+    setTeamSyncYear('');
+    setTeamSyncNotice('');
+    setTeamSyncError('');
     setDocumentUploadState({
       contract: 'idle',
       customer_business_registration: 'idle',
@@ -1314,6 +1326,7 @@ export function ProjectEditorWizard({
       return;
     }
     setTeamSyncing(true);
+    setTeamSyncSignature(null);
     setTeamSyncError('');
     void previewParticipationSheetByLinkViaBff({
       tenantId: orgId,
@@ -1330,17 +1343,16 @@ export function ProjectEditorWizard({
             || '시트를 반영할 수 없는 상태입니다.');
           return;
         }
-        update('teamMembersDetailed', preview.rows.map((row) => ({
-          personId: row.personId || undefined,
-          memberName: row.name,
-          memberNickname: row.nickname,
-          role: row.role,
-          participationRate: row.baseRate ?? 0,
-          laborAllocationStartMonth: row.stintStart,
-          laborAllocationEndMonth: row.stintEnd,
-        })));
+        const mappedTeamMembers = mapParticipationSheetPreviewToProjectTeamMembers(preview);
+        update('teamMembersDetailed', mappedTeamMembers);
         setTeamSyncPreview(preview);
-        // 계약이 10년이면 월 칸이 120개다. 연도로 잘라야 표가 옆으로 터지지 않는다.
+        setTeamSyncSignature(participationSheetSyncSignature({
+          sheetLink,
+          contractStart: draft.contractStart,
+          contractEnd: draft.contractEnd,
+          teamMembersDetailed: mappedTeamMembers,
+        }));
+        // 저장은 전체 계약기간을 유지하고, 확인 화면만 선택 연도 12개월로 자른다.
         setTeamSyncYear(preview.months[0]?.slice(0, 4) || '');
         const pending = preview.summary?.pendingLinkCount || 0;
         setTeamSyncNotice(pending > 0
@@ -1506,6 +1518,19 @@ export function ProjectEditorWizard({
     }
   };
 
+  const participationSheetBaseline = trustedParticipationSheetDraft || initialDraft;
+  const participationSyncIssue = participationSheetSyncIssue({
+    draft,
+    initialDraft: participationSheetBaseline,
+    syncedSignature: teamSyncSignature,
+    trustInitialPersistedSheetState: Boolean(trustedParticipationSheetDraft),
+  });
+  const requiresParticipationSheetLink = participationSheetLinkRequired({
+    draft,
+    initialDraft: participationSheetBaseline,
+    allowLegacyNoLink: Boolean(trustedParticipationSheetDraft),
+  });
+
   const submitIssues = useMemo(() => {
     const issues: Array<{ step: ProjectEditorStep; label: string }> = [];
     const normalizedDepartment = normalizeProjectDepartment(draft.department);
@@ -1619,13 +1644,16 @@ export function ProjectEditorWizard({
     }
     // 참여인력은 시트에서 온다. 역할 구성(운영매니저 1인 이상)은 시트를 보고 사람이 판단할
     // 일이라 저장을 막지 않는다. 대신 시트 링크가 없으면 참여율을 적을 곳 자체가 없어 막는다.
-    if (usesRegistrationV2 && !draft.participationSheetLink.trim()) {
+    if (requiresParticipationSheetLink && !draft.participationSheetLink.trim()) {
       issues.push({ step: 'team', label: '참여율 시트 링크' });
+    }
+    if (participationSyncIssue) {
+      issues.push({ step: 'team', label: participationSyncIssue });
     }
     // 정산지원 담당자는 저장을 막지 않는다. 담당이 정해져 있다는 안내일 뿐이고,
     // 담당자가 바뀌거나 자리를 비운 사이에 프로젝트 등록 자체가 막히면 안 된다.
     return issues;
-  }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
+  }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, participationSyncIssue, requiresAdvanceInterimReason, requiresParticipationSheetLink, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
 
   const canSubmit = submitIssues.length === 0;
 
@@ -2879,10 +2907,10 @@ export function ProjectEditorWizard({
           />
         </ProjectFormRow>
 
-        <div data-issue-label="참여율 시트 링크" className={FORM_FIELD_STACK_CLASS}>
-          {fieldIssues('참여율 시트 링크').length > 0 ? (
+        <div data-issue-label={participationSyncIssue || '참여율 시트 링크'} className={FORM_FIELD_STACK_CLASS}>
+          {fieldIssues('참여율 시트 링크', participationSyncIssue || '').length > 0 ? (
             <ul className={cn('space-y-1', FORM_ERROR_CLASS)} role="alert">
-              {fieldIssues('참여율 시트 링크').map((message) => (
+              {fieldIssues('참여율 시트 링크', participationSyncIssue || '').map((message) => (
                 <li key={message} className="flex gap-1.5">
                   <span aria-hidden className="shrink-0">•</span>
                   <span className="min-w-0">{describeSubmitIssue(message)}</span>
@@ -2907,7 +2935,7 @@ export function ProjectEditorWizard({
                   {teamSyncPreview.summary?.period.start} ~ {teamSyncPreview.summary?.period.end}
                   {' · '}참여인력 {teamSyncPreview.rows.length}명
                 </span>
-                {/* 계약이 10년이면 월 칸이 120개다. 연도로 잘라야 표가 옆으로 터지지 않는다. */}
+                {/* 저장은 전체 계약기간을 유지하고, 확인 화면만 선택 연도 12개월로 자른다. */}
                 <Select value={teamSyncYear} onValueChange={setTeamSyncYear}>
                   <SelectTrigger className="h-8 w-[120px] text-[13px]" aria-label="확인할 연도">
                     <SelectValue />

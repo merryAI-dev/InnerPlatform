@@ -139,10 +139,33 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('contractStart: draft.contractStart,');
     expect(source).toContain('contractEnd: draft.contractEnd,');
     // 명단은 승인 서류·인력 현황·사업 검색이 쓴다. 연동이 그것까지 채워야 끊기지 않는다.
-    expect(source).toContain("update('teamMembersDetailed', preview.rows.map((row) => ({");
-    expect(source).toContain('personId: row.personId || undefined,');
-    expect(source).toContain('participationRate: row.baseRate ?? 0,');
-    expect(source).toContain('laborAllocationStartMonth: row.stintStart,');
+    // 월별 값은 이 mapper가 빈칸(null)과 명시적 0을 구분한 뒤 같은 명단에 싣는다.
+    expect(source).toContain('mapParticipationSheetPreviewToProjectTeamMembers');
+    expect(source).toContain('const mappedTeamMembers = mapParticipationSheetPreviewToProjectTeamMembers(preview);');
+    expect(source).toContain("update('teamMembersDetailed', mappedTeamMembers);");
+    expect(source).toContain('teamMembersDetailed: mappedTeamMembers');
+    // 성공한 입력 조합을 기억해야 링크·계약기간 변경 뒤 옛 preview를 저장하지 않는다.
+    expect(source).toContain('participationSheetSyncSignature({');
+  });
+
+  it('blocks a V2 save until the current sheet link and contract period have a valid preview', () => {
+    // 판정 자체는 순수 helper의 behavior test가 맡고, 이 테스트는 Wizard submit gate 연결만 본다.
+    expect(source).toContain('participationSheetSyncIssue({');
+    expect(source).toContain('draft,');
+    expect(source).toContain('initialDraft,');
+    expect(source).toContain('syncedSignature:');
+    expect(source).toContain("issues.push({ step: 'team', label: participationSyncIssue });");
+  });
+
+  it('requires links for new projects while allowing unchanged pre-link projects to keep editing', () => {
+    expect(source).toContain('participationSheetLinkRequired({');
+    expect(source).toContain('const participationSheetBaseline = trustedParticipationSheetDraft || initialDraft;');
+    expect(source).toContain('allowLegacyNoLink: Boolean(trustedParticipationSheetDraft)');
+    expect(source).toContain('trustInitialPersistedSheetState: Boolean(trustedParticipationSheetDraft)');
+    expect(source).toContain('if (requiresParticipationSheetLink && !draft.participationSheetLink.trim())');
+    expect(adminWizardSource).toContain('trustedParticipationSheetDraft={editProject ? initialDraft : undefined}');
+    expect(portalEditSource).toContain('trustedParticipationSheetDraft={canonicalDraft}');
+    expect(portalRegisterSource).not.toContain('trustedParticipationSheetDraft');
   });
 
   // 표는 저장된 명단이 아니라 방금 읽은 시트다. 저장본을 그리면 연동 전 옛 값이 보인다.
@@ -215,8 +238,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   it('keeps the roster normalization while the rows come from the sheet', () => {
     expect(source).toContain('createProjectEditorWizardDraft');
     expect(source).toContain('normalizeProjectTeamMemberDraftRows');
-    expect(source).toContain('laborAllocationStartMonth');
-    expect(source).toContain('laborAllocationEndMonth');
+    expect(source).toContain('mapParticipationSheetPreviewToProjectTeamMembers(preview)');
     expect(source).not.toContain('<Label className="text-xs">인건비 시작월</Label>');
     expect(source).not.toContain('onClick={addTeamMember}');
   });

@@ -231,6 +231,7 @@ function validRegistrationPayload(overrides = {}) {
 function validRegistrationV2Payload(overrides = {}) {
   const payload = validRegistrationPayload({
     registrationRequirementsVersion: 2,
+    participationSheetLink: 'https://docs.google.com/spreadsheets/d/participation-sheet-a/edit',
     name: VALID_V2_PROJECT_NAME,
     teamMembers: [
       'Head A · 사업 최종 책임자 · 100% · 실제 참여',

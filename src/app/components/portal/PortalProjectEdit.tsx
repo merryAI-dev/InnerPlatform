@@ -665,6 +665,7 @@ function ProjectInfoEditor({
         topSlot={topSlot}
         showCheckoutEntry
         readOnly={!editorCanEdit}
+        trustedParticipationSheetDraft={canonicalDraft}
         canRemoveContractDocument={Boolean(record?.attachmentRefs.some((attachment) => attachment.documentKind === 'contract'))}
         canRemoveProjectDocuments
         onRemoveProjectDocument={removeDocument}
@@ -859,7 +860,6 @@ export function PortalProjectEdit() {
     const pendingChange = requestDoc?.status === 'PENDING' && resolveProjectRequestKind(requestDoc) === 'CHANGE';
     return createProjectEditorDraft({
       ...buildProjectEditorDraftFromProject(project, pendingChange ? resolveProjectRequestPayload(requestDoc) : undefined),
-      registrationRequirementsVersion: 2,
     });
   }, [project, requestDoc]);
 

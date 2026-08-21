@@ -14,19 +14,43 @@
  */
 export const PARTICIPATION_SHEET_TAB = '참여율 관리';
 export const PARTICIPATION_REF_TAB = '참조';
+export const PARTICIPATION_FORMAT_V1_ID = 'MYSC-PARTICIPATION-V1';
+export const PARTICIPATION_FORMAT_V2_ID = 'MYSC-PARTICIPATION-V2';
+export const PARTICIPATION_FORMAT_CURRENT_ID = PARTICIPATION_FORMAT_V2_ID;
 
-export function participationSheetRanges() {
+const FORMAT_LAST_MONTH_COLUMN = {
+  [PARTICIPATION_FORMAT_V1_ID]: 'DV',
+  [PARTICIPATION_FORMAT_V2_ID]: 'IX',
+};
+
+const FORMAT_MONTH_CAPACITY = {
+  [PARTICIPATION_FORMAT_V1_ID]: 120,
+  [PARTICIPATION_FORMAT_V2_ID]: 252,
+};
+
+export function isSupportedParticipationFormat(formatId) {
+  return Object.hasOwn(FORMAT_LAST_MONTH_COLUMN, String(formatId || '').trim());
+}
+
+export function participationFormatMonthCapacity(formatId) {
+  return FORMAT_MONTH_CAPACITY[String(formatId || '').trim()] || 0;
+}
+
+export function participationSheetRanges(formatId = PARTICIPATION_FORMAT_CURRENT_ID) {
+  const normalizedFormatId = String(formatId || '').trim();
+  const lastMonthColumn = FORMAT_LAST_MONTH_COLUMN[normalizedFormatId]
+    || FORMAT_LAST_MONTH_COLUMN[PARTICIPATION_FORMAT_CURRENT_ID];
   return {
     /** 양식 식별자. 반영·검증의 첫 관문이다. */
     format: { sheetName: PARTICIPATION_REF_TAB, rangeA1: 'F1' },
     /** 계약 기간 설정칸(B1 시작월, D1 종료월). C1 은 물결 표시라 함께 읽고 버린다. */
     period: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'B1:D1' },
     /** 월 머리글 2행. 파서는 이 행만 읽는다 - 1행 연도 표시는 사람 보기용 장식이다. */
-    header: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'G2:DV2' },
+    header: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: `G2:${lastMonthColumn}2` },
     /** 고정 열 A~F: 닉네임·이름·역할·투입시작월·투입종료월·기본투입률 */
     meta: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'A3:F62' },
     /** 월 칸 본문 */
-    cells: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: 'G3:DV62' },
+    cells: { sheetName: PARTICIPATION_SHEET_TAB, rangeA1: `G3:${lastMonthColumn}62` },
   };
 }
 

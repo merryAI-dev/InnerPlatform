@@ -1,5 +1,5 @@
 /**
- * MYSC 참여율 표준양식 관리 스크립트 (MYSC-PARTICIPATION-V1)
+ * MYSC 참여율 표준양식 관리 스크립트 (MYSC-PARTICIPATION-V2)
  *
  * 공용 원본 시트에 붙여넣는다.
  * 사본을 만들면 스크립트와 보호가 함께 복사된다.
@@ -13,9 +13,9 @@
 
 var SHEET_NAME = '참여율 관리';
 var REF_SHEET_NAME = '참조';
-var FORMAT_ID = 'MYSC-PARTICIPATION-V1';
+var FORMAT_ID = 'MYSC-PARTICIPATION-V2';
 var FIRST_MONTH_COL = 7;
-var MONTH_COL_COUNT = 120;
+var MONTH_COL_COUNT = 252;
 var DATA_START_ROW = 3;
 var DATA_ROW_COUNT = 60;
 

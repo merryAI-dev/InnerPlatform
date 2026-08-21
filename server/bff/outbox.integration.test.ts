@@ -469,7 +469,19 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     await db.doc(`orgs/${tenantId}/projects/project-disabled-side-effects`).set({
       id: 'project-disabled-side-effects',
       name: 'Disabled side effects project',
-      teamMembersDetailed: [{ memberName: 'Registration PM', role: 'PM', participationRate: 100 }],
+      teamMembersDetailed: [{
+        memberName: 'Registration PM',
+        role: '',
+        participationRate: 30,
+        laborAllocationStartMonth: '2026-11',
+        laborAllocationEndMonth: '2027-02',
+        monthlyRates: {
+          '2026-11': 30,
+          '2026-12': null,
+          '2027-01': 0,
+          '2027-02': 10,
+        },
+      }],
       settlementType: 'NONE',
       accountType: 'NONE',
     });
@@ -516,12 +528,116 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     expect(result).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
     expect(ensureProjectRootFolder).not.toHaveBeenCalled();
     expect(notifyMessage).not.toHaveBeenCalled();
-    expect((await db.collection(`orgs/${tenantId}/partEntries`).get()).size).toBe(1);
+    const participationEntries = await db.collection(`orgs/${tenantId}/partEntries`).get();
+    expect(participationEntries.size).toBe(1);
+    expect(participationEntries.docs[0].data()).toMatchObject({
+      note: '',
+      periodStart: '2026-11',
+      periodEnd: '2027-02',
+      monthlyRates: {
+        '2026-11': 30,
+        '2026-12': null,
+        '2027-01': 0,
+        '2027-02': 10,
+      },
+    });
     expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
       status: 'DONE',
       sideEffects: { registrationDrive: 'SKIPPED', registrationSlack: 'SKIPPED' },
     });
     expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${event.id}`).get()).exists).toBe(true);
+  });
+
+  it('syncs the latest canonical roster when registration delivery overlaps a project edit', async () => {
+    const projectId = 'project-registration-concurrent-edit';
+    const requestId = 'request-registration-concurrent-edit';
+    const projectRef = db.doc(`orgs/${tenantId}/projects/${projectId}`);
+    await db.doc(`orgs/${tenantId}/members/person-able`).set({
+      uid: 'person-able', name: '김정태', nickname: '에이블', role: 'pm', tenantId,
+    });
+    const member = (rate: number) => ({
+      personId: 'person-able',
+      memberName: '김정태',
+      memberNickname: '에이블',
+      role: '',
+      participationRate: rate,
+      laborAllocationStartMonth: '2026-01',
+      laborAllocationEndMonth: '2026-12',
+      monthlyRates: { '2026-01': rate },
+    });
+    await projectRef.set({
+      id: projectId,
+      name: '등록 중 수정 사업',
+      version: 1,
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      teamMembersDetailed: [member(10)],
+      settlementType: 'NONE',
+      accountType: 'NONE',
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/${requestId}`).set({
+      id: requestId,
+      approvedProjectId: projectId,
+      payload: { name: '등록 중 수정 사업' },
+    });
+    const snapshotCaptured = deferred();
+    const releaseDrive = deferred();
+    const ensureProjectRootFolder = vi.fn(async () => {
+      snapshotCaptured.resolve();
+      await releaseDrive.promise;
+      return {
+        id: 'folder-concurrent-edit',
+        driveId: 'drive-a',
+        name: '등록 중 수정 사업',
+        webViewLink: 'https://drive.google.com/drive/folders/folder-concurrent-edit',
+      };
+    });
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-registration-concurrent-edit',
+      eventType: 'project.registration.submitted',
+      entityType: 'project',
+      entityId: projectId,
+      payload: { projectId, projectRequestId: requestId },
+      createdAt: new Date().toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+    const handler = createProjectRegistrationSubmittedOutboxHandler({
+      db,
+      driveService: {
+        getConfig: () => ({ enabled: true, defaultParentFolderId: 'parent-a' }),
+        ensureProjectRootFolder,
+      },
+      projectRegistrationSlackService: { enabled: false },
+    });
+
+    const processing = processOutboxBatch(db, {
+      limit: 20,
+      maxAttempts: 3,
+      eventHandlers: { 'project.registration.submitted': handler },
+    });
+    await snapshotCaptured.promise;
+    await projectRef.set({ version: 2, teamMembersDetailed: [member(30)] }, { merge: true });
+    releaseDrive.resolve();
+    const result = await processing;
+
+    expect(result).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
+    expect((await projectRef.get()).data()).toMatchObject({
+      version: 2,
+      evidenceDriveRootFolderId: 'folder-concurrent-edit',
+      teamMembersDetailed: [expect.objectContaining({ participationRate: 30 })],
+    });
+    const participationEntries = await db.collection(`orgs/${tenantId}/partEntries`)
+      .where('projectId', '==', projectId)
+      .get();
+    expect(participationEntries.size).toBe(1);
+    expect(participationEntries.docs[0].data()).toMatchObject({
+      personId: 'person-able',
+      rate: 30,
+      monthlyRates: { '2026-01': 30 },
+    });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()?.status).toBe('DONE');
   });
 
   it('relocates private registration attachments before atomically publishing canonical metadata', async () => {

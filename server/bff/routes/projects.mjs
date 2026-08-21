@@ -9,6 +9,7 @@ import {
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { extractTextFromPdfBuffer } from '../pdf-text.mjs';
 import { normalizeProjectRevenueFields } from '../project-financials.mjs';
+import { stableStringify } from '../utils.mjs';
 import {
   PROJECT_INFO_DOCUMENT_KINDS,
   PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS,
@@ -379,6 +380,7 @@ export async function mergeProjectAndRequestDocs({
   actorId,
   now,
   notFoundMessage,
+  stageTransactionWrites,
 }) {
   const projectRef = db.doc(projectPath);
   return db.runTransaction(async (tx) => {
@@ -427,11 +429,21 @@ export async function mergeProjectAndRequestDocs({
       updatedBy: actorId, updatedAt: now,
     };
     const sanitizedProject = stripUndefinedDeep(document);
-    tx.set(projectRef, sanitizedProject, { merge: true });
 
     const requestPatch = buildRequestPatch?.(current, currentRequest, nextVersion) || null;
+    const sanitizedRequestPatch = requestPatch ? stripUndefinedDeep(requestPatch) : null;
+    if (typeof stageTransactionWrites === 'function') {
+      await stageTransactionWrites({
+        tx,
+        document: sanitizedProject,
+        current,
+        currentRequest,
+        requestPatch: sanitizedRequestPatch,
+      });
+    }
+
+    tx.set(projectRef, sanitizedProject, { merge: true });
     if (requestPatch && currentRequestRef) {
-      const sanitizedRequestPatch = stripUndefinedDeep(requestPatch);
       tx.set(currentRequestRef, sanitizedRequestPatch, { merge: true });
     }
 
@@ -843,16 +855,28 @@ function assertRegistrationFinancials(payload, type) {
   }
 }
 
-function assertRegistrationTeamMembers(value) {
+function assertRegistrationTeamMembers(value, {
+  participationSheetLinked = false,
+  contractStartMonth = '',
+  contractEndMonth = '',
+} = {}) {
   if (!Array.isArray(value)) invalidRegistration('Project registration teamMembersDetailed is invalid');
   value.forEach((member, index) => {
     if (!member || typeof member !== 'object' || Array.isArray(member)) {
       invalidRegistration(`Project registration teamMembersDetailed.${index} is invalid`);
     }
-    if (!readOptionalText(member.memberName)) {
+    const isSheetBacked = Object.hasOwn(member, 'monthlyRates');
+    if (!isSheetBacked && !readOptionalText(member.memberName)) {
       invalidRegistration(`Project registration teamMembersDetailed.${index}.memberName is required`);
     }
-    if (!PROJECT_TEAM_MEMBER_ROLES.has(readOptionalText(member.role))) {
+    if (isSheetBacked && ![
+      member.personId,
+      member.memberName,
+      member.memberNickname,
+    ].some(readOptionalText)) {
+      invalidRegistration(`Project registration teamMembersDetailed.${index} identity is required`);
+    }
+    if (!isSheetBacked && !PROJECT_TEAM_MEMBER_ROLES.has(readOptionalText(member.role))) {
       invalidRegistration(`Project registration teamMembersDetailed.${index}.role is invalid`);
     }
     if (
@@ -878,11 +902,17 @@ function assertRegistrationTeamMembers(value) {
     ) {
       invalidRegistration(`Project registration teamMembersDetailed.${index} labor allocation period is invalid`);
     }
+    if (isSheetBacked) {
+      normalizeProjectTeamMemberMonthlyRates(member, index, { contractStartMonth, contractEndMonth });
+    }
   });
-  if (!value.some((member) => readOptionalText(member?.role) === '운영매니저')) {
+  const isEntirelySheetBacked = participationSheetLinked
+    && value.every((member) => Object.hasOwn(member || {}, 'monthlyRates'));
+  if (!isEntirelySheetBacked && !value.some((member) => readOptionalText(member?.role) === '운영매니저')) {
     invalidRegistration('Project registration requires at least one operating manager');
   }
   const invalidSettlementSupport = value.some((member) => {
+    if (Object.hasOwn(member || {}, 'monthlyRates')) return false;
     if (readOptionalText(member?.role) !== '정산지원') return false;
     const memberName = readOptionalText(member?.memberName);
     const memberNickname = readOptionalText(member?.memberNickname);
@@ -891,6 +921,52 @@ function assertRegistrationTeamMembers(value) {
   });
   if (invalidSettlementSupport) {
     invalidRegistration('Project registration settlement support must be 도담 or 써니');
+  }
+}
+
+function assertParticipationSheetLinkForTeamMembers(
+  teamMembers,
+  participationSheetLink,
+  { required = false } = {},
+) {
+  const sheetBackedRows = (Array.isArray(teamMembers) ? teamMembers : [])
+    .filter((member) => Object.hasOwn(member || {}, 'monthlyRates'));
+  const containsSheetBackedRows = sheetBackedRows.length > 0;
+  if ((required || containsSheetBackedRows) && !readOptionalText(participationSheetLink)) {
+    invalidRegistration('Project registration participationSheetLink is required for sheet-backed team members');
+  }
+  for (const [index, member] of sheetBackedRows.entries()) {
+    if (![member?.personId, member?.memberName, member?.memberNickname].some(readOptionalText)) {
+      invalidRegistration(`Project registration sheet-backed team member ${index} identity is required`);
+    }
+  }
+  const monthOwners = new Map();
+  for (const [index, member] of sheetBackedRows.entries()) {
+    const monthlyRates = member?.monthlyRates;
+    if (!monthlyRates || typeof monthlyRates !== 'object' || Array.isArray(monthlyRates)) continue;
+    const personId = readOptionalText(member?.personId);
+    const nickname = readOptionalText(member?.memberNickname);
+    const name = readOptionalText(member?.memberName);
+    const placeholderNickname = ['미정', '채용예정'].some((prefix) => nickname.startsWith(prefix));
+    const sheetIdentity = placeholderNickname && name ? name : (nickname || name);
+    const normalizedSheetIdentity = normalizeSyncKeySegment(sheetIdentity);
+    for (const yearMonth of Object.keys(monthlyRates)) {
+      const owners = monthOwners.get(yearMonth) || [];
+      const rate = monthlyRates[yearMonth];
+      const duplicate = rate !== null && owners.some((owner) => (
+        owner.rate !== null
+        && (owner.personId && personId
+          ? owner.personId === personId
+          : owner.sheetIdentity === normalizedSheetIdentity)
+      ));
+      if (duplicate) {
+        invalidRegistration(
+          `Project registration duplicate monthlyRates ownership for ${yearMonth}`,
+        );
+      }
+      owners.push({ index, personId, sheetIdentity: normalizedSheetIdentity, rate });
+      monthOwners.set(yearMonth, owners);
+    }
   }
 }
 
@@ -1419,7 +1495,7 @@ function assertTrustedProjectInfoDocumentReferences(
   }
 }
 
-function assertRegistrationPayload(payload) {
+function assertRegistrationPayload(payload, { participationSheetLinkRequired = true } = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     invalidRegistration('Project registration payload is invalid');
   }
@@ -1439,7 +1515,17 @@ function assertRegistrationPayload(payload) {
   }
   assertRegistrationFinancials(payload, type);
   if (registrationRequirementsVersion(payload.registrationRequirementsVersion) === 2) {
-    assertRegistrationTeamMembers(payload.teamMembersDetailed);
+    const participationSheetLinked = Boolean(readOptionalText(payload.participationSheetLink));
+    assertParticipationSheetLinkForTeamMembers(
+      payload.teamMembersDetailed,
+      payload.participationSheetLink,
+      { required: participationSheetLinkRequired },
+    );
+    assertRegistrationTeamMembers(payload.teamMembersDetailed, {
+      participationSheetLinked,
+      contractStartMonth: readOptionalText(payload.contractStart).slice(0, 7),
+      contractEndMonth: readOptionalText(payload.contractEnd).slice(0, 7),
+    });
   }
   if (
     type !== 'I1'
@@ -1449,6 +1535,19 @@ function assertRegistrationPayload(payload) {
   ) {
     invalidRegistration('Project registration financial fields are incomplete');
   }
+}
+
+function participationSheetFieldsChanged(payload = {}, currentProject = {}) {
+  const linkChanged = Object.hasOwn(payload, 'participationSheetLink')
+    && readOptionalText(payload.participationSheetLink) !== readOptionalText(currentProject.participationSheetLink);
+  const teamChanged = Object.hasOwn(payload, 'teamMembersDetailed')
+    && stableStringify(Array.isArray(payload.teamMembersDetailed) ? payload.teamMembersDetailed : [])
+      !== stableStringify(Array.isArray(currentProject.teamMembersDetailed) ? currentProject.teamMembersDetailed : []);
+  const periodChanged = ['contractStart', 'contractEnd'].some((field) => (
+    Object.hasOwn(payload, field)
+    && readOptionalText(payload[field]) !== readOptionalText(currentProject[field])
+  ));
+  return linkChanged || teamChanged || periodChanged;
 }
 
 export function buildProjectRegistrationCanonicalDocuments({
@@ -1480,7 +1579,10 @@ export function buildProjectRegistrationCanonicalDocuments({
   const basis = normalizeBasis(readOptionalText(payload.basis));
   const settlementDetailsEnabled = basis !== 'NONE';
   const documents = registrationPrivateDocuments(attachmentRefs);
-  const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
+  const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed, {
+    contractStartMonth: readOptionalText(payload.contractStart).slice(0, 7),
+    contractEndMonth: readOptionalText(payload.contractEnd).slice(0, 7),
+  });
   const requestPayload = stripUndefinedDeep({
     name: readOptionalText(payload.name),
     officialContractName: readOptionalText(payload.officialContractName),
@@ -1680,6 +1782,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     description: pickText('description'),
     clientOrg: pickText('clientOrg'),
     businessManagementGoogleFolderLink: pickText('businessManagementGoogleFolderLink'),
+    participationSheetLink: pickText('participationSheetLink'),
     department: pickText('department'),
     groupwareName: pickText('groupwareName'),
     currency: normalizeProjectCurrency(pickText('currency')),
@@ -1789,9 +1892,36 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     || readOptionalText(payload.managerName)
     || readOptionalText(currentProject.registeredByName)
     || readOptionalText(currentProject.managerName);
-  const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
+  const effectiveParticipationSheetLink = Object.hasOwn(payload, 'participationSheetLink')
+    ? readOptionalText(payload.participationSheetLink)
+    : readOptionalText(currentProject.participationSheetLink);
+  const effectiveContractStart = readOptionalText(payload.contractStart) || readOptionalText(currentProject.contractStart);
+  const effectiveContractEnd = readOptionalText(payload.contractEnd) || readOptionalText(currentProject.contractEnd);
+  const registrationVersion = registrationRequirementsVersion(
+    Object.hasOwn(payload, 'registrationRequirementsVersion')
+      ? payload.registrationRequirementsVersion
+      : currentProject.registrationRequirementsVersion,
+  );
+  const currentRegistrationVersion = registrationRequirementsVersion(
+    currentProject.registrationRequirementsVersion,
+  );
+  const updatesTeamMembers = Object.hasOwn(payload, 'teamMembersDetailed');
+  const updatesParticipationSheet = participationSheetFieldsChanged(payload, currentProject);
+  assertParticipationSheetLinkForTeamMembers(
+    payload.teamMembersDetailed,
+    effectiveParticipationSheetLink,
+    {
+      required: registrationVersion === 2
+        && (updatesParticipationSheet || currentRegistrationVersion !== 2),
+    },
+  );
+  const teamMembersDetailed = updatesTeamMembers
+    ? normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed, {
+        contractStartMonth: effectiveContractStart.slice(0, 7),
+        contractEndMonth: effectiveContractEnd.slice(0, 7),
+      })
+    : undefined;
   const settlementType = normalizeSettlementType(readOptionalText(payload.settlementType));
-  const registrationVersion = registrationRequirementsVersion(payload.registrationRequirementsVersion);
   const basis = normalizeBasis(readOptionalText(payload.basis));
   const settlementDetailsEnabled = registrationVersion === 2 ? basis !== 'NONE' : settlementType !== 'NONE';
   const historicalFinancialWeeks = new Map((Array.isArray(currentProject.financialYears) ? currentProject.financialYears : [])
@@ -1809,6 +1939,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
     businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
+    participationSheetLink: readOptionalText(payload.participationSheetLink) || undefined,
     department: resolveProjectDepartmentFromPayload(payload, currentProject),
     cic: resolveProjectCicFromPayload(payload, currentProject),
     groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(currentProject.groupwareName) || undefined,
@@ -1869,7 +2000,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     managerId,
     managerName,
     teamName: readOptionalText(payload.teamName),
-    teamMembersDetailed,
+    ...(updatesTeamMembers ? { teamMembersDetailed } : {}),
     participantCondition: readOptionalText(payload.participantCondition),
     note: readOptionalText(payload.note),
     contractDocument: payload.contractDocument || null,
@@ -1895,6 +2026,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   officialContractName: '공식 계약명',
   clientOrg: '계약 대상',
   businessManagementGoogleFolderLink: '사업관리 구글폴더링크',
+  participationSheetLink: '참여율 시트 링크',
   department: '담당조직(CIC)',
   type: '프로젝트 유형',
   contractStart: '계약 시작일',
@@ -1946,6 +2078,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
 
 const PROJECT_INFO_PAYLOAD_FIELDS = [
   'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg', 'businessManagementGoogleFolderLink',
+  'participationSheetLink',
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
   'totalRevenueAmount', 'totalActualCost', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
@@ -2058,7 +2191,13 @@ export function buildProjectInfoChangeSubmission({
   reviewComment,
 }) {
   const trustedStoredDocuments = trustedStoredChangeRequestDocuments(previousRequest);
-  assertRegistrationPayload(payload);
+  assertRegistrationPayload(payload, {
+    participationSheetLinkRequired: registrationRequirementsVersion(payload.registrationRequirementsVersion) === 2
+      && (
+        registrationRequirementsVersion(project.registrationRequirementsVersion) !== 2
+        || participationSheetFieldsChanged(payload, project)
+      ),
+  });
   if (registrationRequirementsVersion(payload.registrationRequirementsVersion) !== 2) {
     invalidRegistration('Project information changes require registration requirements version 2');
   }
@@ -2262,10 +2401,64 @@ function normalizeParticipationRate(value) {
 
 function normalizeMonth(value) {
   const text = readOptionalText(value);
-  return /^\d{4}-\d{2}$/.test(text) ? text : '';
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(text) ? text : '';
 }
 
-function normalizeProjectTeamMembersDetailed(value) {
+function normalizeProjectTeamMemberMonthlyRates(member, index = null, {
+  contractStartMonth = '',
+  contractEndMonth = '',
+} = {}) {
+  if (!Object.hasOwn(member || {}, 'monthlyRates')) return undefined;
+  const source = member?.monthlyRates;
+  const field = index === null
+    ? 'teamMembersDetailed.monthlyRates'
+    : `teamMembersDetailed.${index}.monthlyRates`;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    invalidRegistration(`Project registration ${field} is invalid`);
+  }
+  const start = normalizeMonth(member?.laborAllocationStartMonth);
+  const end = normalizeMonth(member?.laborAllocationEndMonth);
+  const normalizedContractStart = normalizeMonth(contractStartMonth);
+  const normalizedContractEnd = normalizeMonth(contractEndMonth);
+  const effectiveEnd = end && normalizedContractEnd
+    ? (end < normalizedContractEnd ? end : normalizedContractEnd)
+    : (end || normalizedContractEnd);
+  if (!start || (end && start > end)) {
+    invalidRegistration(`Project registration ${field} requires a valid labor allocation period`);
+  }
+  if (
+    (normalizedContractStart && start < normalizedContractStart)
+    || (normalizedContractEnd && start > normalizedContractEnd)
+    || (end && normalizedContractStart && end < normalizedContractStart)
+    || (end && normalizedContractEnd && end > normalizedContractEnd)
+  ) {
+    invalidRegistration(`Project registration ${field} is outside the project contract period`);
+  }
+  const normalized = {};
+  for (const [yearMonth, rate] of Object.entries(source)) {
+    if (!normalizeMonth(yearMonth)) {
+      invalidRegistration(`Project registration ${field}.${yearMonth} is invalid`);
+    }
+    if (yearMonth < start || (effectiveEnd && yearMonth > effectiveEnd)) {
+      invalidRegistration(`Project registration ${field}.${yearMonth} is outside the labor allocation period`);
+    }
+    if (rate !== null && (
+      typeof rate !== 'number'
+      || !Number.isFinite(rate)
+      || rate < 0
+      || rate > 100
+    )) {
+      invalidRegistration(`Project registration ${field}.${yearMonth} is invalid`);
+    }
+    normalized[yearMonth] = rate;
+  }
+  return normalized;
+}
+
+function normalizeProjectTeamMembersDetailed(value, {
+  contractStartMonth = '',
+  contractEndMonth = '',
+} = {}) {
   return (Array.isArray(value) ? value : [])
     .map((member) => {
       const normalized = {
@@ -2281,6 +2474,11 @@ function normalizeProjectTeamMembersDetailed(value) {
       const laborAllocationEndMonth = normalizeMonth(member?.laborAllocationEndMonth);
       if (laborAllocationStartMonth) normalized.laborAllocationStartMonth = laborAllocationStartMonth;
       if (laborAllocationEndMonth) normalized.laborAllocationEndMonth = laborAllocationEndMonth;
+      const monthlyRates = normalizeProjectTeamMemberMonthlyRates(member, null, {
+        contractStartMonth,
+        contractEndMonth,
+      });
+      if (monthlyRates !== undefined) normalized.monthlyRates = monthlyRates;
       return normalized;
     })
     .filter((member) => (
@@ -2290,6 +2488,7 @@ function normalizeProjectTeamMembersDetailed(value) {
       || member.participationRate > 0
       || member.laborAllocationStartMonth
       || member.laborAllocationEndMonth
+      || Object.hasOwn(member, 'monthlyRates')
     ));
 }
 
@@ -2315,14 +2514,44 @@ function normalizeSyncKeySegment(value, fallback = 'na') {
  */
 export function buildProjectTeamMemberSyncKeys(teamMembers) {
   const members = Array.isArray(teamMembers) ? teamMembers : [];
-  const personSegments = members.map((member) => normalizeSyncKeySegment(member?.memberNickname || member?.memberName, 'member'));
+  const descriptors = members.map((member) => {
+    const isSheetBacked = Object.hasOwn(member || {}, 'monthlyRates');
+    const nickname = readOptionalText(member?.memberNickname);
+    const name = readOptionalText(member?.memberName);
+    const placeholderNickname = ['미정', '채용예정'].some((prefix) => nickname.startsWith(prefix));
+    return {
+      isSheetBacked,
+      person: normalizeSyncKeySegment(
+        isSheetBacked && placeholderNickname && name ? name : (nickname || name),
+        'member',
+      ),
+    };
+  });
   const occurrences = new Map();
-  for (const person of personSegments) occurrences.set(person, (occurrences.get(person) || 0) + 1);
-  return personSegments.map((person, index) => (
-    occurrences.get(person) > 1
-      ? `${person}__${normalizeSyncKeySegment(members[index]?.role, 'role')}`
-      : person
-  ));
+  for (const descriptor of descriptors) {
+    if (descriptor.isSheetBacked) continue;
+    occurrences.set(descriptor.person, (occurrences.get(descriptor.person) || 0) + 1);
+  }
+  const candidates = descriptors.map(({ person, isSheetBacked }, index) => {
+    const stintStart = normalizeMonth(members[index]?.laborAllocationStartMonth);
+    if (isSheetBacked) return `${person}__${stintStart || 'stint'}`;
+    if (occurrences.get(person) === 1) return person;
+    return `${person}__${normalizeSyncKeySegment(members[index]?.role, 'role')}`;
+  });
+  const candidateOccurrences = new Map();
+  for (const candidate of candidates) {
+    candidateOccurrences.set(candidate, (candidateOccurrences.get(candidate) || 0) + 1);
+  }
+  const seen = new Map();
+  return candidates.map((candidate, index) => {
+    if (
+      candidateOccurrences.get(candidate) === 1
+      || !readOptionalText(members[index]?.memberNickname || members[index]?.memberName)
+    ) return candidate;
+    const ordinal = (seen.get(candidate) || 0) + 1;
+    seen.set(candidate, ordinal);
+    return `${candidate}__${ordinal}`;
+  });
 }
 
 export function resolveProjectTeamMemberLookupKeys(member) {
@@ -2410,13 +2639,23 @@ export async function syncProjectParticipationEntries({
   tenantId,
   project,
   now,
+  transaction = null,
 }) {
-  const teamMembers = normalizeProjectTeamMembersDetailed(project?.teamMembersDetailed);
+  const teamMembers = normalizeProjectTeamMembersDetailed(project?.teamMembersDetailed, {
+    contractStartMonth: readOptionalText(project?.contractStart).slice(0, 7),
+    contractEndMonth: readOptionalText(project?.contractEnd).slice(0, 7),
+  });
   const partEntriesRef = db.collection(`orgs/${tenantId}/partEntries`);
-  const existingSnap = await partEntriesRef.where('projectId', '==', project.id).get();
+  const existingQuery = partEntriesRef.where('projectId', '==', project.id);
+  const existingSnap = transaction
+    ? await transaction.get(existingQuery)
+    : await existingQuery.get();
   const existingSyncEntries = existingSnap.docs.filter((doc) => doc.data()?.source === 'PROJECT_TEAM_SYNC');
 
-  const memberSnap = await db.collection(`orgs/${tenantId}/members`).get();
+  const membersRef = db.collection(`orgs/${tenantId}/members`);
+  const memberSnap = transaction
+    ? await transaction.get(membersRef)
+    : await membersRef.get();
   const members = memberSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
   const memberByIdentity = new Map();
   for (const member of members) {
@@ -2429,7 +2668,7 @@ export async function syncProjectParticipationEntries({
   const teamMemberSyncKeys = buildProjectTeamMemberSyncKeys(teamMembers);
   for (const [index, member] of teamMembers.entries()) {
     const personId = readOptionalText(member?.personId);
-    if (!member.role || (!personId && !member.memberName && !member.memberNickname)) continue;
+    if (!personId && !member.memberName && !member.memberNickname) continue;
     const key = teamMemberSyncKeys[index];
     const matchedMember = resolveProjectTeamMemberLookupKeys(member)
       .map((lookupKey) => memberByIdentity.get(lookupKey))
@@ -2440,7 +2679,7 @@ export async function syncProjectParticipationEntries({
       || member.memberNickname
       || member.memberName;
     const entryId = `pte-${project.id}-${key}`;
-    desiredEntries.set(entryId, {
+    const entry = {
       id: entryId,
       ...(personId ? { personId } : {}),
       memberId,
@@ -2458,21 +2697,25 @@ export async function syncProjectParticipationEntries({
       source: 'PROJECT_TEAM_SYNC',
       projectTeamMemberKey: key,
       updatedAt: now,
-    });
+    };
+    if (Object.hasOwn(member, 'monthlyRates')) {
+      entry.monthlyRates = member.monthlyRates;
+    }
+    desiredEntries.set(entryId, entry);
   }
 
-  const batch = db.batch();
+  const writer = transaction || db.batch();
   for (const [entryId, entry] of desiredEntries.entries()) {
-    batch.set(partEntriesRef.doc(entryId), {
+    writer.set(partEntriesRef.doc(entryId), {
       ...entry,
       tenantId,
-    }, { merge: true });
+    });
   }
   for (const doc of existingSyncEntries) {
     if (desiredEntries.has(doc.id)) continue;
-    batch.delete(doc.ref);
+    writer.delete(doc.ref);
   }
-  await batch.commit();
+  if (!transaction) await writer.commit();
 
 }
 
@@ -2653,7 +2896,24 @@ export function createProjectRegistrationSubmittedOutboxHandler({
       registrationDriveAt: timestamp,
     }));
 
-    await syncProjectParticipationEntries({ db, tenantId, project, now: timestamp });
+    await db.runTransaction(async (tx) => {
+      const outboxRef = db.doc(`outbox/${event.id}`);
+      const [currentProjectSnap, outboxSnap] = await Promise.all([
+        tx.get(projectRef),
+        tx.get(outboxRef),
+      ]);
+      if (!currentProjectSnap.exists || !outboxSnap.exists) {
+        throw new Error('Project registration delivery records are missing');
+      }
+      assertCurrentClaim(outboxSnap.data() || {}, event);
+      await syncProjectParticipationEntries({
+        db,
+        transaction: tx,
+        tenantId,
+        project: { id: projectId, ...(currentProjectSnap.data() || {}) },
+        now: timestamp,
+      });
+    });
 
     if (!projectRegistrationSlackService?.enabled) {
       await mutateSideEffects(event, (sideEffects) => {
@@ -3052,13 +3312,43 @@ export function mountProjectRoutes(app, {
       }))
       : parsed.financialYears;
 
+    const effectiveParticipationSheetLink = Object.hasOwn(parsed, 'participationSheetLink')
+      ? readOptionalText(parsed.participationSheetLink)
+      : readOptionalText(existingProject?.participationSheetLink);
+    const effectiveRegistrationVersion = registrationRequirementsVersion(
+      Object.hasOwn(parsed, 'registrationRequirementsVersion')
+        ? parsed.registrationRequirementsVersion
+        : existingProject?.registrationRequirementsVersion,
+    );
+    const existingRegistrationVersion = registrationRequirementsVersion(
+      existingProject?.registrationRequirementsVersion,
+    );
+    const updatesTeamMembers = Object.hasOwn(parsed, 'teamMembersDetailed');
+    const updatesParticipationSheet = participationSheetFieldsChanged(parsed, existingProject || {});
+    assertParticipationSheetLinkForTeamMembers(
+      parsed.teamMembersDetailed,
+      effectiveParticipationSheetLink,
+      {
+        required: effectiveRegistrationVersion === 2 && (
+          !existingProject
+          || existingRegistrationVersion !== 2
+          || updatesParticipationSheet
+        ),
+      },
+    );
+
     const projectPayload = normalizeProjectRevenueFields({
       ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: parsed.id.trim(),
       name: parsed.name.trim(),
       orgId: tenantId,
       currency: normalizeProjectCurrency(parsed.currency),
-      teamMembersDetailed: normalizeProjectTeamMembersDetailed(parsed.teamMembersDetailed),
+      ...(updatesTeamMembers ? {
+        teamMembersDetailed: normalizeProjectTeamMembersDetailed(parsed.teamMembersDetailed, {
+          contractStartMonth: readOptionalText(parsed.contractStart || existingProject?.contractStart).slice(0, 7),
+          contractEndMonth: readOptionalText(parsed.contractEnd || existingProject?.contractEnd).slice(0, 7),
+        }),
+      } : {}),
       ...(hasSettlementSystem ? {
         settlementSystem,
         settlementSystemOther: settlementSystem === 'OTHER'
@@ -3111,16 +3401,16 @@ export function mountProjectRoutes(app, {
       now: timestamp,
       expectedVersion,
       outboxEvent,
+      stageTransactionWrites: updatesTeamMembers && Array.isArray(projectPayload.teamMembersDetailed)
+        ? ({ tx, document }) => syncProjectParticipationEntries({
+            db,
+            transaction: tx,
+            tenantId,
+            project: document,
+            now: timestamp,
+          })
+        : undefined,
     });
-
-    if (Array.isArray(projectPayload.teamMembersDetailed)) {
-      await syncProjectParticipationEntries({
-        db,
-        tenantId,
-        project: result.data,
-        now: timestamp,
-      });
-    }
 
     const existingName = readOptionalText(existingProject?.name);
     const renamedProjectRoot = (
@@ -3619,6 +3909,18 @@ export function mountProjectRoutes(app, {
       actorId,
       now,
       notFoundMessage: `Project not found: ${projectId}`,
+      stageTransactionWrites: parsed.reviewStatus === 'APPROVED'
+        ? async ({ tx, document, currentRequest }) => {
+            if (!isProjectChangeRequest(currentRequest || request)) return;
+            await syncProjectParticipationEntries({
+              db,
+              transaction: tx,
+              tenantId,
+              project: document,
+              now,
+            });
+          }
+        : undefined,
     });
 
     let slackDelivered = false;
@@ -3687,10 +3989,12 @@ export function mountProjectRoutes(app, {
       && isProjectChangeRequest(request)
       && readOptionalText(request?.status) === 'PENDING';
 
+    let projectCodeClaimWrite = null;
     const projectResult = await mergeProjectAndRequestDocs({
       db,
       projectPath,
       buildProjectPatch: async (currentProject, currentRequest, _nextVersion, tx) => {
+        projectCodeClaimWrite = null;
         const reviewRequest = currentRequest || request;
         const hasExecutiveApproval = readOptionalText(currentProject.executiveReviewStatus) === 'APPROVED'
           || readOptionalText(reviewRequest?.status) === 'APPROVED';
@@ -3745,14 +4049,17 @@ export function mountProjectRoutes(app, {
           if (legacyConflict) {
             throw createHttpError(409, 'Project code is already assigned to another project', 'project_code_conflict');
           }
-          tx.set(projectCodeClaimRef, {
+          projectCodeClaimWrite = {
+            ref: projectCodeClaimRef,
+            value: {
             tenantId,
             projectId,
             projectCode,
             projectCodeKey: projectCode,
             createdAt: readOptionalText(claim.createdAt) || now,
             updatedAt: now,
-          }, { merge: true });
+            },
+          };
         }
 
         return {
@@ -3819,6 +4126,24 @@ export function mountProjectRoutes(app, {
       actorId,
       now,
       notFoundMessage: `Project not found: ${projectId}`,
+      stageTransactionWrites: async ({ tx, document, currentRequest }) => {
+        if (
+          parsed.reviewStatus === 'AGREED'
+          && isProjectChangeRequest(currentRequest || request)
+          && readOptionalText((currentRequest || request)?.status) === 'PENDING'
+        ) {
+          await syncProjectParticipationEntries({
+            db,
+            transaction: tx,
+            tenantId,
+            project: document,
+            now,
+          });
+        }
+        if (projectCodeClaimWrite) {
+          tx.set(projectCodeClaimWrite.ref, projectCodeClaimWrite.value, { merge: true });
+        }
+      },
     });
 
     let slackDelivered = false;

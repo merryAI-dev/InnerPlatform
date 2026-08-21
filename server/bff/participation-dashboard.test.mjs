@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { buildParticipationDashboardSnapshot, selectParticipationDashboardYear } from './participation-dashboard.mjs';
+import {
+  buildParticipationDashboardSnapshot,
+  buildProjectParticipationSnapshot,
+  selectParticipationDashboardYear,
+} from './participation-dashboard.mjs';
 import { mountParticipationDashboardRoutes } from './routes/participation-dashboard.mjs';
 
 const project = {
@@ -41,12 +45,201 @@ describe('participation dashboard', () => {
     expect(filtered.members[0].memberName).toBe('변민욱A');
     expect(boram.projectLabel).toBe('agri-2026 · hongsi-2026');
     expect(boram.projectCount).toBe(2);
-    expect(boram.months[2]).toEqual({ yearMonth: '2026-03', label: '3월', rate: 120, isWarning: true });
+    expect(boram.months[2]).toEqual({
+      yearMonth: '2026-03', label: '3월', rate: 120,
+      isConfirmed: true, hasMissing: false, isWarning: true,
+    });
     expect(filtered.warnings).toEqual(expect.arrayContaining([{ memberId: 'psn-boram', memberName: '변민욱A', yearMonth: '2026-03', rate: 120 }]));
     expect(selectParticipationDashboardYear(snapshot).selectedYear).toBe('2026');
     expect(snapshot.availableYears).toContain('2026');
     expect(result.unlinkedEntryCount).toBe(1);
     expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용' }]));
+  });
+
+  it('sheet-backed 월별 맵의 빈칸을 legacy 기본률로 되살리지 않는다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [project],
+      people: [{ personId: 'psn-sheet', name: '시트 인력', joinedAt: '2020-01-01' }],
+      rules: [],
+      entries: [{
+        id: 'sheet-entry',
+        projectId: project.id,
+        personId: 'psn-sheet',
+        rate: 30,
+        periodStart: '2026-01',
+        periodEnd: '2026-03',
+        monthlyRates: { '2026-01': 0, '2026-03': 10 },
+      }],
+      generatedAt: '2026-08-21T00:00:00.000Z',
+    });
+
+    const member = selectParticipationDashboardYear(snapshot, '2026').members[0];
+    expect(member.months.slice(0, 3).map(({ rate, isConfirmed, hasMissing }) => ({
+      rate, isConfirmed, hasMissing,
+    }))).toEqual([
+      { rate: 0, isConfirmed: true, hasMissing: false },
+      { rate: 0, isConfirmed: false, hasMissing: true },
+      { rate: 10, isConfirmed: true, hasMissing: false },
+    ]);
+  });
+
+  it('전월 미입력인 다년도 sheet-backed stint도 중간 연도를 조회할 수 있다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [{ ...project, contractStart: '2025-04-01', contractEnd: '2035-06-30' }],
+      people: [{ personId: 'psn-sheet', name: '시트 인력', joinedAt: '2020-01-01' }],
+      rules: [],
+      entries: [{
+        id: 'sheet-entry',
+        projectId: project.id,
+        personId: 'psn-sheet',
+        rate: 20,
+        periodStart: '2025-04',
+        periodEnd: '2035-06',
+        monthlyRates: {},
+      }],
+      generatedAt: '2026-08-21T00:00:00.000Z',
+    });
+
+    expect(snapshot.availableYears).toEqual(expect.arrayContaining(['2025', '2026', '2030', '2035']));
+    expect(selectParticipationDashboardYear(snapshot, '2030').members[0].months.every(({ rate }) => rate === 0)).toBe(true);
+  });
+
+  it('PROJECT_TEAM_SYNC가 소유한 사람·사업·월은 MANUAL 문서를 보존하되 이중 집계하지 않는다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [project],
+      people: [{ personId: 'psn-sheet', name: '시트 인력', joinedAt: '2020-01-01' }],
+      rules: [],
+      entries: [
+        {
+          id: 'manual-entry',
+          source: 'MANUAL',
+          projectId: project.id,
+          personId: 'psn-sheet',
+          rate: 5,
+          periodStart: '2026-01',
+          periodEnd: '2026-03',
+        },
+        {
+          id: 'sheet-entry',
+          source: 'PROJECT_TEAM_SYNC',
+          projectId: project.id,
+          personId: 'psn-sheet',
+          rate: 20,
+          periodStart: '2026-01',
+          periodEnd: '2026-03',
+          monthlyRates: { '2026-01': 20, '2026-02': null, '2026-03': 10 },
+        },
+      ],
+      generatedAt: '2026-08-21T00:00:00.000Z',
+    });
+
+    const member = selectParticipationDashboardYear(snapshot, '2026').members[0];
+    expect(member.months.slice(0, 3).map(({ rate, isConfirmed, hasMissing }) => ({
+      rate, isConfirmed, hasMissing,
+    }))).toEqual([
+      { rate: 20, isConfirmed: true, hasMissing: false },
+      { rate: 0, isConfirmed: false, hasMissing: true },
+      { rate: 10, isConfirmed: true, hasMissing: false },
+    ]);
+  });
+
+  it('프로젝트별 참여인력 요약도 PROJECT_TEAM_SYNC와 MANUAL을 이중 집계하지 않는다', () => {
+    const result = buildProjectParticipationSnapshot({
+      project,
+      entries: [
+        {
+          id: 'manual-entry', source: 'MANUAL', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 5,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+        {
+          id: 'sheet-entry', source: 'PROJECT_TEAM_SYNC', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 20,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ headcount: 1, totalRate: 20, averageRate: 20 });
+    expect(result.members[0]).toMatchObject({ entryCount: 1, totalRate: 20 });
+    expect(result.members[0].entries).toEqual([
+      expect.objectContaining({ id: 'sheet-entry', source: 'PROJECT_TEAM_SYNC' }),
+    ]);
+  });
+
+  it('legacy MANUAL에 personId가 없어도 같은 memberId의 시트 참여행과 겹치면 이중 집계하지 않는다', () => {
+    const result = buildProjectParticipationSnapshot({
+      project,
+      entries: [
+        {
+          id: 'legacy-manual', source: 'MANUAL', projectId: project.id,
+          memberId: 'member-sheet', memberName: '시트 인력', rate: 5,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+        {
+          id: 'sheet-entry', source: 'PROJECT_TEAM_SYNC', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 20,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ headcount: 1, totalRate: 20, averageRate: 20 });
+    expect(result.members[0].entries.map(({ id }) => id)).toEqual(['sheet-entry']);
+  });
+
+  it('서로 다른 personId의 MANUAL은 같은 legacy memberId여도 제거하지 않는다', () => {
+    const result = buildProjectParticipationSnapshot({
+      project,
+      entries: [
+        {
+          id: 'manual-other-person', source: 'MANUAL', projectId: project.id,
+          personId: 'psn-other', memberId: 'member-sheet', memberName: '다른 사람', rate: 5,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+        {
+          id: 'sheet-entry', source: 'PROJECT_TEAM_SYNC', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 20,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ totalRate: 25 });
+    expect(result.members[0].entries.map(({ id }) => id)).toEqual([
+      'manual-other-person',
+      'sheet-entry',
+    ]);
+  });
+
+  it('프로젝트별 요약에서 시트 기간과 겹치지 않는 수기 참여행은 보존한다', () => {
+    const result = buildProjectParticipationSnapshot({
+      project,
+      entries: [
+        {
+          id: 'manual-before-sheet', source: 'MANUAL', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 5,
+          periodStart: '2025-01', periodEnd: '2025-12',
+        },
+        {
+          id: 'manual-without-period', source: 'MANUAL', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 3,
+        },
+        {
+          id: 'sheet-entry', source: 'PROJECT_TEAM_SYNC', projectId: project.id,
+          personId: 'psn-sheet', memberId: 'member-sheet', memberName: '시트 인력', rate: 20,
+          periodStart: '2026-01', periodEnd: '2026-03',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ headcount: 1, totalRate: 28, averageRate: 28 });
+    expect(result.members[0]).toMatchObject({ entryCount: 3, totalRate: 28 });
+    expect(result.members[0].entries.map(({ id }) => id)).toEqual([
+      'manual-before-sheet',
+      'manual-without-period',
+      'sheet-entry',
+    ]);
   });
 });
 

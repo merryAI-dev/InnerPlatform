@@ -47,7 +47,7 @@ describe('Project Check out behavior', () => {
         evidenceDeletedAfterUsb: false,
       },
       taxInvoiceDocument: document,
-    }, { id: 'project-a' }) as Project;
+    }, { id: 'project-a', registrationRequirementsVersion: 2 }) as Project;
 
     expect(canonical.taxInvoiceDocument).toEqual(document);
     expect(projectCheckoutFileStatus(false, Boolean(canonical.taxInvoiceDocument?.path))).toBe('첨부 완료');
