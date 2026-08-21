@@ -1858,20 +1858,6 @@ export function ProjectEditorWizard({
         />
       </ProjectFormRow>
 
-      {/* 참여율 시트를 이 사업에 묶는 지점. 시트 안에는 사업 식별자를 적지 않는다 -
-          사람이 적는 식별자는 어긋난다. 링크를 저장하는 것이 곧 바인딩이다. */}
-      <ProjectFormRow
-        label="참여율 시트 링크"
-        hints={['참여율 표준양식을 복사해 만든 이 사업 전용 시트 링크를 입력해 주세요.']}
-      >
-        <Input
-          type="url"
-          value={draft.participationSheetLink}
-          onChange={(event) => update('participationSheetLink', event.target.value)}
-          placeholder="https://docs.google.com/spreadsheets/d/..."
-          className={FORM_CONTROL_CLASS}
-        />
-      </ProjectFormRow>
 
       <ProjectFormRow
         label="프로젝트 목적"
@@ -2934,6 +2920,25 @@ export function ProjectEditorWizard({
           </Button>
         )}
       >
+        {/* 이 섹션이 참여인력을 다루는 곳이라 시트 링크도 여기 있어야 한다. 기본 정보에 두면
+            참여율을 입력하는 사람이 이 칸을 영영 만나지 못한다. 링크 저장이 곧 사업 바인딩이고,
+            시트 안에는 사업 식별자를 적지 않는다 - 사람이 적는 식별자는 어긋난다. */}
+        <ProjectFormRow
+          label="참여율 시트 링크"
+          hints={[
+            '월별 참여율은 이 시트에 적습니다. 표준양식을 복사해 이 사업 전용 시트를 만든 뒤 링크를 넣어 주세요.',
+            '저장하면 참여인력 대시보드의 "시트 확인"에서 입력 상태를 볼 수 있습니다.',
+          ]}
+        >
+          <Input
+            type="url"
+            value={draft.participationSheetLink}
+            onChange={(event) => update('participationSheetLink', event.target.value)}
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+            className={FORM_CONTROL_CLASS}
+          />
+        </ProjectFormRow>
+
         <div data-issue-label="참여인력 이름·역할" className={FORM_FIELD_STACK_CLASS}>
           {fieldIssues('참여인력 이름·역할', '운영매니저 1인 이상').length > 0 ? (
             <ul className={cn('space-y-1', FORM_ERROR_CLASS)} role="alert">
@@ -3408,6 +3413,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
             <ReviewRow label="최종 결재자 지정 (사업총괄)" value={draft.executiveApproverName} />
             <ReviewRow label="참여인력 (서류상·실제)" value={teamMembersSummary} />
+            <ReviewRow label="참여율 시트 링크" value={draft.participationSheetLink} />
           </CardContent>
         </Card>
         <Card className="shadow-none lg:col-start-1 lg:row-start-3 lg:self-start">
