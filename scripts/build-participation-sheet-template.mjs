@@ -100,6 +100,13 @@ async function main() {
     ['', '  줄 삭제 · 열 추가/삭제 · 1~2행(머리글) 수정. 양식이 달라지면 반영이 거부됩니다.'],
     ['', '  사업 기간이 바뀌면 플랫폼에서 계약 기간을 먼저 수정합니다. 반영 시 시트 기간과 대조합니다.'],
     ['', ''],
+    ['굵게', '칸을 덮어쓴 뒤에 - 되돌리기와 빨간 칸'],
+    ['', '  숫자를 적으면 그 칸의 자동 채움 수식이 지워집니다. 정상이며, 손댄 칸은 노랗게 남습니다.'],
+    ['', '  기본값으로 되돌리려면: 같은 줄의 노랗지 않은 칸 하나를 복사해 붙여넣으세요. 수식이 자리에'],
+    ['', '  맞게 살아납니다. 줄 전체를 덮어썼다면 아래 여유 줄의 아무 칸이나 복사해도 됩니다.'],
+    ['', '  진한 빨간 칸 = 투입기간 밖에 남은 옛 값입니다(기간·투입월을 바꾼 뒤 남은 흔적). 지우거나'],
+    ['', '  기간을 확인하세요. 이 값이 남아 있으면 반영이 거부됩니다.'],
+    ['', ''],
     ['굵게', '기간을 바꿀 때 - 종료월만 바꿉니다'],
     ['', '  연장·단축 → 종료월만 바꾸면 월 칸이 그에 맞춰 늘어나거나 줄어듭니다. 이미 적은 값은 그대로입니다.'],
     ['', '  시작월은 값을 적기 전에 정하고, 그 뒤에는 바꾸지 않습니다 - 바꾸면 이미 적은 값의 달이 한 칸씩'],
@@ -241,22 +248,34 @@ async function main() {
   });
 
   // 조건부 서식: 회색 = 기간 밖(헤더 없음) · 빨강 = 투입기간 안의 미입력 · 노랑 = 기본과 다른 값(diff)
+  const A = `$A${dataStartRow}`; const D = `$D${dataStartRow}`; const E = `$E${dataStartRow}`;
+  const CELL = `${firstMonthLetter}${dataStartRow}`; const HDR = `${firstMonthLetter}$2`;
   sheet.addConditionalFormatting({
     ref: `${firstMonthLetter}${dataStartRow}:${lastColLetter}${dataEndRow}`,
     rules: [
+      // ① 고아 값(최우선): 값이 있는데 헤더 밖이거나 투입기간 밖. 수식 칸은 그런 자리에서
+      //    스스로 비워지므로 이 규칙에 걸리는 것은 하드코딩 잔재뿐이다. 기간·투입월을 바꾼 뒤
+      //    남은 옛 값이 즉시 진한 빨강으로 드러난다. 반영도 이 값을 거부한다(이중 방어).
       {
         type: 'expression', priority: 1,
-        formulae: [`${firstMonthLetter}$2=""`],
-        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFF1F5F9' } } },
+        formulae: [`AND(${CELL}<>"",OR(${HDR}="",${D}="",AND(${D}<>"",${HDR}<${D}),AND(${E}<>"",${HDR}>${E})))`],
+        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFCA5A5' } } },
       },
       {
         type: 'expression', priority: 2,
-        formulae: [`AND(${firstMonthLetter}$2<>"",$A${dataStartRow}<>"",$D${dataStartRow}<>"",${firstMonthLetter}$2>=$D${dataStartRow},OR($E${dataStartRow}="",${firstMonthLetter}$2<=$E${dataStartRow}),${firstMonthLetter}${dataStartRow}="")`],
-        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFDE0E0' } } },
+        formulae: [`${HDR}=""`],
+        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFF1F5F9' } } },
       },
       {
         type: 'expression', priority: 3,
-        formulae: [`AND(${firstMonthLetter}${dataStartRow}<>"",$F${dataStartRow}<>"",${firstMonthLetter}${dataStartRow}<>$F${dataStartRow})`],
+        formulae: [`AND(${HDR}<>"",${A}<>"",${D}<>"",${HDR}>=${D},OR(${E}="",${HDR}<=${E}),${CELL}="")`],
+        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFDE0E0' } } },
+      },
+      // ④ diff 를 값 비교가 아니라 수식 여부(ISFORMULA)로 표시한다. 하드코딩한 칸은 값이
+      //    기본과 같아도 노랗다 - "수식이 깨진 곳" 지도와 "사람이 손댄 곳" 지도가 같아진다.
+      {
+        type: 'expression', priority: 4,
+        formulae: [`AND(${CELL}<>"",NOT(ISFORMULA(${CELL})))`],
         style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFF3C4' } } },
       },
     ],
