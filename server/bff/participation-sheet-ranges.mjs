@@ -7,27 +7,32 @@
  * 좌표가 어긋나면 적응하지 않고 거부한다 - 엉뚱한 달에 값이 들어가는 것이 가장 위험하다.
  */
 
-export const PARTICIPATION_SHEET_TAB = '참여율';
+/**
+ * 탭 이름은 고정이다. 워크북 안 여러 탭 중 하나로 들어가더라도 이 이름이어야 한다.
+ * 사람이 정하게 하면 오타 하나로 연동이 끊기고, 그 오타를 찾는 일이 다시 사람 몫이 된다.
+ * 이름이 다르면 적응하지 않고 거부한다 - 좌표 계약과 같은 원칙이다.
+ */
+export const PARTICIPATION_SHEET_TAB = '참여율 관리';
 export const PARTICIPATION_REF_TAB = '참조';
 
-/** 양식 식별자. 반영·검증의 첫 관문이다. */
-export const PARTICIPATION_FORMAT_RANGE = `${PARTICIPATION_REF_TAB}!F1`;
-/** 계약 기간 설정칸(B1 시작월, D1 종료월). C1 은 물결 표시라 함께 읽고 버린다. */
-export const PARTICIPATION_PERIOD_RANGE = `${PARTICIPATION_SHEET_TAB}!B1:D1`;
-/** 월 머리글 2행. 파서는 이 행만 읽는다 - 1행 연도 표시는 사람 보기용 장식이다. */
-export const PARTICIPATION_HEADER_RANGE = `${PARTICIPATION_SHEET_TAB}!G2:DV2`;
-/** 고정 열 A~F: 닉네임·이름·역할·투입시작월·투입종료월·기본투입률 */
-export const PARTICIPATION_META_RANGE = `${PARTICIPATION_SHEET_TAB}!A3:F62`;
-/** 월 칸 본문 */
-export const PARTICIPATION_CELL_RANGE = `${PARTICIPATION_SHEET_TAB}!G3:DV62`;
-
-export const PARTICIPATION_RANGES = [
-  PARTICIPATION_FORMAT_RANGE,
-  PARTICIPATION_PERIOD_RANGE,
-  PARTICIPATION_HEADER_RANGE,
-  PARTICIPATION_META_RANGE,
-  PARTICIPATION_CELL_RANGE,
-];
+/** 탭 이름에 공백이 있어 범위에 인용부호가 필요하다. */
+export function participationSheetRanges() {
+  const tab = PARTICIPATION_SHEET_TAB;
+  const quoted = `'${tab.replace(/'/g, "''")}'`;
+  return {
+    tab,
+    /** 양식 식별자. 반영·검증의 첫 관문이다. */
+    format: `'${PARTICIPATION_REF_TAB}'!F1`,
+    /** 계약 기간 설정칸(B1 시작월, D1 종료월). C1 은 물결 표시라 함께 읽고 버린다. */
+    period: `${quoted}!B1:D1`,
+    /** 월 머리글 2행. 파서는 이 행만 읽는다 - 1행 연도 표시는 사람 보기용 장식이다. */
+    header: `${quoted}!G2:DV2`,
+    /** 고정 열 A~F: 닉네임·이름·역할·투입시작월·투입종료월·기본투입률 */
+    meta: `${quoted}!A3:F62`,
+    /** 월 칸 본문 */
+    cells: `${quoted}!G3:DV62`,
+  };
+}
 
 /**
  * 읽어 온 다섯 범위를 파서 입력으로 맞춘다.

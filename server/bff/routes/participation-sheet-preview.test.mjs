@@ -25,11 +25,11 @@ const PEOPLE = {
 /** 표준양식 다섯 범위의 기본값. 필요한 것만 바꿔 쓴다. */
 function sheetRanges(overrides = {}) {
   return {
-    '참조!F1': [[PARTICIPATION_FORMAT_ID]],
-    '참여율!B1:D1': [['2026-01', '~', '2026-03']],
-    '참여율!G2:DV2': [['2026-01', '2026-02', '2026-03']],
-    '참여율!A3:F62': [['에이블', '김정태', '총괄책임자', '2026-01', '', '30']],
-    '참여율!G3:DV62': [['30', '30', '30']],
+    "'참조'!F1": [[PARTICIPATION_FORMAT_ID]],
+    "'참여율 관리'!B1:D1": [['2026-01', '~', '2026-03']],
+    "'참여율 관리'!G2:DV2": [['2026-01', '2026-02', '2026-03']],
+    "'참여율 관리'!A3:F62": [['에이블', '김정태', '총괄책임자', '2026-01', '', '30']],
+    "'참여율 관리'!G3:DV62": [['30', '30', '30']],
     ...overrides,
   };
 }
@@ -109,7 +109,7 @@ describe('참여율 시트 검증 - 읽기 전용', () => {
     const { app, requestedRanges } = createApp({ documents: withProject() });
     await request(app).get(url);
     expect(requestedRanges.sort()).toEqual([
-      '참여율!A3:F62', '참여율!B1:D1', '참여율!G2:DV2', '참여율!G3:DV62', '참조!F1',
+      "'참여율 관리'!A3:F62", "'참여율 관리'!B1:D1", "'참여율 관리'!G2:DV2", "'참여율 관리'!G3:DV62", "'참조'!F1",
     ]);
   });
 });
@@ -152,7 +152,7 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
   it('양식이 다르면 행을 읽기 전에 막는다', async () => {
     const { app } = createApp({
       documents: withProject(),
-      ranges: sheetRanges({ '참조!F1': [['OTHER-V9']] }),
+      ranges: sheetRanges({ "'참조'!F1": [['OTHER-V9']] }),
     });
     const response = await request(app).get(url);
     expect(response.status).toBe(200);
@@ -165,8 +165,8 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
     const { app } = createApp({
       documents: withProject(),
       ranges: sheetRanges({
-        '참여율!B1:D1': [['2026-01', '~', '2026-06']],
-        '참여율!G2:DV2': [['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06']],
+        "'참여율 관리'!B1:D1": [['2026-01', '~', '2026-06']],
+        "'참여율 관리'!G2:DV2": [['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06']],
       }),
     });
     const response = await request(app).get(url);
@@ -180,7 +180,7 @@ describe('사람이 확인할 것', () => {
   it('미입력을 막지 않고 목록으로 돌려준다', async () => {
     const { app } = createApp({
       documents: withProject(),
-      ranges: sheetRanges({ '참여율!G3:DV62': [['30', '', '']] }),
+      ranges: sheetRanges({ "'참여율 관리'!G3:DV62": [['30', '', '']] }),
     });
     const response = await request(app).get(url);
     expect(response.body.ok).toBe(true);
@@ -190,7 +190,7 @@ describe('사람이 확인할 것', () => {
   it('People 에 없는 사람은 연결 대기로 두고 등록 후보로 올린다', async () => {
     const { app } = createApp({
       documents: withProject(),
-      ranges: sheetRanges({ '참여율!A3:F62': [['테일러', '김혜령', '연구', '2026-01', '', '30']] }),
+      ranges: sheetRanges({ "'참여율 관리'!A3:F62": [['테일러', '김혜령', '연구', '2026-01', '', '30']] }),
     });
     const response = await request(app).get(url);
     expect(response.body.ok).toBe(true);
@@ -201,7 +201,7 @@ describe('사람이 확인할 것', () => {
   it('이름 없는 미정 자리는 후보가 아니다 - 등록할 사람이 아직 없다', async () => {
     const { app } = createApp({
       documents: withProject(),
-      ranges: sheetRanges({ '참여율!A3:F62': [['미정-1', '', '운영', '2026-01', '', '30']] }),
+      ranges: sheetRanges({ "'참여율 관리'!A3:F62": [['미정-1', '', '운영', '2026-01', '', '30']] }),
     });
     const response = await request(app).get(url);
     expect(response.body.rows[0].linkState).toBe('PLACEHOLDER');
@@ -213,16 +213,22 @@ describe('사람이 확인할 것', () => {
 // 등록 중에는 사업 문서가 아직 없고, 수정 중에는 화면의 링크가 저장본과 다를 수 있다.
 // 그래서 저장 전에도 확인할 수 있어야 한다 - 저장해야만 확인되면 사람이 저장부터 하게 된다.
 describe('저장 전 연동 - 링크와 기간을 요청에 담는다', () => {
-  const linkUrl = '/api/v1/participation-dashboard/sheet-preview';
-  const body = {
-    sheetLink: 'https://docs.google.com/spreadsheets/d/sheet-abc/edit',
-    contractStart: '2026-01-01',
-    contractEnd: '2026-03-31',
+  // 조회이므로 GET 이다. POST 면 BFF 가 mutating 으로 보고 idempotency-key 를 요구해
+  // 요청이 컨텍스트 미들웨어에서 끊긴다(라이브에서 본문 없는 502 로 나타났다).
+  const base = '/api/v1/participation-dashboard/sheet-preview';
+  const query = (extra = {}) => {
+    const params = new URLSearchParams({
+      sheetLink: 'https://docs.google.com/spreadsheets/d/sheet-abc/edit',
+      contractStart: '2026-01-01',
+      contractEnd: '2026-03-31',
+      ...extra,
+    });
+    return `${base}?${params}`;
   };
 
   it('사업이 저장돼 있지 않아도 확인된다', async () => {
     const { app } = createApp({ documents: PEOPLE });
-    const response = await request(app).post(linkUrl).send(body);
+    const response = await request(app).get(query());
     expect(response.status).toBe(200);
     expect(response.body.ok).toBe(true);
     expect(response.body.rows[0]).toMatchObject({ name: '김정태', linkState: 'LINKED' });
@@ -230,27 +236,27 @@ describe('저장 전 연동 - 링크와 기간을 요청에 담는다', () => {
 
   it('명단을 채울 수 있게 personId 와 기본투입률을 함께 준다', async () => {
     const { app } = createApp({ documents: PEOPLE });
-    const response = await request(app).post(linkUrl).send(body);
+    const response = await request(app).get(query());
     expect(response.body.rows[0]).toMatchObject({ personId: 'p-kim', baseRate: 30 });
   });
 
   it('화면의 계약 기간과 다르면 막는다 - 저장본이 아니라 지금 값과 맞춰야 한다', async () => {
     const { app } = createApp({ documents: PEOPLE });
-    const response = await request(app).post(linkUrl).send({ ...body, contractEnd: '2026-06-30' });
+    const response = await request(app).get(query({ contractEnd: '2026-06-30' }));
     expect(response.body.ok).toBe(false);
     expect(response.body.blocking[0].code).toBe('participation_period_mismatch');
   });
 
   it('링크가 없으면 무엇을 넣어야 하는지 알려준다', async () => {
     const { app } = createApp({ documents: PEOPLE });
-    const response = await request(app).post(linkUrl).send({ ...body, sheetLink: '' });
+    const response = await request(app).get(query({ sheetLink: '' }));
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('participation_sheet_link_missing');
   });
 
   it('확인만으로 아무것도 쓰지 않는다', async () => {
     const { app, writes } = createApp({ documents: PEOPLE });
-    await request(app).post(linkUrl).send(body);
+    await request(app).get(query());
     expect(writes).toEqual([]);
   });
 });

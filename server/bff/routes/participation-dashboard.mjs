@@ -3,11 +3,7 @@ import {
 } from '../bff-utils.mjs';
 import { buildParticipationDashboardSnapshot, buildProjectParticipationSnapshot, selectParticipationDashboardYear } from '../participation-dashboard.mjs';
 import { analyzeParticipationSheet } from '../participation-sheet-ingest.mjs';
-import {
-  PARTICIPATION_CELL_RANGE, PARTICIPATION_FORMAT_RANGE, PARTICIPATION_HEADER_RANGE,
-  PARTICIPATION_META_RANGE, PARTICIPATION_PERIOD_RANGE, PARTICIPATION_SHEET_TAB,
-  toParticipationSheetInput,
-} from '../participation-sheet-ranges.mjs';
+import { participationSheetRanges, toParticipationSheetInput } from '../participation-sheet-ranges.mjs';
 
 /** 캐시플로우 시트 연동과 같은 방식으로 서비스 계정 주소를 얻는다. */
 function resolveSystemAccountEmail(googleSheetsService) {
@@ -30,7 +26,7 @@ function participationSheetUnreachable(error, systemAccountEmail = '') {
     ? ` 시트를 ${systemAccountEmail} 에 보기 권한으로 공유했는지 확인해 주세요.`
     : ' 시트 공유 권한을 확인해 주세요.';
   const missingTab = /참여율|Unable to parse range|not found/i.test(detail)
-    ? ' 표준양식의 "참여율" 탭이 있는지도 확인해 주세요.'
+    ? ' 표준양식의 "참여율 관리" 탭이 있는지도 확인해 주세요.'
     : '';
   return createHttpError(
     502,
@@ -41,18 +37,20 @@ function participationSheetUnreachable(error, systemAccountEmail = '') {
 
 /** 다섯 범위를 함께 읽는다. 한 번에 읽어야 사람이 그 사이 고쳐도 한 장면으로 남는다. */
 async function readParticipationSheet(googleSheetsService, sheetLink) {
+  const ranges = participationSheetRanges();
+  // 범위에 탭 이름이 들어 있으므로 sheetName 을 따로 넘기지 않는다. 둘 다 주면 어느 쪽이
+  // 이기는지 호출부마다 달라진다.
   const readRange = (rangeA1) => googleSheetsService.getSheetValues({
     spreadsheetId: sheetLink,
-    sheetName: PARTICIPATION_SHEET_TAB,
     rangeA1,
   });
   try {
     const [format, period, header, meta, cells] = await Promise.all([
-      readRange(PARTICIPATION_FORMAT_RANGE),
-      readRange(PARTICIPATION_PERIOD_RANGE),
-      readRange(PARTICIPATION_HEADER_RANGE),
-      readRange(PARTICIPATION_META_RANGE),
-      readRange(PARTICIPATION_CELL_RANGE),
+      readRange(ranges.format),
+      readRange(ranges.period),
+      readRange(ranges.header),
+      readRange(ranges.meta),
+      readRange(ranges.cells),
     ]);
     return { format, period, header, meta, cells };
   } catch (error) {
@@ -196,10 +194,14 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
 
   /*
    * 저장 전에도 확인할 수 있는 경로. 등록 중에는 사업 문서가 아직 없고, 수정 중에는 화면의
-   * 링크가 저장본과 다를 수 있다. 그래서 링크와 계약 기간을 요청에 담아 받는다.
-   * 읽기만 하므로 GET 과 같은 권한이고 아무것도 쓰지 않는다.
+   * 링크가 저장본과 다를 수 있다. 그래서 링크와 계약 기간을 질의로 받는다.
+   *
+   * GET 이어야 한다. BFF 는 POST·PUT·PATCH·DELETE 를 mutating 으로 보고 idempotency-key
+   * 헤더를 요구한다. 이것은 아무것도 쓰지 않는 조회라 멱등키가 뜻을 갖지 않는다.
+   * 캐시플로우 시트 연동도 같은 규칙이다 - 미러 조회·공유 계정 조회는 GET, stage·apply 는
+   * POST + 멱등키.
    */
-  app.post('/api/v1/participation-dashboard/sheet-preview', asyncHandler(async (req, res) => {
+  app.get('/api/v1/participation-dashboard/sheet-preview', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview participation sheet by link');
     if (!db) throw createHttpError(503, '참여율 시트를 확인할 수 없습니다.', 'firestore_unconfigured');
     const tenantId = readOptionalText(req.context?.tenantId);
@@ -207,7 +209,7 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
     if (!googleSheetsService?.getSheetValues) {
       throw createHttpError(503, 'Google Sheets 연동이 설정되지 않았습니다.', 'google_sheets_unconfigured');
     }
-    const sheetLink = readOptionalText(req.body?.sheetLink);
+    const sheetLink = readOptionalText(req.query?.sheetLink);
     if (!sheetLink) {
       throw createHttpError(400, '참여율 시트 링크를 입력해 주세요.', 'participation_sheet_link_missing');
     }
@@ -218,12 +220,12 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
       sheet: toParticipationSheetInput(sheetValues),
       // 계약 기간은 화면의 초안 값이다. 저장된 사업이 아직 없을 수 있다.
       project: {
-        contractStart: readOptionalText(req.body?.contractStart),
-        contractEnd: readOptionalText(req.body?.contractEnd),
+        contractStart: readOptionalText(req.query?.contractStart),
+        contractEnd: readOptionalText(req.query?.contractEnd),
       },
       people: peopleSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
       tenantId,
-      projectId: readOptionalText(req.body?.projectId),
+      projectId: readOptionalText(req.query?.projectId),
     });
 
     res.status(200).json(participationPreviewBody(analysis, {
