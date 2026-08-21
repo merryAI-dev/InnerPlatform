@@ -13,7 +13,41 @@
 
 export const PARTICIPATION_FORMAT_ID = 'MYSC-PARTICIPATION-V1';
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
-const PLACEHOLDER_PREFIX = '채용예정';
+/*
+ * 자리표시자 닉네임. 시트가 플랫폼보다 먼저 만들어지기도 하고 매번 갱신되지도 않으므로,
+ * "아직 누구인지 모른다" 를 한 가지 말로 담는다(미정1, 미정2...). 채용예정-N 은 먼저 쓰던
+ * 말이라 계속 알아본다 - 이미 그렇게 적은 시트가 있다.
+ *
+ * 이름이 적히는 순간 자리표시자가 아니라 실제 사람이다. 그때부터는 닉네임을 무시하고
+ * 이름으로 사람을 찾는다 - 닉네임 칸은 아직 '미정1' 이어도 사람은 정해진 것이다.
+ */
+const PLACEHOLDER_PREFIXES = ['미정', '채용예정'];
+
+function isPlaceholderNickname(nickname) {
+  return PLACEHOLDER_PREFIXES.some((prefix) => text(nickname).startsWith(prefix));
+}
+
+/**
+ * 중복 검사용 사람 키. People 로 연결됐으면 그게 가장 확실한 신원이다 - 같은 사람을
+ * 한 줄은 닉네임으로, 다른 줄은 이름으로 적어도 같은 사람으로 잡아야 한다.
+ * 문서 id 에는 쓰지 않는다. People 등록 시점에 따라 id 가 바뀌면 멱등이 깨진다.
+ */
+function identityKeyOf(row) {
+  return text(row?.personId) || participantKeyOf(row);
+}
+
+/**
+ * 참여행 문서 id 에 쓰는 사람 키. 시트에 적힌 대로만 정한다 - People 등록이 늦어도
+ * 같은 시트는 언제나 같은 문서가 된다.
+ * 자리표시자 닉네임에 이름이 붙었으면 이름이 곧 사람이다 - '미정1' 로 묶으면 서로 다른
+ * 두 사람이 한 사람으로 합쳐진다.
+ */
+export function participantKeyOf(row) {
+  const nickname = text(row?.nickname);
+  const name = text(row?.name);
+  if (name && isPlaceholderNickname(nickname)) return personKeyOf(name);
+  return personKeyOf(nickname || name);
+}
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : (value == null ? '' : String(value).trim());
@@ -222,8 +256,14 @@ export function resolvePeopleIdentity({ rows = [], people = [] } = {}) {
   };
 
   return rows.map((row) => {
-    if (row.nickname.startsWith(PLACEHOLDER_PREFIX)) {
+    const placeholder = isPlaceholderNickname(row.nickname);
+    // 이름이 없는 자리표시자만 "사람 미정" 이다. 이름이 붙으면 실제 사람으로 다룬다.
+    if (placeholder && !row.name) {
       return { ...row, personId: '', linkState: 'PLACEHOLDER' };
+    }
+    if (placeholder) {
+      const nameOnlyId = uniqueId(byName, row.name);
+      return { ...row, personId: nameOnlyId, linkState: nameOnlyId ? 'LINKED' : 'PENDING_LINK' };
     }
     const nicknameId = uniqueId(byNickname, row.nickname);
     const nameId = uniqueId(byName, row.name);
@@ -286,7 +326,7 @@ export function validateStintRows({ rows = [], months = [] } = {}) {
         continue;
       }
       // 같은 사람이 두 줄에서 같은 달에 값을 가지면 어느 쪽이 맞는지 알 수 없다.
-      const key = `${personKeyOf(row.nickname || row.name)}:${month}`;
+      const key = `${identityKeyOf(row)}:${month}`;
       const owner = monthOwners.get(key);
       if (owner !== undefined && owner !== row.rowIndex) {
         errors.push(issue(
@@ -317,7 +357,7 @@ export function buildStintEntries({ tenantId = '', projectId = '', project = {},
   return rows
     .filter((row) => row.stintStart && row.linkState !== 'PLACEHOLDER')
     .map((row) => {
-      const key = personKeyOf(row.nickname || row.name);
+      const key = participantKeyOf(row);
       return {
         id: `pts-${projectId}-${key}-${row.stintStart}`,
         tenantId,
@@ -334,6 +374,41 @@ export function buildStintEntries({ tenantId = '', projectId = '', project = {},
         clientOrg: text(project?.clientOrg),
       };
     });
+}
+
+/**
+ * People 등록 후보. 연결 대기로 남은 행에서 사람을 추려 낸다.
+ *
+ * 사전 등록을 놓치는 일은 늘 생긴다. 시트는 그때도 멈추지 않고 이름만으로 받아 두는데,
+ * 그 이름이 어디에도 모이지 않으면 영영 연결되지 않는다. 그래서 연결 대기를 사람 단위로
+ * 묶어 "이 사람들을 People 에 등록하면 이어집니다" 목록으로 돌려준다.
+ *
+ * 자동 등록은 하지 않는다. People 은 사람이 등록하는 것이고 파이프라인은 잇기만 한다 -
+ * 시트 오타로 People 에 유령이 생기면 되돌리기 어렵다.
+ */
+export function buildPeopleLinkCandidates({ rows = [] } = {}) {
+  const candidates = new Map();
+  for (const row of rows) {
+    if (row.linkState !== 'PENDING_LINK') continue;
+    const key = participantKeyOf(row);
+    if (!key) continue;
+    const found = candidates.get(key) || {
+      key,
+      name: row.name,
+      nickname: isPlaceholderNickname(row.nickname) ? '' : row.nickname,
+      rowIndexes: [],
+      monthCount: 0,
+    };
+    // 자리표시자 닉네임은 후보 정보가 아니다 - 등록할 때 쓰는 이름은 사람이 적은 이름뿐이다.
+    if (!found.name && row.name) found.name = row.name;
+    if (!found.nickname && !isPlaceholderNickname(row.nickname)) found.nickname = row.nickname;
+    found.rowIndexes.push(row.rowIndex);
+    found.monthCount += Object.keys(row.monthlyRates || {}).length;
+    candidates.set(key, found);
+  }
+  return [...candidates.values()].sort((left, right) => (
+    (left.name || left.nickname).localeCompare(right.name || right.nickname, 'ko')
+  ));
 }
 
 /**
@@ -355,6 +430,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
   const { errors, missing } = validateStintRows({ rows, months: parsed.months });
   const blocking = [...parsed.issues, ...errors];
   const entries = buildStintEntries({ tenantId, projectId, project, rows });
+  const candidates = buildPeopleLinkCandidates({ rows });
 
   return {
     ok: blocking.length === 0,
@@ -363,6 +439,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
     rows,
     entries,
     missing,
+    candidates,
     summary: {
       period: parsed.period,
       monthCount: parsed.months.length,
@@ -371,6 +448,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
       pendingLinkCount: rows.filter((row) => row.linkState === 'PENDING_LINK').length,
       placeholderCount: rows.filter((row) => row.linkState === 'PLACEHOLDER').length,
       missingCount: missing.length,
+      candidateCount: candidates.length,
       errorCount: blocking.length,
     },
   };
