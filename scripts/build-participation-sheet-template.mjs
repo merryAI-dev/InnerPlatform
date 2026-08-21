@@ -47,9 +47,11 @@ const FIXED_HEADERS = ['닉네임', '이름', '역할', '투입시작월', '투�
 const FIRST_MONTH_COL = FIXED_HEADERS.length + 1; // G
 const MONTH_COLS = 120;      // 10년치 열을 미리 깐다. 기간 밖 열은 헤더가 비고 회색이다.
 const DATA_ROWS = 60;        // 명단 + 교체·재투입용 여유 줄
-// People 미연결이 허용되는 자리표시자. 채용예정-N = 뽑히면 실제 사람으로 교체.
-// 외부-N = People 에 없는 외부 파트너 - 이름 칸의 수식을 지우고 실명을 직접 적는다.
-const PLACEHOLDER_KINDS = ['채용예정', '외부'];
+// 사람이 아직 정해지지 않은 자리. 뽑히면 실제 사람으로 교체한다.
+// People 에 없는 실제 사람(신규 입사자·외부 파트너)은 자리표시자가 아니라 닉네임·이름을
+// 직접 적는다 - 드롭다운은 편의이고, 경고는 뜨지만 막지 않는다. People 등록이 따라오면
+// 반영 파이프라인이 그때 연결한다.
+const PLACEHOLDER_KINDS = ['채용예정'];
 const PLACEHOLDER_COUNT = 5;
 const SETTING_MONTHS_FROM = 2022;
 const SETTING_MONTHS_TO = 2035;
@@ -88,12 +90,17 @@ async function main() {
     ['', '  나갔다 다시 옴    → 새 줄(같은 사람 두 줄). 단 같은 달에 두 줄 다 값이 있으면 오류입니다'],
     ['', '  역할만 바뀜       → 역할 칸만 고치고 줄은 그대로'],
     ['', '  아직 채용 전 자리 → 닉네임에서 채용예정-1~5 를 고릅니다. 채용되면 실제 사람으로 바꿉니다'],
-    ['', '  신규 입사자       → People 등록이 먼저입니다. 등록 전까지는 채용예정-N 으로 적어 두었다가 바꿉니다'],
-    ['', '  외부 파트너       → 닉네임에서 외부-1~5 를 고르고, 이름 칸에 실명을 직접 적습니다(수식 덮어쓰기 허용)'],
+    ['', '  People에 없는 사람 → (신규 입사자·외부 파트너) 닉네임과 이름을 직접 적습니다. 노란 경고가 떠도'],
+    ['', '                      진행됩니다. People 등록이 되면 반영할 때 자동으로 연결됩니다'],
     ['', ''],
     ['굵게', '하지 말아야 할 것'],
     ['', '  줄 삭제 · 열 추가/삭제 · 1~2행(머리글) 수정. 양식이 달라지면 반영이 거부됩니다.'],
     ['', '  사업 기간이 바뀌면 플랫폼에서 계약 기간을 먼저 수정합니다. 반영 시 시트 기간과 대조합니다.'],
+    ['', ''],
+    ['굵게', '기간을 바꿀 때 - 종료월만 바꿉니다'],
+    ['', '  연장·단축 → 종료월만 바꾸면 월 칸이 그에 맞춰 늘어나거나 줄어듭니다. 이미 적은 값은 그대로입니다.'],
+    ['', '  시작월은 값을 적기 전에 정하고, 그 뒤에는 바꾸지 않습니다 - 바꾸면 이미 적은 값의 달이 한 칸씩'],
+    ['', '  어긋납니다(칸은 자리를 지키는데 머리글만 이동). 시작월을 꼭 바꿔야 하면 새 복사본에 옮겨 적습니다.'],
   ];
   for (const [kind, line] of guideLines) {
     const row = guide.addRow([line]);
@@ -139,7 +146,13 @@ async function main() {
   sheet.getCell('A1').font = { bold: true };
   sheet.getCell('C1').value = '~';
   sheet.getCell('C1').alignment = { horizontal: 'center' };
-  sheet.getCell('E1').value = '← 시작월·종료월을 고르면 월 칸이 저절로 생깁니다';
+  // 살아있는 상태줄. 값(수식 아닌 입력)이 하나라도 생기면 시작월 변경 금지 경고로 바뀐다.
+  sheet.getCell('E1').value = {
+    formula: `IF(OR($B$1="",$D$1=""),"← 시작월·종료월을 고르면 월 칸이 저절로 생깁니다",`
+      + `IF(SUMPRODUCT(--NOT(ISFORMULA(${'G'}3:${'DV'}62)))>0,`
+      + `"⚠ 값을 적은 뒤에는 시작월을 바꾸지 마세요 - 달이 어긋납니다. 연장·단축은 종료월만.",`
+      + `"기간 설정됨 - 아래에 명단과 기본투입률을 입력하세요"))`,
+  };
   sheet.getCell('E1').font = { size: 9, color: { argb: 'FF64748B' } };
   for (const address of ['B1', 'D1']) {
     sheet.getCell(address).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7D6' } };
@@ -201,10 +214,12 @@ async function main() {
     type: 'list', allowBlank: true, formulae: [`참조!$D$2:$D$${settingMonthsEnd}`],
     showErrorMessage: true, errorTitle: '월을 고르세요', error: '목록에서 YYYY-MM 형식의 월을 고르세요.',
   });
+  // 경고(warning)이지 거부(stop)가 아니다. People 에 아직 없는 사람도 급여 기록은 지금
+  // 적혀야 한다. 잘못 적힌 이름은 반영 때 "연결 대기" 로 잡히므로 조용히 사라지지 않는다.
   sheet.dataValidations.add(`A${dataStartRow}:A${dataEndRow}`, {
-    type: 'list', allowBlank: true, formulae: [`참조!$A$2:$A$${nicknameListEnd}`],
-    showErrorMessage: true, errorTitle: '드롭다운에서 골라 주세요',
-    error: 'People에 등록된 사람만 넣을 수 있습니다. 신규 입사자는 People 등록 후(임시로 채용예정-N), 외부 파트너는 외부-N 을 고르고 이름 칸에 실명을 적으세요.',
+    type: 'list', allowBlank: true, errorStyle: 'warning', formulae: [`참조!$A$2:$A$${nicknameListEnd}`],
+    showErrorMessage: true, errorTitle: 'People에 없는 이름이에요',
+    error: '신규 입사자·외부 파트너면 그대로 진행하고 이름 칸에 실명을 적어 주세요. People 등록이 되면 반영할 때 자동으로 연결됩니다. 오타라면 드롭다운에서 다시 골라 주세요.',
   });
   // 투입월 드롭다운의 출처는 월 헤더 행 자신 - ①에서 고른 기간 밖은 목록에 없다.
   sheet.dataValidations.add(`D${dataStartRow}:E${dataEndRow}`, {
