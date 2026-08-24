@@ -108,6 +108,16 @@ test('saved-rule project rows disclose accessibly without extra dashboard reques
 
   await page.getByLabel('참여율 연도').selectOption('2027');
   await expect(page.getByRole('button', { name: '김메리의 프로젝트 2개 펼치기' })).toHaveAttribute('aria-expanded', 'false');
+
+  const requestsBeforeRuleEdit = dashboardRequests.length;
+  await page.getByRole('button', { name: '규칙 관리' }).click();
+  await page.getByRole('button', { name: '새 규칙 만들기' }).click();
+  const zeroCountSettlement = page.getByRole('checkbox', { name: '정산 · 0개' });
+  await expect(zeroCountSettlement).toBeVisible();
+  await expect(zeroCountSettlement).toBeEnabled();
+  await zeroCountSettlement.click();
+  await expect(zeroCountSettlement).toBeChecked();
+  expect(dashboardRequests.length).toBe(requestsBeforeRuleEdit);
   expect(consoleErrors.filter((message) => message.includes('validateDOMNesting'))).toEqual([]);
 });
 
