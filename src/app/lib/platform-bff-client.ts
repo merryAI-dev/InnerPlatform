@@ -39,19 +39,28 @@ export interface UpsertProjectPayload {
   [key: string]: unknown;
 }
 
+export interface ParticipationDashboardMonth {
+  yearMonth: string;
+  label: string;
+  rate: number;
+  isConfirmed: boolean;
+  hasMissing: boolean;
+  isWarning: boolean;
+}
+
+export interface ParticipationDashboardProject {
+  projectId: string;
+  projectName: string;
+  months: ParticipationDashboardMonth[];
+}
+
 export interface ParticipationDashboardMember {
   memberId: string;
   memberName: string;
   projectLabel: string;
   projectCount: number;
-  months: Array<{
-    yearMonth: string;
-    label: string;
-    rate: number;
-    isConfirmed: boolean;
-    hasMissing: boolean;
-    isWarning: boolean;
-  }>;
+  months: ParticipationDashboardMonth[];
+  projects?: ParticipationDashboardProject[];
   warnings: Array<{ yearMonth: string; rate: number }>;
 }
 
@@ -76,7 +85,7 @@ export interface ParticipationDashboardSnapshot {
   warningCount: number;
   hasWarnings: boolean;
   unlinkedEntryCount: number;
-  filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string }> };
+  filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string; projectCount?: number }> };
   projects: Array<{ id: string; name: string; clientOrg: string }>;
 }
 
