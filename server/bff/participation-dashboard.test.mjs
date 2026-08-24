@@ -61,7 +61,7 @@ describe('participation dashboard', () => {
     expect(selectParticipationDashboardYear(snapshot).selectedYear).toBe('2026');
     expect(snapshot.availableYears).toContain('2026');
     expect(result.unlinkedEntryCount).toBe(1);
-    expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용' }]));
+    expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용', projectCount: 0 }]));
   });
 
   it('legacy 정산 필드도 저장 경로와 같은 플랫폼으로 분류한다', () => {
@@ -90,8 +90,32 @@ describe('participation dashboard', () => {
     ]);
     expect(snapshot.filterOptions.settlementSystems).toContainEqual({
       value: 'E_NARA_DOUM',
-      label: 'e나라도움',
+      label: 'e나라도움 (국고보조금통합관리시스템)',
+      projectCount: 1,
     });
+  });
+
+  it('사업 등록 정산 시스템 전체를 등록 순서와 사업 수로 제공한다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [{
+        ...secondProject,
+        registrationRequirementsVersion: 2,
+        basis: 'SUPPLY_AMOUNT',
+      }],
+    });
+
+    expect(snapshot.filterOptions.settlementSystems).toEqual([
+      { value: 'NONE', label: '시스템 미사용', projectCount: 0 },
+      { value: 'E_NARA_DOUM', label: 'e나라도움 (국고보조금통합관리시스템)', projectCount: 1 },
+      { value: 'BOTAEM_E', label: '보탬e(지방보조금관리시스템)', projectCount: 0 },
+      { value: 'RCMS', label: 'RCMS (실시간연구비관리시스템)', projectCount: 0 },
+      { value: 'EZBARO', label: '통합이지바로 (통합 Ez-plus)', projectCount: 0 },
+      { value: 'SMTECH', label: 'SMTECH (중소기업기술개발사업종합관리시스템)', projectCount: 0 },
+      { value: 'KOCCA_PMS', label: 'KOCCA PMS', projectCount: 0 },
+      { value: 'NIPA', label: 'NIPA 사업관리시스템', projectCount: 0 },
+      { value: 'IRIS', label: 'IRIS(범부처통합연구지원시스템)', projectCount: 0 },
+      { value: 'OTHER', label: '기타', projectCount: 0 },
+    ]);
   });
 
   it('sheet-backed 월별 맵의 빈칸을 legacy 기본률로 되살리지 않는다', () => {
@@ -307,5 +331,7 @@ describe('participation dashboard routes', () => {
     expect(saved.get(`orgs/mysc/participation_rules/${response.body.id}`)).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg], settlementSystems: [project.settlementSystem], kind: 'USER_DEFINED' });
     const legacyResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'legacy-key').send({ alias: 'KOICA · e나라도움', clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] }).expect(200);
     expect(saved.get(`orgs/mysc/participation_rules/${legacyResponse.body.id}`)).toMatchObject({ clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] });
+    const zeroProjectResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'zero-project-key').send({ alias: 'RCMS 예정 사업', clientOrgs: [], settlementSystems: ['RCMS'] }).expect(200);
+    expect(saved.get(`orgs/mysc/participation_rules/${zeroProjectResponse.body.id}`)).toMatchObject({ alias: 'RCMS 예정 사업', clientOrgs: [], settlementSystems: ['RCMS'] });
   });
 });

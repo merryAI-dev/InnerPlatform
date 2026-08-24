@@ -2,7 +2,10 @@ import {
   asyncHandler, assertActorRoleAllowed, createHttpError, createMutatingRoute, ROUTE_ROLES, readOptionalText,
 } from '../bff-utils.mjs';
 import { buildParticipationDashboardSnapshot, buildProjectParticipationSnapshot, selectParticipationDashboardYear } from '../participation-dashboard.mjs';
-import { resolveParticipationSettlementSystem } from '../participation-settlement-system.mjs';
+import {
+  PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
+  resolveParticipationSettlementSystem,
+} from '../participation-settlement-system.mjs';
 import { analyzeParticipationSheet } from '../participation-sheet-ingest.mjs';
 import {
   isSupportedParticipationFormat,
@@ -257,7 +260,10 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
     const projectsSnap = await db.collection(`orgs/${tenantId}/projects`).get();
     const projects = projectsSnap.docs.map((doc) => doc.data() || {});
     const validClientOrgs = new Set(projects.map((project) => readOptionalText(project.clientOrg)).filter(Boolean));
-    const validSettlementSystems = new Set(projects.map(resolveParticipationSettlementSystem));
+    const validSettlementSystems = new Set([
+      ...PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
+      ...projects.map(resolveParticipationSettlementSystem),
+    ]);
     if (clientOrgs.some((value) => !validClientOrgs.has(value)) || settlementSystems.some((value) => !validSettlementSystems.has(value))) throw createHttpError(422, '규칙 조건에 사용할 수 없는 값이 포함되어 있습니다.', 'invalid_participation_rule_filter');
     const ruleId = requestedId || `participation-rule-${crypto.randomUUID()}`;
     if (!/^participation-rule-[a-zA-Z0-9-]{1,80}$/.test(ruleId)) throw createHttpError(422, '규칙 식별자가 올바르지 않습니다.', 'invalid_participation_rule_id');
