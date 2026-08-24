@@ -2895,7 +2895,7 @@ export function ProjectEditorWizard({
             sheetSystemAccount
               ? `만든 시트를 ${sheetSystemAccount} 에 보기 권한으로 공유해 주세요. 공유하지 않으면 연동이 되지 않습니다.`
               : '만든 시트를 MYSC 시스템 계정에 보기 권한으로 공유해야 연동이 됩니다.',
-            '저장하면 참여인력 대시보드의 "시트 확인"에서도 입력 상태를 볼 수 있습니다.',
+            '저장한 시트 내용은 참여율 연동과 사람별 참여율 집계에 사용됩니다.',
           ]}
         >
           <Input

@@ -44,7 +44,7 @@ function snapshot(ruleId: RuleId, year = '2026', includeProjects = true) {
     version: 1, generatedAt: '2026-08-24T00:00:00.000Z', availableYears: ['2026', '2027'], selectedYear: year,
     months: monthsFor(year).map(({ yearMonth, label }) => ({ yearMonth, label })),
     selectedRule: ruleOptions.find((rule) => rule.id === ruleId), ruleOptions, userRuleOptions: ruleOptions.slice(1),
-    members, warnings: [], warningCount: 0, hasWarnings: false, unlinkedEntryCount: 0,
+    members, warnings: [], warningCount: 0, hasWarnings: false, unlinkedEntryCount: 10,
     filterOptions: { clientOrgs: ['기관'], settlementSystems: [{ value: 'system', label: '정산', projectCount: 0 }] },
     projects: [],
   };
@@ -69,6 +69,8 @@ test('saved-rule project rows disclose accessibly without extra dashboard reques
   await loginAsAdmin(page);
   await page.goto('/participation');
   await expect(page.getByRole('heading', { name: '참여인력 대시보드' })).toBeVisible();
+  await expect(page.getByText('연결 대기 10건', { exact: true })).toBeVisible();
+  await expect(page.getByText('참여율 시트 확인', { exact: true })).toHaveCount(0);
 
   await expect(page.getByRole('button', { name: /프로젝트 .* (펼치기|접기)/ })).toHaveCount(0);
   await expect(page.getByText('프로젝트 2개', { exact: true })).toBeVisible();
@@ -106,6 +108,14 @@ test('saved-rule project rows disclose accessibly without extra dashboard reques
   await expect(firstProjectRow.getByRole('cell')).toHaveCount(14);
   await expect(firstProjectRow.locator('td').nth(0)).toHaveText('');
   await expect(firstProjectRow.locator('td').nth(1)).toContainText('가 사업');
+  const detailStyles = await firstProjectRow.locator('td').nth(2).evaluate((cell) => {
+    const style = getComputedStyle(cell);
+    return { backgroundColor: style.backgroundColor, fontSize: style.fontSize };
+  });
+  await expect(firstProjectRow.locator('td').nth(2)).toHaveClass(/bg-slate-50/);
+  expect(detailStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(detailStyles.fontSize).toBe('11px');
+  await expect(firstProjectRow.locator('td').nth(3)).toHaveClass(/bg-amber-50/);
   await expect(firstDetails.getByText('0%', { exact: true }).first()).toBeVisible();
   await expect(firstDetails.getByText('미입력', { exact: true }).first()).toBeVisible();
   await expect(firstDetails.getByText('—', { exact: true }).first()).toBeVisible();

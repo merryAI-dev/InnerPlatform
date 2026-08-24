@@ -758,4 +758,9 @@ describe('참여율 시트 링크 자리', () => {
   it('검토 요약에도 실려 승인자가 본다', () => {
     expect(source).toContain('<ReviewRow label="참여율 시트 링크" value={draft.participationSheetLink} />');
   });
+
+  it('대시보드에서 제거된 시트 확인 기능을 안내하지 않는다', () => {
+    expect(source).toContain('저장한 시트 내용은 참여율 연동과 사람별 참여율 집계에 사용됩니다.');
+    expect(source).not.toContain('참여인력 대시보드의 "시트 확인"');
+  });
 });
