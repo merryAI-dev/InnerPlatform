@@ -132,7 +132,7 @@ BFF는 카탈로그 rank가 가장 높은 학력 레코드 하나를 `최종학�
 - `person:professional_profile:read`
 - `person:professional_profile:write`
 
-첫 배포에서는 `admin`, `finance`, `tenant_admin`에 두 permission을 부여한다. `tenant_admin`은 policy의 정식 role로 등록하되 일반 사용자가 선택할 수 있는 role-change 대상에는 추가하지 않는다. 새로운 hard-coded role 배열을 만들지 않는다. 프로필 route와 참여율 route는 주입된 RBAC policy와 `assertActorPermissionAllowed`을 사용한다.
+첫 배포에서는 현재 4-role 정책을 유지해 `admin`, `finance`에 두 permission을 부여한다. 과거 `tenant_admin`은 저장소의 역할 간소화 정책에서 `admin`으로 흡수되는 legacy role이므로 이번 기능 때문에 정식 role로 되살리지 않는다. 새로운 hard-coded role 배열을 만들지 않는다. 프로필 route와 참여율 route는 주입된 RBAC policy와 `assertActorPermissionAllowed`을 사용한다.
 
 Firestore rules의 BFF-only collection 목록에 `persons`를 추가하고 직접 client read/write를 모든 역할에서 거부한다. 현재 저장소의 People 소비 경로가 `/api/v1/persons`만 사용하는지 contract test로 고정한다. BFF Admin SDK와 운영 스크립트는 rules의 영향을 받지 않는다.
 
@@ -308,7 +308,7 @@ People 등록·상세 화면에 `전문 프로필` 영역을 추가한다.
    - 실제 내용 변경만 revision 1 증가
    - stale expectedRevision 충돌과 동일 내용 stale no-op
    - permission별 허용·차단과 tenant 격리
-   - tenant_admin의 정식 permission과 일반 role-change 대상 제외
+   - admin·finance 허용, pm·viewer 차단 및 legacy role을 재도입하지 않는 계약
    - profile을 포함한 person 생성은 기본 create·profile write permission을 모두 요구
    - People 목록 capability와 프로필 미포함 계약
    - 잘못된 입력과 audit 실패의 원자적 no-write
