@@ -101,6 +101,11 @@ test('saved-rule project rows disclose accessibly without extra dashboard reques
   expect(dashboardRequests.length).toBe(requestsBeforeToggle);
 
   const firstDetails = page.locator('#participation-projects-member-a');
+  const firstProjectRow = firstDetails.getByRole('row').first();
+  await expect(firstProjectRow.locator('td')).toHaveCount(14);
+  await expect(firstProjectRow.getByRole('cell')).toHaveCount(14);
+  await expect(firstProjectRow.locator('td').nth(0)).toHaveText('');
+  await expect(firstProjectRow.locator('td').nth(1)).toContainText('가 사업');
   await expect(firstDetails.getByText('0%', { exact: true }).first()).toBeVisible();
   await expect(firstDetails.getByText('미입력', { exact: true }).first()).toBeVisible();
   await expect(firstDetails.getByText('—', { exact: true }).first()).toBeVisible();
