@@ -6,7 +6,15 @@ import {
   buildProjectParticipationSnapshot,
   selectParticipationDashboardYear,
 } from './participation-dashboard.mjs';
+import {
+  PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
+  PARTICIPATION_SETTLEMENT_SYSTEM_LABELS,
+} from './participation-settlement-system.mjs';
 import { mountParticipationDashboardRoutes } from './routes/participation-dashboard.mjs';
+import {
+  PROJECT_SETTLEMENT_SYSTEM_CODES,
+  SETTLEMENT_SYSTEM_LABELS,
+} from '../../src/app/data/types.ts';
 
 const project = {
   id: 'agri-2026', clientOrg: '한국농업기술진흥원', settlementSystem: 'ACCOUNTANT',
@@ -61,7 +69,7 @@ describe('participation dashboard', () => {
     expect(selectParticipationDashboardYear(snapshot).selectedYear).toBe('2026');
     expect(snapshot.availableYears).toContain('2026');
     expect(result.unlinkedEntryCount).toBe(1);
-    expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용' }]));
+    expect(result.filterOptions.settlementSystems).toEqual(expect.arrayContaining([{ value: 'NONE', label: '시스템 미사용', projectCount: 0 }]));
   });
 
   it('legacy 정산 필드도 저장 경로와 같은 플랫폼으로 분류한다', () => {
@@ -90,8 +98,59 @@ describe('participation dashboard', () => {
     ]);
     expect(snapshot.filterOptions.settlementSystems).toContainEqual({
       value: 'E_NARA_DOUM',
-      label: 'e나라도움',
+      label: 'e나라도움 (국고보조금통합관리시스템)',
+      projectCount: 1,
     });
+  });
+
+  it('사업 등록 정산 시스템 전체를 등록 순서와 사업 수로 제공한다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [{
+        ...secondProject,
+        registrationRequirementsVersion: 2,
+        basis: 'SUPPLY_AMOUNT',
+      }],
+    });
+
+    expect(snapshot.filterOptions.settlementSystems).toEqual([
+      { value: 'NONE', label: '시스템 미사용', projectCount: 0 },
+      { value: 'E_NARA_DOUM', label: 'e나라도움 (국고보조금통합관리시스템)', projectCount: 1 },
+      { value: 'BOTAEM_E', label: '보탬e(지방보조금관리시스템)', projectCount: 0 },
+      { value: 'RCMS', label: 'RCMS (실시간연구비관리시스템)', projectCount: 0 },
+      { value: 'EZBARO', label: '통합이지바로 (통합 Ez-plus)', projectCount: 0 },
+      { value: 'SMTECH', label: 'SMTECH (중소기업기술개발사업종합관리시스템)', projectCount: 0 },
+      { value: 'KOCCA_PMS', label: 'KOCCA PMS', projectCount: 0 },
+      { value: 'NIPA', label: 'NIPA 사업관리시스템', projectCount: 0 },
+      { value: 'IRIS', label: 'IRIS(범부처통합연구지원시스템)', projectCount: 0 },
+      { value: 'OTHER', label: '기타', projectCount: 0 },
+    ]);
+  });
+
+  it('관측된 레거시 정산 분류를 등록 카탈로그 뒤에 정렬하고 실제 사업 수를 센다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [
+        { id: 'accountant-1', settlementSystem: 'ACCOUNTANT' },
+        { id: 'private-1', settlementSystem: 'NONE' },
+        { id: 'accountant-2', registrationRequirementsVersion: 2, basis: 'SUPPLY_AMOUNT', settlementSystem: 'ACCOUNTANT' },
+        { id: 'private-2', settlementSystem: 'NONE' },
+        { id: 'private-3', settlementSystem: 'NONE' },
+      ],
+    });
+
+    expect(snapshot.filterOptions.settlementSystems.map(({ value }) => value)).toEqual([
+      ...PROJECT_SETTLEMENT_SYSTEM_CODES,
+      'ACCOUNTANT',
+      'PRIVATE',
+    ]);
+    expect(snapshot.filterOptions.settlementSystems.slice(-2)).toEqual([
+      { value: 'ACCOUNTANT', label: '회계사정산', projectCount: 2 },
+      { value: 'PRIVATE', label: '민간사업', projectCount: 3 },
+    ]);
+  });
+
+  it('사업 등록 카탈로그와 표시명을 클라이언트 계약과 동일하게 유지한다', () => {
+    expect(PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES).toEqual(PROJECT_SETTLEMENT_SYSTEM_CODES);
+    expect(PARTICIPATION_SETTLEMENT_SYSTEM_LABELS).toEqual(SETTLEMENT_SYSTEM_LABELS);
   });
 
   it('sheet-backed 월별 맵의 빈칸을 legacy 기본률로 되살리지 않는다', () => {
@@ -179,6 +238,133 @@ describe('participation dashboard', () => {
       { rate: 0, isConfirmed: false, hasMissing: true },
       { rate: 10, isConfirmed: true, hasMissing: false },
     ]);
+  });
+
+  it('저장 View는 선택 연도에 매칭되는 사업별 월 상태를 부모 합계와 함께 반환한다', () => {
+    const projects = [
+      { id: 'p-sheet', name: '시트 사업', clientOrg: 'KOICA', settlementSystem: 'E_NARA_DOUM' },
+      { id: 'p-manual', name: '수기 사업', clientOrg: 'KOICA', settlementSystem: 'RCMS' },
+      { id: 'p-out', name: '제외 사업', clientOrg: 'OTHER', settlementSystem: 'RCMS' },
+      { id: 'p-old', name: '과거 사업', clientOrg: 'KOICA', settlementSystem: 'RCMS' },
+    ];
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects,
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{
+        id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA 사업', clientOrgs: ['KOICA'],
+        settlementSystems: ['E_NARA_DOUM', 'RCMS'],
+      }],
+      entries: [
+        { id: 'sheet', source: 'PROJECT_TEAM_SYNC', projectId: 'p-sheet', personId: 'person-1', rate: 20, periodStart: '2026-01', periodEnd: '2026-03', monthlyRates: { '2026-01': 20, '2026-02': null, '2026-03': 0 } },
+        { id: 'sheet-manual', source: 'MANUAL', projectId: 'p-sheet', personId: 'person-1', rate: 5, periodStart: '2026-01', periodEnd: '2026-03' },
+        { id: 'manual', source: 'MANUAL', projectId: 'p-manual', personId: 'person-1', rate: 40, periodStart: '2026-01', periodEnd: '2026-03' },
+        { id: 'out', source: 'MANUAL', projectId: 'p-out', personId: 'person-1', rate: 90, periodStart: '2026-01', periodEnd: '2026-03' },
+        { id: 'old', source: 'MANUAL', projectId: 'p-old', personId: 'person-1', rate: 10, periodStart: '2025-01', periodEnd: '2025-12' },
+      ],
+    });
+
+    const savedMember = selectParticipationDashboardYear(snapshot, '2026', 'koica').members[0];
+    expect(savedMember.projectCount).toBe(2);
+    expect(savedMember.projects.map(({ projectId }) => projectId)).toEqual(['p-manual', 'p-sheet']);
+    expect(savedMember.projectLabel).toBe('수기 사업 · 시트 사업');
+    expect(savedMember.months.slice(0, 3)).toEqual([
+      { yearMonth: '2026-01', label: '1월', rate: 60, isConfirmed: true, hasMissing: false, isWarning: false },
+      { yearMonth: '2026-02', label: '2월', rate: 40, isConfirmed: true, hasMissing: true, isWarning: false },
+      { yearMonth: '2026-03', label: '3월', rate: 40, isConfirmed: true, hasMissing: false, isWarning: false },
+    ]);
+    expect(savedMember.projects.find(({ projectId }) => projectId === 'p-sheet').months.slice(0, 3)).toEqual([
+      { yearMonth: '2026-01', label: '1월', rate: 20, isConfirmed: true, hasMissing: false, isWarning: false },
+      { yearMonth: '2026-02', label: '2월', rate: 0, isConfirmed: false, hasMissing: true, isWarning: false },
+      { yearMonth: '2026-03', label: '3월', rate: 0, isConfirmed: true, hasMissing: false, isWarning: false },
+    ]);
+    expect(savedMember.projects.map(({ projectId }) => projectId)).not.toContain('p-out');
+    expect(savedMember.projects.map(({ projectId }) => projectId)).not.toContain('p-old');
+
+    const allMember = selectParticipationDashboardYear(snapshot, '2026').members[0];
+    expect(allMember.projects).toEqual([]);
+    expect(allMember.projectCount).toBe(3);
+  });
+
+  it('같은 projectId의 여러 stint는 하나로 합치고 같은 이름의 다른 ID는 분리한다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [
+        { id: 'p-one', name: '같은 이름', clientOrg: 'KOICA' },
+        { id: 'p-two', name: '같은 이름', clientOrg: 'KOICA' },
+      ],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA', clientOrgs: ['KOICA'] }],
+      entries: [
+        { id: 'one-a', projectId: 'p-one', personId: 'person-1', rate: 10, periodStart: '2026-01', periodEnd: '2026-01' },
+        { id: 'one-b', projectId: 'p-one', personId: 'person-1', rate: 20, periodStart: '2026-02', periodEnd: '2026-02' },
+        { id: 'two', projectId: 'p-two', personId: 'person-1', rate: 30, periodStart: '2026-01', periodEnd: '2026-01' },
+      ],
+    });
+
+    const member = selectParticipationDashboardYear(snapshot, '2026', 'koica').members[0];
+    expect(member.projectCount).toBe(2);
+    expect(member.projects.map(({ projectId }) => projectId)).toEqual(['p-one', 'p-two']);
+    expect(member.projects[0].months.slice(0, 2).map(({ rate }) => rate)).toEqual([10, 20]);
+  });
+
+  it('동일 프로젝트 stint 입력 순서와 무관하게 이름과 월 키를 안정적으로 직렬화한다', () => {
+    const common = {
+      projects: [{ id: 'p-one', name: '프로젝트 원본명', clientOrg: 'KOICA' }],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA', clientOrgs: ['KOICA'] }],
+    };
+    const entries = [
+      { id: 'feb', projectId: 'p-one', projectShortName: '나 사업', personId: 'person-1', rate: 20, periodStart: '2026-02', periodEnd: '2026-02' },
+      { id: 'jan', projectId: 'p-one', projectName: '가 사업', personId: 'person-1', rate: 10, periodStart: '2026-01', periodEnd: '2026-01' },
+    ];
+    const serializedProject = (orderedEntries) => buildParticipationDashboardSnapshot({
+      ...common,
+      entries: orderedEntries,
+    }).rules.find(({ id }) => id === 'koica').members[0].projects[0];
+
+    const forward = serializedProject(entries);
+    const reverse = serializedProject([...entries].reverse());
+    expect(forward).toEqual(reverse);
+    expect(forward.projectName).toBe('가 사업');
+    expect(Object.keys(forward.monthlyRates)).toEqual(['2026-01', '2026-02']);
+  });
+
+  it('일부 stint에만 entry 이름이 있어도 canonical 사업명보다 우선한다', () => {
+    const common = {
+      projects: [{ id: 'p-one', name: '가 원본명', clientOrg: 'KOICA' }],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA', clientOrgs: ['KOICA'] }],
+    };
+    const entries = [
+      { id: 'labeled', projectId: 'p-one', projectShortName: '나 사업', personId: 'person-1', rate: 10, periodStart: '2026-01', periodEnd: '2026-01' },
+      { id: 'unlabeled', projectId: 'p-one', personId: 'person-1', rate: 20, periodStart: '2026-02', periodEnd: '2026-02' },
+    ];
+    const serializedProject = (orderedEntries) => buildParticipationDashboardSnapshot({
+      ...common,
+      entries: orderedEntries,
+    }).rules.find(({ id }) => id === 'koica').members[0].projects[0];
+
+    const forward = serializedProject(entries);
+    const reverse = serializedProject([...entries].reverse());
+    expect(forward).toEqual(reverse);
+    expect(forward.projectName).toBe('나 사업');
+  });
+
+  it('전월 미입력 사업과 전월 명시적 0 사업도 선택 연도 사업으로 센다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [{ id: 'missing', name: '빈 사업' }, { id: 'zero', name: '0 사업' }],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'both', kind: 'USER_DEFINED', alias: '둘 다', settlementSystems: [] }],
+      entries: [
+        { id: 'missing-entry', source: 'PROJECT_TEAM_SYNC', projectId: 'missing', personId: 'person-1', periodStart: '2026-01', periodEnd: '2026-12', monthlyRates: {} },
+        { id: 'zero-entry', source: 'PROJECT_TEAM_SYNC', projectId: 'zero', personId: 'person-1', periodStart: '2026-01', periodEnd: '2026-12', monthlyRates: Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`2026-${String(index + 1).padStart(2, '0')}`, 0])) },
+      ],
+    });
+
+    const member = selectParticipationDashboardYear(snapshot, '2026', 'both').members[0];
+    expect(member.projectCount).toBe(2);
+    expect(member.projects.map(({ projectId }) => projectId)).toEqual(['zero', 'missing']);
+    expect(member.projects[0].months.every(({ isConfirmed, hasMissing }) => isConfirmed && !hasMissing)).toBe(true);
+    expect(member.projects[1].months.every(({ isConfirmed, hasMissing }) => !isConfirmed && hasMissing)).toBe(true);
   });
 
   it('프로젝트별 참여인력 요약도 PROJECT_TEAM_SYNC와 MANUAL을 이중 집계하지 않는다', () => {
@@ -307,5 +493,11 @@ describe('participation dashboard routes', () => {
     expect(saved.get(`orgs/mysc/participation_rules/${response.body.id}`)).toMatchObject({ alias: '농식품 + 회계사 정산', clientOrgs: [project.clientOrg], settlementSystems: [project.settlementSystem], kind: 'USER_DEFINED' });
     const legacyResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'legacy-key').send({ alias: 'KOICA · e나라도움', clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] }).expect(200);
     expect(saved.get(`orgs/mysc/participation_rules/${legacyResponse.body.id}`)).toMatchObject({ clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] });
+    const zeroProjectResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'zero-project-key').send({ alias: 'RCMS 예정 사업', clientOrgs: [], settlementSystems: ['RCMS'] }).expect(200);
+    expect(saved.get(`orgs/mysc/participation_rules/${zeroProjectResponse.body.id}`)).toMatchObject({ alias: 'RCMS 예정 사업', clientOrgs: [], settlementSystems: ['RCMS'] });
+    const savedCount = saved.size;
+    const unknownResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'unknown-platform-key').send({ alias: '알 수 없는 플랫폼', clientOrgs: [], settlementSystems: ['UNKNOWN_PLATFORM'] }).expect(422);
+    expect(unknownResponse.body.code).toBe('invalid_participation_rule_filter');
+    expect(saved.size).toBe(savedCount);
   });
 });

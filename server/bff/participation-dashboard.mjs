@@ -1,13 +1,28 @@
 import { readOptionalText } from './bff-utils.mjs';
-import { resolveParticipationSettlementSystem } from './participation-settlement-system.mjs';
+import {
+  PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
+  PARTICIPATION_SETTLEMENT_SYSTEM_LABELS,
+  resolveParticipationSettlementSystem,
+} from './participation-settlement-system.mjs';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_RULE_FILTER_VALUES = 4;
-const SETTLEMENT_SYSTEM_LABELS = {
-  E_NARA_DOUM: 'e나라도움', IRIS: 'IRIS', RCMS: 'RCMS', EZBARO: '통합이지바로', E_HIJO: 'e호조', EDUFINE: '에듀파인',
-  HAPPYEUM: '행복e음', AGRIX: 'AgriX', BOTAEM_E: '보탬e', SMTECH: 'SMTECH', KOCCA_PMS: 'e나라도움', NIPA: 'NIPA',
-  ACCOUNTANT: '회계사정산', PRIVATE: '자체 정산', OTHER: '기타', NONE: '시스템 미사용',
-};
+
+function buildSettlementSystemOptions(projects) {
+  const counts = new Map();
+  for (const project of projects) {
+    const value = resolveParticipationSettlementSystem(project);
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  const observedLegacy = [...counts.keys()]
+    .filter((value) => !PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES.includes(value))
+    .sort();
+  return [...PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES, ...observedLegacy].map((value) => ({
+    value,
+    label: PARTICIPATION_SETTLEMENT_SYSTEM_LABELS[value] || value,
+    projectCount: counts.get(value) || 0,
+  }));
+}
 
 function monthsForYear(year) {
   return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
@@ -118,8 +133,21 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         values: new Map(),
         confirmedMonths: new Set(),
         missingMonths: new Set(),
+        projects: new Map(),
       };
-      row.projectNames.add(readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId);
+      const entryProjectName = readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName);
+      const canonicalProjectName = readOptionalText(project?.name);
+      const projectName = entryProjectName || canonicalProjectName || projectId;
+      const projectRow = row.projects.get(projectId) || {
+        projectId,
+        entryProjectNames: new Set(),
+        canonicalProjectName,
+        values: new Map(),
+        confirmedMonths: new Set(),
+        missingMonths: new Set(),
+      };
+      if (entryProjectName) projectRow.entryProjectNames.add(entryProjectName);
+      row.projectNames.add(projectName);
       row.projectIds.add(projectId);
       for (const year of yearsForEntry(entry)) {
         for (const yearMonth of monthsForYear(year)) {
@@ -128,17 +156,22 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
             && sheetOwnedMonths.has(`${projectId}\n${personId}\n${yearMonth}`)
           ) continue;
           if (!entryOwnsMonth(entry, yearMonth)) continue;
-          row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + valueForMonth(entry, yearMonth));
+          const value = valueForMonth(entry, yearMonth);
+          row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + value);
+          projectRow.values.set(yearMonth, (projectRow.values.get(yearMonth) || 0) + value);
           if (
             Object.hasOwn(entry || {}, 'monthlyRates')
             && (!Object.hasOwn(entry?.monthlyRates || {}, yearMonth) || entry?.monthlyRates?.[yearMonth] === null)
           ) {
             row.missingMonths.add(yearMonth);
+            projectRow.missingMonths.add(yearMonth);
           } else {
             row.confirmedMonths.add(yearMonth);
+            projectRow.confirmedMonths.add(yearMonth);
           }
         }
       }
+      row.projects.set(projectId, projectRow);
       bucket.rows.set(personId, row);
     }
   }
@@ -159,6 +192,18 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         monthlyRates,
         confirmedMonths: [...row.confirmedMonths].sort(),
         missingMonths: [...row.missingMonths].sort(),
+        projects: [...row.projects.values()].map((projectRow) => ({
+          projectId: projectRow.projectId,
+          projectName: [...projectRow.entryProjectNames].sort((left, right) => left.localeCompare(right, 'ko'))[0]
+            || projectRow.canonicalProjectName
+            || projectRow.projectId,
+          monthlyRates: Object.fromEntries([...projectRow.values.entries()].sort(([left], [right]) => left.localeCompare(right))),
+          confirmedMonths: [...projectRow.confirmedMonths].sort(),
+          missingMonths: [...projectRow.missingMonths].sort(),
+        })).sort((left, right) => (
+          left.projectName.localeCompare(right.projectName, 'ko')
+          || left.projectId.localeCompare(right.projectId)
+        )),
       };
     }).sort((left, right) => (
       (left.joinedAt || '9999-12-31').localeCompare(right.joinedAt || '9999-12-31')
@@ -180,8 +225,7 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
     rules: serializedRules,
     filterOptions: {
       clientOrgs: [...new Set(projects.map((project) => readOptionalText(project?.clientOrg)).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ko')),
-      settlementSystems: [...new Set(['NONE', ...projects.map(resolveParticipationSettlementSystem)])]
-        .sort().map((value) => ({ value, label: SETTLEMENT_SYSTEM_LABELS[value] || value })),
+      settlementSystems: buildSettlementSystemOptions(projects),
     },
     unlinkedEntryCount,
   };
@@ -256,24 +300,31 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
   const months = monthKeys.map((yearMonth) => ({ yearMonth, label: `${Number(yearMonth.slice(5, 7))}월` }));
   const ruleOptions = (snapshot.rules || []).map((rule) => ({ id: rule.id, alias: rule.alias, clientOrgs: rule.clientOrgs || [], settlementSystems: rule.settlementSystems || [] }));
   const selectedRule = (snapshot.rules || []).find((rule) => rule.id === selectedRuleId) || snapshot.rules?.[0] || { id: 'all', alias: '전체 인력', members: [], clientOrgs: [], settlementSystems: [] };
+  const monthWithStatus = (source, yearMonth) => {
+    const rate = Number(source.monthlyRates?.[yearMonth] || 0);
+    return {
+      yearMonth,
+      label: `${Number(yearMonth.slice(5, 7))}월`,
+      rate,
+      isConfirmed: (source.confirmedMonths || []).includes(yearMonth),
+      hasMissing: (source.missingMonths || []).includes(yearMonth),
+      isWarning: rate > 100,
+    };
+  };
   const members = (selectedRule.members || []).map((member) => {
-    const monthsWithStatus = monthKeys.map((yearMonth) => {
-      const rate = Number(member.monthlyRates?.[yearMonth] || 0);
-      return {
-        yearMonth,
-        label: `${Number(yearMonth.slice(5, 7))}월`,
-        rate,
-        isConfirmed: (member.confirmedMonths || []).includes(yearMonth),
-        hasMissing: (member.missingMonths || []).includes(yearMonth),
-        isWarning: rate > 100,
-      };
-    });
+    const monthsWithStatus = monthKeys.map((yearMonth) => monthWithStatus(member, yearMonth));
+    const selectedYearProjects = (member.projects || []).map((projectRow) => ({
+      projectId: projectRow.projectId,
+      projectName: projectRow.projectName,
+      months: monthKeys.map((yearMonth) => monthWithStatus(projectRow, yearMonth)),
+    })).filter((projectRow) => projectRow.months.some((month) => month.isConfirmed || month.hasMissing));
     const warnings = monthsWithStatus.filter((month) => month.isWarning).map(({ yearMonth, rate }) => ({ yearMonth, rate }));
     return {
       memberId: member.memberId,
       memberName: member.memberName,
-      projectLabel: (member.projectNames || []).join(' · '),
-      projectCount: Number(member.projectCount) || 0,
+      projectLabel: selectedYearProjects.map((projectRow) => projectRow.projectName).join(' · '),
+      projectCount: selectedYearProjects.length,
+      projects: selectedRule.id === 'all' ? [] : selectedYearProjects,
       months: monthsWithStatus,
       warnings,
     };

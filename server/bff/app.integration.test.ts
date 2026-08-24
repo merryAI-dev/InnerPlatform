@@ -1111,6 +1111,20 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       clientOrgs: ['KOICA'],
       settlementSystems: [],
     });
+    const dashboardCollectionNames = ['projects', 'partEntries', 'persons', 'participation_rules'];
+    const snapshotDashboardCollections = async () => Object.fromEntries(await Promise.all(
+      dashboardCollectionNames.map(async (collectionName) => {
+        const snapshot = await db.collection(`orgs/${tenantId}/${collectionName}`).get();
+        return [collectionName, snapshot.docs
+          .map((doc) => ({ id: doc.id, data: doc.data() }))
+          .sort((left, right) => left.id.localeCompare(right.id))];
+      }),
+    ));
+    const collectionsBeforeDashboard = await snapshotDashboardCollections();
+    const expectedYearMonths = [
+      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
+      '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
+    ];
     const dashboard = await api
       .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-koica-platforms')
       .set(defaultHeaders);
@@ -1122,10 +1136,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
     expect(dashboard.body.unlinkedEntryCount).toBe(1);
     expect(dashboard.body.months).toHaveLength(12);
-    expect(dashboard.body.months.map((month: { yearMonth: string }) => month.yearMonth)).toEqual([
-      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
-      '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
-    ]);
+    expect(dashboard.body.months.map((month: { yearMonth: string }) => month.yearMonth)).toEqual(expectedYearMonths);
     expect(dashboard.body.members).toEqual([
       expect.objectContaining({
         memberId: 'person-able',
@@ -1136,6 +1147,47 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
           expect.objectContaining({ yearMonth: '2026-03', rate: 0, isConfirmed: true, hasMissing: false }),
         ]),
       }),
+    ]);
+    const koicaPlatformsMember = dashboard.body.members[0];
+    expect(koicaPlatformsMember.projects.map((project: { projectId: string }) => project.projectId).sort()).toEqual([
+      targetProjectId,
+      'p-koica-ezbaro',
+      'p-koica-rcms',
+    ].sort());
+    expect(koicaPlatformsMember.projects).toHaveLength(koicaPlatformsMember.projectCount);
+    koicaPlatformsMember.projects.forEach((project: { months: Array<{ yearMonth: string }> }) => {
+      expect(project.months.map((month) => month.yearMonth)).toEqual(expectedYearMonths);
+    });
+    const targetProject = koicaPlatformsMember.projects.find((project: { projectId: string }) => project.projectId === targetProjectId);
+    expect(targetProject.months).toEqual(expect.arrayContaining([
+      expect.objectContaining({ yearMonth: '2026-01', rate: 20, isConfirmed: true, hasMissing: false }),
+      expect.objectContaining({ yearMonth: '2026-02', rate: 0, isConfirmed: false, hasMissing: true }),
+      expect.objectContaining({ yearMonth: '2026-03', rate: 0, isConfirmed: true, hasMissing: false }),
+    ]));
+    const koicaRcmsProject = koicaPlatformsMember.projects.find((project: { projectId: string }) => project.projectId === 'p-koica-rcms');
+    const koicaEzbaroProject = koicaPlatformsMember.projects.find((project: { projectId: string }) => project.projectId === 'p-koica-ezbaro');
+    expect(koicaRcmsProject.months).toContainEqual(expect.objectContaining({ yearMonth: '2026-01', rate: 7 }));
+    expect(koicaEzbaroProject.months).toContainEqual(expect.objectContaining({ yearMonth: '2026-01', rate: 3 }));
+    expect(koicaPlatformsMember.months.find((month: { yearMonth: string }) => month.yearMonth === '2026-01')?.rate).toBe(
+      koicaPlatformsMember.projects.reduce((sum: number, project: { months: Array<{ yearMonth: string; rate: number }> }) => (
+        sum + (project.months.find((month) => month.yearMonth === '2026-01')?.rate || 0)
+      ), 0),
+    );
+    expect(dashboard.body.filterOptions.settlementSystems.map(({ value, projectCount }: { value: string; projectCount: number }) => ({
+      value,
+      projectCount,
+    }))).toEqual([
+      { value: 'NONE', projectCount: 0 },
+      { value: 'E_NARA_DOUM', projectCount: 1 },
+      { value: 'BOTAEM_E', projectCount: 0 },
+      { value: 'RCMS', projectCount: 2 },
+      { value: 'EZBARO', projectCount: 1 },
+      { value: 'SMTECH', projectCount: 0 },
+      { value: 'KOCCA_PMS', projectCount: 0 },
+      { value: 'NIPA', projectCount: 0 },
+      { value: 'IRIS', projectCount: 0 },
+      { value: 'OTHER', projectCount: 0 },
+      { value: 'ACCOUNTANT', projectCount: 1 },
     ]);
 
     const platformOnlyDashboard = await api
@@ -1156,6 +1208,13 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         ]),
       }),
     ]);
+    expect(platformOnlyDashboard.body.members[0].projects.map((project: { projectId: string }) => project.projectId).sort()).toEqual([
+      'p-koica-rcms',
+      'p-other-rcms',
+    ]);
+    platformOnlyDashboard.body.members[0].projects.forEach((project: { months: Array<{ yearMonth: string }> }) => {
+      expect(project.months.map((month) => month.yearMonth)).toEqual(expectedYearMonths);
+    });
 
     const clientOnlyDashboard = await api
       .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-koica-all')
@@ -1175,6 +1234,32 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         ]),
       }),
     ]);
+    expect(clientOnlyDashboard.body.members[0].projects.map((project: { projectId: string }) => project.projectId).sort()).toEqual([
+      targetProjectId,
+      'p-koica-ezbaro',
+      'p-koica-other',
+      'p-koica-rcms',
+    ].sort());
+    clientOnlyDashboard.body.members[0].projects.forEach((project: { months: Array<{ yearMonth: string }> }) => {
+      expect(project.months.map((month) => month.yearMonth)).toEqual(expectedYearMonths);
+    });
+
+    const allDashboard = await api
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=all')
+      .set(defaultHeaders);
+    expect(allDashboard.status).toBe(200);
+    expect(allDashboard.body.members.length).toBeGreaterThan(0);
+    expect(allDashboard.body.members.every((member: { projects: unknown[] }) => member.projects.length === 0)).toBe(true);
+    expect(allDashboard.body.members).toContainEqual(expect.objectContaining({
+      memberId: 'person-able',
+      projectCount: 5,
+      projects: [],
+      months: expect.arrayContaining([
+        expect.objectContaining({ yearMonth: '2026-01', rate: 54 }),
+      ]),
+    }));
+
+    expect(await snapshotDashboardCollections()).toEqual(collectionsBeforeDashboard);
 
     await db.doc(`orgs/${tenantId}/persons/person-taylor`).set({
       personId: 'person-taylor',
