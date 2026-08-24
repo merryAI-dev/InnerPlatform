@@ -135,15 +135,18 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         missingMonths: new Set(),
         projects: new Map(),
       };
-      const projectName = readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId;
+      const entryProjectName = readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName);
+      const canonicalProjectName = readOptionalText(project?.name);
+      const projectName = entryProjectName || canonicalProjectName || projectId;
       const projectRow = row.projects.get(projectId) || {
         projectId,
-        projectNames: new Set(),
+        entryProjectNames: new Set(),
+        canonicalProjectName,
         values: new Map(),
         confirmedMonths: new Set(),
         missingMonths: new Set(),
       };
-      projectRow.projectNames.add(projectName);
+      if (entryProjectName) projectRow.entryProjectNames.add(entryProjectName);
       row.projectNames.add(projectName);
       row.projectIds.add(projectId);
       for (const year of yearsForEntry(entry)) {
@@ -191,7 +194,9 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         missingMonths: [...row.missingMonths].sort(),
         projects: [...row.projects.values()].map((projectRow) => ({
           projectId: projectRow.projectId,
-          projectName: [...projectRow.projectNames].sort((left, right) => left.localeCompare(right, 'ko'))[0] || projectRow.projectId,
+          projectName: [...projectRow.entryProjectNames].sort((left, right) => left.localeCompare(right, 'ko'))[0]
+            || projectRow.canonicalProjectName
+            || projectRow.projectId,
           monthlyRates: Object.fromEntries([...projectRow.values.entries()].sort(([left], [right]) => left.localeCompare(right))),
           confirmedMonths: [...projectRow.confirmedMonths].sort(),
           missingMonths: [...projectRow.missingMonths].sort(),

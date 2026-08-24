@@ -328,6 +328,27 @@ describe('participation dashboard', () => {
     expect(Object.keys(forward.monthlyRates)).toEqual(['2026-01', '2026-02']);
   });
 
+  it('일부 stint에만 entry 이름이 있어도 canonical 사업명보다 우선한다', () => {
+    const common = {
+      projects: [{ id: 'p-one', name: '가 원본명', clientOrg: 'KOICA' }],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA', clientOrgs: ['KOICA'] }],
+    };
+    const entries = [
+      { id: 'labeled', projectId: 'p-one', projectShortName: '나 사업', personId: 'person-1', rate: 10, periodStart: '2026-01', periodEnd: '2026-01' },
+      { id: 'unlabeled', projectId: 'p-one', personId: 'person-1', rate: 20, periodStart: '2026-02', periodEnd: '2026-02' },
+    ];
+    const serializedProject = (orderedEntries) => buildParticipationDashboardSnapshot({
+      ...common,
+      entries: orderedEntries,
+    }).rules.find(({ id }) => id === 'koica').members[0].projects[0];
+
+    const forward = serializedProject(entries);
+    const reverse = serializedProject([...entries].reverse());
+    expect(forward).toEqual(reverse);
+    expect(forward.projectName).toBe('나 사업');
+  });
+
   it('전월 미입력 사업과 전월 명시적 0 사업도 선택 연도 사업으로 센다', () => {
     const snapshot = buildParticipationDashboardSnapshot({
       projects: [{ id: 'missing', name: '빈 사업' }, { id: 'zero', name: '0 사업' }],
