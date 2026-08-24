@@ -15,12 +15,18 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain('projectIds: scope === \'selected\'');
   });
 
-  it('supports organization filtering, multi-project selection, and the 2024 year', () => {
+  it('wires organization, multi-project, multi-account-type, sorting, and continuous years to the BFF', () => {
     expect(source).toContain('소속(CIC/센터)');
     expect(source).toContain('selectedProjectIds');
     expect(source).toContain('사업 다중선택');
-    expect(source).toContain("years.add('2024')");
-    expect(source).toContain("scope === 'selected' || departmentFilter !== 'ALL'");
+    expect(source).toContain('통장 유형 다중선택');
+    expect(source).toContain('buildCashflowExportAvailableYears');
+    expect(source).not.toContain("years.add('2024')");
+    expect(source).toContain("projectIds: scope === 'selected'");
+    expect(source).toContain('scope,');
+    expect(source).toContain("department: departmentFilter === 'ALL'");
+    expect(source).toContain('accountTypes:');
+    expect(source).toContain('sortBy,');
   });
 
   it('shows the selected project status table without client-side financial differences', () => {

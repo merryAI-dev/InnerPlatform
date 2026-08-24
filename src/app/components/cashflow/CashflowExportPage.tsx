@@ -27,7 +27,13 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { triggerDownload } from '../../platform/csv-utils';
-import { filterCashflowExportTargetProjects } from '../../platform/cashflow-export-filters';
+import {
+  buildCashflowExportAvailableYears,
+  filterCashflowExportTargetProjects,
+  toggleCashflowExportAccountType,
+  type CashflowExportAccountTypeFilter,
+  type CashflowExportSortBy,
+} from '../../platform/cashflow-export-filters';
 import { buildCashflowExportProjectRows } from '../../platform/cashflow-export-surface';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 import {
@@ -88,7 +94,9 @@ export function CashflowExportPage() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
-  const [accountTypeFilter, setAccountTypeFilter] = useState<'ALL' | AccountType>('ALL');
+  const [accountTypeFilter, setAccountTypeFilter] = useState<CashflowExportAccountTypeFilter>('ALL');
+  const [accountTypePickerOpen, setAccountTypePickerOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<CashflowExportSortBy>('PROJECT_NAME');
   const [rangeMode, setRangeMode] = useState<'year' | 'custom'>('year');
   const [selectedYear, setSelectedYear] = useState<string>(yearMonth.slice(0, 4));
   const [startYearMonth, setStartYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-01`);
@@ -108,16 +116,10 @@ export function CashflowExportPage() {
     sortedProjects.map((project) => project.department).filter(Boolean),
   )).sort((left, right) => left.localeCompare(right, 'ko')), [sortedProjects]);
 
-  const availableYears = useMemo(() => {
-    const years = new Set<string>();
-    for (const project of sortedProjects) {
-      if (/^\d{4}/.test(project.contractStart)) years.add(project.contractStart.slice(0, 4));
-      if (/^\d{4}/.test(project.contractEnd)) years.add(project.contractEnd.slice(0, 4));
-    }
-    years.add('2024');
-    years.add(yearMonth.slice(0, 4));
-    return Array.from(years).sort();
-  }, [sortedProjects, yearMonth]);
+  const availableYears = useMemo(
+    () => buildCashflowExportAvailableYears(sortedProjects, yearMonth.slice(0, 4)),
+    [sortedProjects, yearMonth],
+  );
 
   const yearMonths = useMemo(() => {
     if (rangeMode === 'year') {
@@ -132,14 +134,22 @@ export function CashflowExportPage() {
       selectedProjectIds,
       departmentFilter,
       accountTypeFilter,
+      sortBy,
     });
-  }, [accountTypeFilter, departmentFilter, scope, selectedProjectIds, sortedProjects]);
+  }, [accountTypeFilter, departmentFilter, scope, selectedProjectIds, sortBy, sortedProjects]);
   const targetProjectIds = useMemo(() => targetProjects.map((project) => project.id), [targetProjects]);
   const canonicalSummaries = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds: targetProjectIds });
 
   const workbookVariant: CashflowExportWorkbookVariant = multiProjectVariant;
   const periodSummary = summarizeCashflowYearMonths(yearMonths);
-  const accountTypeFilterLabel = accountTypeFilter === 'ALL' ? '전체 통장 유형' : ACCOUNT_TYPE_LABELS[accountTypeFilter];
+  const accountTypeFilterLabel = accountTypeFilter === 'ALL'
+    ? '전체 통장 유형'
+    : accountTypeFilter.length === 0
+      ? '0개 선택'
+      : accountTypeFilter.length === 1
+        ? ACCOUNT_TYPE_LABELS[accountTypeFilter[0]]
+        : `${accountTypeFilter.length}개 유형 선택`;
+  const sortByLabel = sortBy === 'DEPARTMENT' ? '소속(CIC/센터)' : '사업명';
   const projectSelectionLabel = scope === 'selected'
     ? `${targetProjects.length}개 사업 선택`
     : '전체 사업';
@@ -182,11 +192,11 @@ export function CashflowExportPage() {
             googleAccessToken: user.googleAccessToken,
           },
           body: {
-            scope: 'all',
-            projectIds: scope === 'selected' || departmentFilter !== 'ALL'
-              ? targetProjects.map((project) => project.id)
-              : undefined,
-            accountType: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
+            scope,
+            projectIds: scope === 'selected' ? selectedProjectIds : undefined,
+            department: departmentFilter === 'ALL' ? undefined : departmentFilter,
+            accountTypes: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
+            sortBy,
             startYearMonth: yearMonths[0],
             endYearMonth: yearMonths[yearMonths.length - 1],
             variant: workbookVariant,
@@ -275,6 +285,31 @@ export function CashflowExportPage() {
 
           <SelectionField
             step="2"
+            icon={BarChart3}
+            label="정렬 기준"
+            helper="워크북의 사업 순서를 사업명 또는 소속 기준으로 정합니다."
+            value={sortByLabel}
+            testId="cashflow-export-step-sort"
+            toneClass={monochromeSurfaceClass}
+          >
+            <Select
+              value={sortBy}
+              onValueChange={(value) => {
+                if (value === 'PROJECT_NAME' || value === 'DEPARTMENT') setSortBy(value);
+              }}
+            >
+              <SelectTrigger data-testid="cashflow-export-sort" className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`} style={{ borderWidth: 2 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PROJECT_NAME">사업명</SelectItem>
+                <SelectItem value="DEPARTMENT">소속(CIC/센터)</SelectItem>
+              </SelectContent>
+            </Select>
+          </SelectionField>
+
+          <SelectionField
+            step="3"
             icon={Layers3}
             label="소속(CIC/센터)"
             helper="담당 조직을 기준으로 다운로드 대상을 좁힙니다."
@@ -294,7 +329,7 @@ export function CashflowExportPage() {
           </SelectionField>
 
           <SelectionField
-            step="3"
+            step="4"
             icon={FolderSearch}
             label="사업 다중선택"
             helper={scope === 'selected' ? '다운로드할 사업을 여러 개 선택합니다.' : '전체 사업 범위에서는 자동으로 모든 사업이 포함됩니다.'}
@@ -324,7 +359,7 @@ export function CashflowExportPage() {
                     <CommandGroup heading="다운로드할 사업">
                       {sortedProjects
                         .filter((project) => departmentFilter === 'ALL' || project.department === departmentFilter)
-                        .filter((project) => accountTypeFilter === 'ALL' || project.accountType === accountTypeFilter)
+                        .filter((project) => accountTypeFilter === 'ALL' || accountTypeFilter.includes(project.accountType))
                         .map((project) => {
                           const selected = selectedProjectIds.includes(project.id);
                           return (
@@ -343,40 +378,58 @@ export function CashflowExportPage() {
           </SelectionField>
 
           <SelectionField
-            step="4"
+            step="5"
             icon={BarChart3}
-            label="통장 유형"
-            helper="프로젝트 등록 시 선택한 통장 유형별로 추출 대상을 걸러냅니다."
+            label="통장 유형 다중선택"
+            helper="프로젝트 등록 시 선택한 통장 유형을 여러 개 함께 고를 수 있습니다."
             value={accountTypeFilterLabel}
             testId="cashflow-export-step-account-type"
             toneClass={monochromeSurfaceClass}
           >
-            <Select
-              value={accountTypeFilter}
-              onValueChange={(value) => {
-                if (value === 'ALL' || value === 'DEDICATED' || value === 'OPERATING' || value === 'NONE') {
-                  setAccountTypeFilter(value as 'ALL' | AccountType);
-                }
-              }}
-            >
-              <SelectTrigger
-                data-testid="cashflow-export-account-type"
-                className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
-                style={{ borderWidth: 2 }}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">전체 통장 유형</SelectItem>
-                {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={accountTypePickerOpen} onOpenChange={setAccountTypePickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={accountTypePickerOpen}
+                  data-testid="cashflow-export-account-type"
+                  className={`${strongFieldBaseClass} w-full justify-between border-stone-300 px-3 hover:border-stone-400 focus-visible:ring-stone-200`}
+                >
+                  <span className="truncate">{accountTypeFilterLabel}</span>
+                  <ChevronsUpDown className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+                <Command>
+                  <CommandList>
+                    <CommandGroup heading="추출할 통장 유형">
+                      <CommandItem value="전체 통장 유형" onSelect={() => setAccountTypeFilter('ALL')}>
+                        <Check className={`h-4 w-4 ${accountTypeFilter === 'ALL' ? 'opacity-100' : 'opacity-0'}`} />
+                        전체 통장 유형
+                      </CommandItem>
+                      {(Object.entries(ACCOUNT_TYPE_LABELS) as Array<[AccountType, string]>).map(([value, label]) => {
+                        const selected = accountTypeFilter !== 'ALL' && accountTypeFilter.includes(value);
+                        return (
+                          <CommandItem
+                            key={value}
+                            value={label}
+                            onSelect={() => setAccountTypeFilter((current) => toggleCashflowExportAccountType(current, value))}
+                          >
+                            <Check className={`h-4 w-4 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                            {label}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </SelectionField>
 
           <SelectionField
-            step="5"
+            step="6"
             icon={CalendarRange}
             label="기간 범위"
             helper="기본은 연간 일괄이며, 필요하면 시작 월과 종료 월을 직접 지정할 수 있습니다."
@@ -405,7 +458,7 @@ export function CashflowExportPage() {
           </SelectionField>
 
           <SelectionField
-            step="6"
+            step="7"
             icon={FileSpreadsheet}
             label="워크북 형식"
             helper="경영기획실 후처리 방식에 맞춰 통합 시트 또는 사업별 시트를 선택합니다."
@@ -437,7 +490,7 @@ export function CashflowExportPage() {
 
           {rangeMode === 'year' ? (
             <SelectionField
-              step="7"
+              step="8"
               icon={CalendarRange}
               label="추출 연도"
               helper="월당 5주 고정 슬롯으로 1년 전체를 한 번에 구성합니다."
@@ -464,7 +517,7 @@ export function CashflowExportPage() {
           ) : (
             <>
               <SelectionField
-                step="7A"
+                step="8A"
                 icon={CalendarRange}
                 label="시작 월"
                 helper="직접 추출을 시작할 월입니다."
@@ -482,7 +535,7 @@ export function CashflowExportPage() {
                 />
               </SelectionField>
               <SelectionField
-                step="7B"
+                step="8B"
                 icon={CalendarRange}
                 label="종료 월"
                 helper="마지막으로 포함할 월입니다."

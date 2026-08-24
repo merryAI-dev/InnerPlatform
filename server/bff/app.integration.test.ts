@@ -2429,7 +2429,45 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       variant: 'multi-sheet',
     });
     expect(mismatchedFilter.status).toBe(404);
-    expect(JSON.parse(mismatchedFilter.body.toString()).error).toBe('selected_project_not_found');
+    expect(JSON.parse(mismatchedFilter.body.toString()).error).toBe('not_found');
+  });
+
+  it('cross-filters selected projects by canonical department and account types before sorting the workbook', async () => {
+    const projects = [
+      { id: 'p-cross-b', name: '가 사업', shortName: 'A-B', department: '센터B', accountType: 'OTHER' },
+      { id: 'p-cross-a2', name: '나 사업', shortName: 'B-A2', department: '센터A', accountType: 'OTHER' },
+      { id: 'p-cross-a1', name: '가 사업', shortName: 'C-A1', department: '센터A', accountType: 'DEDICATED' },
+      { id: 'p-cross-account', name: '다 사업', shortName: 'D-ACCOUNT', department: '센터A', accountType: 'OPERATING' },
+    ];
+    for (const project of projects) {
+      await db.doc(`orgs/${tenantId}/projects/${project.id}`).set(project);
+    }
+
+    const response = await downloadCashflowExport({
+      scope: 'selected',
+      projectIds: projects.map(({ id }) => id),
+      department: '센터A',
+      accountTypes: ['DEDICATED', 'OTHER'],
+      sortBy: 'DEPARTMENT',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+
+    expect(response.status).toBe(200);
+    expect(decodeURIComponent(response.headers['content-disposition'])).toContain('선택사업_개별시트');
+    const workbook = await readWorkbook(response.body);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['C-A1', 'B-A2']);
+
+    const missingProject = await downloadCashflowExport({
+      scope: 'selected',
+      projectIds: ['p-cross-a1', 'missing-project'],
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+    expect(missingProject.status).toBe(404);
+    expect(JSON.parse(missingProject.body.toString()).error).toBe('selected_project_not_found');
   });
 
   it('accepts legacy basis payloads for export requests', async () => {

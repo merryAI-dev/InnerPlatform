@@ -51,17 +51,23 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
 
     if (payload.projectIds) {
       const selectedProjectIds = new Set(payload.projectIds);
-      projects = projects.filter((project) => selectedProjectIds.has(project.id));
+      const selectedProjects = projects.filter((project) => selectedProjectIds.has(project.id));
+      if (selectedProjects.length !== selectedProjectIds.size) {
+        throw createHttpError(404, '선택한 프로젝트 중 조회할 수 없는 항목이 있습니다.', 'selected_project_not_found');
+      }
+      projects = selectedProjects;
     }
 
-    if (payload.accountType) {
-      projects = projects.filter((project) => project.accountType === payload.accountType);
+    if (payload.department) {
+      projects = projects.filter((project) => project.department === payload.department);
+    }
+
+    const accountTypes = payload.accountTypes || (payload.accountType ? [payload.accountType] : null);
+    if (accountTypes) {
+      const selectedAccountTypes = new Set(accountTypes);
+      projects = projects.filter((project) => selectedAccountTypes.has(project.accountType));
     } else if (payload.basis) {
       projects = projects.filter((project) => project.basis === payload.basis);
-    }
-
-    if (payload.projectIds && projects.length !== new Set(payload.projectIds).size) {
-      throw createHttpError(404, '선택한 프로젝트 중 조회 조건에 맞지 않거나 접근할 수 없는 항목이 있습니다.', 'selected_project_not_found');
     }
 
     if (projects.length === 0) {
@@ -106,17 +112,26 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
       id: project.id,
       name: project.name,
       shortName: project.shortName,
+      department: project.department,
       weeks: weeksByProject.get(project.id) || [],
       transactions: transactionsByProject.get(project.id) || [],
     }));
+
+    const exportScope = payload.scope === 'single'
+      ? 'single'
+      : payload.scope === 'selected' || payload.projectIds
+        ? 'selected'
+        : 'all';
 
     const buffer = await buildCashflowExportWorkbookBuffer({
       projects: exportProjects,
       yearMonths,
       variant: payload.variant,
+      sortBy: payload.sortBy,
+      scope: exportScope,
     });
     const fileName = buildCashflowExportFileName({
-      scope: payload.scope,
+      scope: exportScope,
       projectName: exportProjects[0]?.name,
       yearMonths,
       variant: payload.variant,

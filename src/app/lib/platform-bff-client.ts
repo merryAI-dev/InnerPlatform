@@ -4228,10 +4228,13 @@ export async function exportCashflowWorkbookViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   body: {
-    scope: 'all' | 'single';
+    scope: 'all' | 'single' | 'selected';
     projectId?: string;
     projectIds?: string[];
     accountType?: AccountType;
+    accountTypes?: AccountType[];
+    department?: string;
+    sortBy?: 'PROJECT_NAME' | 'DEPARTMENT';
     startYearMonth: string;
     endYearMonth: string;
     variant: 'single-project' | 'combined' | 'multi-sheet';
