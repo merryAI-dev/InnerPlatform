@@ -133,8 +133,17 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         values: new Map(),
         confirmedMonths: new Set(),
         missingMonths: new Set(),
+        projects: new Map(),
       };
-      row.projectNames.add(readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId);
+      const projectName = readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId;
+      const projectRow = row.projects.get(projectId) || {
+        projectId,
+        projectName,
+        values: new Map(),
+        confirmedMonths: new Set(),
+        missingMonths: new Set(),
+      };
+      row.projectNames.add(projectName);
       row.projectIds.add(projectId);
       for (const year of yearsForEntry(entry)) {
         for (const yearMonth of monthsForYear(year)) {
@@ -143,17 +152,22 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
             && sheetOwnedMonths.has(`${projectId}\n${personId}\n${yearMonth}`)
           ) continue;
           if (!entryOwnsMonth(entry, yearMonth)) continue;
-          row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + valueForMonth(entry, yearMonth));
+          const value = valueForMonth(entry, yearMonth);
+          row.values.set(yearMonth, (row.values.get(yearMonth) || 0) + value);
+          projectRow.values.set(yearMonth, (projectRow.values.get(yearMonth) || 0) + value);
           if (
             Object.hasOwn(entry || {}, 'monthlyRates')
             && (!Object.hasOwn(entry?.monthlyRates || {}, yearMonth) || entry?.monthlyRates?.[yearMonth] === null)
           ) {
             row.missingMonths.add(yearMonth);
+            projectRow.missingMonths.add(yearMonth);
           } else {
             row.confirmedMonths.add(yearMonth);
+            projectRow.confirmedMonths.add(yearMonth);
           }
         }
       }
+      row.projects.set(projectId, projectRow);
       bucket.rows.set(personId, row);
     }
   }
@@ -174,6 +188,16 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         monthlyRates,
         confirmedMonths: [...row.confirmedMonths].sort(),
         missingMonths: [...row.missingMonths].sort(),
+        projects: [...row.projects.values()].map((projectRow) => ({
+          projectId: projectRow.projectId,
+          projectName: projectRow.projectName,
+          monthlyRates: Object.fromEntries([...projectRow.values.entries()]),
+          confirmedMonths: [...projectRow.confirmedMonths].sort(),
+          missingMonths: [...projectRow.missingMonths].sort(),
+        })).sort((left, right) => (
+          left.projectName.localeCompare(right.projectName, 'ko')
+          || left.projectId.localeCompare(right.projectId)
+        )),
       };
     }).sort((left, right) => (
       (left.joinedAt || '9999-12-31').localeCompare(right.joinedAt || '9999-12-31')
@@ -270,24 +294,31 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
   const months = monthKeys.map((yearMonth) => ({ yearMonth, label: `${Number(yearMonth.slice(5, 7))}월` }));
   const ruleOptions = (snapshot.rules || []).map((rule) => ({ id: rule.id, alias: rule.alias, clientOrgs: rule.clientOrgs || [], settlementSystems: rule.settlementSystems || [] }));
   const selectedRule = (snapshot.rules || []).find((rule) => rule.id === selectedRuleId) || snapshot.rules?.[0] || { id: 'all', alias: '전체 인력', members: [], clientOrgs: [], settlementSystems: [] };
+  const monthWithStatus = (source, yearMonth) => {
+    const rate = Number(source.monthlyRates?.[yearMonth] || 0);
+    return {
+      yearMonth,
+      label: `${Number(yearMonth.slice(5, 7))}월`,
+      rate,
+      isConfirmed: (source.confirmedMonths || []).includes(yearMonth),
+      hasMissing: (source.missingMonths || []).includes(yearMonth),
+      isWarning: rate > 100,
+    };
+  };
   const members = (selectedRule.members || []).map((member) => {
-    const monthsWithStatus = monthKeys.map((yearMonth) => {
-      const rate = Number(member.monthlyRates?.[yearMonth] || 0);
-      return {
-        yearMonth,
-        label: `${Number(yearMonth.slice(5, 7))}월`,
-        rate,
-        isConfirmed: (member.confirmedMonths || []).includes(yearMonth),
-        hasMissing: (member.missingMonths || []).includes(yearMonth),
-        isWarning: rate > 100,
-      };
-    });
+    const monthsWithStatus = monthKeys.map((yearMonth) => monthWithStatus(member, yearMonth));
+    const selectedYearProjects = (member.projects || []).map((projectRow) => ({
+      projectId: projectRow.projectId,
+      projectName: projectRow.projectName,
+      months: monthKeys.map((yearMonth) => monthWithStatus(projectRow, yearMonth)),
+    })).filter((projectRow) => projectRow.months.some((month) => month.isConfirmed || month.hasMissing));
     const warnings = monthsWithStatus.filter((month) => month.isWarning).map(({ yearMonth, rate }) => ({ yearMonth, rate }));
     return {
       memberId: member.memberId,
       memberName: member.memberName,
-      projectLabel: (member.projectNames || []).join(' · '),
-      projectCount: Number(member.projectCount) || 0,
+      projectLabel: selectedYearProjects.map((projectRow) => projectRow.projectName).join(' · '),
+      projectCount: selectedYearProjects.length,
+      projects: selectedRule.id === 'all' ? [] : selectedYearProjects,
       months: monthsWithStatus,
       warnings,
     };

@@ -240,6 +240,90 @@ describe('participation dashboard', () => {
     ]);
   });
 
+  it('저장 View는 선택 연도에 매칭되는 사업별 월 상태를 부모 합계와 함께 반환한다', () => {
+    const projects = [
+      { id: 'p-sheet', name: '시트 사업', clientOrg: 'KOICA', settlementSystem: 'E_NARA_DOUM' },
+      { id: 'p-manual', name: '수기 사업', clientOrg: 'KOICA', settlementSystem: 'RCMS' },
+      { id: 'p-out', name: '제외 사업', clientOrg: 'OTHER', settlementSystem: 'RCMS' },
+      { id: 'p-old', name: '과거 사업', clientOrg: 'KOICA', settlementSystem: 'RCMS' },
+    ];
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects,
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{
+        id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA 사업', clientOrgs: ['KOICA'],
+        settlementSystems: ['E_NARA_DOUM', 'RCMS'],
+      }],
+      entries: [
+        { id: 'sheet', source: 'PROJECT_TEAM_SYNC', projectId: 'p-sheet', personId: 'person-1', rate: 20, periodStart: '2026-01', periodEnd: '2026-03', monthlyRates: { '2026-01': 20, '2026-02': null, '2026-03': 0 } },
+        { id: 'sheet-manual', source: 'MANUAL', projectId: 'p-sheet', personId: 'person-1', rate: 5, periodStart: '2026-01', periodEnd: '2026-03' },
+        { id: 'manual', source: 'MANUAL', projectId: 'p-manual', personId: 'person-1', rate: 40, periodStart: '2026-01', periodEnd: '2026-03' },
+        { id: 'out', source: 'MANUAL', projectId: 'p-out', personId: 'person-1', rate: 90, periodStart: '2026-01', periodEnd: '2026-03' },
+        { id: 'old', source: 'MANUAL', projectId: 'p-old', personId: 'person-1', rate: 10, periodStart: '2025-01', periodEnd: '2025-12' },
+      ],
+    });
+
+    const savedMember = selectParticipationDashboardYear(snapshot, '2026', 'koica').members[0];
+    expect(savedMember.projectCount).toBe(2);
+    expect(savedMember.projects.map(({ projectId }) => projectId)).toEqual(['p-manual', 'p-sheet']);
+    expect(savedMember.projectLabel).toBe('수기 사업 · 시트 사업');
+    expect(savedMember.months.slice(0, 3)).toEqual([
+      { yearMonth: '2026-01', label: '1월', rate: 60, isConfirmed: true, hasMissing: false, isWarning: false },
+      { yearMonth: '2026-02', label: '2월', rate: 40, isConfirmed: true, hasMissing: true, isWarning: false },
+      { yearMonth: '2026-03', label: '3월', rate: 40, isConfirmed: true, hasMissing: false, isWarning: false },
+    ]);
+    expect(savedMember.projects.find(({ projectId }) => projectId === 'p-sheet').months.slice(0, 3)).toEqual([
+      { yearMonth: '2026-01', label: '1월', rate: 20, isConfirmed: true, hasMissing: false, isWarning: false },
+      { yearMonth: '2026-02', label: '2월', rate: 0, isConfirmed: false, hasMissing: true, isWarning: false },
+      { yearMonth: '2026-03', label: '3월', rate: 0, isConfirmed: true, hasMissing: false, isWarning: false },
+    ]);
+    expect(savedMember.projects.map(({ projectId }) => projectId)).not.toContain('p-out');
+    expect(savedMember.projects.map(({ projectId }) => projectId)).not.toContain('p-old');
+
+    const allMember = selectParticipationDashboardYear(snapshot, '2026').members[0];
+    expect(allMember.projects).toEqual([]);
+    expect(allMember.projectCount).toBe(3);
+  });
+
+  it('같은 projectId의 여러 stint는 하나로 합치고 같은 이름의 다른 ID는 분리한다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [
+        { id: 'p-one', name: '같은 이름', clientOrg: 'KOICA' },
+        { id: 'p-two', name: '같은 이름', clientOrg: 'KOICA' },
+      ],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA', clientOrgs: ['KOICA'] }],
+      entries: [
+        { id: 'one-a', projectId: 'p-one', personId: 'person-1', rate: 10, periodStart: '2026-01', periodEnd: '2026-01' },
+        { id: 'one-b', projectId: 'p-one', personId: 'person-1', rate: 20, periodStart: '2026-02', periodEnd: '2026-02' },
+        { id: 'two', projectId: 'p-two', personId: 'person-1', rate: 30, periodStart: '2026-01', periodEnd: '2026-01' },
+      ],
+    });
+
+    const member = selectParticipationDashboardYear(snapshot, '2026', 'koica').members[0];
+    expect(member.projectCount).toBe(2);
+    expect(member.projects.map(({ projectId }) => projectId)).toEqual(['p-one', 'p-two']);
+    expect(member.projects[0].months.slice(0, 2).map(({ rate }) => rate)).toEqual([10, 20]);
+  });
+
+  it('전월 미입력 사업과 전월 명시적 0 사업도 선택 연도 사업으로 센다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [{ id: 'missing', name: '빈 사업' }, { id: 'zero', name: '0 사업' }],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'both', kind: 'USER_DEFINED', alias: '둘 다', settlementSystems: [] }],
+      entries: [
+        { id: 'missing-entry', source: 'PROJECT_TEAM_SYNC', projectId: 'missing', personId: 'person-1', periodStart: '2026-01', periodEnd: '2026-12', monthlyRates: {} },
+        { id: 'zero-entry', source: 'PROJECT_TEAM_SYNC', projectId: 'zero', personId: 'person-1', periodStart: '2026-01', periodEnd: '2026-12', monthlyRates: Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`2026-${String(index + 1).padStart(2, '0')}`, 0])) },
+      ],
+    });
+
+    const member = selectParticipationDashboardYear(snapshot, '2026', 'both').members[0];
+    expect(member.projectCount).toBe(2);
+    expect(member.projects.map(({ projectId }) => projectId)).toEqual(['zero', 'missing']);
+    expect(member.projects[0].months.every(({ isConfirmed, hasMissing }) => isConfirmed && !hasMissing)).toBe(true);
+    expect(member.projects[1].months.every(({ isConfirmed, hasMissing }) => !isConfirmed && hasMissing)).toBe(true);
+  });
+
   it('프로젝트별 참여인력 요약도 PROJECT_TEAM_SYNC와 MANUAL을 이중 집계하지 않는다', () => {
     const result = buildProjectParticipationSnapshot({
       project,
