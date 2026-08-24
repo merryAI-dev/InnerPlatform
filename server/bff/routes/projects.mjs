@@ -1872,7 +1872,9 @@ function resolveProjectDepartmentFromPayload(payload, currentProject = {}) {
   );
 }
 
-export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentProject = {}) {
+function buildProjectPatchFromChangeRequestPayloadInternal(payload = {}, currentProject = {}, {
+  validateParticipationSheetLink = true,
+} = {}) {
   const managerId = readOptionalText(payload.registeredById)
     || readOptionalText(payload.managerId)
     || readOptionalText(currentProject.registeredById)
@@ -1881,6 +1883,9 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     || readOptionalText(payload.managerName)
     || readOptionalText(currentProject.registeredByName)
     || readOptionalText(currentProject.managerName);
+  const effectiveParticipationSheetLink = Object.hasOwn(payload, 'participationSheetLink')
+    ? readOptionalText(payload.participationSheetLink)
+    : readOptionalText(currentProject.participationSheetLink);
   const effectiveContractStart = readOptionalText(payload.contractStart) || readOptionalText(currentProject.contractStart);
   const effectiveContractEnd = readOptionalText(payload.contractEnd) || readOptionalText(currentProject.contractEnd);
   const registrationVersion = registrationRequirementsVersion(
@@ -1888,10 +1893,21 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
       ? payload.registrationRequirementsVersion
       : currentProject.registrationRequirementsVersion,
   );
-  // 참여율 시트 링크 검증은 제출 게이트(assertRegistrationPayload, PUT/PATCH 라우트)에서만 한다.
-  // 이 빌더는 draft open 시드 경로에서도 실행되므로, 여기서 검증하면 기존 데이터가
-  // 새 필수 규칙을 못 채운 프로젝트의 수정 화면 열기 자체가 막힌다.
+  const currentRegistrationVersion = registrationRequirementsVersion(
+    currentProject.registrationRequirementsVersion,
+  );
   const updatesTeamMembers = Object.hasOwn(payload, 'teamMembersDetailed');
+  const updatesParticipationSheet = participationSheetFieldsChanged(payload, currentProject);
+  if (validateParticipationSheetLink) {
+    assertParticipationSheetLinkForTeamMembers(
+      payload.teamMembersDetailed,
+      effectiveParticipationSheetLink,
+      {
+        required: registrationVersion === 2
+          && (updatesParticipationSheet || currentRegistrationVersion !== 2),
+      },
+    );
+  }
   const teamMembersDetailed = updatesTeamMembers
     ? normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed, {
         contractStartMonth: effectiveContractStart.slice(0, 7),
@@ -1998,6 +2014,10 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
   }), 'totalRevenueAmount');
 }
 
+export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentProject = {}) {
+  return buildProjectPatchFromChangeRequestPayloadInternal(payload, currentProject);
+}
+
 const PROJECT_INFO_CHANGE_LABELS = {
   name: '프로젝트명',
   officialContractName: '공식 계약명',
@@ -2091,7 +2111,13 @@ function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
   });
 }
 
-function projectInfoPayloadWithDocuments(payload, project, attachmentRefs, trustedStoredDocuments = {}) {
+function projectInfoPayloadWithDocuments(
+  payload,
+  project,
+  attachmentRefs,
+  trustedStoredDocuments = {},
+  { validateParticipationSheetLink = true } = {},
+) {
   const privateDocuments = registrationPrivateDocuments(attachmentRefs);
   const effectiveDocument = (field) => {
     if (privateDocuments[field]) return privateDocuments[field];
@@ -2104,7 +2130,9 @@ function projectInfoPayloadWithDocuments(payload, project, attachmentRefs, trust
     }
     return project[field] || null;
   };
-  const normalizedPatch = buildProjectPatchFromChangeRequestPayload(payload, project);
+  const normalizedPatch = buildProjectPatchFromChangeRequestPayloadInternal(payload, project, {
+    validateParticipationSheetLink,
+  });
   const proposedWithLegacyFallback = buildProjectRequestPayloadFromProject({ ...project, ...normalizedPatch }, payload);
   const proposed = Object.fromEntries(PROJECT_INFO_PAYLOAD_FIELDS.flatMap((field) => (
     Object.hasOwn(proposedWithLegacyFallback, field) ? [[field, proposedWithLegacyFallback[field]]] : []
@@ -2148,9 +2176,16 @@ export function buildProjectInfoDraftSeed(project, previousRequest) {
       project,
       [],
       trustedStoredChangeRequestDocuments(previousRequest),
+      { validateParticipationSheetLink: false },
     );
   }
-  return projectInfoPayloadWithDocuments(buildProjectRequestPayloadFromProject(project), project, []);
+  return projectInfoPayloadWithDocuments(
+    buildProjectRequestPayloadFromProject(project),
+    project,
+    [],
+    {},
+    { validateParticipationSheetLink: false },
+  );
 }
 
 export function buildProjectInfoChangeSubmission({
@@ -2198,6 +2233,8 @@ export function buildProjectInfoChangeSubmission({
     buildProjectRequestPayloadFromProject(project, previousRequest?.payload),
     project,
     [],
+    {},
+    { validateParticipationSheetLink: false },
   );
   const proposedSnapshot = projectInfoPayloadWithDocuments(
     payload,

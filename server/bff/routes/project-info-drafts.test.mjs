@@ -512,6 +512,177 @@ describe('project information private drafts', () => {
     })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
   });
 
+  it('opens a pending V2 change draft for a legacy project before its participation sheet is linked', async () => {
+    const h = harness();
+    const manualTeam = [{
+      memberName: 'Actor A',
+      memberNickname: 'Actor',
+      role: '운영매니저',
+      participationRate: 50,
+      isDocumentOnly: false,
+    }];
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      id: 'project-a',
+      tenantId: 'tenant-a',
+      version: 3,
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewHistory: [],
+      ...validPayload({ teamMembersDetailed: manualTeam }),
+    });
+    h.db.documents.set('orgs/tenant-a/project_requests/change-project-a', {
+      id: 'change-project-a',
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      targetProjectId: 'project-a',
+      proposedSnapshot: validV2Payload({ teamMembersDetailed: manualTeam }),
+    });
+    const projectBeforeOpen = clone(h.db.documents.get('orgs/tenant-a/projects/project-a'));
+    const requestBeforeOpen = clone(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a'));
+
+    const opened = await openedDraft(h, 'open-legacy-pending-v2');
+
+    expect(opened).toMatchObject({
+      status: 200,
+      body: { draft: {
+        projectId: 'project-a',
+        draftRevision: 0,
+        payload: {
+          registrationRequirementsVersion: 2,
+          participationSheetLink: '',
+          teamMembersDetailed: manualTeam,
+        },
+      } },
+    });
+    expect(h.db.documents.get('orgs/tenant-a/projects/project-a')).toEqual(projectBeforeOpen);
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a')).toEqual(requestBeforeOpen);
+  });
+
+  it('hydrates a pending no-link sheet roster but still rejects it at submission', async () => {
+    const h = harness();
+    const manualTeam = [{
+      memberName: 'Actor A',
+      memberNickname: 'Actor',
+      role: '운영매니저',
+      participationRate: 50,
+      isDocumentOnly: false,
+    }];
+    const sheetTeam = [{
+      personId: 'person-a',
+      memberName: 'Actor A',
+      memberNickname: 'Actor',
+      role: '',
+      participationRate: 20,
+      laborAllocationStartMonth: '2026-07',
+      laborAllocationEndMonth: '2026-12',
+      monthlyRates: {
+        '2026-07': 20,
+        '2026-08': 0,
+        '2026-09': null,
+      },
+    }];
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      id: 'project-a',
+      tenantId: 'tenant-a',
+      version: 3,
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewHistory: [],
+      ...validPayload({ teamMembersDetailed: manualTeam }),
+    });
+    h.db.documents.set('orgs/tenant-a/project_requests/change-project-a', {
+      id: 'change-project-a',
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      targetProjectId: 'project-a',
+      proposedSnapshot: validV2Payload({ teamMembersDetailed: sheetTeam }),
+    });
+    const projectBeforeOpen = clone(h.db.documents.get('orgs/tenant-a/projects/project-a'));
+    const requestBeforeOpen = clone(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a'));
+
+    const opened = await openedDraft(h, 'open-legacy-pending-sheet-v2');
+
+    expect(opened.body.draft.payload).toMatchObject({
+      registrationRequirementsVersion: 2,
+      participationSheetLink: '',
+      teamMembersDetailed: sheetTeam,
+    });
+    expect(h.db.documents.get('orgs/tenant-a/projects/project-a')).toEqual(projectBeforeOpen);
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a')).toEqual(requestBeforeOpen);
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'submit-legacy-pending-sheet-v2',
+      expectedDraftRevision: 0,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'project_registration_invalid',
+      message: expect.stringContaining('participationSheetLink'),
+    });
+    expect(h.db.documents.get('orgs/tenant-a/projects/project-a')).toEqual(projectBeforeOpen);
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a')).toEqual(requestBeforeOpen);
+  });
+
+  it('returns an existing active owner draft without hydrating an incompatible pending seed', async () => {
+    const h = harness();
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    const requestPath = 'orgs/tenant-a/project_requests/change-project-a';
+    const draftId = `v1_${Buffer.from(JSON.stringify(['project-info', 'project-a', 'actor-a']), 'utf8').toString('base64url')}`;
+    const draftPath = `orgs/tenant-a/privateEditDrafts/${draftId}`;
+    const existingDraft = {
+      ownerUid: 'actor-a',
+      tenantId: 'tenant-a',
+      resourceType: 'project-info',
+      resourceId: 'project-a',
+      draftRevision: 7,
+      baseCanonicalVersion: 2,
+      baseSnapshot: { marker: 'original-base' },
+      payload: { marker: 'keep-existing-draft' },
+      attachmentRefs: [],
+      stepIndex: 3,
+      status: 'ACTIVE',
+      createdAt: '2026-07-11T23:00:00.000Z',
+      updatedAt: '2026-07-11T23:30:00.000Z',
+    };
+    h.db.documents.set(requestPath, {
+      id: 'change-project-a',
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      targetProjectId: 'project-a',
+      proposedSnapshot: validV2Payload({
+        participationSheetLink: '',
+        teamMembersDetailed: [{
+          personId: 'person-a',
+          memberName: 'Actor A',
+          laborAllocationStartMonth: '2026-07',
+          monthlyRates: { '2026-07': 120 },
+        }],
+      }),
+    });
+    h.db.documents.set(draftPath, existingDraft);
+    const projectBeforeOpen = clone(h.db.documents.get(projectPath));
+    const requestBeforeOpen = clone(h.db.documents.get(requestPath));
+    const draftBeforeOpen = clone(h.db.documents.get(draftPath));
+
+    const opened = await openedDraft(h, 'open-existing-active-draft');
+
+    expect(opened.body.draft).toEqual({
+      projectId: 'project-a',
+      resourceType: 'project-info',
+      resourceId: 'project-a',
+      draftRevision: 7,
+      baseCanonicalVersion: 2,
+      payload: { marker: 'keep-existing-draft' },
+      attachmentRefs: [],
+      stepIndex: 3,
+      status: 'ACTIVE',
+      createdAt: '2026-07-11T23:00:00.000Z',
+      updatedAt: '2026-07-11T23:30:00.000Z',
+    });
+    expect(h.db.documents.get(projectPath)).toEqual(projectBeforeOpen);
+    expect(h.db.documents.get(requestPath)).toEqual(requestBeforeOpen);
+    expect(h.db.documents.get(draftPath)).toEqual(draftBeforeOpen);
+    expect(h.auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
+  });
+
   it('downloads a stored edit-draft attachment only for its owner and exact document kind', async () => {
     const downloadDraftAttachment = vi.fn(async () => ({
       buffer: Buffer.from('private-edit-pdf'), contentType: 'application/pdf', size: 16,

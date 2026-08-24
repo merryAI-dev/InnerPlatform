@@ -689,8 +689,8 @@ describe('project route helpers', () => {
     };
 
     expect(() => changeSubmission(payload, currentProject)).toThrowError(/participationSheetLink/);
-    // 열기/시드 경로는 같은 데이터로도 막히면 안 된다 — 링크는 폼에서 채워 제출할 때 검증한다.
-    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject)).not.toThrow();
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/participationSheetLink/);
   });
 
   it('rejects a V2 change submission with a manual roster but no participation sheet link', () => {
@@ -703,7 +703,8 @@ describe('project route helpers', () => {
     });
 
     expect(() => changeSubmission(payload, currentProject)).toThrowError(/participationSheetLink/);
-    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject)).not.toThrow();
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/participationSheetLink/);
   });
 
   it('preserves the current participation roster when a portal change does not touch it', () => {
@@ -738,9 +739,8 @@ describe('project route helpers', () => {
     };
 
     expect(() => changeSubmission(payload, currentProject)).toThrowError(/participationSheetLink/);
-    // 부분 patch(열기/시드 경로)는 온보딩 전 프로젝트라도 만들어져야 한다.
     expect(() => buildProjectPatchFromChangeRequestPayload({ contractEnd: '2028-12-31' }, currentProject))
-      .not.toThrow();
+      .toThrowError(/participationSheetLink/);
   });
 
   it('requires a participation sheet link at submit when a legacy project is upgraded to V2', () => {
@@ -760,7 +760,7 @@ describe('project route helpers', () => {
       .toThrowError(/participationSheetLink/);
     expect(() => buildProjectPatchFromChangeRequestPayload({
       registrationRequirementsVersion: 2,
-    }, currentProject)).not.toThrow();
+    }, currentProject)).toThrowError(/participationSheetLink/);
   });
 
   it('rejects a change submission whose sheet-backed row has no person identity', () => {
@@ -779,7 +779,8 @@ describe('project route helpers', () => {
     };
 
     expect(() => changeSubmission(payload, currentProject)).toThrowError(/identity is required/);
-    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject)).not.toThrow();
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
+      .toThrowError(/identity is required/);
   });
 
   it('opens the edit-form draft seed even when the saved roster is sheet-backed without a sheet link', () => {
@@ -800,6 +801,40 @@ describe('project route helpers', () => {
 
     expect(seed.teamMembersDetailed).toHaveLength(1);
     expect(seed.teamMembersDetailed[0].monthlyRates).toEqual({ '2026-01': 20 });
+  });
+
+  it('submits a repaired sheet link without revalidating the legacy before snapshot', () => {
+    const sheetMember = {
+      memberName: '김정태',
+      memberNickname: '에이블',
+      role: '',
+      participationRate: 20,
+      laborAllocationStartMonth: '2026-01',
+      monthlyRates: { '2026-01': 20 },
+    };
+    const canonical = registrationV2Canonical(
+      registrationV2Payload({
+        participationSheetLink: 'https://docs.google.com/spreadsheets/d/repaired/edit',
+        teamMembersDetailed: [sheetMember],
+      }),
+      registrationV2AttachmentKinds,
+      registrationV2AttachmentKinds,
+    );
+    const legacyProject = {
+      ...canonical.project,
+      participationSheetLink: '',
+      teamMembersDetailed: [sheetMember],
+    };
+
+    const openedDraft = buildProjectInfoDraftSeed(legacyProject, {});
+    const submission = changeSubmission({
+      ...openedDraft,
+      participationSheetLink: 'https://docs.google.com/spreadsheets/d/repaired/edit',
+      teamMembersDetailed: [sheetMember],
+    }, legacyProject);
+
+    expect(submission.projectRequest.proposedSnapshot.participationSheetLink)
+      .toBe('https://docs.google.com/spreadsheets/d/repaired/edit');
   });
 
   it('uses the current project contract end when a partial change omits contractEnd', () => {
