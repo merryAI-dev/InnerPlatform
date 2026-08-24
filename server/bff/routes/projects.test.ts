@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildProjectRegistrationCanonicalDocuments,
   buildProjectInfoChangeSubmission,
+  buildProjectInfoDraftSeed,
   buildProjectPatchFromChangeRequestPayload,
   formatProjectTypeSlackLabel,
   mergeProjectAndRequestDocs,
@@ -137,6 +138,21 @@ function registrationV2Canonical(
     actorName: 'PM A',
     actorEmail: 'pm-a@example.com',
     timestamp: '2026-07-14T00:00:00.000Z',
+  });
+}
+
+function changeSubmission(payload: Record<string, unknown>, project: Record<string, unknown>) {
+  return buildProjectInfoChangeSubmission({
+    tenantId: 'mysc',
+    project,
+    previousRequest: null,
+    payload,
+    attachmentRefs: [],
+    actorId: 'pm-a',
+    actorName: 'PM A',
+    actorEmail: 'pm-a@example.com',
+    timestamp: '2026-08-24T00:00:00.000Z',
+    targetProjectVersion: 2,
   });
 }
 
@@ -657,7 +673,7 @@ describe('project route helpers', () => {
     expect(buildProjectPatchFromChangeRequestPayload(payload, canonical.project).participationSheetLink).toBe(nextLink);
   });
 
-  it('rejects a portal change patch that carries sheet rates without a participation sheet link', () => {
+  it('rejects a change submission that carries sheet rates without a participation sheet link', () => {
     const currentProject = registrationV2Canonical(registrationV2Payload()).project;
     const payload = {
       ...registrationV2Payload(),
@@ -672,11 +688,12 @@ describe('project route helpers', () => {
       }],
     };
 
-    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
-      .toThrowError(/participationSheetLink/);
+    expect(() => changeSubmission(payload, currentProject)).toThrowError(/participationSheetLink/);
+    // 열기/시드 경로는 같은 데이터로도 막히면 안 된다 — 링크는 폼에서 채워 제출할 때 검증한다.
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject)).not.toThrow();
   });
 
-  it('rejects a V2 portal change patch with a manual roster but no participation sheet link', () => {
+  it('rejects a V2 change submission with a manual roster but no participation sheet link', () => {
     const currentProject = registrationV2Canonical(registrationV2Payload()).project;
     const payload = registrationV2Payload({
       participationSheetLink: '',
@@ -685,8 +702,8 @@ describe('project route helpers', () => {
       }],
     });
 
-    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
-      .toThrowError(/participationSheetLink/);
+    expect(() => changeSubmission(payload, currentProject)).toThrowError(/participationSheetLink/);
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject)).not.toThrow();
   });
 
   it('preserves the current participation roster when a portal change does not touch it', () => {
@@ -710,31 +727,43 @@ describe('project route helpers', () => {
     expect({ ...currentProject, ...patch }.participationSheetLink).toBe('');
   });
 
-  it('requires sheet onboarding when a pre-link V2 project changes its contract period', () => {
+  it('requires sheet onboarding at submit when a pre-link V2 project changes its contract period', () => {
     const currentProject = {
       ...registrationV2Canonical(registrationV2Payload()).project,
       participationSheetLink: '',
     };
+    const payload = {
+      ...registrationV2Payload({ participationSheetLink: '' }),
+      contractEnd: '2028-12-31',
+    };
 
+    expect(() => changeSubmission(payload, currentProject)).toThrowError(/participationSheetLink/);
+    // 부분 patch(열기/시드 경로)는 온보딩 전 프로젝트라도 만들어져야 한다.
     expect(() => buildProjectPatchFromChangeRequestPayload({ contractEnd: '2028-12-31' }, currentProject))
-      .toThrowError(/participationSheetLink/);
+      .not.toThrow();
   });
 
-  it('requires a participation sheet link when a legacy project is upgraded to V2', () => {
+  it('requires a participation sheet link at submit when a legacy project is upgraded to V2', () => {
     const currentProject = {
+      id: 'project-legacy',
+      version: 1,
       registrationRequirementsVersion: 1,
       participationSheetLink: '',
+      registeredById: 'pm-a',
+      managerId: 'pm-a',
       teamMembersDetailed: [{
         memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50,
       }],
     };
 
+    expect(() => changeSubmission(registrationV2Payload({ participationSheetLink: '' }), currentProject))
+      .toThrowError(/participationSheetLink/);
     expect(() => buildProjectPatchFromChangeRequestPayload({
       registrationRequirementsVersion: 2,
-    }, currentProject)).toThrowError(/participationSheetLink/);
+    }, currentProject)).not.toThrow();
   });
 
-  it('rejects a portal change patch whose sheet-backed row has no person identity', () => {
+  it('rejects a change submission whose sheet-backed row has no person identity', () => {
     const currentProject = registrationV2Canonical(registrationV2Payload()).project;
     const payload = {
       ...registrationV2Payload(),
@@ -749,8 +778,28 @@ describe('project route helpers', () => {
       }],
     };
 
-    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject))
-      .toThrowError(/identity is required/);
+    expect(() => changeSubmission(payload, currentProject)).toThrowError(/identity is required/);
+    expect(() => buildProjectPatchFromChangeRequestPayload(payload, currentProject)).not.toThrow();
+  });
+
+  it('opens the edit-form draft seed even when the saved roster is sheet-backed without a sheet link', () => {
+    const project = {
+      ...registrationV2Canonical(registrationV2Payload()).project,
+      participationSheetLink: '',
+      teamMembersDetailed: [{
+        memberName: '김정태',
+        memberNickname: '에이블',
+        role: '',
+        participationRate: 20,
+        laborAllocationStartMonth: '2026-01',
+        monthlyRates: { '2026-01': 20 },
+      }],
+    };
+
+    const seed = buildProjectInfoDraftSeed(project, {});
+
+    expect(seed.teamMembersDetailed).toHaveLength(1);
+    expect(seed.teamMembersDetailed[0].monthlyRates).toEqual({ '2026-01': 20 });
   });
 
   it('uses the current project contract end when a partial change omits contractEnd', () => {

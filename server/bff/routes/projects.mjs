@@ -1881,9 +1881,6 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     || readOptionalText(payload.managerName)
     || readOptionalText(currentProject.registeredByName)
     || readOptionalText(currentProject.managerName);
-  const effectiveParticipationSheetLink = Object.hasOwn(payload, 'participationSheetLink')
-    ? readOptionalText(payload.participationSheetLink)
-    : readOptionalText(currentProject.participationSheetLink);
   const effectiveContractStart = readOptionalText(payload.contractStart) || readOptionalText(currentProject.contractStart);
   const effectiveContractEnd = readOptionalText(payload.contractEnd) || readOptionalText(currentProject.contractEnd);
   const registrationVersion = registrationRequirementsVersion(
@@ -1891,19 +1888,10 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
       ? payload.registrationRequirementsVersion
       : currentProject.registrationRequirementsVersion,
   );
-  const currentRegistrationVersion = registrationRequirementsVersion(
-    currentProject.registrationRequirementsVersion,
-  );
+  // 참여율 시트 링크 검증은 제출 게이트(assertRegistrationPayload, PUT/PATCH 라우트)에서만 한다.
+  // 이 빌더는 draft open 시드 경로에서도 실행되므로, 여기서 검증하면 기존 데이터가
+  // 새 필수 규칙을 못 채운 프로젝트의 수정 화면 열기 자체가 막힌다.
   const updatesTeamMembers = Object.hasOwn(payload, 'teamMembersDetailed');
-  const updatesParticipationSheet = participationSheetFieldsChanged(payload, currentProject);
-  assertParticipationSheetLinkForTeamMembers(
-    payload.teamMembersDetailed,
-    effectiveParticipationSheetLink,
-    {
-      required: registrationVersion === 2
-        && (updatesParticipationSheet || currentRegistrationVersion !== 2),
-    },
-  );
   const teamMembersDetailed = updatesTeamMembers
     ? normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed, {
         contractStartMonth: effectiveContractStart.slice(0, 7),
