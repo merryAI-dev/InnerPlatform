@@ -1,0 +1,99 @@
+{
+  "catalogVersion": 1,
+  "educationAttainments": [
+    { "code": "HIGH_SCHOOL_GRADUATED", "label": "고등학교 졸업", "rank": 10 },
+    { "code": "ASSOCIATE_GRADUATED", "label": "전문학사 졸업", "rank": 20 },
+    { "code": "BACHELOR_ENROLLED", "label": "학사 재학", "rank": 30 },
+    { "code": "BACHELOR_GRADUATED", "label": "학사 졸업", "rank": 40 },
+    { "code": "MASTER_ENROLLED", "label": "석사 재학", "rank": 50 },
+    { "code": "MASTER_COMPLETED", "label": "석사 수료", "rank": 55 },
+    { "code": "MASTER_GRADUATED", "label": "석사 졸업", "rank": 60 },
+    { "code": "DOCTOR_ENROLLED", "label": "박사 재학", "rank": 70 },
+    { "code": "DOCTOR_COMPLETED", "label": "박사 수료", "rank": 75 },
+    { "code": "DOCTOR_GRADUATED", "label": "박사 졸업", "rank": 80 },
+    { "code": "OTHER", "label": "기타", "rank": 1 }
+  ],
+  "englishTests": [
+    {
+      "code": "TOEIC",
+      "label": "TOEIC",
+      "displayLabel": "TOEIC",
+      "scales": [
+        { "code": "TOEIC_990", "resultType": "NUMBER", "min": 0, "max": 990, "step": 1 }
+      ]
+    },
+    {
+      "code": "TOEFL",
+      "label": "TOEFL",
+      "displayLabel": "TOEFL",
+      "scales": [
+        { "code": "TOEFL_IBT_120", "resultType": "NUMBER", "min": 0, "max": 120, "step": 1 },
+        { "code": "TOEFL_IBT_6", "resultType": "NUMBER", "min": 0, "max": 6, "step": 0.5 },
+        { "code": "TOEFL_PBT_677", "resultType": "NUMBER", "min": 0, "max": 677, "step": 1 }
+      ]
+    },
+    {
+      "code": "OPIC",
+      "label": "OPIc",
+      "displayLabel": "OPIc",
+      "scales": [
+        {
+          "code": "OPIC_GRADE",
+          "resultType": "GRADE",
+          "allowedValues": ["NL", "NM", "NH", "IL", "IM1", "IM2", "IM3", "IH", "AL"]
+        }
+      ]
+    },
+    {
+      "code": "IELTS",
+      "label": "IELTS",
+      "displayLabel": "IELTS",
+      "scales": [
+        { "code": "IELTS_9", "resultType": "NUMBER", "min": 0, "max": 9, "step": 0.5 }
+      ]
+    },
+    {
+      "code": "TEPS",
+      "label": "TEPS",
+      "displayLabel": "TEPS",
+      "scales": [
+        { "code": "TEPS_600", "resultType": "NUMBER", "min": 0, "max": 600, "step": 1 }
+      ]
+    },
+    {
+      "code": "OTHER",
+      "label": "기타",
+      "displayLabel": "기타",
+      "scales": [
+        { "code": "OTHER_TEXT", "resultType": "TEXT" }
+      ]
+    }
+  ],
+  "countryCodes": [
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW", "AX", "AZ",
+    "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY", "BZ",
+    "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN", "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ",
+    "DE", "DJ", "DK", "DM", "DO", "DZ",
+    "EC", "EE", "EG", "EH", "ER", "ES", "ET",
+    "FI", "FJ", "FK", "FM", "FO", "FR",
+    "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL", "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY",
+    "HK", "HM", "HN", "HR", "HT", "HU",
+    "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT",
+    "JE", "JM", "JO", "JP",
+    "KE", "KG", "KH", "KI", "KM", "KN", "KP", "KR", "KW", "KY", "KZ",
+    "LA", "LB", "LC", "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY",
+    "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK", "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ",
+    "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP", "NR", "NU", "NZ",
+    "OM",
+    "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM", "PN", "PR", "PS", "PT", "PW", "PY",
+    "QA",
+    "RE", "RO", "RS", "RU", "RW",
+    "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ",
+    "TC", "TD", "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW", "TZ",
+    "UA", "UG", "UM", "US", "UY", "UZ",
+    "VA", "VC", "VE", "VG", "VI", "VN", "VU",
+    "WF", "WS",
+    "YE", "YT",
+    "ZA", "ZM", "ZW"
+  ]
+}
