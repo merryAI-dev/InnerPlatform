@@ -664,30 +664,31 @@ export function createProjectInfoDraftService({
         await assertLease(tx, current, nowDate);
         const existing = draftSnap.exists ? (draftSnap.data() || {}) : null;
         const previousRequest = requestSnap.exists ? (requestSnap.data() || {}) : {};
-        const seed = buildProjectInfoDraftSeed(project, previousRequest);
-        const draft = existing?.status === 'ACTIVE' && readOptionalText(existing.ownerUid) === current.actorId
-          ? existing
-          : {
-              ownerUid: current.actorId,
-              tenantId: current.tenantId,
-              resourceType: RESOURCE_TYPE,
-              resourceId: current.projectId,
-              draftRevision: 0,
-              baseCanonicalVersion: Number.isInteger(project.version) && project.version > 0 ? project.version : 1,
-              // Frozen copy of the canonical values this draft started from, so a
-              // later rebase can tell "the user changed it" from "someone else did".
-              baseSnapshot: seed,
-              payload: seed,
-              attachmentRefs: resumableDraftAttachments(
-                current.tenantId,
-                current.draftDocumentId,
-                previousRequest,
-              ),
-              stepIndex: 0,
-              status: 'ACTIVE',
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            };
+        let draft = existing;
+        if (existing?.status !== 'ACTIVE' || readOptionalText(existing.ownerUid) !== current.actorId) {
+          const seed = buildProjectInfoDraftSeed(project, previousRequest);
+          draft = {
+            ownerUid: current.actorId,
+            tenantId: current.tenantId,
+            resourceType: RESOURCE_TYPE,
+            resourceId: current.projectId,
+            draftRevision: 0,
+            baseCanonicalVersion: Number.isInteger(project.version) && project.version > 0 ? project.version : 1,
+            // Frozen copy of the canonical values this draft started from, so a
+            // later rebase can tell "the user changed it" from "someone else did".
+            baseSnapshot: seed,
+            payload: seed,
+            attachmentRefs: resumableDraftAttachments(
+              current.tenantId,
+              current.draftDocumentId,
+              previousRequest,
+            ),
+            stepIndex: 0,
+            status: 'ACTIVE',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          };
+        }
         assertDraftSize(draft);
         const body = { draft: draftContract(draft) };
         if (draft !== existing) {
