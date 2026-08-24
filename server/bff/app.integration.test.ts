@@ -1111,10 +1111,20 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       clientOrgs: ['KOICA'],
       settlementSystems: [],
     });
-    const targetProjectBeforeDashboard = (await db.doc(`orgs/${tenantId}/projects/${targetProjectId}`).get()).data();
-    const targetEntriesBeforeDashboard = firstEntries.docs
-      .map((doc) => ({ id: doc.id, data: doc.data() }))
-      .sort((left, right) => left.id.localeCompare(right.id));
+    const dashboardCollectionNames = ['projects', 'partEntries', 'persons', 'participation_rules'];
+    const snapshotDashboardCollections = async () => Object.fromEntries(await Promise.all(
+      dashboardCollectionNames.map(async (collectionName) => {
+        const snapshot = await db.collection(`orgs/${tenantId}/${collectionName}`).get();
+        return [collectionName, snapshot.docs
+          .map((doc) => ({ id: doc.id, data: doc.data() }))
+          .sort((left, right) => left.id.localeCompare(right.id))];
+      }),
+    ));
+    const collectionsBeforeDashboard = await snapshotDashboardCollections();
+    const expectedYearMonths = [
+      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
+      '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
+    ];
     const dashboard = await api
       .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-koica-platforms')
       .set(defaultHeaders);
@@ -1126,10 +1136,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
     expect(dashboard.body.unlinkedEntryCount).toBe(1);
     expect(dashboard.body.months).toHaveLength(12);
-    expect(dashboard.body.months.map((month: { yearMonth: string }) => month.yearMonth)).toEqual([
-      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
-      '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
-    ]);
+    expect(dashboard.body.months.map((month: { yearMonth: string }) => month.yearMonth)).toEqual(expectedYearMonths);
     expect(dashboard.body.members).toEqual([
       expect.objectContaining({
         memberId: 'person-able',
@@ -1148,7 +1155,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'p-koica-rcms',
     ].sort());
     expect(koicaPlatformsMember.projects).toHaveLength(koicaPlatformsMember.projectCount);
-    expect(koicaPlatformsMember.projects.every((project: { months: unknown[] }) => project.months.length === 12)).toBe(true);
+    koicaPlatformsMember.projects.forEach((project: { months: Array<{ yearMonth: string }> }) => {
+      expect(project.months.map((month) => month.yearMonth)).toEqual(expectedYearMonths);
+    });
     const targetProject = koicaPlatformsMember.projects.find((project: { projectId: string }) => project.projectId === targetProjectId);
     expect(targetProject.months).toEqual(expect.arrayContaining([
       expect.objectContaining({ yearMonth: '2026-01', rate: 20, isConfirmed: true, hasMissing: false }),
@@ -1164,13 +1173,22 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         sum + (project.months.find((month) => month.yearMonth === '2026-01')?.rate || 0)
       ), 0),
     );
-    expect(dashboard.body.filterOptions.settlementSystems).toEqual(expect.arrayContaining([
-      expect.objectContaining({ value: 'BOTAEM_E', projectCount: 0 }),
-      expect.objectContaining({ value: 'E_NARA_DOUM', projectCount: 1 }),
-      expect.objectContaining({ value: 'RCMS', projectCount: 2 }),
-      expect.objectContaining({ value: 'EZBARO', projectCount: 1 }),
-      expect.objectContaining({ value: 'ACCOUNTANT', projectCount: 1 }),
-    ]));
+    expect(dashboard.body.filterOptions.settlementSystems.map(({ value, projectCount }: { value: string; projectCount: number }) => ({
+      value,
+      projectCount,
+    }))).toEqual([
+      { value: 'NONE', projectCount: 0 },
+      { value: 'E_NARA_DOUM', projectCount: 1 },
+      { value: 'BOTAEM_E', projectCount: 0 },
+      { value: 'RCMS', projectCount: 2 },
+      { value: 'EZBARO', projectCount: 1 },
+      { value: 'SMTECH', projectCount: 0 },
+      { value: 'KOCCA_PMS', projectCount: 0 },
+      { value: 'NIPA', projectCount: 0 },
+      { value: 'IRIS', projectCount: 0 },
+      { value: 'OTHER', projectCount: 0 },
+      { value: 'ACCOUNTANT', projectCount: 1 },
+    ]);
 
     const platformOnlyDashboard = await api
       .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-rcms-all')
@@ -1194,6 +1212,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'p-koica-rcms',
       'p-other-rcms',
     ]);
+    platformOnlyDashboard.body.members[0].projects.forEach((project: { months: Array<{ yearMonth: string }> }) => {
+      expect(project.months.map((month) => month.yearMonth)).toEqual(expectedYearMonths);
+    });
 
     const clientOnlyDashboard = await api
       .get('/api/v1/participation-dashboard?year=2026&ruleId=participation-rule-koica-all')
@@ -1219,6 +1240,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'p-koica-other',
       'p-koica-rcms',
     ].sort());
+    clientOnlyDashboard.body.members[0].projects.forEach((project: { months: Array<{ yearMonth: string }> }) => {
+      expect(project.months.map((month) => month.yearMonth)).toEqual(expectedYearMonths);
+    });
 
     const allDashboard = await api
       .get('/api/v1/participation-dashboard?year=2026&ruleId=all')
@@ -1235,13 +1259,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       ]),
     }));
 
-    const targetEntriesAfterDashboard = await db.collection(`orgs/${tenantId}/partEntries`)
-      .where('projectId', '==', targetProjectId)
-      .get();
-    expect((await db.doc(`orgs/${tenantId}/projects/${targetProjectId}`).get()).data()).toEqual(targetProjectBeforeDashboard);
-    expect(targetEntriesAfterDashboard.docs
-      .map((doc) => ({ id: doc.id, data: doc.data() }))
-      .sort((left, right) => left.id.localeCompare(right.id))).toEqual(targetEntriesBeforeDashboard);
+    expect(await snapshotDashboardCollections()).toEqual(collectionsBeforeDashboard);
 
     await db.doc(`orgs/${tenantId}/persons/person-taylor`).set({
       personId: 'person-taylor',
