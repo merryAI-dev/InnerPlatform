@@ -52,6 +52,7 @@ const protectedCollections = [
   'cashflow_month_close_request_audits',
   'cashflow_cumulative_close_heads',
   'monthly_close_versions',
+  'persons',
 ] as const;
 const canonicalRootCollections = [
   'projects',
@@ -153,6 +154,7 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
         const created = doc(db, `orgs/${tenantId}/${collection}/created-${actor.uid}`);
 
         await assertFails(getDoc(existing));
+        await assertFails(getDocs(firestoreCollection(db, `orgs/${tenantId}/${collection}`)));
         await assertFails(setDoc(created, protectedDocumentData(actor.uid)));
         await assertFails(updateDoc(existing, { value: `updated-${actor.uid}` }));
         await assertFails(deleteDoc(existing));

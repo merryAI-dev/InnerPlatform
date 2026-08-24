@@ -17,12 +17,20 @@ import { DEFAULT_BOOTSTRAP_ADMIN_EMAILS } from '../data/auth-bootstrap';
 const policy = rbacPolicy as {
   rolePermissions: Record<string, string[]>;
   roles: string[];
+  roleChangeRules: Record<string, string[]>;
 };
 const firestoreRulesText = readFileSync(new URL('../../../firebase/firestore.rules', import.meta.url), 'utf8');
 const storageRulesText = readFileSync(new URL('../../../firebase/storage.rules', import.meta.url), 'utf8');
 const firebaseSourceText = readFileSync(new URL('../lib/firebase.ts', import.meta.url), 'utf8');
 
 describe('firestore rules policy alignment', () => {
+  it('keeps the four-role model and role assignment boundary unchanged', () => {
+    expect(policy.roles).toEqual(['admin', 'finance', 'pm', 'viewer']);
+    expect(policy.roleChangeRules).toEqual({
+      admin: ['admin', 'finance', 'pm', 'viewer'],
+    });
+  });
+
   // ── isSignedIn: company email domain ──
   it('only recognizes @mysc.co.kr emails (documented assumption)', () => {
     expect('@mysc.co.kr'.endsWith('@mysc.co.kr')).toBe(true);
@@ -167,9 +175,18 @@ describe('firestore rules policy alignment', () => {
 
   it('keeps business-card PII collections behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
-    expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
+    expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events', 'persons']");
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection)');
+  });
+
+  it('keeps People records behind BFF-only Firestore rules', () => {
+    expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events', 'persons']");
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/persons\/\{personId\} \{\s*allow read, write: if false;\s*\}/,
+    );
+    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection)');
   });
 

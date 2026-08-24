@@ -27,6 +27,8 @@
     "contact:write",
     "contact:image:read",
     "contact:delete",
+    "person:professional_profile:read",
+    "person:professional_profile:write",
     "user:manage",
     "tenant:manage"
   ],
@@ -51,6 +53,8 @@
       "contact:write",
       "contact:image:read",
       "contact:delete",
+      "person:professional_profile:read",
+      "person:professional_profile:write",
       "user:manage",
       "tenant:manage"
     ],
@@ -72,7 +76,9 @@
       "audit:read",
       "contact:read",
       "contact:write",
-      "contact:image:read"
+      "contact:image:read",
+      "person:professional_profile:read",
+      "person:professional_profile:write"
     ],
     "pm": [
       "project:read",
