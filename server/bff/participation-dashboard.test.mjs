@@ -6,7 +6,15 @@ import {
   buildProjectParticipationSnapshot,
   selectParticipationDashboardYear,
 } from './participation-dashboard.mjs';
+import {
+  PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
+  PARTICIPATION_SETTLEMENT_SYSTEM_LABELS,
+} from './participation-settlement-system.mjs';
 import { mountParticipationDashboardRoutes } from './routes/participation-dashboard.mjs';
+import {
+  PROJECT_SETTLEMENT_SYSTEM_CODES,
+  SETTLEMENT_SYSTEM_LABELS,
+} from '../../src/app/data/types.ts';
 
 const project = {
   id: 'agri-2026', clientOrg: '한국농업기술진흥원', settlementSystem: 'ACCOUNTANT',
@@ -116,6 +124,33 @@ describe('participation dashboard', () => {
       { value: 'IRIS', label: 'IRIS(범부처통합연구지원시스템)', projectCount: 0 },
       { value: 'OTHER', label: '기타', projectCount: 0 },
     ]);
+  });
+
+  it('관측된 레거시 정산 분류를 등록 카탈로그 뒤에 정렬하고 실제 사업 수를 센다', () => {
+    const snapshot = buildParticipationDashboardSnapshot({
+      projects: [
+        { id: 'accountant-1', settlementSystem: 'ACCOUNTANT' },
+        { id: 'private-1', settlementSystem: 'NONE' },
+        { id: 'accountant-2', registrationRequirementsVersion: 2, basis: 'SUPPLY_AMOUNT', settlementSystem: 'ACCOUNTANT' },
+        { id: 'private-2', settlementSystem: 'NONE' },
+        { id: 'private-3', settlementSystem: 'NONE' },
+      ],
+    });
+
+    expect(snapshot.filterOptions.settlementSystems.map(({ value }) => value)).toEqual([
+      ...PROJECT_SETTLEMENT_SYSTEM_CODES,
+      'ACCOUNTANT',
+      'PRIVATE',
+    ]);
+    expect(snapshot.filterOptions.settlementSystems.slice(-2)).toEqual([
+      { value: 'ACCOUNTANT', label: '회계사정산', projectCount: 2 },
+      { value: 'PRIVATE', label: '민간사업', projectCount: 3 },
+    ]);
+  });
+
+  it('사업 등록 카탈로그와 표시명을 클라이언트 계약과 동일하게 유지한다', () => {
+    expect(PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES).toEqual(PROJECT_SETTLEMENT_SYSTEM_CODES);
+    expect(PARTICIPATION_SETTLEMENT_SYSTEM_LABELS).toEqual(SETTLEMENT_SYSTEM_LABELS);
   });
 
   it('sheet-backed 월별 맵의 빈칸을 legacy 기본률로 되살리지 않는다', () => {
@@ -333,5 +368,9 @@ describe('participation dashboard routes', () => {
     expect(saved.get(`orgs/mysc/participation_rules/${legacyResponse.body.id}`)).toMatchObject({ clientOrgs: ['KOICA'], settlementSystems: ['E_NARA_DOUM'] });
     const zeroProjectResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'zero-project-key').send({ alias: 'RCMS 예정 사업', clientOrgs: [], settlementSystems: ['RCMS'] }).expect(200);
     expect(saved.get(`orgs/mysc/participation_rules/${zeroProjectResponse.body.id}`)).toMatchObject({ alias: 'RCMS 예정 사업', clientOrgs: [], settlementSystems: ['RCMS'] });
+    const savedCount = saved.size;
+    const unknownResponse = await request(app).post('/api/v1/participation-dashboard/rules').set('Idempotency-Key', 'unknown-platform-key').send({ alias: '알 수 없는 플랫폼', clientOrgs: [], settlementSystems: ['UNKNOWN_PLATFORM'] }).expect(422);
+    expect(unknownResponse.body.code).toBe('invalid_participation_rule_filter');
+    expect(saved.size).toBe(savedCount);
   });
 });
