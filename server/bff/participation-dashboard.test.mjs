@@ -306,6 +306,28 @@ describe('participation dashboard', () => {
     expect(member.projects[0].months.slice(0, 2).map(({ rate }) => rate)).toEqual([10, 20]);
   });
 
+  it('동일 프로젝트 stint 입력 순서와 무관하게 이름과 월 키를 안정적으로 직렬화한다', () => {
+    const common = {
+      projects: [{ id: 'p-one', name: '프로젝트 원본명', clientOrg: 'KOICA' }],
+      people: [{ personId: 'person-1', name: '참여자' }],
+      rules: [{ id: 'koica', kind: 'USER_DEFINED', alias: 'KOICA', clientOrgs: ['KOICA'] }],
+    };
+    const entries = [
+      { id: 'feb', projectId: 'p-one', projectShortName: '나 사업', personId: 'person-1', rate: 20, periodStart: '2026-02', periodEnd: '2026-02' },
+      { id: 'jan', projectId: 'p-one', projectName: '가 사업', personId: 'person-1', rate: 10, periodStart: '2026-01', periodEnd: '2026-01' },
+    ];
+    const serializedProject = (orderedEntries) => buildParticipationDashboardSnapshot({
+      ...common,
+      entries: orderedEntries,
+    }).rules.find(({ id }) => id === 'koica').members[0].projects[0];
+
+    const forward = serializedProject(entries);
+    const reverse = serializedProject([...entries].reverse());
+    expect(forward).toEqual(reverse);
+    expect(forward.projectName).toBe('가 사업');
+    expect(Object.keys(forward.monthlyRates)).toEqual(['2026-01', '2026-02']);
+  });
+
   it('전월 미입력 사업과 전월 명시적 0 사업도 선택 연도 사업으로 센다', () => {
     const snapshot = buildParticipationDashboardSnapshot({
       projects: [{ id: 'missing', name: '빈 사업' }, { id: 'zero', name: '0 사업' }],

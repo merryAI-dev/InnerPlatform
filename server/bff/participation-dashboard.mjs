@@ -138,11 +138,12 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
       const projectName = readOptionalText(entry?.projectShortName) || readOptionalText(entry?.projectName) || readOptionalText(project?.name) || projectId;
       const projectRow = row.projects.get(projectId) || {
         projectId,
-        projectName,
+        projectNames: new Set(),
         values: new Map(),
         confirmedMonths: new Set(),
         missingMonths: new Set(),
       };
+      projectRow.projectNames.add(projectName);
       row.projectNames.add(projectName);
       row.projectIds.add(projectId);
       for (const year of yearsForEntry(entry)) {
@@ -190,8 +191,8 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         missingMonths: [...row.missingMonths].sort(),
         projects: [...row.projects.values()].map((projectRow) => ({
           projectId: projectRow.projectId,
-          projectName: projectRow.projectName,
-          monthlyRates: Object.fromEntries([...projectRow.values.entries()]),
+          projectName: [...projectRow.projectNames].sort((left, right) => left.localeCompare(right, 'ko'))[0] || projectRow.projectId,
+          monthlyRates: Object.fromEntries([...projectRow.values.entries()].sort(([left], [right]) => left.localeCompare(right))),
           confirmedMonths: [...projectRow.confirmedMonths].sort(),
           missingMonths: [...projectRow.missingMonths].sort(),
         })).sort((left, right) => (
