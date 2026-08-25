@@ -191,18 +191,12 @@ describe('platform-bff-client', () => {
     });
   });
 
-  it('uses the canonical month-close review hook for MONTH and the status transition hook for WEEK', async () => {
+  it('uses the same JVM status transition hook for MONTH and WEEK approvals', async () => {
     const status = { projectId: 'p001', yearMonth: '2026-08', items: [] };
-    const monthRequest = {
-      requestId: 'p001-2026-08', projectId: 'p001', yearMonth: '2026-08', status: 'PENDING',
-      revision: 3, manifestHash: 'sha256:manifest', reviewWarnings: [],
-    };
     const client = asMockClient({
-      get: vi.fn()
-        .mockResolvedValueOnce({ data: { request: monthRequest } })
-        .mockResolvedValueOnce({ data: status }),
+      get: vi.fn(),
       post: vi.fn()
-        .mockResolvedValueOnce({ data: { request: { ...monthRequest, status: 'APPROVED' } } })
+        .mockResolvedValueOnce({ data: status })
         .mockResolvedValueOnce({ data: status }),
       request: vi.fn(),
     });
@@ -211,9 +205,9 @@ describe('platform-bff-client', () => {
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'MONTH', action: 'APPROVE' });
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'WEEK_2', action: 'APPROVE' });
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/requests/p001-2026-08/status-review', expect.objectContaining({
-      body: { decision: 'APPROVE', expectedRevision: 3, expectedManifestHash: 'sha256:manifest' },
-      idempotencyKey: 'cashflow-settlement:p001-2026-08:r3:approve',
+    expect(client.get).not.toHaveBeenCalled();
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
+      body: { yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' },
     }));
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
       body: { yearMonth: '2026-08', period: 'WEEK_2', action: 'APPROVE' },
