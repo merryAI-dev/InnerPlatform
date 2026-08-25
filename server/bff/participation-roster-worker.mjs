@@ -97,6 +97,7 @@ export function createParticipationRosterChangedOutboxHandler({ db, googleSheets
         updatedAt: nowIso,
       };
       if (text(result.spreadsheetTitle)) status.spreadsheetTitle = result.spreadsheetTitle;
+      if (Array.isArray(result.sheetTabs) && result.sheetTabs.length > 0) status.sheetTabs = result.sheetTabs;
       if (result.ok === true) {
         status.lastSuccessAt = nowIso;
         status.writtenRows = result.writtenRows || 0;

@@ -210,6 +210,41 @@ async function markFailure(db, ref, event, nowIso, maxAttempts, error) {
   return { updated, isDead };
 }
 
+/**
+ * 이벤트 하나를 지금 이 요청 안에서 처리한다(인라인). 대기열 계약은 그대로다 -
+ * 같은 claim·성공/실패 마킹을 쓰므로, 인라인이 실패하거나 도중에 죽어도 이벤트는
+ * FAILED/stale-PROCESSING 으로 남아 다음 배치(크론)가 이어받는다. 인라인은 지름길이지
+ * 별도 경로가 아니다.
+ */
+export async function processOutboxEventById(db, eventId, {
+  now = () => new Date().toISOString(),
+  eventHandlers,
+  maxAttempts = 8,
+  workerId = `inline-${randomUUID()}`,
+  processingTimeoutMs = DEFAULT_PROCESSING_TIMEOUT_MS,
+  createClaimToken = randomUUID,
+} = {}) {
+  const normalizedId = String(eventId || '').trim();
+  if (!normalizedId) return { processed: false, reason: 'event_id_required' };
+  const ref = db.doc(`outbox/${normalizedId}`);
+  const claimed = await claimEvent(db, ref, toIso(now()), {
+    workerId, processingTimeoutMs, createClaimToken,
+  });
+  if (!claimed) return { processed: false, reason: 'not_claimable' };
+  try {
+    await defaultOutboxHandler(db, claimed, toIso(now()), eventHandlers);
+    await markSuccess(db, ref, claimed, toIso(now()));
+    return { processed: true, succeeded: true };
+  } catch (error) {
+    await markFailure(db, ref, claimed, toIso(now()), maxAttempts, error);
+    return {
+      processed: true,
+      succeeded: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function processOutboxBatch(db, {
   limit = 50,
   maxAttempts = 8,

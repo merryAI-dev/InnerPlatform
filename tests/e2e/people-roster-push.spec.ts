@@ -26,12 +26,14 @@ const ROSTER_STATUS = {
   statuses: [
     {
       spreadsheetId: 'sheet-ok', spreadsheetTitle: '참여율_사업하나 사본',
+      sheetTabs: ['안내', '참조', '참여율 관리'],
       projects: [{ projectId: 'proj-1', projectName: '사업 하나' }],
       ok: true, active: true, reason: null, message: null,
       lastAttemptAt: '2026-08-25T02:30:00.000Z', lastSuccessAt: '2026-08-25T02:30:00.000Z', writtenRows: 101,
     },
     {
       spreadsheetId: 'sheet-bad', spreadsheetTitle: '참여율_사업둘 사본',
+      sheetTabs: [],
       projects: [{ projectId: 'proj-2', projectName: '사업 둘' }],
       ok: false, active: true, reason: 'permission_denied', message: '공유 안 됨',
       lastAttemptAt: '2026-08-25T02:30:00.000Z', lastSuccessAt: null, writtenRows: null,
@@ -79,7 +81,7 @@ function installApi(page: Page, options: {
     }
     if (url.pathname === '/api/v1/participation-roster/push' && route.request().method() === 'POST') {
       pushes.push({ idempotencyKey: route.request().headers()['idempotency-key'] });
-      await fulfillJson(route, { ok: true, eventId: 'evt-1', eventType: 'participation.roster.changed' }, 202);
+      await fulfillJson(route, { ok: true, eventId: 'evt-1', eventType: 'participation.roster.changed', processed: true, succeeded: true }, 200);
       return;
     }
     await fulfillJson(route, { code: 'e2e_unhandled', message: `${route.request().method()} ${url.pathname}` }, 500);
@@ -98,12 +100,13 @@ test('관리자는 시트별 동기화 상태를 보고 명단 갱신을 대기�
   await expect(page.getByText('참여율 시트 명단 동기화')).toBeVisible();
   await expect(page.getByText('참여율_사업하나 사본')).toBeVisible();
   await expect(page.getByText('반영됨 · 101행')).toBeVisible();
+  await expect(page.getByText('탭 3개: 안내 · 참조 · 참여율 관리')).toBeVisible();
   await expect(page.getByText('편집 권한 없음 - 시스템 계정을 편집자로 공유해 주세요')).toBeVisible();
   await expect(page.getByText('연동 해제된 시트 이력 1건은 표시하지 않습니다.')).toBeVisible();
 
   const before = api.countStatusGets();
   await page.getByRole('button', { name: '명단 갱신 실행' }).click();
-  await expect(page.getByText('명단 갱신을 대기열에 넣었습니다', { exact: false })).toBeVisible();
+  await expect(page.getByText('명단을 시트에 즉시 반영했습니다', { exact: false })).toBeVisible();
   expect(api.pushes).toHaveLength(1);
   expect(api.pushes[0].idempotencyKey).toMatch(/^roster-push:/);
   await expect.poll(() => api.countStatusGets()).toBeGreaterThan(before);
