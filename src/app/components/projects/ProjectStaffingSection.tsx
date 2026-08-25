@@ -6,6 +6,12 @@ import { fetchPersonsViaBff, type PersonRecord } from '../../lib/platform-bff-cl
 import type { ActorLike } from '../../lib/platform-bff-client';
 import { Button } from '../ui/button';
 import { MemberPicker } from '../ui/member-picker';
+import { cn } from '../ui/utils';
+import {
+  FORM_CONTROL_CLASS,
+  ProjectFormRow,
+  ProjectFormSection,
+} from './project-form-layout';
 import type { OrgMemberPickerOption } from '../../data/project-team-member-options';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -90,89 +96,87 @@ export function ProjectStaffingSection({
   ];
   if (operatorSlots.length === 0) operatorSlots.push(null);
 
-  const slotRow = (label: string, hint: string, slot: ProjectStaffingSlot | null, apply: (next: ProjectStaffingSlot | null) => void, trailing?: ReactNode) => (
-    <div className="grid grid-cols-1 items-start gap-1 sm:grid-cols-[9.5rem_1fr_auto] sm:items-center sm:gap-3">
-      <div>
-        <p className="text-sm font-medium text-slate-800">{label}</p>
-        <p className="text-xs text-slate-500">{hint}</p>
-      </div>
-      <MemberPicker
-        className="max-w-sm"
-        options={options}
-        value={slot?.personId || ''}
-        placeholder="인력 명부에서 선택 (미정 가능)"
-        emptyLabel={loadError || '인력 명부를 불러오는 중입니다'}
-        disabled={disabled || !enabled}
-        onChange={(personId) => apply(toSlot(people, personId))}
-      />
-      {trailing || <span />}
-    </div>
+  const picker = (slot: ProjectStaffingSlot | null, apply: (next: ProjectStaffingSlot | null) => void) => (
+    <MemberPicker
+      className={cn('w-full', FORM_CONTROL_CLASS)}
+      options={options}
+      value={slot?.personId || ''}
+      placeholder="인력 명부에서 선택 (미정 가능)"
+      emptyLabel={loadError || '인력 명부를 불러오는 중입니다'}
+      disabled={disabled || !enabled}
+      onChange={(personId) => apply(toSlot(people, personId))}
+    />
   );
 
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 p-4">
-      <div>
-        <p className="text-sm font-semibold text-slate-900">실제 투입인력</p>
-        <p className="text-xs text-slate-500">
-          참여율 시트와 별개로, 이 사업의 책임 역할을 인력 명부 기준으로 지정합니다. 미정인 자리는 비워둘 수 있습니다.
-        </p>
-      </div>
-      {loadError ? <p className="text-xs text-amber-700">{loadError}</p> : null}
+    <ProjectFormSection
+      title="실제 투입인력"
+      description="참여율 시트와 별개로, 이 사업의 책임 역할을 인력 명부 기준으로 지정합니다. 미정인 자리는 비워둘 수 있습니다."
+    >
+      {loadError ? <p className="text-[11px] text-amber-700">{loadError}</p> : null}
 
-      {slotRow('총괄책임자', '사업 최종 책임자', staffing.lead, (slot) => patch({ lead: slot }))}
-      {slotRow('실무책임자', '실무 책임자 (PM)', staffing.pm, (slot) => patch({ pm: slot }))}
+      <ProjectFormRow label="총괄책임자" note="사업 최종 책임자">
+        {picker(staffing.lead, (slot) => patch({ lead: slot }))}
+      </ProjectFormRow>
+      <ProjectFormRow label="실무책임자" note="실무 책임자 (PM)">
+        {picker(staffing.pm, (slot) => patch({ pm: slot }))}
+      </ProjectFormRow>
 
-      {operatorSlots.map((slot, index) => slotRow(
-        `운영매니저 ${index + 1}`,
-        index === 0 ? '운영 매니저 (1인 이상)' : '추가 운영 매니저',
-        slot,
-        (next) => {
-          const filled = [...staffing.operators];
-          if (index < filled.length) {
-            if (next) filled[index] = next;
-            else filled.splice(index, 1);
-          } else if (next) {
-            filled.push(next);
-            setEmptyOperatorSlots((count) => Math.max(0, count - 1));
-          }
-          patch({ operators: filled });
-        },
-        operatorSlots.length > 1 ? (
-          <Button
-            type="button" variant="outline" size="sm" className="h-8 px-2"
-            disabled={disabled}
-            onClick={() => {
-              if (index < staffing.operators.length) {
-                const filled = staffing.operators.filter((_, itemIndex) => itemIndex !== index);
+      {operatorSlots.map((slot, index) => (
+        <ProjectFormRow
+          key={`operator-${index}`}
+          label={`운영매니저 ${index + 1}`}
+          note={index === 0 ? '운영 매니저 (1인 이상)' : '추가 운영 매니저'}
+        >
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              {picker(slot, (next) => {
+                const filled = [...staffing.operators];
+                if (index < filled.length) {
+                  if (next) filled[index] = next;
+                  else filled.splice(index, 1);
+                } else if (next) {
+                  filled.push(next);
+                  setEmptyOperatorSlots((count) => Math.max(0, count - 1));
+                }
                 patch({ operators: filled });
-              } else {
-                setEmptyOperatorSlots((count) => Math.max(0, count - 1));
-              }
-            }}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        ) : undefined,
+              })}
+            </div>
+            {operatorSlots.length > 1 ? (
+              <Button
+                type="button" variant="outline" size="sm" className="h-9 px-2"
+                disabled={disabled}
+                onClick={() => {
+                  if (index < staffing.operators.length) {
+                    patch({ operators: staffing.operators.filter((_, itemIndex) => itemIndex !== index) });
+                  } else {
+                    setEmptyOperatorSlots((count) => Math.max(0, count - 1));
+                  }
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
+          </div>
+        </ProjectFormRow>
       ))}
-      <Button
-        type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
-        disabled={disabled}
-        onClick={() => setEmptyOperatorSlots((count) => count + 1)}
-      >
-        <Plus className="h-3.5 w-3.5" /> 운영매니저 추가
-      </Button>
+      <ProjectFormRow label="" note="">
+        <Button
+          type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
+          disabled={disabled}
+          onClick={() => setEmptyOperatorSlots((count) => count + 1)}
+        >
+          <Plus className="h-3.5 w-3.5" /> 운영매니저 추가
+        </Button>
+      </ProjectFormRow>
 
-      <div className="grid grid-cols-1 items-start gap-1 sm:grid-cols-[9.5rem_1fr_auto] sm:items-center sm:gap-3">
-        <div>
-          <p className="text-sm font-medium text-slate-800">정산지원</p>
-          <p className="text-xs text-slate-500">해당 시 도담/써니 중 선택</p>
-        </div>
+      <ProjectFormRow label="정산지원" note="해당 시 도담/써니 중 선택">
         <Select
           value={staffing.settlementSupport || 'NONE'}
           onValueChange={(value) => patch({ settlementSupport: value === 'NONE' ? '' : value })}
           disabled={disabled}
         >
-          <SelectTrigger className="max-w-sm"><SelectValue placeholder="해당 없음" /></SelectTrigger>
+          <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue placeholder="해당 없음" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="NONE">해당 없음</SelectItem>
             {SETTLEMENT_SUPPORT_CHOICES.map((choice) => (
@@ -180,8 +184,7 @@ export function ProjectStaffingSection({
             ))}
           </SelectContent>
         </Select>
-        <span />
-      </div>
-    </div>
+      </ProjectFormRow>
+    </ProjectFormSection>
   );
 }
