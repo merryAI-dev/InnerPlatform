@@ -32,6 +32,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
     private final Set<String> allowedOrigins;
     private final String authMode;
     private final String workspaceEmailDomain;
+    private final CanonicalMemberResolver canonicalMemberResolver;
 
     public InternalServiceTokenFilter(
         @Value("${weekly.internal-api-token-enabled:false}") boolean internalApiTokenEnabled,
@@ -39,7 +40,8 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         @Value("${weekly.allowed-origins:}") String allowedOrigins,
         @Value("${weekly.auth-mode:strict}") String authMode,
         @Value("${weekly.workspace-email-domain:mysc.co.kr}") String workspaceEmailDomain,
-        FirebaseBearerTokenVerifier firebaseBearerTokenVerifier
+        FirebaseBearerTokenVerifier firebaseBearerTokenVerifier,
+        CanonicalMemberResolver canonicalMemberResolver
     ) {
         if (internalApiTokenEnabled && (internalApiToken == null || internalApiToken.isBlank())) {
             throw new IllegalStateException("weekly.internal-api-token must be configured.");
@@ -50,6 +52,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         this.authMode = authMode == null ? "strict" : authMode.trim().toLowerCase(Locale.ROOT);
         this.workspaceEmailDomain = normalizeWorkspaceDomain(workspaceEmailDomain);
         this.firebaseBearerTokenVerifier = firebaseBearerTokenVerifier;
+        this.canonicalMemberResolver = canonicalMemberResolver;
     }
 
     @Override
@@ -150,24 +153,37 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
         if (isWorkspaceAuthMode()) {
             requireWorkspaceEmail(actorEmail);
-            return new VerifiedFirebaseActor(tenantId, tokenActor.actorId(), actorEmail, "workspace_user", actorName);
         }
 
         if (actorEmail.isBlank()) {
             actorEmail = normalizeEmail(request.getHeader("x-actor-email"));
         }
 
-        String actorRole = tokenActor.actorRole();
-        if (actorRole.isBlank()) {
-            actorRole = normalizeRole(requireRequestHeader(request, "x-actor-role", "actor_role_required", "Request actor role context is required."));
-            if (isPrivilegedRole(actorRole)) {
-                throw new WeeklyApiAuthException(
+        CanonicalMemberResolver.CanonicalMember member;
+        try {
+            member = canonicalMemberResolver.resolve(tenantId, tokenActor.actorId()).orElseThrow(() ->
+                new WeeklyApiAuthException(
                     HttpServletResponse.SC_FORBIDDEN,
-                    "actor_role_claim_required",
-                    "Privileged actor roles require trusted Firebase role claims."
-                );
-            }
+                    "member_inactive",
+                    "An active canonical member is required."
+                )
+            );
+        } catch (CanonicalMemberResolver.CanonicalMemberResolutionException error) {
+            throw new WeeklyApiAuthException(
+                HttpServletResponse.SC_SERVICE_UNAVAILABLE,
+                "member_resolver_unavailable",
+                "Canonical member resolution is unavailable."
+            );
         }
+        if (member.statusPresent() && !"ACTIVE".equals(member.status())) {
+            throw new WeeklyApiAuthException(
+                HttpServletResponse.SC_FORBIDDEN,
+                "member_inactive",
+                "An active canonical member is required."
+            );
+        }
+
+        String actorRole = normalizeRole(member.role());
 
         return new VerifiedFirebaseActor(tenantId, tokenActor.actorId(), actorEmail, actorRole, actorName);
     }
@@ -181,11 +197,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
     }
 
     private String normalizeRole(String value) {
-        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-        if ("viewer".equals(normalized)) {
-            return "pm";
-        }
-        return normalized;
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private boolean isWorkspaceAuthMode() {
@@ -200,16 +212,6 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
                 "Google Workspace account must belong to @" + workspaceEmailDomain + "."
             );
         }
-    }
-
-    private boolean isPrivilegedRole(String value) {
-        String normalized = normalizeRole(value);
-        return "admin".equals(normalized)
-            || "tenant_admin".equals(normalized)
-            || "finance".equals(normalized)
-            || "auditor".equals(normalized)
-            || "support".equals(normalized)
-            || "security".equals(normalized);
     }
 
     private String normalizeEmail(String value) {

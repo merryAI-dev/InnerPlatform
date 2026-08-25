@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +42,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,8 +103,18 @@ class WeeklyExpenseControllerTest {
     @SpyBean
     private JpaWeeklyExpensePersistence weeklyExpensePersistence;
 
+    @MockBean
+    private CanonicalMemberResolver canonicalMemberResolver;
+
     @BeforeEach
     void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
+        when(canonicalMemberResolver.resolve(any(), any())).thenAnswer(invocation -> Optional.of(
+            new CanonicalMemberResolver.CanonicalMember(
+                true,
+                "ACTIVE",
+                canonicalRoleForTestActor(invocation.getArgument(1))
+            )
+        ));
         doReturn(2026).when(weeklyExpensePersistence).findCashflowDeclaredWeeklyYear(any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
@@ -242,6 +254,31 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void firebaseStalePrivilegedClaimWithoutCanonicalMembershipIsDeniedBeforeCommandEffects() throws Exception {
+        long sheetsBefore = sheetRepository.count();
+        when(canonicalMemberResolver.resolve("tenant-membership-gate", "former-finance"))
+            .thenReturn(Optional.empty());
+
+        mockMvc.perform(asFirebaseActor(
+                post("/api/v1/weekly-expenses/project-membership-gate/sheets/default/save-draft"),
+                "tenant-membership-gate",
+                "former-finance",
+                "finance",
+                "former-finance@mysc.co.kr"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"idempotencyKey\":\"stale-finance-denied\",\"rows\":[]}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("member_inactive"));
+
+        assertThat(sheetRepository.count()).isEqualTo(sheetsBefore);
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc(
+            "tenant-membership-gate",
+            "project-membership-gate"
+        )).isEmpty();
+    }
+
+    @Test
     void authSessionEndpointIsNotPartOfBrowserDirectBearerFlow() throws Exception {
         String idToken = firebaseTestToken("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr");
         mockMvc.perform(post("/api/v1/auth/session")
@@ -329,9 +366,12 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void privilegedRoleRequiresFirebaseRoleClaim() throws Exception {
+    void blankCanonicalRoleDoesNotUsePrivilegedTokenOrRequestHeader() throws Exception {
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-admin-claims;email=admin-claims@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
+        when(canonicalMemberResolver.resolve("tenant-direct", "firebase-admin-claims"))
+            .thenReturn(Optional.of(new CanonicalMemberResolver.CanonicalMember(true, "ACTIVE", "")));
+        long sheetsBefore = sheetRepository.count();
 
         mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-role/sheets/default/save-draft")
                 .header("authorization", "Bearer " + missingClaimsToken)
@@ -346,11 +386,17 @@ class WeeklyExpenseControllerTest {
                     }
                     """))
             .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("actor_role_claim_required"));
+            .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
+
+        assertThat(sheetRepository.count()).isEqualTo(sheetsBefore);
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc(
+            "tenant-direct",
+            "project-missing-role"
+        )).isEmpty();
     }
 
     @Test
-    void browserDirectFirebaseTokenRequiresRequestContextWhenClaimsAreMissing() throws Exception {
+    void browserDirectFirebaseTokenRequiresTenantButUsesCanonicalRoleWhenClaimsAreMissing() throws Exception {
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-pm-missing-context;email=pm-missing@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
 
@@ -363,14 +409,26 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value("tenant_required"));
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct-missing-role/sheets/default/save-draft")
+        mockMvc.perform(withEditLease(post("/api/v1/weekly-expenses/project-direct-missing-role/sheets/default/save-draft"))
                 .header("authorization", "Bearer " + missingClaimsToken)
                 .header("x-tenant-id", "tenant-direct")
                 .header("x-actor-id", "firebase-pm-missing-context")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"idempotencyKey\":\"missing-role-denied\",\"rows\":[]}"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value("actor_role_required"));
+            .andExpect(status().isOk());
+    }
+
+    private static String canonicalRoleForTestActor(String actorId) {
+        if (actorId == null) return "";
+        if (actorId.startsWith("admin")) return "admin";
+        if (actorId.startsWith("auditor")) return "auditor";
+        if (actorId.startsWith("contractor")) return "contractor";
+        if (actorId.startsWith("finance")) return "finance";
+        if (actorId.startsWith("unknown")) return "unknown";
+        if (actorId.startsWith("viewer")) return "viewer";
+        if (actorId.startsWith("former-finance")) return "finance";
+        if (actorId.startsWith("firebase-admin")) return "admin";
+        return "pm";
     }
 
     @Test

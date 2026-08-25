@@ -53,9 +53,13 @@ function appendQuery(uri, values) {
 }
 
 function memberContext(member, context) {
-  const status = readOptionalText(member?.status).toUpperCase();
   const role = readOptionalText(member?.role).toLowerCase();
-  if (status !== 'ACTIVE' || !role) throw createHttpError(403, '활성 MYSCube 구성원만 MCP를 사용할 수 있습니다.', 'mcp_member_inactive');
+  const hasStatus = member
+    ? Object.prototype.hasOwnProperty.call(member, 'status')
+    : false;
+  if (!member || (hasStatus && member.status !== 'ACTIVE') || !role) {
+    throw createHttpError(403, '활성 MYSCube 구성원만 MCP를 사용할 수 있습니다.', 'mcp_member_inactive');
+  }
   return {
     tenantId: context.tenantId,
     actorId: context.actorId,
