@@ -21,7 +21,6 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain('사업 다중선택');
     expect(source).toContain('통장 유형 다중선택');
     expect(source).toContain('buildCashflowExportAvailableYears');
-    expect(source).not.toContain("years.add('2024')");
     expect(source).toContain("projectIds: scope === 'selected'");
     expect(source).toContain('scope,');
     expect(source).toContain("department: departmentFilter === 'ALL'");

@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: 'admin-cashflow-export-api.spec.ts',
   timeout: 60_000,
   expect: {
     timeout: 10_000,

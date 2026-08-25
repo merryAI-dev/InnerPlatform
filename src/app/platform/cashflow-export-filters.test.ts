@@ -118,7 +118,7 @@ describe('cashflow-export-filters', () => {
     }).map(({ id }) => id)).toEqual(['p0', 'p1', 'p2', 'p3']);
   });
 
-  it('expands every contract year instead of relying on a hardcoded 2024 option', () => {
+  it('expands every contract year around the required legacy 2024 option', () => {
     expect(typeof (cashflowExportFilters as Record<string, unknown>).buildCashflowExportAvailableYears).toBe('function');
     const buildCashflowExportAvailableYears = (
       cashflowExportFilters as unknown as {
@@ -133,5 +133,38 @@ describe('cashflow-export-filters', () => {
       { contractStart: '2023-09-01', contractEnd: '2026-02-28' },
       { contractStart: '2028-01-01', contractEnd: '2028-12-31' },
     ], '2027')).toEqual(['2023', '2024', '2025', '2026', '2027', '2028']);
+  });
+
+  it('always offers the 2024 export year when every contract starts later', () => {
+    expect(cashflowExportFilters.buildCashflowExportAvailableYears([
+      { contractStart: '2026-01-01', contractEnd: '2027-12-31' },
+    ], '2028')).toEqual(['2024', '2026', '2027', '2028']);
+  });
+
+  it('always offers the 2024 export year when there are no projects', () => {
+    expect(cashflowExportFilters.buildCashflowExportAvailableYears([], '2028')).toEqual(['2024', '2028']);
+  });
+
+  it('counts every account type after the department filter, including zero-count types', () => {
+    expect(typeof (cashflowExportFilters as Record<string, unknown>).countCashflowExportProjectsByAccountType).toBe('function');
+    const countCashflowExportProjectsByAccountType = (
+      cashflowExportFilters as unknown as {
+        countCashflowExportProjectsByAccountType: (
+          projects: ReturnType<typeof project>[],
+          departmentFilter: string,
+        ) => Record<AccountType, number>;
+      }
+    ).countCashflowExportProjectsByAccountType;
+
+    expect(countCashflowExportProjectsByAccountType([
+      project('p1', 'DEDICATED', '센터A'),
+      project('p2', 'OTHER', '센터A'),
+      project('p3', 'OPERATING', '센터B'),
+    ], '센터A')).toEqual({
+      DEDICATED: 1,
+      OPERATING: 0,
+      NONE: 0,
+      OTHER: 1,
+    });
   });
 });

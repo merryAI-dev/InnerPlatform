@@ -64,6 +64,23 @@ export function filterCashflowExportTargetProjects<T extends CashflowExportProje
   return [...accountTypeProjects].sort(compare);
 }
 
+export function countCashflowExportProjectsByAccountType(
+  projects: ReadonlyArray<CashflowExportProjectLike>,
+  departmentFilter = 'ALL',
+): Record<AccountType, number> {
+  const counts: Record<AccountType, number> = {
+    DEDICATED: 0,
+    OPERATING: 0,
+    NONE: 0,
+    OTHER: 0,
+  };
+  for (const project of projects) {
+    if (departmentFilter !== 'ALL' && project.department !== departmentFilter) continue;
+    counts[project.accountType] += 1;
+  }
+  return counts;
+}
+
 function readContractYear(value?: string): number | null {
   const match = /^(\d{4})(?:-|$)/.exec(String(value || '').trim());
   if (!match) return null;
@@ -76,6 +93,7 @@ export function buildCashflowExportAvailableYears(
   currentYear: string,
 ): string[] {
   const years = new Set<number>();
+  years.add(2024);
   const current = readContractYear(currentYear);
   if (current !== null) years.add(current);
 

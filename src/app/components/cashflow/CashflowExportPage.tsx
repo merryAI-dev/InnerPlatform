@@ -29,6 +29,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import { triggerDownload } from '../../platform/csv-utils';
 import {
   buildCashflowExportAvailableYears,
+  countCashflowExportProjectsByAccountType,
   filterCashflowExportTargetProjects,
   toggleCashflowExportAccountType,
   type CashflowExportAccountTypeFilter,
@@ -119,6 +120,10 @@ export function CashflowExportPage() {
   const availableYears = useMemo(
     () => buildCashflowExportAvailableYears(sortedProjects, yearMonth.slice(0, 4)),
     [sortedProjects, yearMonth],
+  );
+  const accountTypeCounts = useMemo(
+    () => countCashflowExportProjectsByAccountType(sortedProjects, departmentFilter),
+    [departmentFilter, sortedProjects],
   );
 
   const yearMonths = useMemo(() => {
@@ -410,14 +415,15 @@ export function CashflowExportPage() {
                       </CommandItem>
                       {(Object.entries(ACCOUNT_TYPE_LABELS) as Array<[AccountType, string]>).map(([value, label]) => {
                         const selected = accountTypeFilter !== 'ALL' && accountTypeFilter.includes(value);
+                        const optionLabel = `${label} (${accountTypeCounts[value]}개)`;
                         return (
                           <CommandItem
                             key={value}
-                            value={label}
+                            value={optionLabel}
                             onSelect={() => setAccountTypeFilter((current) => toggleCashflowExportAccountType(current, value))}
                           >
                             <Check className={`h-4 w-4 ${selected ? 'opacity-100' : 'opacity-0'}`} />
-                            {label}
+                            {optionLabel}
                           </CommandItem>
                         );
                       })}

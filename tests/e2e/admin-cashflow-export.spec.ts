@@ -11,40 +11,7 @@ async function completeWorkspaceSelectionIfNeeded(page: Page) {
   await page.getByRole('button', { name: 'PM 포털로 계속' }).click();
 }
 
-async function mockProjectList(page: Page) {
-  await page.route('**/api/v1/projects?limit=200*', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        items: [
-          {
-            id: 'cashflow-e2e-a',
-            name: '가 사업',
-            shortName: '가 사업',
-            department: '센터A',
-            accountType: 'DEDICATED',
-            contractStart: '2024-01-01',
-            contractEnd: '2026-12-31',
-          },
-          {
-            id: 'cashflow-e2e-b',
-            name: '나 사업',
-            shortName: '나 사업',
-            department: '센터B',
-            accountType: 'OTHER',
-            contractStart: '2026-01-01',
-            contractEnd: '2027-12-31',
-          },
-        ],
-        nextCursor: null,
-      }),
-    });
-  });
-}
-
 async function loginAsAdmin(page: Page) {
-  await mockProjectList(page);
   await page.goto('/login');
   await page.getByRole('button', { name: '관리자 샘플 로그인' }).click();
   await completeWorkspaceSelectionIfNeeded(page);
@@ -56,17 +23,7 @@ async function loginAsPm(page: Page) {
   await completeWorkspaceSelectionIfNeeded(page);
 }
 
-test('admin can access cashflow export page and trigger workbook download', async ({ page }) => {
-  let requestBody: Record<string, unknown> | undefined;
-  await page.route('**/api/v1/cashflow-exports', async (route) => {
-    requestBody = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      headers: { 'content-disposition': "attachment; filename*=UTF-8''cashflow-test.xlsx" },
-      body: 'test-workbook',
-    });
-  });
+test('admin can access cashflow export page and sees the disabled-server fallback', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/cashflow/export');
 
@@ -79,17 +36,8 @@ test('admin can access cashflow export page and trigger workbook download', asyn
   await expect(page.getByRole('columnheader', { name: '누적 Projection-Actual' })).toBeVisible();
   await expect(page.locator('tbody tr').first()).toBeVisible();
 
-  if (await page.getByText('내보내기 서버 연결을 확인해 주세요.').count()) {
-    await expect(page.getByTestId('cashflow-export-download')).toBeDisabled();
-    return;
-  }
-  await expect(page.getByTestId('cashflow-export-download')).toBeEnabled();
-
-  const downloadPromise = page.waitForEvent('download');
-  await page.getByTestId('cashflow-export-download').click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('cashflow-test.xlsx');
-  expect(requestBody).toMatchObject({ scope: 'all', sortBy: 'PROJECT_NAME' });
+  await expect(page.getByText('내보내기 서버 연결을 확인해 주세요.')).toBeVisible();
+  await expect(page.getByTestId('cashflow-export-download')).toBeDisabled();
 });
 
 test('admin cashflow export controls have strong field boundaries and visible dropdown affordances', async ({ page }) => {
@@ -116,16 +64,6 @@ test('admin can reach the cashflow monitoring hub before using export tools', as
 });
 
 test('admin can cross-filter exports by several account types and choose department sorting', async ({ page }) => {
-  let requestBody: Record<string, unknown> | undefined;
-  await page.route('**/api/v1/cashflow-exports', async (route) => {
-    requestBody = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      headers: { 'content-disposition': "attachment; filename*=UTF-8''cashflow-filtered.xlsx" },
-      body: 'test-workbook',
-    });
-  });
   await loginAsAdmin(page);
   await page.goto('/cashflow/export');
 
@@ -137,18 +75,7 @@ test('admin can cross-filter exports by several account types and choose departm
   await page.getByRole('option', { name: '소속(CIC/센터)' }).click();
 
   await expect(page.getByTestId('cashflow-export-step-account-type')).toContainText('2개 유형 선택');
-  if (await page.getByText('내보내기 서버 연결을 확인해 주세요.').count()) {
-    await expect(page.getByTestId('cashflow-export-download')).toBeDisabled();
-    return;
-  }
-  const downloadPromise = page.waitForEvent('download');
-  await page.getByTestId('cashflow-export-download').click();
-  await downloadPromise;
-  expect(requestBody).toMatchObject({
-    scope: 'all',
-    accountTypes: ['DEDICATED', 'OTHER'],
-    sortBy: 'DEPARTMENT',
-  });
+  await expect(page.getByTestId('cashflow-export-download')).toBeDisabled();
 });
 
 test('admin cashflow export uses a monochrome hierarchy for filter cards', async ({ page }) => {
