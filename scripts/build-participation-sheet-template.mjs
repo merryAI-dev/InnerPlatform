@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import ExcelJS from 'exceljs';
 import { createFirestoreDb, resolveProjectId } from '../server/bff/firestore.mjs';
 import { PARTICIPATION_FORMAT_CURRENT_ID } from '../server/bff/participation-sheet-ranges.mjs';
-import { composeRosterRows, normalizeRosterPeople } from '../server/bff/participation-roster-push.mjs';
+import { composeRosterRows, normalizeRosterPeople, tenantMarkerOf } from '../server/bff/participation-roster-push.mjs';
 
 function flag(name, fallback = '') {
   const index = process.argv.indexOf(name);
@@ -52,7 +52,7 @@ const TEMPLATE_FORMAT_ID = PARTICIPATION_FORMAT_CURRENT_ID;
 const SETTING_MONTHS_FROM = 2000;
 const SETTING_MONTHS_TO = 2099;
 
-export function buildParticipationSheetWorkbook({ people = [] } = {}) {
+export function buildParticipationSheetWorkbook({ people = [], tenantId = '' } = {}) {
   const workbook = new ExcelJS.Workbook();
 
   // ── 안내 탭 ──
@@ -119,9 +119,11 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
       monthRow += 1;
     }
   }
-  const nicknameListEnd = rosterRows.length + 1;
   const settingMonthsEnd = monthRow - 1;
   ref.getCell(1, 6).value = TEMPLATE_FORMAT_ID;
+  // 시트 소유 테넌트 표식(G1). 명단 푸시가 이 값으로 교차 테넌트 덮어쓰기를 거부한다.
+  // 빌더가 안 새겨도 첫 푸시가 선점하지만, 새기고 태어나는 쪽이 한 단계 안전하다.
+  if (tenantId) ref.getCell(1, 7).value = tenantMarkerOf(tenantId);
   ref.state = 'hidden';
 
   // ── 참여율 관리 탭 ──
@@ -207,8 +209,10 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
   });
   // 경고(warning)이지 거부(stop)가 아니다. People 에 아직 없는 사람도 급여 기록은 지금
   // 적혀야 한다. 잘못 적힌 이름은 반영 때 "연결 대기" 로 잡히므로 조용히 사라지지 않는다.
+  // 범위는 열린 상한(1000행)이다 - 만든 시점의 명단 길이로 고정하면 명단 푸시로 늘어난
+  // 사람이 드롭다운에서 조용히 빠진다. 빈 행은 구글 시트 드롭다운이 무시한다.
   sheet.dataValidations.add(`A${dataStartRow}:A${dataEndRow}`, {
-    type: 'list', allowBlank: true, errorStyle: 'warning', formulae: [`참조!$A$2:$A$${nicknameListEnd}`],
+    type: 'list', allowBlank: true, errorStyle: 'warning', formulae: ['참조!$A$2:$A$1000'],
     showErrorMessage: true, errorTitle: 'People에 없는 이름이에요',
     error: '그대로 진행해도 됩니다 - 이름 칸에 실명을 적어 주세요. People 등록이 되면 반영할 때 자동으로 연결됩니다. 아직 누구인지 모르면 미정-1~10 을 고르고, 사람이 정해지면 이름만 채우면 됩니다.',
   });
@@ -282,7 +286,7 @@ async function main() {
   const db = createFirestoreDb({ projectId: firebaseProjectId });
   const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
   const people = normalizeRosterPeople(peopleSnap.docs.map((doc) => doc.data() || {}));
-  const workbook = buildParticipationSheetWorkbook({ people });
+  const workbook = buildParticipationSheetWorkbook({ people, tenantId });
 
   mkdirSync(outDir, { recursive: true });
   const filePath = join(outDir, 'MYSC_참여율_표준양식_v2.xlsx');

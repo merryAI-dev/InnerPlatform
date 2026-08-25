@@ -76,16 +76,21 @@ export function createParticipationRosterChangedOutboxHandler({ db, googleSheets
       sheetsService: googleSheetsService,
       people,
       links,
+      tenantId,
     });
 
     const nowIso = now();
+    const currentDocIds = new Set();
     for (const result of results) {
-      const ref = db.doc(`orgs/${tenantId}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}/${statusDocId(result)}`);
+      const docId = statusDocId(result);
+      currentDocIds.add(docId);
+      const ref = db.doc(`orgs/${tenantId}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}/${docId}`);
       // 실패해도 이전 성공의 흔적(제목·lastSuccessAt)은 지우지 않는다 - merge 가 그 역할이다.
       const status = {
         spreadsheetId: result.spreadsheetId || null,
         projects: result.projects || [],
         ok: result.ok === true,
+        active: true,
         reason: result.ok === true ? null : (result.reason || 'api_error'),
         message: result.ok === true ? null : (result.message || null),
         lastAttemptAt: nowIso,
@@ -97,6 +102,16 @@ export function createParticipationRosterChangedOutboxHandler({ db, googleSheets
         status.writtenRows = result.writtenRows || 0;
       }
       await ref.set(status, { merge: true });
+    }
+
+    // 링크 해제·프로젝트 종료로 대상에서 빠진 시트의 상태는 지우지 않고 active:false 로
+    // 내린다 - 실패 이력은 진단 자료라 보존하되, 화면이 "지금의 실패" 와 섞으면 안 된다.
+    const statusSnap = await db.collection(`orgs/${tenantId}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}`).get();
+    for (const doc of statusSnap.docs) {
+      if (currentDocIds.has(doc.id)) continue;
+      if ((doc.data() || {}).active === false) continue;
+      await db.doc(`orgs/${tenantId}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}/${doc.id}`)
+        .set({ active: false, updatedAt: nowIso }, { merge: true });
     }
 
     // 일시 장애(api_error)만 재시도한다. 권한·형식·링크 문제는 사람이 고쳐야 하는 상태라

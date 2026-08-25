@@ -14,9 +14,34 @@ import {
 } from '../bff-utils.mjs';
 import { enqueueOutboxEvent } from '../outbox.mjs';
 import {
+  PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE,
   PARTICIPATION_ROSTER_STATUS_COLLECTION,
   buildParticipationRosterOutboxEvent,
 } from '../participation-roster-worker.mjs';
+
+/**
+ * 처리 대기 중인 명단 이벤트. outbox 워커는 크론(매일 1회)으로 돌므로 "실행했는데 왜
+ * 반영이 안 되죠" 의 답은 대부분 여기다 - 대기 중임을 보여주지 않으면 사람이 또 누른다.
+ */
+async function readPendingRosterEvents(db, tenantId) {
+  const statuses = ['PENDING', 'FAILED', 'PROCESSING'];
+  const snaps = await Promise.all(statuses.map((status) => db.collection('outbox')
+    .where('eventType', '==', PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE)
+    .where('status', '==', status)
+    .get()));
+  const events = snaps
+    .flatMap((snap) => snap.docs.map((doc) => doc.data() || {}))
+    .filter((event) => event.tenantId === tenantId);
+  const queuedAts = events
+    .map((event) => readOptionalText(event.createdAt))
+    .filter(Boolean)
+    .sort();
+  return {
+    queued: events.filter((event) => event.status !== 'PROCESSING').length,
+    processing: events.filter((event) => event.status === 'PROCESSING').length,
+    oldestQueuedAt: queuedAts[0] || null,
+  };
+}
 
 export function mountParticipationRosterRoutes(app, { db, now = () => new Date().toISOString(), idempotencyService } = {}) {
   app.get('/api/v1/participation-roster/push-status', asyncHandler(async (req, res) => {
@@ -25,7 +50,10 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
     const tenantId = readOptionalText(req.context?.tenantId);
     if (!tenantId) throw createHttpError(400, 'tenantId is required.', 'tenant_required');
 
-    const snap = await db.collection(`orgs/${tenantId}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}`).get();
+    const [snap, pendingPush] = await Promise.all([
+      db.collection(`orgs/${tenantId}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}`).get(),
+      readPendingRosterEvents(db, tenantId),
+    ]);
     const statuses = snap.docs
       .map((doc) => {
         const status = doc.data() || {};
@@ -34,6 +62,8 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
           spreadsheetTitle: readOptionalText(status.spreadsheetTitle) || readOptionalText(status.spreadsheetId) || doc.id,
           projects: Array.isArray(status.projects) ? status.projects : [],
           ok: status.ok === true,
+          // active=false: 링크 해제·종료로 지금은 팬아웃 대상이 아닌 시트의 이력.
+          active: status.active !== false,
           reason: readOptionalText(status.reason) || null,
           message: readOptionalText(status.message) || null,
           lastAttemptAt: readOptionalText(status.lastAttemptAt) || null,
@@ -41,15 +71,19 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
           writtenRows: Number.isInteger(status.writtenRows) ? status.writtenRows : null,
         };
       })
-      .sort((left, right) => String(right.lastAttemptAt || '').localeCompare(String(left.lastAttemptAt || '')));
+      .sort((left, right) => String(right.lastAttemptAt || '').localeCompare(String(left.lastAttemptAt || '')))
+      .slice(0, 500);
+    const activeStatuses = statuses.filter((status) => status.active);
 
     res.status(200).json({
       statuses,
       counts: {
-        total: statuses.length,
-        ok: statuses.filter((status) => status.ok).length,
-        failed: statuses.filter((status) => !status.ok).length,
+        total: activeStatuses.length,
+        ok: activeStatuses.filter((status) => status.ok).length,
+        failed: activeStatuses.filter((status) => !status.ok).length,
+        inactive: statuses.length - activeStatuses.length,
       },
+      pendingPush,
     });
   }));
 

@@ -30,12 +30,48 @@ function placeholderNicknames() {
   return Array.from({ length: PLACEHOLDER_COUNT }, (_, index) => `${PLACEHOLDER_KIND}-${index + 1}`);
 }
 
-/** People 원본 문서를 명단 항목으로 정규화한다: 닉네임 없는 사람 제외, 한국어 닉네임순 정렬. */
+/** 시트 소유 테넌트 표식. 참조!G1 에 새겨지고 첫 푸시가 선점한다. */
+export function tenantMarkerOf(tenantId) {
+  return `MYSC-TENANT:${text(tenantId)}`;
+}
+
+/**
+ * 한 시트 호출이 멈추면 뒤의 모든 시트가 굶는다. 시트별 팬아웃이 계속 흐르도록
+ * 호출 단위로 마감을 건다. 넘기면 statusCode 0 → api_error(재시도 대상)로 분류된다.
+ * (기저 요청을 중단하지는 않는다 - 공유 클라이언트에 abort 를 심는 것은 별도 결정.)
+ */
+const SHEETS_CALL_DEADLINE_MS = 30_000;
+function withDeadline(promise, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(Object.assign(
+        new Error(`${label} 응답이 ${SHEETS_CALL_DEADLINE_MS / 1000}초를 넘었습니다.`),
+        { statusCode: 0 },
+      ));
+    }, SHEETS_CALL_DEADLINE_MS);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+/**
+ * People 원본 문서를 명단 항목으로 정규화한다: 닉네임 없는 사람 제외, 한국어 닉네임순 정렬,
+ * 중복 닉네임은 첫 사람만(시트에 같은 닉네임 두 줄을 쓰면 VLOOKUP 과 연결이 모두 흔들린다).
+ * 유일성 강제 자체는 People 저장 경로의 숙제다 - 여기서는 결정적으로만 만든다.
+ */
 export function normalizeRosterPeople(rawPeople = []) {
-  return rawPeople
+  const sorted = rawPeople
     .map((person) => ({ nickname: text(person?.nickname), name: text(person?.name) }))
     .filter((person) => person.nickname)
     .sort((left, right) => left.nickname.localeCompare(right.nickname, 'ko'));
+  const seen = new Set();
+  return sorted.filter((person) => {
+    if (seen.has(person.nickname)) return false;
+    seen.add(person.nickname);
+    return true;
+  });
 }
 
 /**
@@ -98,10 +134,11 @@ function refusal({ spreadsheetId = '', link = '', spreadsheetTitle = '', reason,
  *
  * 쓰기 전 검증 순서가 계약이다:
  *   ① People 이 비어 있지 않음  ② 참조 탭 존재  ③ 형식 마커(F1)가 아는 버전
- *   ④ 병합 결과가 기존보다 줄지 않음(불변식 - 병합 구조상 불가능하지만 마지막 안전핀)
+ *   ④ 테넌트 마커(G1)가 비어 있거나(첫 푸시가 선점) 우리 테넌트
+ *   ⑤ 병합 결과가 기존보다 줄지 않음(불변식 - 병합 구조상 불가능하지만 마지막 안전핀)
  * 어느 하나라도 어긋나면 쓰지 않고 거부를 기록한다.
  */
-export async function pushRosterToSheet({ sheetsService, spreadsheetId, people }) {
+export async function pushRosterToSheet({ sheetsService, spreadsheetId, people, tenantId }) {
   const normalizedId = extractSpreadsheetId(spreadsheetId);
   if (!normalizedId) {
     return refusal({ link: text(spreadsheetId), reason: 'invalid_link', message: '시트 링크에서 spreadsheet ID를 찾지 못했습니다.' });
@@ -114,7 +151,7 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people }
 
   let meta;
   try {
-    meta = await sheetsService.getSpreadsheetMeta(normalizedId);
+    meta = await withDeadline(sheetsService.getSpreadsheetMeta(normalizedId), '시트 메타데이터');
   } catch (error) {
     return refusal({
       spreadsheetId: normalizedId,
@@ -133,9 +170,9 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people }
   }
 
   try {
-    const markerMatrix = await sheetsService.getSheetValues({
-      spreadsheetId: normalizedId, sheetName: PARTICIPATION_REF_TAB, rangeA1: 'F1',
-    });
+    const markerMatrix = await withDeadline(sheetsService.getSheetValues({
+      spreadsheetId: normalizedId, sheetName: PARTICIPATION_REF_TAB, rangeA1: 'F1:G1',
+    }), '형식 마커');
     const marker = text(markerMatrix?.[0]?.[0]);
     if (!isSupportedParticipationFormat(marker)) {
       return refusal({
@@ -145,9 +182,22 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people }
       });
     }
 
-    const existingRows = await sheetsService.getSheetValues({
+    // 같은 서비스 계정이 여러 테넌트의 시트에 닿을 수 있다. 다른 테넌트가 선점한 시트를
+    // 이 테넌트의 명단으로 덮어쓰는 것은 갱신이 아니라 유출이다. G1 이 비어 있으면
+    // (기존 사본·구양식) 이번 쓰기가 선점하고, 다르면 거부한다.
+    const ourTenantMarker = tenantMarkerOf(tenantId);
+    const existingTenantMarker = text(markerMatrix?.[0]?.[1]);
+    if (existingTenantMarker && existingTenantMarker !== ourTenantMarker) {
+      return refusal({
+        spreadsheetId: normalizedId, spreadsheetTitle,
+        reason: 'tenant_mismatch',
+        message: `다른 테넌트의 시트입니다(${existingTenantMarker}) - 쓰지 않았습니다.`,
+      });
+    }
+
+    const existingRows = await withDeadline(sheetsService.getSheetValues({
       spreadsheetId: normalizedId, sheetName: PARTICIPATION_REF_TAB, rangeA1: 'A2:B',
-    });
+    }), '기존 명단');
     const existingCount = existingRows.filter((row) => text(row?.[0])).length;
     const mergedRows = mergeRosterRows(people, existingRows);
     if (mergedRows.length < existingCount) {
@@ -158,14 +208,18 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people }
       });
     }
 
-    await sheetsService.batchUpdateValues({
+    const updates = [{ rangeA1: `A2:B${mergedRows.length + 1}`, values: mergedRows }];
+    if (!existingTenantMarker) {
+      updates.push({ rangeA1: 'G1', values: [[ourTenantMarker]] });
+    }
+    await withDeadline(sheetsService.batchUpdateValues({
       spreadsheetId: normalizedId,
       sheetName: PARTICIPATION_REF_TAB,
       // RAW 가 계약이다: 이름·닉네임에 '=' 가 섞여도 수식이 아니라 텍스트로 들어간다.
       // USER_ENTERED 는 People 값이 시트에서 실행되는 주입 경로가 된다.
       valueInputOption: 'RAW',
-      updates: [{ rangeA1: `A2:B${mergedRows.length + 1}`, values: mergedRows }],
-    });
+      updates,
+    }), '명단 쓰기');
     return {
       ok: true, spreadsheetId: normalizedId, spreadsheetTitle,
       writtenRows: mergedRows.length,
@@ -187,7 +241,7 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people }
  *
  * links: [{ link, projectId, projectName }]
  */
-export async function pushRosterToLinkedSheets({ sheetsService, people, links = [] }) {
+export async function pushRosterToLinkedSheets({ sheetsService, people, links = [], tenantId }) {
   const bySheet = new Map();
   for (const entry of links) {
     const normalizedId = extractSpreadsheetId(entry?.link);
@@ -205,7 +259,7 @@ export async function pushRosterToLinkedSheets({ sheetsService, people, links = 
   // 순차 실행이 의도다: 변동 빈도와 시트 수 규모에서 병렬은 이득이 없고 쿼터만 두드린다.
   for (const target of bySheet.values()) {
     const result = target.spreadsheetId
-      ? await pushRosterToSheet({ sheetsService, spreadsheetId: target.spreadsheetId, people })
+      ? await pushRosterToSheet({ sheetsService, spreadsheetId: target.spreadsheetId, people, tenantId })
       : refusal({ link: text(target.link), reason: 'invalid_link', message: '시트 링크에서 spreadsheet ID를 찾지 못했습니다.' });
     results.push({ ...result, projects: target.projects });
   }

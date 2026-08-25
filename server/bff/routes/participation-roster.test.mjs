@@ -18,14 +18,16 @@ function createApp({ role = 'admin', documents = {}, idempotencyBegin } = {}) {
   });
 
   const writes = [];
-  const db = {
-    collection: (path) => ({
-      get: async () => ({
-        docs: Object.entries(documents)
-          .filter(([key]) => key.startsWith(`${path}/`))
-          .map(([key, data]) => ({ id: key.slice(path.length + 1), data: () => data })),
-      }),
+  const makeQuery = (entries) => ({
+    get: async () => ({
+      docs: entries.map(([key, data]) => ({ id: key.split('/').pop(), data: () => data })),
     }),
+    where: (field, _op, value) => makeQuery(entries.filter(([, data]) => data[field] === value)),
+  });
+  const db = {
+    collection: (path) => makeQuery(
+      Object.entries(documents).filter(([key]) => key.startsWith(`${path}/`)),
+    ),
     doc: (path) => ({
       create: async (value) => { writes.push({ path, value }); },
     }),
@@ -60,9 +62,35 @@ describe('GET /api/v1/participation-roster/push-status', () => {
     const { app } = createApp({ role: 'viewer', documents: STATUS_DOCS });
     const res = await request(app).get('/api/v1/participation-roster/push-status');
     expect(res.status).toBe(200);
-    expect(res.body.counts).toEqual({ total: 2, ok: 1, failed: 1 });
+    expect(res.body.counts).toEqual({ total: 2, ok: 1, failed: 1, inactive: 0 });
     expect(res.body.statuses.map((status) => status.spreadsheetTitle)).toEqual(['참여율 사본 B', '참여율 사본 A']);
     expect(res.body.statuses[0]).toMatchObject({ reason: 'permission_denied', projects: [{ projectId: 'proj-2', projectName: '사업 둘' }] });
+    expect(res.body.pendingPush).toEqual({ queued: 0, processing: 0, oldestQueuedAt: null });
+  });
+
+  it('active:false 이력은 집계에서 빼고, 대기 중인 outbox 이벤트를 보여준다', async () => {
+    const { app } = createApp({
+      role: 'viewer',
+      documents: {
+        ...STATUS_DOCS,
+        [`orgs/${TENANT}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}/sheet-gone`]: {
+          spreadsheetId: 'sheet-gone', spreadsheetTitle: '해제된 시트', projects: [],
+          ok: false, reason: 'permission_denied', active: false, lastAttemptAt: '2026-08-01T00:00:00.000Z',
+        },
+        'outbox/evt-1': {
+          eventType: 'participation.roster.changed', status: 'PENDING',
+          tenantId: TENANT, createdAt: '2026-08-25T08:50:00.000Z',
+        },
+        'outbox/evt-other-tenant': {
+          eventType: 'participation.roster.changed', status: 'PENDING',
+          tenantId: 'tenant-z', createdAt: '2026-08-25T08:40:00.000Z',
+        },
+      },
+    });
+    const res = await request(app).get('/api/v1/participation-roster/push-status');
+    expect(res.body.counts).toEqual({ total: 2, ok: 1, failed: 1, inactive: 1 });
+    expect(res.body.statuses.find((status) => status.spreadsheetId === 'sheet-gone').active).toBe(false);
+    expect(res.body.pendingPush).toEqual({ queued: 1, processing: 0, oldestQueuedAt: '2026-08-25T08:50:00.000Z' });
   });
 });
 

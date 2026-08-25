@@ -51,7 +51,7 @@ function fakeSheetsService({ metaErrorFor = {}, marker = 'MYSC-PARTICIPATION-V2'
         };
       },
       async getSheetValues({ rangeA1 }) {
-        if (rangeA1 === 'F1') return [[marker]];
+        if (rangeA1 === 'F1:G1') return [[marker, '']];
         if (rangeA1 === 'A2:B') return [['가든', '김신영']];
         return [];
       },
@@ -82,6 +82,19 @@ describe('participation.roster.changed 핸들러', () => {
     expect(written.slice(0, 2)).toEqual([['가든', '김신영'], ['보람', '변민욱']]);
     expect(written[written.length - 1]).toEqual(['미정-10', '']);
     expect(summary).toMatchObject({ sheets: 1, succeeded: 1, refused: 0, people: 2 });
+  });
+
+  it('대상에서 빠진 시트의 상태 문서는 active:false 로 내린다 - 지우지 않는다', async () => {
+    const db = fakeDb({
+      ...DOCUMENTS,
+      [`orgs/${TENANT}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}/old-sheet-000000000009`]: { ok: false, reason: 'permission_denied', active: true },
+    });
+    const { db: usedDb, run } = runHandler({ db });
+    await run();
+    const demoted = usedDb.writes.find((write) => write.path.endsWith('/old-sheet-000000000009'));
+    expect(demoted.value).toEqual({ active: false, updatedAt: NOW });
+    const current = usedDb.writes.find((write) => write.path.endsWith('/sheet-alpha-000000000001'));
+    expect(current.value).toMatchObject({ active: true, ok: true });
   });
 
   it('People 조회가 0명이면 시트를 건드리지 않고 people_empty 로 남긴다 - 던지지 않는다', async () => {

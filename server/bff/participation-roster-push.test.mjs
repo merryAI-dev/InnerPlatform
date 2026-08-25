@@ -1,13 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   composeRosterRows,
   mergeRosterRows,
   normalizeRosterPeople,
   pushRosterToLinkedSheets,
   pushRosterToSheet,
+  tenantMarkerOf,
 } from './participation-roster-push.mjs';
 
 const SHEET_ID = 'test-spreadsheet-id-000001';
+const TENANT = 'tenant-a';
 const PEOPLE = normalizeRosterPeople([
   { nickname: '보람', name: '변민욱' },
   { nickname: '가든', name: '김신영' },
@@ -17,6 +19,7 @@ const PEOPLE = normalizeRosterPeople([
 /** 시트 한 장짜리 가짜 서비스. 호출 내용을 기록해 "무엇을 썼는가/안 썼는가" 를 단언한다. */
 function fakeSheetsService({
   marker = 'MYSC-PARTICIPATION-V2',
+  tenantCell = '',
   existingRows = [['가든', '김신영']],
   tabs = ['안내', '참조', '참여율 관리'],
   metaError = null,
@@ -35,7 +38,7 @@ function fakeSheetsService({
     },
     async getSheetValues({ rangeA1 }) {
       calls.reads.push(rangeA1);
-      if (rangeA1 === 'F1') return marker === null ? [] : [[marker]];
+      if (rangeA1 === 'F1:G1') return marker === null ? [] : [[marker, tenantCell]];
       if (rangeA1 === 'A2:B') return existingRows;
       return [];
     },
@@ -55,6 +58,14 @@ function statusError(statusCode, message) {
 describe('명단 구성 - 빌더와 단일 출처', () => {
   it('닉네임 없는 사람은 빼고 한국어 닉네임순으로 정렬한다', () => {
     expect(PEOPLE.map((person) => person.nickname)).toEqual(['가든', '보람']);
+  });
+
+  it('중복 닉네임은 첫 사람만 남긴다 - 같은 닉네임 두 줄은 연결을 흔든다', () => {
+    const people = normalizeRosterPeople([
+      { nickname: '가든', name: '김신영' },
+      { nickname: '가든', name: '동명닉네임' },
+    ]);
+    expect(people).toEqual([{ nickname: '가든', name: '김신영' }]);
   });
 
   it('사람 명단 뒤에 미정-1~10 자리표시자가 이름 없이 붙는다', () => {
@@ -89,7 +100,7 @@ describe('mergeRosterRows - 병합-보존이 append-only 를 강제한다', () =
 describe('pushRosterToSheet - 쓰기 전 검증이 계약이다', () => {
   it('아는 형식(V2)이면 참조 A2:B 에 병합 명단을 RAW 로 재작성한다', async () => {
     const { calls, service } = fakeSheetsService({ existingRows: [['옛닉네임', '개명전이름']] });
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
     expect(result.ok).toBe(true);
     expect(result.spreadsheetTitle).toBe('참여율_공통양식 사본');
     expect(result.preservedRows).toBe(1);
@@ -107,7 +118,7 @@ describe('pushRosterToSheet - 쓰기 전 검증이 계약이다', () => {
 
   it('V1 사본도 참조 명단 좌표가 같으므로 갱신한다', async () => {
     const { calls, service } = fakeSheetsService({ marker: 'MYSC-PARTICIPATION-V1' });
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
     expect(result.ok).toBe(true);
     expect(calls.updates).toHaveLength(1);
   });
@@ -118,14 +129,14 @@ describe('pushRosterToSheet - 쓰기 전 검증이 계약이다', () => {
     ['참조 탭 없음', { tabs: ['Sheet1'] }],
   ])('%s 이면 format_mismatch 로 거부하고 쓰지 않는다', async (_label, overrides) => {
     const { calls, service } = fakeSheetsService(overrides);
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
     expect(result).toMatchObject({ ok: false, reason: 'format_mismatch' });
     expect(calls.updates).toHaveLength(0);
   });
 
   it('People 이 비어 있으면 people_empty - 자리표시자만 쓰는 사고를 막는다', async () => {
     const { calls, service } = fakeSheetsService();
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: [] });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: [], tenantId: TENANT });
     expect(result).toMatchObject({ ok: false, reason: 'people_empty' });
     expect(calls.reads).toHaveLength(0);
     expect(calls.updates).toHaveLength(0);
@@ -137,7 +148,7 @@ describe('pushRosterToSheet - 쓰기 전 검증이 계약이다', () => {
     const existingRows = Array.from({ length: 40 }, (_, index) => [`기존-${index}`, '']);
     const dedupedExisting = existingRows.concat(existingRows); // 중복은 병합에서 1회만 남는다
     const { calls, service } = fakeSheetsService({ existingRows: dedupedExisting });
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
     // 80행을 읽었지만 중복 제거 후 병합은 40+2+10=52행 → 80 미만이라 거부된다.
     expect(result).toMatchObject({ ok: false, reason: 'roster_shrunk' });
     expect(calls.updates).toHaveLength(0);
@@ -152,15 +163,51 @@ describe('pushRosterToSheet - 쓰기 전 검증이 계약이다', () => {
     [503, 'api_error'],
   ])('메타 조회 %i 오류는 %s 로 분류한다', async (statusCode, reason) => {
     const { service } = fakeSheetsService({ metaError: statusError(statusCode, '오류') });
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
     expect(result).toMatchObject({ ok: false, reason });
   });
 
   it('statusCode 없는 네트워크 단절은 api_error(재시도 대상)다', async () => {
     const { service } = fakeSheetsService({ writeError: new Error('socket hang up') });
-    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
     expect(result).toMatchObject({ ok: false, reason: 'api_error' });
   });
+
+  it('테넌트 마커(G1)가 비어 있으면 명단과 함께 선점 기록한다', async () => {
+    const { calls, service } = fakeSheetsService({ tenantCell: '' });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
+    expect(result.ok).toBe(true);
+    const claim = calls.updates[0].updates.find((update) => update.rangeA1 === 'G1');
+    expect(claim.values).toEqual([[tenantMarkerOf(TENANT)]]);
+  });
+
+  it('우리 테넌트 마커면 G1 을 다시 쓰지 않는다', async () => {
+    const { calls, service } = fakeSheetsService({ tenantCell: tenantMarkerOf(TENANT) });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
+    expect(result.ok).toBe(true);
+    expect(calls.updates[0].updates.some((update) => update.rangeA1 === 'G1')).toBe(false);
+  });
+
+  it('다른 테넌트가 선점한 시트는 tenant_mismatch 로 거부하고 쓰지 않는다', async () => {
+    const { calls, service } = fakeSheetsService({ tenantCell: tenantMarkerOf('other-tenant') });
+    const result = await pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
+    expect(result).toMatchObject({ ok: false, reason: 'tenant_mismatch' });
+    expect(calls.updates).toHaveLength(0);
+  });
+
+  it('30초 넘게 멈춘 호출은 api_error 로 끊는다 - 다음 시트가 굶지 않는다', async () => {
+    vi.useFakeTimers();
+    const service = { getSpreadsheetMeta: () => new Promise(() => {}) };
+    const pending = pushRosterToSheet({ sheetsService: service, spreadsheetId: SHEET_ID, people: PEOPLE, tenantId: TENANT });
+    await vi.advanceTimersByTimeAsync(31_000);
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false, reason: 'api_error' });
+    expect(result.message).toContain('30초');
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('pushRosterToLinkedSheets - 팬아웃', () => {
@@ -172,6 +219,7 @@ describe('pushRosterToLinkedSheets - 팬아웃', () => {
     const results = await pushRosterToLinkedSheets({
       sheetsService: service,
       people: PEOPLE,
+      tenantId: TENANT,
       links: [
         { link: LINK_A, projectId: 'proj-1', projectName: '사업 하나' },
         { link: LINK_A, projectId: 'proj-2', projectName: '사업 둘' },
@@ -195,6 +243,7 @@ describe('pushRosterToLinkedSheets - 팬아웃', () => {
     const results = await pushRosterToLinkedSheets({
       sheetsService: routed,
       people: PEOPLE,
+      tenantId: TENANT,
       links: [
         { link: LINK_A, projectId: 'proj-1', projectName: '사업 하나' },
         { link: LINK_B, projectId: 'proj-2', projectName: '사업 둘' },
@@ -210,6 +259,7 @@ describe('pushRosterToLinkedSheets - 팬아웃', () => {
     const results = await pushRosterToLinkedSheets({
       sheetsService: service,
       people: PEOPLE,
+      tenantId: TENANT,
       links: [{ link: 'not-a-link', projectId: 'proj-1', projectName: '사업 하나' }],
     });
     expect(results[0]).toMatchObject({ ok: false, reason: 'invalid_link' });
