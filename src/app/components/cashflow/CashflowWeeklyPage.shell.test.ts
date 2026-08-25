@@ -38,7 +38,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, yearMonth)}");
+    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}");
     // 2026-08-20: 진행 바로 바꿨다가 헷갈린다는 피드백으로 배지로 롤백. 기간 줄만 유지.
     expect(source).toContain('주정산 이전');
     expect(source).toContain('결산 전');
