@@ -8,6 +8,21 @@ service firebase.storage {
         && request.auth.token.email.matches('.*@mysc\\.co\\.kr$');
     }
 
+    function canonicalMemberPath(orgId) {
+      return /databases/(default)/documents/orgs/$(orgId)/members/$(request.auth.uid);
+    }
+
+    function hasLegacyOrActiveCanonicalStatus(orgId) {
+      let member = firestore.get(canonicalMemberPath(orgId));
+      return !member.data.keys().hasAny(['status']) || member.data.status == 'ACTIVE';
+    }
+
+    function hasActiveCanonicalMembership(orgId) {
+      return isMyscSignedIn()
+        && firestore.exists(canonicalMemberPath(orgId))
+        && hasLegacyOrActiveCanonicalStatus(orgId);
+    }
+
     // Private 원본 파일은 BFF API에서만 조회한다.
     // Storage rules는 특정 deny가 broad allow를 이기지 못하므로 아래 orgs catch-all에서도 제외한다.
     match /orgs/{orgId}/business-cards/{allPaths=**} {
@@ -23,17 +38,17 @@ service firebase.storage {
     }
 
     // ── 테넌트 스코프 스토리지 경로: orgs/{orgId}/** ──
-    // Firestore와 달리 Storage에서는 Firestore 멤버십 조회 불가.
-    // 최소 보안 레이어: Firebase 로그인 + @mysc.co.kr 이메일 도메인 확인.
+    // Firebase 로그인과 해당 org의 canonical 멤버십을 함께 확인한다.
+    // status가 없는 과거 문서만 호환하고, status가 있으면 ACTIVE만 허용한다.
     match /orgs/{orgId}/{collection}/{allPaths=**} {
       allow read: if collection != 'business-cards'
         && collection != 'project-registration-drafts'
         && collection != 'project-registration-documents'
-        && isMyscSignedIn();
+        && hasActiveCanonicalMembership(orgId);
       allow write: if collection != 'business-cards'
         && collection != 'project-registration-drafts'
         && collection != 'project-registration-documents'
-        && isMyscSignedIn();
+        && hasActiveCanonicalMembership(orgId);
     }
 
     // 그 외 경로: 모두 거부

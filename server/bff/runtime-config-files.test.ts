@@ -28,7 +28,7 @@ describe('BFF runtime config files', () => {
     const script = readRepoFile('scripts/test_bff_integration.sh');
     const vitestConfig = readRepoFile('vitest.bff-integration.config.ts');
     const firestoreRun = script.indexOf('run_emulator_suite firestore');
-    const storageRun = script.indexOf('run_emulator_suite auth,storage');
+    const storageRun = script.indexOf('run_emulator_suite auth,firestore,storage');
 
     expect(firestoreRun).toBeGreaterThan(-1);
     expect(storageRun).toBeGreaterThan(firestoreRun);

@@ -3197,6 +3197,79 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(allowed.status).toBe(200);
     expect(allowed.body.role).toBe('finance');
+
+    await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
+      status: 'INACTIVE',
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    const revoked = await firebaseApi
+      .get('/api/v1/persons')
+      .set({
+        authorization: 'Bearer firebase-token',
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'u-firebase-roleless',
+      });
+
+    expect(revoked.status).toBe(403);
+    expect(revoked.body.error).toBe('member_inactive');
+
+    for (const invalidStatus of ['', null, 7, 'active', ' ACTIVE ']) {
+      await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
+        status: invalidStatus,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      const malformed = await firebaseApi
+        .get('/api/v1/persons')
+        .set({
+          authorization: 'Bearer firebase-token',
+          'x-tenant-id': tenantId,
+          'x-actor-id': 'u-firebase-roleless',
+        });
+
+      expect(malformed.status).toBe(403);
+      expect(malformed.body.error).toBe('member_inactive');
+    }
+
+    await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
+      uid: 'u-firebase-roleless',
+      tenantId,
+      role: 'admin',
+      email: 'roleless@mysc.co.kr',
+      updatedAt: new Date().toISOString(),
+    });
+    const legacyStatus = await firebaseApi
+      .get('/api/v1/persons')
+      .set({
+        authorization: 'Bearer firebase-token',
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'u-firebase-roleless',
+      });
+    expect(legacyStatus.status).toBe(200);
+
+    const missingMemberApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      authMode: 'firebase_required',
+      tokenVerifier: async () => ({
+        uid: 'u-former-finance',
+        tenantId,
+        role: 'finance',
+        email: 'former-finance@mysc.co.kr',
+      }),
+    }));
+    const missingMember = await missingMemberApi
+      .get('/api/v1/persons')
+      .set({
+        authorization: 'Bearer firebase-token',
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'u-former-finance',
+      });
+
+    expect(missingMember.status).toBe(403);
+    expect(missingMember.body.error).toBe('member_inactive');
   });
 
   it('lists auth governance rows merged from auth users and member docs', async () => {

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -18,12 +19,14 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -43,8 +46,14 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
     @SpyBean
     private JpaWeeklyExpensePersistence weeklyExpensePersistence;
 
+    @MockBean
+    private CanonicalMemberResolver canonicalMemberResolver;
+
     @BeforeEach
     void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
+        when(canonicalMemberResolver.resolve(any(), any())).thenReturn(Optional.of(
+            new CanonicalMemberResolver.CanonicalMember(true, "ACTIVE", "workspace_user")
+        ));
         doReturn(2026).when(weeklyExpensePersistence).findCashflowDeclaredWeeklyYear(any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());

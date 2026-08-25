@@ -37,6 +37,13 @@ describe('firestore rules policy alignment', () => {
     expect('@gmail.com'.endsWith('@mysc.co.kr')).toBe(false);
   });
 
+  it('requires active membership while preserving legacy members without a status field', () => {
+    expect(firestoreRulesText).toContain('function isActiveMemberDocument(member)');
+    expect(firestoreRulesText).toContain("!member.keys().hasAny(['status'])");
+    expect(firestoreRulesText).toContain("member.status == 'ACTIVE'");
+    expect(firestoreRulesText).toContain('&& isActiveMemberDocument(');
+  });
+
   // ── isBootstrapAdminEmail ──
   it('keeps bootstrap recovery separate from Firestore runtime role checks', () => {
     expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toEqual(['mwbyun1220@mysc.co.kr']);
@@ -106,13 +113,12 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).not.toContain("isAdmin('mysc')");
   });
 
-  it('keeps self-service member writes on a strict non-assignment allowlist', () => {
-    expect(firestoreRulesText).toContain('function isSafeSelfMemberCreate(orgId, memberId)');
+  it('keeps member creation server-only and self updates on a strict non-assignment allowlist', () => {
+    expect(firestoreRulesText).not.toContain('function isSafeSelfMemberCreate(orgId, memberId)');
     expect(firestoreRulesText).toContain('function isSafeSelfMemberUpdate(orgId, memberId)');
     expect(firestoreRulesText).toContain("collection in ['members']");
-    expect(firestoreRulesText).toContain('request.resource.data.keys().hasOnly([');
-    expect(firestoreRulesText).toContain("request.resource.data.projectIds.size() == 0");
-    expect(firestoreRulesText).toContain("!request.resource.data.keys().hasAny(['portalProfile', 'projectNames'])");
+    expect(firestoreRulesText).toContain('allow create: if false;');
+    expect(firestoreRulesText).toContain('allow update, delete: if isAdmin(orgId);');
     expect(firestoreRulesText).toContain('request.resource.data.diff(resource.data).affectedKeys().hasOnly([');
     for (const protectedField of [
       'uid', 'status', 'role', 'tenantId', 'projectId', 'projectIds', 'portalProfile',
@@ -327,6 +333,14 @@ describe('firestore rules policy alignment', () => {
     );
     expect(storageRulesText).toContain("collection != 'project-registration-drafts'");
     expect(storageRulesText).toContain("collection != 'project-registration-documents'");
+  });
+
+  it('requires the canonical tenant membership for ordinary Storage objects', () => {
+    expect(storageRulesText).toContain('function hasActiveCanonicalMembership(orgId)');
+    expect(storageRulesText).toContain('firestore.exists(');
+    expect(storageRulesText).toContain('firestore.get(');
+    expect(storageRulesText).toContain("member.data.status == 'ACTIVE'");
+    expect(storageRulesText).toContain('hasActiveCanonicalMembership(orgId)');
   });
 
   it('keeps business-card indexes deployable and large fields exempted', () => {

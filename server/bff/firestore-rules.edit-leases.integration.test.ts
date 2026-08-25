@@ -110,6 +110,16 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
           role: 'admin',
           status: 'INACTIVE',
         }),
+        setDoc(doc(db, `orgs/${tenantId}/members/legacy-member`), {
+          uid: 'legacy-member',
+          name: 'Legacy Member',
+          email: 'legacy-member@mysc.co.kr',
+          role: 'pm',
+          tenantId,
+          projectId: '',
+          projectIds: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }),
         setDoc(doc(db, `orgs/${tenantId}/members/self-member`), {
           uid: 'self-member',
           name: 'Self Member',
@@ -218,6 +228,71 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     }
   });
 
+  it('denies inactive members while preserving legacy members without status', async () => {
+    const inactiveDb = testEnv.authenticatedContext('inactive-member', {
+      email: 'inactive-member@mysc.co.kr',
+    }).firestore();
+    const legacyDb = testEnv.authenticatedContext('legacy-member', {
+      email: 'legacy-member@mysc.co.kr',
+    }).firestore();
+    const projectRef = doc(inactiveDb, `orgs/${tenantId}/projects/existing`);
+
+    await assertFails(getDoc(projectRef));
+    await assertFails(getDocs(firestoreCollection(inactiveDb, `orgs/${tenantId}/projects`)));
+    expect((await assertSucceeds(getDoc(
+      doc(legacyDb, `orgs/${tenantId}/projects/existing`),
+    ))).data()?.value).toBe('original');
+    await assertSucceeds(setDoc(
+      doc(legacyDb, `orgs/${tenantId}/members/legacy-member`),
+      {
+        uid: 'legacy-member',
+        name: 'Legacy Member Updated',
+        email: 'legacy-member@mysc.co.kr',
+        role: 'pm',
+        tenantId,
+        projectId: '',
+        projectIds: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-08-25T00:00:00.000Z',
+        lastLoginAt: '2026-08-25T00:00:00.000Z',
+      },
+      { merge: true },
+    ));
+    expect((await assertSucceeds(getDoc(
+      doc(legacyDb, `orgs/${tenantId}/members/legacy-member`),
+    ))).data()).not.toHaveProperty('status');
+  });
+
+  it('denies every present noncanonical member status at the Firestore boundary', async () => {
+    const invalidStatuses = [
+      { uid: 'status-empty', value: '' },
+      { uid: 'status-null', value: null },
+      { uid: 'status-number', value: 7 },
+      { uid: 'status-lowercase', value: 'active' },
+      { uid: 'status-padded', value: ' ACTIVE ' },
+    ];
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all(invalidStatuses.map(({ uid, value }) => setDoc(
+        doc(db, `orgs/${tenantId}/members/${uid}`),
+        { uid, role: 'admin', status: value },
+      )));
+    });
+
+    for (const { uid } of invalidStatuses) {
+      const db = testEnv.authenticatedContext(uid, {
+        email: `${uid}@mysc.co.kr`,
+      }).firestore();
+      await assertFails(getDoc(doc(db, `orgs/${tenantId}/projects/existing`)));
+      await assertFails(getDocs(firestoreCollection(db, `orgs/${tenantId}/projects`)));
+      await assertFails(setDoc(doc(db, `orgs/${tenantId}/projects/existing/expense_sheets/${uid}-write`), {
+        tenantId,
+        value: 'blocked',
+      }));
+    }
+  });
+
   it('keeps existing project subcollection writes until every client flow has a server replacement', async () => {
     const db = testEnv.authenticatedContext('pm-member', {
       email: 'pm-member@mysc.co.kr',
@@ -229,40 +304,34 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     await assertSucceeds(deleteDoc(ref));
   });
 
-  it('allows first-login self-registration only with empty project assignment and safe keys', async () => {
-    const uid = 'safe-self-create';
-    const email = `${uid}@mysc.co.kr`;
-    const db = testEnv.authenticatedContext(uid, { email }).firestore();
-    const memberRef = doc(db, `orgs/${tenantId}/members/${uid}`);
+  it('denies first-login self-registration so only the admin BFF can provision membership', async () => {
+    const cases = [
+      { uid: 'self-enrollment-claimless', claims: {} },
+      { uid: 'self-enrollment-matching-claim', claims: { tenantId, role: 'pm' } },
+      { uid: 'self-enrollment-other-claim', claims: { tenantId: 'other-tenant', role: 'finance' } },
+    ];
 
-    expect((await assertSucceeds(getDoc(memberRef))).exists()).toBe(false);
+    for (const { uid, claims } of cases) {
+      const email = `${uid}@mysc.co.kr`;
+      const db = testEnv.authenticatedContext(uid, { email, ...claims }).firestore();
+      await assertFails(setDoc(doc(db, `orgs/${tenantId}/members/${uid}`), {
+        uid,
+        name: 'Blocked Self Enrollment',
+        email,
+        role: 'pm',
+        status: 'ACTIVE',
+        tenantId,
+        projectId: '',
+        projectIds: [],
+      }));
+    }
 
-    await assertSucceeds(setDoc(memberRef, {
-      uid,
-      name: 'Safe Self Create',
-      email,
-      role: 'pm',
-      status: 'ACTIVE',
-      tenantId,
-      projectId: '',
-      projectIds: [],
-      avatarUrl: 'https://example.test/avatar.png',
-      createdAt: '2026-07-10T00:00:00.000Z',
-      updatedAt: '2026-07-10T00:00:00.000Z',
-      lastLoginAt: '2026-07-10T00:00:00.000Z',
-      defaultWorkspace: 'portal',
-      lastWorkspace: 'portal',
-    }));
-    expect((await assertSucceeds(getDoc(memberRef))).data()?.role).toBe('pm');
-
-    const unassignedUid = 'safe-self-create-without-assignment-fields';
-    const unassignedDb = testEnv.authenticatedContext(unassignedUid, {
-      email: `${unassignedUid}@mysc.co.kr`,
+    const adminDb = testEnv.authenticatedContext('admin-member', {
+      email: 'admin-member@mysc.co.kr',
     }).firestore();
-    await assertSucceeds(setDoc(doc(unassignedDb, `orgs/${tenantId}/members/${unassignedUid}`), {
-      uid: unassignedUid,
-      name: 'Safe Self Create Without Assignment Fields',
-      email: `${unassignedUid}@mysc.co.kr`,
+    await assertFails(setDoc(doc(adminDb, `orgs/${tenantId}/members/admin-client-created`), {
+      uid: 'admin-client-created',
+      email: 'admin-client-created@mysc.co.kr',
       role: 'pm',
       status: 'ACTIVE',
       tenantId,
@@ -337,6 +406,18 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     ]) {
       await assertFails(updateDoc(memberRef, patch));
     }
+  });
+
+  it('does not let an inactive member reactivate itself', async () => {
+    const db = testEnv.authenticatedContext('inactive-member', {
+      email: 'inactive-member@mysc.co.kr',
+      tenantId,
+      role: 'admin',
+    }).firestore();
+    await assertFails(updateDoc(
+      doc(db, `orgs/${tenantId}/members/inactive-member`),
+      { status: 'ACTIVE' },
+    ));
   });
 
   it('keeps admin assignment writes available', async () => {

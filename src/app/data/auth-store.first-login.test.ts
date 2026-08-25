@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildSafeFirstLoginMember } from './auth-store';
 
 const authStoreSource = readFileSync(resolve(import.meta.dirname, 'auth-store.tsx'), 'utf8');
 
@@ -14,31 +13,17 @@ describe('first-login member bootstrap', () => {
     expect(authStoreSource).toContain("...(existing?.name ? {} : { name: firebaseUser.displayName || '사용자' }),");
     expect(authStoreSource).not.toContain("name: existing?.name || firebaseUser.displayName");
     expect(authStoreSource).not.toContain("name: firebaseUser.displayName || existing?.name");
-    // First-login creation still needs a value, since the ledger has nothing yet.
-    expect(authStoreSource).toContain("name: firebaseUser.displayName || '사용자',");
+    expect(authStoreSource).not.toContain('buildSafeFirstLoginMember');
   });
 
-  it('creates only an unassigned PM profile that cannot self-elevate', () => {
-    const member = buildSafeFirstLoginMember({
-      uid: 'new-user',
-      name: 'New User',
-      email: 'new-user@mysc.co.kr',
-      tenantId: 'mysc',
-      avatarUrl: 'https://example.test/avatar.png',
-      now: '2026-07-12T00:00:00.000Z',
-    });
+  it('does not provision membership from the browser on first login', () => {
+    expect(authStoreSource).toContain('if (!memberSnap.exists()) return undefined;');
+    expect(authStoreSource).not.toContain('await setDoc(memberRef, created);');
+  });
 
-    expect(member).toEqual(expect.objectContaining({
-      uid: 'new-user',
-      role: 'pm',
-      status: 'ACTIVE',
-      tenantId: 'mysc',
-      projectId: '',
-      projectIds: [],
-    }));
-    expect(member).not.toHaveProperty('portalProfile');
-    expect(member).not.toHaveProperty('projectNames');
-    expect(member).not.toHaveProperty('department');
+  it('does not turn a legacy status-less member into ACTIVE from the browser', () => {
+    expect(authStoreSource).toContain("Object.prototype.hasOwnProperty.call(canonicalMember, 'status')");
+    expect(authStoreSource).not.toContain("status: existing?.status || 'ACTIVE'");
   });
 
   it('attaches a Firebase token before publishing the optimistic user', () => {

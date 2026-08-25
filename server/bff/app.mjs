@@ -597,12 +597,29 @@ export async function resolveApiRequestContext(req, {
   let actorEmail = identity.actorEmail;
   let actorName = identity.actorName;
 
-  if (identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
+  if (identity.source === 'firebase') {
+    if (typeof resolveMemberIdentity !== 'function') {
+      throw createHttpError(
+        503,
+        'Organization membership verification is unavailable',
+        'member_resolver_unavailable',
+      );
+    }
     const memberIdentity = await resolveMemberIdentity({
       tenantId: identity.tenantId,
       actorId: identity.actorId,
     });
-    actorRole = normalizeRole(memberIdentity?.role) || actorRole || undefined;
+    const memberHasStatus = memberIdentity
+      ? Object.prototype.hasOwnProperty.call(memberIdentity, 'status')
+      : false;
+    if (!memberIdentity || (memberHasStatus && memberIdentity.status !== 'ACTIVE')) {
+      throw createHttpError(
+        403,
+        'Active organization membership is required',
+        'member_inactive',
+      );
+    }
+    actorRole = normalizeRole(memberIdentity.role) || undefined;
     actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
     actorName = actorName || readOptionalText(memberIdentity?.name) || undefined;
   }
@@ -840,6 +857,7 @@ export function createBffApp(options = {}) {
     const data = snap.data() || {};
     return {
       role: normalizeRole(data.role),
+      ...(Object.prototype.hasOwnProperty.call(data, 'status') ? { status: data.status } : {}),
       email: readOptionalText(data.email).toLowerCase() || undefined,
       name: readOptionalText(data.name) || undefined,
     };

@@ -17,10 +17,19 @@ service cloud.firestore {
     // 테넌트 격리 헬퍼 (orgs/{orgId}/members/{uid} 멤버십 확인)
     // ══════════════════════════════════════════════════════════════
 
-    // 요청 사용자가 해당 orgId의 멤버인지 확인
+    // status가 없던 구형 멤버 문서는 마이그레이션 전까지 활성으로 취급한다.
+    function isActiveMemberDocument(member) {
+      return !member.keys().hasAny(['status'])
+        || member.status == 'ACTIVE';
+    }
+
+    // 요청 사용자가 해당 orgId의 활성 멤버인지 확인
     function isMember(orgId) {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid))
+        && isActiveMemberDocument(
+          get(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid)).data
+        );
     }
 
     // 멤버 문서에서 역할 조회
@@ -53,30 +62,6 @@ service cloud.firestore {
     function canReadAuditLogs(orgId) {
       return isMember(orgId)
         && getMemberRole(orgId) in ['admin', 'finance'];
-    }
-
-    function isSafeSelfMemberCreate(orgId, memberId) {
-      return isSignedIn()
-        && memberId == request.auth.uid
-        && request.resource.data.keys().hasOnly([
-          'uid', 'name', 'email', 'role', 'status', 'tenantId',
-          'projectId', 'projectIds', 'avatarUrl', 'createdAt', 'updatedAt',
-          'lastLoginAt', 'defaultWorkspace', 'lastWorkspace'
-        ])
-        && request.resource.data.keys().hasAll([
-          'uid', 'name', 'email', 'role', 'status', 'tenantId'
-        ])
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.role == 'pm'
-        && request.resource.data.status == 'ACTIVE'
-        && request.resource.data.tenantId == orgId
-        && (!request.resource.data.keys().hasAny(['projectId'])
-          || request.resource.data.projectId == '')
-        && (!request.resource.data.keys().hasAny(['projectIds'])
-          || (request.resource.data.projectIds is list
-            && request.resource.data.projectIds.size() == 0))
-        && !request.resource.data.keys().hasAny(['portalProfile', 'projectNames']);
     }
 
     function isSafeSelfMemberUpdate(orgId, memberId) {
@@ -182,16 +167,14 @@ service cloud.firestore {
       allow get: if (isSignedIn() && memberId == request.auth.uid) || canRead(orgId);
       allow list: if canRead(orgId);
 
-      // 최초 로그인 자기 등록: 본인 UID로만, 기본 역할 pm 고정
-      // (auth-store.tsx의 upsertMemberFromFirebase 지원)
-      // 다른 역할 부여는 admin이 /users 페이지에서 변경
-      allow create: if isSafeSelfMemberCreate(orgId, memberId);
+      // 구성원 생성은 Auth Governance BFF(Admin SDK)에서만 수행한다.
+      allow create: if false;
 
       // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
       allow update: if isSafeSelfMemberUpdate(orgId, memberId);
 
-      // Admin: 역할 변경·삭제·타인 문서 수정 포함 모든 쓰기
-      allow write: if isAdmin(orgId);
+      // Admin: 역할 변경·삭제·타인 문서 수정
+      allow update, delete: if isAdmin(orgId);
     }
 
     // ── 조직DB: 현재 조직 admin만 조직 registry를 관리 ──
