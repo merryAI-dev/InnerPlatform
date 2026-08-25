@@ -1588,8 +1588,10 @@ export interface CashflowMonthClosePresentation {
     periodLabel: string;
   };
   monthClose: {
+    status?: CashflowSettlementStatus;
     statusLabel: string;
     tone: 'danger' | 'warning' | 'success' | 'neutral';
+    approvedAt?: string;
   };
   evidenceSource: 'DASHBOARD';
 }

@@ -1772,6 +1772,16 @@ class WeeklyExpenseControllerTest {
             new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-08", 3),
             java.math.BigDecimal.ZERO, true
         ));
+        when(dashboardCommandService.readCashflowSettlementStatuses(
+            any(), eq("project-stale-close"), eq("2026-07")
+        )).thenReturn(new CashflowSettlementStatusesResponse(
+            "project-stale-close",
+            "2026-07",
+            List.of(new CashflowSettlementStatusesResponse.Item(
+                "MONTH", "COMPLETED", "2026-08-20T02:51:00Z", "pm-1",
+                "2026-08-25T06:45:00Z", "finance-1", 2, null, null
+            ))
+        ));
 
         CashflowMonthDashboardSourceResponse response = testController(
             dashboardCommandService,
@@ -1799,6 +1809,13 @@ class WeeklyExpenseControllerTest {
         assertThat(json.path("operationalCycle").path("closeDeadline").asText()).isEqualTo("2026-08-10");
         assertThat(json.path("operationalCycle").path("closeEligible").asBoolean()).isTrue();
         assertThat(json.path("operationalCycle").path("late").asBoolean()).isTrue();
+        assertThat(json.path("settlementStatuses").path("yearMonth").asText()).isEqualTo("2026-07");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("period").asText())
+            .isEqualTo("MONTH");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("status").asText())
+            .isEqualTo("COMPLETED");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("approvedAt").asText())
+            .isEqualTo("2026-08-25T06:45:00Z");
         assertThat(json.path("monthCloseCalendar")).hasSize(12);
         assertThat(json.path("monthCloseCalendar").get(0).path("yearMonth").asText()).isEqualTo("2026-01");
         assertThat(json.path("monthCloseCalendar").get(7).path("yearMonth").asText()).isEqualTo("2026-08");

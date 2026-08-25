@@ -48,6 +48,9 @@ describe('CashflowProjectSheet schedule bar', () => {
     expect(source).toContain('practitionerDoneAt: monthCloseRequest.requestedAt,');
     // 대상 월로 이름 붙인다. 사람은 "무엇을 결산했나" 로 기억한다.
     expect(source).toContain("label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`");
+    expect(source).toContain("cashflowPresentation?.monthClose.status === 'COMPLETED'");
+    expect(source).toContain('approverDoneAt: executedCycleApproved ? cashflowPresentation?.monthClose.approvedAt : null,');
+    expect(source).not.toContain("approverDoneAt: ['APPROVED', 'REOPEN_REQUESTED'].includes(status)");
   });
 
   it('keeps one month-close action button, on the node that owns the request', () => {

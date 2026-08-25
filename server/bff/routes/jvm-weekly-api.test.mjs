@@ -1311,6 +1311,69 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
+  it('uses the canonical month settlement status for an executed-cycle approval', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
+      requestId: 'project-a-2026-08',
+      projectId: 'project-a',
+      yearMonth: '2026-08',
+      throughMonth: '2026-07',
+      status: 'PENDING',
+      requestedAt: '2026-08-20T02:51:00.000Z',
+    });
+    const canonicalSettlementStatuses = {
+      projectId: 'project-a',
+      yearMonth: '2026-07',
+      items: [{
+          period: 'MONTH',
+          status: 'COMPLETED',
+          approvedAt: '2026-08-25T06:45:00.000Z',
+          approvedBy: 'finance-1',
+          revision: 2,
+      }],
+    };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ...monthDashboardSource(
+        { ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0 },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        closedCumulativeAuthority('2026-07'),
+      ), settlementStatuses: canonicalSettlementStatuses }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+      now: () => new Date('2026-08-25T07:00:00.000Z'),
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.presentation.monthClose).toEqual({
+          status: 'COMPLETED',
+          statusLabel: '월 결산 완료',
+          tone: 'success',
+          approvedAt: '2026-08-25T06:45:00.000Z',
+        });
+      });
+
+    source.documents.delete('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08');
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.presentation.monthClose).toEqual({
+          statusLabel: '결산 전',
+          tone: 'neutral',
+        });
+      });
+  });
+
   it('uses the JVM evaluated business date across dashboard, compliance, and presentation at KST midnight', async () => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async () => ({

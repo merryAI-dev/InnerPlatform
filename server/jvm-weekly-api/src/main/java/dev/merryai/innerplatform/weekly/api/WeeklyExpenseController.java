@@ -509,7 +509,7 @@ public class WeeklyExpenseController {
                 "현금흐름 원장이 조회 중 변경되었습니다. 화면을 새로고침한 뒤 다시 시도해 주세요."
             );
         }
-        return dashboardSourceResponse(result, yearMonth);
+        return dashboardSourceResponse(result, yearMonth, actor);
     }
 
     public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
@@ -527,7 +527,8 @@ public class WeeklyExpenseController {
 
     private CashflowMonthDashboardSourceResponse dashboardSourceResponse(
         CashflowMonthDashboardQueryService.Result result,
-        String yearMonth
+        String yearMonth,
+        TrustedActorContext actor
     ) {
         String operationalStatus = result.operationalStatus();
         CashflowMonthCloseResponse latestRun = CashflowMonthCloseResponse.fromState(
@@ -554,6 +555,12 @@ public class WeeklyExpenseController {
                 authority.head().headRevision()
             )
             : CashflowMonthDashboardSourceResponse.CumulativeClose.unavailable(authority.availability());
+        CashflowMonthDashboardSourceResponse.OperationalCycle cycle = operationalCycle(
+            yearMonth, operationalStatus, latestRun
+        );
+        CashflowSettlementStatusesResponse settlementStatuses = commandService.readCashflowSettlementStatuses(
+            actor, result.latestRun().projectId(), cycle.targetYearMonth()
+        );
         return new CashflowMonthDashboardSourceResponse(
             monthClose,
             latestRun,
@@ -587,7 +594,8 @@ public class WeeklyExpenseController {
                 result.reopenRequest().enabled(),
                 result.reopenRequest().reasonCode()
             ),
-            operationalCycle(yearMonth, operationalStatus, latestRun),
+            cycle,
+            settlementStatuses,
             monthCloseCalendar(yearMonth)
         );
     }

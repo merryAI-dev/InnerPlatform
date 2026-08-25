@@ -1660,7 +1660,7 @@ export function CashflowProjectSheet({
    */
   const executedCycleSteps = useMemo(() => {
     if (monthCoveredByRequest || !monthCloseRequest?.requestedAt) return [];
-    const status = String(monthCloseRequest?.status || '').toUpperCase();
+    const executedCycleApproved = cashflowPresentation?.monthClose.status === 'COMPLETED';
     return buildScheduleSteps({
       practitionerLabel: '결산 요청',
       approverLabel: '조직장 승인',
@@ -1668,11 +1668,11 @@ export function CashflowProjectSheet({
       practitionerDeadline: null,
       approverDeadline: null,
       practitionerDoneAt: monthCloseRequest.requestedAt,
-      approverDoneAt: ['APPROVED', 'REOPEN_REQUESTED'].includes(status) ? monthCloseRequest?.reviewedAt : null,
-      approverDone: ['APPROVED', 'REOPEN_REQUESTED'].includes(status),
+      approverDoneAt: executedCycleApproved ? cashflowPresentation?.monthClose.approvedAt : null,
+      approverDone: executedCycleApproved,
       nowIso: new Date().toISOString(),
     });
-  }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthCloseRequest?.status, monthCoveredByRequest]);
+  }, [cashflowPresentation?.monthClose, monthCloseRequest?.requestedAt, monthCoveredByRequest]);
 
   const portalTimelineNodes = useMemo<PortalTimelineNode[]>(() => {
     if (!portalMode) return [];
