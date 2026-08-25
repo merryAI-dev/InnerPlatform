@@ -27,6 +27,7 @@ import {
   previewParticipationSheetByLinkViaBff,
   type ParticipationSheetPreview,
 } from '../../lib/platform-bff-client';
+import { ProjectStaffingSection } from './ProjectStaffingSection';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -94,6 +95,7 @@ import { formatProfitRatePercentInput } from '../../platform/project-financials'
 import { isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   createProjectEditorDraft,
+  formatProjectStaffingSummary,
   hasInvalidProjectContractPeriod,
   type ProjectEditorDraft,
   type ProjectEditorMode,
@@ -2812,6 +2814,12 @@ export function ProjectEditorWizard({
 
   const renderTeamStep = () => (
     <div className={FORM_SECTION_STACK_CLASS}>
+      <ProjectStaffingSection
+        orgId={orgId}
+        actor={user}
+        staffing={draft.staffing}
+        onChange={(next) => update('staffing', next)}
+      />
       <ProjectFormSection title="담당자와 결재자">
         <ProjectFormRow
           label="사업 담당자"
@@ -3371,6 +3379,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
             <ReviewRow label="최종 결재자 지정 (사업총괄)" value={draft.executiveApproverName} />
+            <ReviewRow label="실제 투입인력" value={formatProjectStaffingSummary(draft.staffing)} />
             <ReviewRow label="참여인력 (서류상·실제)" value={teamMembersSummary} />
             <ReviewRow label="참여율 시트 링크" value={draft.participationSheetLink} />
           </CardContent>

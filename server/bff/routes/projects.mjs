@@ -1491,6 +1491,31 @@ function assertTrustedProjectInfoDocumentReferences(
   }
 }
 
+
+/** 실제 투입인력 정규화. personId 없는 슬롯은 미정(null) - 명부 밖 인물은 담지 않는다. */
+function normalizeProjectStaffingForWrite(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const slot = (input) => {
+    if (!input || typeof input !== 'object') return null;
+    const personId = readOptionalText(input.personId);
+    if (!personId) return null;
+    return {
+      personId,
+      name: readOptionalText(input.name),
+      nickname: readOptionalText(input.nickname),
+    };
+  };
+  const operators = (Array.isArray(source.operators) ? source.operators : [])
+    .map((item) => slot(item))
+    .filter(Boolean);
+  return {
+    lead: slot(source.lead),
+    pm: slot(source.pm),
+    operators,
+    settlementSupport: readOptionalText(source.settlementSupport),
+  };
+}
+
 function assertRegistrationPayload(payload, { participationSheetLinkRequired = true } = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     invalidRegistration('Project registration payload is invalid');
@@ -1589,6 +1614,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     clientOrg: readOptionalText(payload.clientOrg),
     businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
     participationSheetLink: readOptionalText(payload.participationSheetLink) || undefined,
+    staffing: normalizeProjectStaffingForWrite(payload.staffing),
     department: normalizeProjectOrganizationLabel(payload.department),
     groupwareName: readOptionalText(payload.groupwareName) || undefined,
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
@@ -1772,6 +1798,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     clientOrg: pickText('clientOrg'),
     businessManagementGoogleFolderLink: pickText('businessManagementGoogleFolderLink'),
     participationSheetLink: pickText('participationSheetLink'),
+    staffing: normalizeProjectStaffingForWrite(pickValue('staffing')),
     department: pickText('department'),
     groupwareName: pickText('groupwareName'),
     currency: normalizeProjectCurrency(pickText('currency')),
@@ -1933,6 +1960,9 @@ function buildProjectPatchFromChangeRequestPayloadInternal(payload = {}, current
     clientOrg: readOptionalText(payload.clientOrg),
     businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
     participationSheetLink: readOptionalText(payload.participationSheetLink) || undefined,
+    staffing: Object.hasOwn(payload, 'staffing')
+      ? normalizeProjectStaffingForWrite(payload.staffing)
+      : (currentProject.staffing || undefined),
     department: resolveProjectDepartmentFromPayload(payload, currentProject),
     cic: resolveProjectCicFromPayload(payload, currentProject),
     groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(currentProject.groupwareName) || undefined,
@@ -2045,6 +2075,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   executiveApproverName: '최종 결재자 지정 (사업총괄)',
   teamName: '사내기업팀',
   teamMembersDetailed: '참여인력 (서류상·실제)',
+  staffing: '실제 투입인력',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
   finalPaymentExpectedWeek: '최종 입금 예상 주차',
