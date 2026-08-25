@@ -433,25 +433,41 @@ export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, 
   return isCurrent ? 'current' : 'default';
 }
 
-function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable) {
+function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable, settlementStatus) {
   if (!requestAvailable || readOptionalText(close?.status) === 'UNAVAILABLE') {
     return { statusLabel: '상태 재확인 필요', tone: 'danger' };
   }
   const requestStatus = readOptionalText(requestRecord?.status);
+  if (requestStatus === 'REOPEN_REQUESTED') return { statusLabel: '재오픈 승인 대기', tone: 'warning' };
+  if (requestStatus === 'REOPENED') return { statusLabel: '재결산 필요', tone: 'warning' };
+  if (requestStatus === 'REJECTED') return { statusLabel: '월 결산 반려', tone: 'danger' };
+  const canonicalStatus = readOptionalText(settlementStatus?.status);
+  if (canonicalStatus === 'COMPLETED') {
+    return {
+      status: 'COMPLETED',
+      statusLabel: '월 결산 완료',
+      tone: 'success',
+      approvedAt: readOptionalText(settlementStatus?.approvedAt),
+    };
+  }
+  if (canonicalStatus === 'PENDING_APPROVAL') {
+    return { status: 'PENDING_APPROVAL', statusLabel: '조직장 승인 대기', tone: 'warning', approvedAt: '' };
+  }
+  if (canonicalStatus === 'WAITING_FOR_UPDATE') {
+    return { status: 'WAITING_FOR_UPDATE', statusLabel: '결산 전', tone: 'neutral', approvedAt: '' };
+  }
+  // canonical JVM 상태가 없는 기존 결산 요청만 호환한다. JVM 상태가 있으면 위 값이 항상 우선한다.
   if (['PENDING', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)) {
     return { statusLabel: '조직장 승인 대기', tone: 'warning' };
   }
   if (requestStatus === 'APPROVED' || (!requestRecord && readOptionalText(close?.status) === 'CLOSED')) {
     return { statusLabel: '월 결산 완료', tone: 'success' };
   }
-  if (requestStatus === 'REOPEN_REQUESTED') return { statusLabel: '재오픈 승인 대기', tone: 'warning' };
-  if (requestStatus === 'REOPENED') return { statusLabel: '재결산 필요', tone: 'warning' };
-  if (requestStatus === 'REJECTED') return { statusLabel: '월 결산 반려', tone: 'danger' };
   return { statusLabel: '결산 전', tone: 'neutral' };
 }
 
 function buildCashflowMonthClosePresentation({
-  dashboard, close, requestRecord, requestAvailable, comparisonBoundary,
+  dashboard, close, requestRecord, requestAvailable, settlementStatus, comparisonBoundary,
 }) {
   const weeklyYear = readWeeklyYear(dashboard?.canonical?.weeklyYear);
   const annualYears = weeklyYear === null ? [] : annualYearsFor(weeklyYear);
@@ -565,7 +581,7 @@ function buildCashflowMonthClosePresentation({
       changed: comparisonCells.some((cell) => cell.difference !== null && cell.difference !== 0),
       periodLabel: `${periodStart} ~ ${effectiveAsOfWeek?.yearMonth} ${effectiveAsOfWeek?.weekNo}주차`,
     },
-    monthClose: cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable),
+    monthClose: cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable, settlementStatus),
     evidenceSource: 'DASHBOARD',
   };
 }
@@ -4339,6 +4355,11 @@ export function mountJvmWeeklyApiRoutes(app, {
           close: cumulativeClose,
           requestRecord: monthCloseRequest,
           requestAvailable: monthCloseRequestRead.available,
+          settlementStatus: readOptionalText(monthCloseRequest?.throughMonth)
+            && readOptionalText(source?.settlementStatuses?.yearMonth) === readOptionalText(monthCloseRequest?.throughMonth)
+            && Array.isArray(source?.settlementStatuses?.items)
+            ? source.settlementStatuses.items.find((item) => readOptionalText(item?.period) === 'MONTH')
+            : null,
           comparisonBoundary,
         });
         if (publicationStateUnavailable
