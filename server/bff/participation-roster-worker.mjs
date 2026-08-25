@@ -9,7 +9,6 @@
 import { createHash } from 'node:crypto';
 import { createOutboxEvent } from './outbox.mjs';
 import {
-  composeRosterRows,
   normalizeRosterPeople,
   pushRosterToLinkedSheets,
 } from './participation-roster-push.mjs';
@@ -43,12 +42,15 @@ function statusDocId(result) {
 
 /**
  * 팬아웃 대상: 참여율 시트 링크가 있는 활성 프로젝트.
- * COMPLETED 만 제외한다 - 잔금 대기(COMPLETED_PENDING_PAYMENT)는 정산이 진행 중이라
- * 시트가 아직 살아 있다.
+ * COMPLETED 와 휴지통(trashedAt)을 제외한다 - 잔금 대기(COMPLETED_PENDING_PAYMENT)는
+ * 정산이 진행 중이라 시트가 아직 살아 있다. 휴지통 프로젝트의 시트에 계속 명단(PII)을
+ * 보내는 것은 갱신이 아니라 유출이다.
  */
 function collectRosterLinks(projects) {
   return projects
-    .filter((project) => text(project.participationSheetLink) && text(project.status) !== 'COMPLETED')
+    .filter((project) => text(project.participationSheetLink)
+      && text(project.status) !== 'COMPLETED'
+      && !project.trashedAt)
     .map((project) => ({
       link: project.participationSheetLink,
       projectId: project.id,
@@ -65,16 +67,14 @@ export function createParticipationRosterChangedOutboxHandler({ db, googleSheets
       db.collection(`orgs/${tenantId}/persons`).get(),
       db.collection(`orgs/${tenantId}/projects`).get(),
     ]);
-    const rosterRows = composeRosterRows(
-      normalizeRosterPeople(peopleSnap.docs.map((doc) => doc.data() || {})),
-    );
+    const people = normalizeRosterPeople(peopleSnap.docs.map((doc) => doc.data() || {}));
     const links = collectRosterLinks(
       projectsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
     );
 
     const results = await pushRosterToLinkedSheets({
       sheetsService: googleSheetsService,
-      rosterRows,
+      people,
       links,
     });
 
@@ -112,7 +112,7 @@ export function createParticipationRosterChangedOutboxHandler({ db, googleSheets
       sheets: results.length,
       succeeded: results.filter((result) => result.ok).length,
       refused: results.filter((result) => !result.ok).length,
-      rosterRows: rosterRows.length,
+      people: people.length,
       at: nowIso,
     };
   };

@@ -17,6 +17,7 @@ const DOCUMENTS = {
   [`orgs/${TENANT}/projects/proj-2`]: { name: '사업 둘', status: 'COMPLETED_PENDING_PAYMENT', participationSheetLink: LINK_A },
   [`orgs/${TENANT}/projects/proj-3`]: { name: '끝난 사업', status: 'COMPLETED', participationSheetLink: LINK_B },
   [`orgs/${TENANT}/projects/proj-4`]: { name: '링크 없는 사업', status: 'IN_PROGRESS' },
+  [`orgs/${TENANT}/projects/proj-5`]: { name: '휴지통 사업', status: 'IN_PROGRESS', participationSheetLink: LINK_B, trashedAt: '2026-08-20T00:00:00.000Z' },
 };
 
 function fakeDb(documents = DOCUMENTS) {
@@ -75,12 +76,24 @@ describe('participation.roster.changed 핸들러', () => {
   it('라이브 People 로 명단을 만들어 링크된 활성 프로젝트의 시트에만 1회씩 쓴다', async () => {
     const { sheets, run } = runHandler();
     const summary = await run();
-    // proj-1·proj-2 는 같은 시트(중복 제거 1회), COMPLETED 와 무링크는 제외.
+    // proj-1·proj-2 는 같은 시트(중복 제거 1회), COMPLETED·무링크·휴지통(trashedAt)은 제외.
     expect(sheets.calls.updates).toHaveLength(1);
     const written = sheets.calls.updates[0].updates[0].values;
     expect(written.slice(0, 2)).toEqual([['가든', '김신영'], ['보람', '변민욱']]);
     expect(written[written.length - 1]).toEqual(['미정-10', '']);
-    expect(summary).toMatchObject({ sheets: 1, succeeded: 1, refused: 0 });
+    expect(summary).toMatchObject({ sheets: 1, succeeded: 1, refused: 0, people: 2 });
+  });
+
+  it('People 조회가 0명이면 시트를 건드리지 않고 people_empty 로 남긴다 - 던지지 않는다', async () => {
+    const db = fakeDb({
+      [`orgs/${TENANT}/projects/proj-1`]: { name: '사업 하나', status: 'IN_PROGRESS', participationSheetLink: LINK_A },
+    });
+    const { db: usedDb, sheets, run } = runHandler({ db });
+    const summary = await run();
+    expect(sheets.calls.updates).toHaveLength(0);
+    expect(summary).toMatchObject({ succeeded: 0, refused: 1, people: 0 });
+    const statusWrite = usedDb.writes.find((write) => write.path.includes(PARTICIPATION_ROSTER_STATUS_COLLECTION));
+    expect(statusWrite.value).toMatchObject({ ok: false, reason: 'people_empty' });
   });
 
   it('성공한 시트의 상태 문서에 제목·프로젝트명·lastSuccessAt 을 기록한다', async () => {

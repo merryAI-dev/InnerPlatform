@@ -7,11 +7,13 @@ const { mountParticipationRosterRoutes } = await import('./participation-roster.
 
 const TENANT = 'tenant-a';
 
-function createApp({ role = 'admin', documents = {} } = {}) {
+function createApp({ role = 'admin', documents = {}, idempotencyBegin } = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.context = { tenantId: TENANT, actorId: 'actor-a', actorRole: role, requestId: 'req-1' };
+    req.context = {
+      tenantId: TENANT, actorId: 'actor-a', actorRole: role, requestId: 'req-1', idempotencyKey: 'idem-1',
+    };
     next();
   });
 
@@ -28,10 +30,16 @@ function createApp({ role = 'admin', documents = {} } = {}) {
       create: async (value) => { writes.push({ path, value }); },
     }),
   };
+  const idempotencyCalls = { complete: 0, fail: 0 };
+  const idempotencyService = {
+    begin: idempotencyBegin || (async () => ({ mode: 'new', requestFingerprint: 'fp-1' })),
+    complete: async () => { idempotencyCalls.complete += 1; },
+    fail: async () => { idempotencyCalls.fail += 1; },
+  };
 
-  mountParticipationRosterRoutes(app, { db, now: () => '2026-08-25T09:00:00.000Z' });
+  mountParticipationRosterRoutes(app, { db, now: () => '2026-08-25T09:00:00.000Z', idempotencyService });
   app.use((error, _req, res, _next) => res.status(error.statusCode || 500).json({ code: error.code, message: error.message }));
-  return { app, writes };
+  return { app, writes, idempotencyCalls };
 }
 
 const STATUS_DOCS = {
@@ -60,7 +68,7 @@ describe('GET /api/v1/participation-roster/push-status', () => {
 
 describe('POST /api/v1/participation-roster/push', () => {
   it('personWrite 역할이면 outbox 이벤트를 넣고 202 를 돌려준다', async () => {
-    const { app, writes } = createApp({ role: 'finance' });
+    const { app, writes, idempotencyCalls } = createApp({ role: 'finance' });
     const res = await request(app).post('/api/v1/participation-roster/push');
     expect(res.status).toBe(202);
     expect(writes).toHaveLength(1);
@@ -70,12 +78,26 @@ describe('POST /api/v1/participation-roster/push', () => {
       tenantId: TENANT,
       payload: { trigger: 'manual', actorId: 'actor-a' },
     });
+    expect(idempotencyCalls.complete).toBe(1);
+  });
+
+  it('같은 idempotency 키의 재전송은 새 이벤트 대신 저장된 응답을 재생한다', async () => {
+    const { app, writes } = createApp({
+      role: 'finance',
+      idempotencyBegin: async () => ({ mode: 'replay', status: 202, body: { ok: true, eventId: 'prev-event' } }),
+    });
+    const res = await request(app).post('/api/v1/participation-roster/push');
+    expect(res.status).toBe(202);
+    expect(res.body.eventId).toBe('prev-event');
+    expect(res.headers['x-idempotency-replayed']).toBe('1');
+    expect(writes).toHaveLength(0);
   });
 
   it('viewer 는 실행할 수 없다', async () => {
-    const { app, writes } = createApp({ role: 'viewer' });
+    const { app, writes, idempotencyCalls } = createApp({ role: 'viewer' });
     const res = await request(app).post('/api/v1/participation-roster/push');
     expect(res.status).toBe(403);
     expect(writes).toHaveLength(0);
+    expect(idempotencyCalls.fail).toBe(1);
   });
 });

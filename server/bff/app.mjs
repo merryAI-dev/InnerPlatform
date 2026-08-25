@@ -1610,7 +1610,7 @@ export function createBffApp(options = {}) {
     rbacPolicy,
     professionalProfileCatalog,
   });
-  mountParticipationRosterRoutes(app, { db, now });
+  mountParticipationRosterRoutes(app, { db, now, idempotencyService });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,

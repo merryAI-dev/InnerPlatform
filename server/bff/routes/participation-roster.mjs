@@ -10,7 +10,7 @@
  */
 
 import {
-  asyncHandler, assertActorRoleAllowed, createHttpError, ROUTE_ROLES, readOptionalText,
+  asyncHandler, assertActorRoleAllowed, createHttpError, createMutatingRoute, ROUTE_ROLES, readOptionalText,
 } from '../bff-utils.mjs';
 import { enqueueOutboxEvent } from '../outbox.mjs';
 import {
@@ -18,7 +18,7 @@ import {
   buildParticipationRosterOutboxEvent,
 } from '../participation-roster-worker.mjs';
 
-export function mountParticipationRosterRoutes(app, { db, now = () => new Date().toISOString() } = {}) {
+export function mountParticipationRosterRoutes(app, { db, now = () => new Date().toISOString(), idempotencyService } = {}) {
   app.get('/api/v1/participation-roster/push-status', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read participation roster push status');
     if (!db) throw createHttpError(503, '명단 푸시 상태를 읽을 수 없습니다.', 'firestore_unconfigured');
@@ -53,7 +53,9 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
     });
   }));
 
-  app.post('/api/v1/participation-roster/push', asyncHandler(async (req, res) => {
+  // createMutatingRoute 가 계약이다: idempotency-key 없는 POST 는 전역 미들웨어가 400 으로
+  // 거르고, 같은 키의 재전송은 새 이벤트를 또 만드는 대신 저장된 응답을 재생한다.
+  app.post('/api/v1/participation-roster/push', createMutatingRoute(idempotencyService, async (req) => {
     // 명단 푸시는 People 명부와 같은 민감도다 - personWrite(admin·tenant_admin·finance).
     assertActorRoleAllowed(req, ROUTE_ROLES.personWrite, 'trigger participation roster push');
     if (!db) throw createHttpError(503, '명단 푸시를 실행할 수 없습니다.', 'firestore_unconfigured');
@@ -68,6 +70,6 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
       createdAt: now(),
     });
     await enqueueOutboxEvent(db, event);
-    res.status(202).json({ ok: true, eventId: event.id, eventType: event.eventType });
+    return { status: 202, body: { ok: true, eventId: event.id, eventType: event.eventType } };
   }));
 }
