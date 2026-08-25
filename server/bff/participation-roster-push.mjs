@@ -49,8 +49,10 @@ function classifySheetsError(error) {
   return 'api_error';
 }
 
-function refusal({ spreadsheetId, spreadsheetTitle = '', reason, message }) {
-  return { ok: false, spreadsheetId, spreadsheetTitle, reason, message };
+// invalid_link 는 spreadsheetId 가 없다 - 원본 링크는 link 로 따로 나른다.
+// 링크 문자열을 id 자리에 넣으면 '/' 때문에 Firestore 문서 id 로 못 쓴다.
+function refusal({ spreadsheetId = '', link = '', spreadsheetTitle = '', reason, message }) {
+  return { ok: false, spreadsheetId, link, spreadsheetTitle, reason, message };
 }
 
 /**
@@ -65,7 +67,7 @@ function refusal({ spreadsheetId, spreadsheetTitle = '', reason, message }) {
 export async function pushRosterToSheet({ sheetsService, spreadsheetId, rosterRows }) {
   const normalizedId = extractSpreadsheetId(spreadsheetId);
   if (!normalizedId) {
-    return refusal({ spreadsheetId: text(spreadsheetId), reason: 'invalid_link', message: '시트 링크에서 spreadsheet ID를 찾지 못했습니다.' });
+    return refusal({ link: text(spreadsheetId), reason: 'invalid_link', message: '시트 링크에서 spreadsheet ID를 찾지 못했습니다.' });
   }
   if (!Array.isArray(rosterRows) || rosterRows.length === 0) {
     return refusal({ spreadsheetId: normalizedId, reason: 'roster_empty', message: '쓸 명단이 비어 있습니다 - People 조회를 의심하세요.' });
@@ -160,7 +162,7 @@ export async function pushRosterToLinkedSheets({ sheetsService, rosterRows, link
   for (const target of bySheet.values()) {
     const result = target.spreadsheetId
       ? await pushRosterToSheet({ sheetsService, spreadsheetId: target.spreadsheetId, rosterRows })
-      : refusal({ spreadsheetId: text(target.link), reason: 'invalid_link', message: '시트 링크에서 spreadsheet ID를 찾지 못했습니다.' });
+      : refusal({ link: text(target.link), reason: 'invalid_link', message: '시트 링크에서 spreadsheet ID를 찾지 못했습니다.' });
     results.push({ ...result, projects: target.projects });
   }
   return results;
