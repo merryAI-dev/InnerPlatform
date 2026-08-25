@@ -22,6 +22,13 @@ function validateCatalog(value) {
   }
   assertUnique(value.englishTests.map(({ code }) => code), 'English test code');
   assertUnique(value.englishTests.flatMap(({ scales }) => scales.map(({ code }) => code)), 'English scale code');
+  if (value.englishTests.some(({ scales }) => (
+    !Array.isArray(scales)
+    || scales.length === 0
+    || scales.some(({ label }) => typeof label !== 'string' || !label.trim())
+  ))) {
+    throw new Error('professional profile English scale labels are required');
+  }
 
   if (!Array.isArray(value.countryCodes) || value.countryCodes.length === 0) {
     throw new Error('professional profile countryCodes are required');

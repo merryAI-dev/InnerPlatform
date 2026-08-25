@@ -96,16 +96,17 @@ describe('professional profile catalog', () => {
     const scales = catalog.englishTests.flatMap((test) => test.scales.map((scale) => ({
       testCode: test.code,
       scaleCode: scale.code,
+      scaleLabel: scale.label,
     })));
     expect(scales).toEqual([
-      { testCode: 'TOEIC', scaleCode: 'TOEIC_990' },
-      { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_120' },
-      { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_6' },
-      { testCode: 'TOEFL', scaleCode: 'TOEFL_PBT_677' },
-      { testCode: 'OPIC', scaleCode: 'OPIC_GRADE' },
-      { testCode: 'IELTS', scaleCode: 'IELTS_9' },
-      { testCode: 'TEPS', scaleCode: 'TEPS_600' },
-      { testCode: 'OTHER', scaleCode: 'OTHER_TEXT' },
+      { testCode: 'TOEIC', scaleCode: 'TOEIC_990', scaleLabel: '990점' },
+      { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_120', scaleLabel: 'iBT 120점' },
+      { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_6', scaleLabel: 'iBT 6점' },
+      { testCode: 'TOEFL', scaleCode: 'TOEFL_PBT_677', scaleLabel: 'PBT 677점' },
+      { testCode: 'OPIC', scaleCode: 'OPIC_GRADE', scaleLabel: '등급' },
+      { testCode: 'IELTS', scaleCode: 'IELTS_9', scaleLabel: '9점' },
+      { testCode: 'TEPS', scaleCode: 'TEPS_600', scaleLabel: '600점' },
+      { testCode: 'OTHER', scaleCode: 'OTHER_TEXT', scaleLabel: '직접 입력' },
     ]);
     expect(catalog.englishTests.find(({ code }) => code === 'OPIC').scales[0].allowedValues)
       .toEqual(['NL', 'NM', 'NH', 'IL', 'IM1', 'IM2', 'IM3', 'IH', 'AL']);
