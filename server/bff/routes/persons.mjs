@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
-  asyncHandler, createMutatingRoute, assertActorRoleAllowed,
+  asyncHandler, createMutatingRoute, assertActorRoleAllowed, assertActorPermissionAllowed,
   ROUTE_ROLES, createHttpError, encryptAuditEmail,
 } from '../bff-utils.mjs';
 import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema } from '../schemas.mjs';
+import { normalizeProfessionalProfileInput } from '../professional-profile.mjs';
+import { buildRequestFingerprint } from '../utils.mjs';
 
 /**
  * 인력 명부(persons) — 사람과 그 고용(계약) 구간을 관리한다.
@@ -90,64 +92,189 @@ function readPerson(snapshot) {
   return { ...data, employments: Array.isArray(data.employments) ? data.employments : [] };
 }
 
+function serializePersonDirectoryItem(person) {
+  return {
+    personId: person.personId,
+    name: person.name || '',
+    nickname: person.nickname || '',
+    email: person.email || '',
+    departmentTop: person.departmentTop || '',
+    departmentMid: person.departmentMid || '',
+    departmentSub: person.departmentSub || '',
+    title: person.title || '',
+    grade: person.grade || '',
+    workLocation: person.workLocation || '',
+    joinedAt: person.joinedAt || '',
+    uid: person.uid || null,
+    employments: Array.isArray(person.employments) ? person.employments : [],
+  };
+}
+
+function actorCanUseProfile(rbacPolicy, req, permission) {
+  try {
+    assertActorPermissionAllowed(rbacPolicy, req, permission, 'access a professional profile');
+    return true;
+  } catch (error) {
+    if (error?.statusCode === 403) return false;
+    throw error;
+  }
+}
+
+function hasProfileContent(profile) {
+  return profile.educationRecords.length > 0
+    || profile.englishEvidence.length > 0
+    || profile.certifications.length > 0;
+}
+
+function normalizeProfileCommand(value) {
+  try {
+    return normalizeProfessionalProfileInput(value);
+  } catch (error) {
+    if (error?.code !== 'professional_profile_invalid') throw error;
+    throw createHttpError(400, error.message, 'professional_profile_invalid');
+  }
+}
+
+function preventPersonCaching(_req, res, next) {
+  res.setHeader('Cache-Control', 'private, no-store');
+  next();
+}
+
+function idempotencyError(lock) {
+  if (lock.mode === 'conflict') {
+    return createHttpError(409, lock.reason, 'idempotency_conflict');
+  }
+  if (lock.mode === 'in_progress') {
+    return createHttpError(409, lock.reason, 'idempotency_in_progress');
+  }
+  return null;
+}
+
+function preparePersonCreate(rbacPolicy) {
+  return (req, _res, next) => {
+    try {
+      assertActorRoleAllowed(req, ROUTE_ROLES.personWrite, 'create a person');
+      const parsed = parseWithSchema(personCreateSchema, req.body, 'Invalid person payload');
+      const profileProvided = Object.hasOwn(req.body || {}, 'professionalProfile');
+      const normalizedProfile = profileProvided
+        ? normalizeProfileCommand(parsed.professionalProfile)
+        : null;
+      const includesProfile = normalizedProfile !== null && hasProfileContent(normalizedProfile);
+      if (profileProvided) {
+        assertActorPermissionAllowed(
+          rbacPolicy,
+          req,
+          'person:professional_profile:write',
+          'create a professional profile',
+        );
+      }
+      req.personCreateCommand = {
+        parsed,
+        normalizedProfile,
+        profileProvided,
+        includesProfile,
+      };
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+function buildPersonCreateDocument({ parsed, normalizedProfile, includesProfile }, context, timestamp) {
+  const { tenantId, actorId } = context;
+  const personId = parsed.personId
+    || `psn-x-${String(parsed.name).replace(/[()\s/]/g, '')}${String(parsed.nickname || '').replace(/[()\s/]/g, '')}`;
+  const employment = {
+    id: randomUUID(),
+    type: parsed.employment.type,
+    state: parsed.employment.state,
+    startDate: parsed.employment.effectiveFrom,
+    endDate: parsed.employment.endDate ?? null,
+    note: (parsed.employment.note || '').trim(),
+  };
+  if (employment.endDate !== null && employment.endDate < employment.startDate) {
+    throw invalidChange('종료일이 적용일보다 빠릅니다. 날짜를 다시 확인해 주세요.');
+  }
+
+  const doc = {
+    personId,
+    tenantId,
+    name: parsed.name,
+    nickname: parsed.nickname || '',
+    email: (parsed.email || '').trim().toLowerCase(),
+    departmentTop: parsed.departmentTop || '',
+    departmentMid: parsed.departmentMid || '',
+    departmentSub: parsed.departmentSub || '',
+    title: parsed.title || '',
+    grade: parsed.grade || '',
+    workLocation: parsed.workLocation || '',
+    note: parsed.note || '',
+    joinedAt: employment.startDate,
+    employments: [employment],
+    uid: null,
+    // 시트에서 온 인력이 아니라는 걸 남긴다 — 시트 재동기화가 덮어쓰면 안 된다.
+    source: { sheet: null, origin: 'manual', createdBy: actorId, createdAt: timestamp },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    updatedBy: actorId,
+  };
+
+  if (includesProfile) {
+    doc.professionalProfile = {
+      schemaVersion: 1,
+      ...normalizedProfile,
+      provenance: {
+        source: 'PEOPLE_MANUAL',
+        revision: 1,
+        updatedAt: timestamp,
+        updatedBy: actorId,
+      },
+    };
+  }
+  return { personId, employment, doc };
+}
+
 export function mountPersonRoutes(app, {
-  db, now, idempotencyService, auditChainService, piiProtector,
+  db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy,
 }) {
-  app.get('/api/v1/persons', asyncHandler(async (req, res) => {
+  app.get('/api/v1/persons', preventPersonCaching, asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read the people directory');
     const { tenantId } = req.context;
     const snap = await db.collection(`orgs/${tenantId}/persons`).get();
     const items = snap.docs
       .map((doc) => readPerson(doc))
       .filter(Boolean)
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
-    res.status(200).json({ items, total: items.length });
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'))
+      .map(serializePersonDirectoryItem);
+    res.status(200).json({
+      items,
+      total: items.length,
+      capabilities: {
+        professionalProfileRead: actorCanUseProfile(
+          rbacPolicy,
+          req,
+          'person:professional_profile:read',
+        ),
+        professionalProfileWrite: actorCanUseProfile(
+          rbacPolicy,
+          req,
+          'person:professional_profile:write',
+        ),
+      },
+    });
   }));
 
-  app.post('/api/v1/persons', createMutatingRoute(idempotencyService, async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.personWrite, 'create a person');
+  const createLegacyPerson = createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const timestamp = now();
-    const parsed = parseWithSchema(personCreateSchema, req.body, 'Invalid person payload');
-
-    const personId = parsed.personId
-      || `psn-x-${String(parsed.name).replace(/[()\s/]/g, '')}${String(parsed.nickname || '').replace(/[()\s/]/g, '')}`;
+    const { parsed } = req.personCreateCommand;
+    const { personId, employment, doc } = buildPersonCreateDocument(
+      req.personCreateCommand,
+      req.context,
+      timestamp,
+    );
     const ref = db.doc(`orgs/${tenantId}/persons/${personId}`);
-
-    const employment = {
-      id: randomUUID(),
-      type: parsed.employment.type,
-      state: parsed.employment.state,
-      startDate: parsed.employment.effectiveFrom,
-      endDate: parsed.employment.endDate ?? null,
-      note: (parsed.employment.note || '').trim(),
-    };
-    if (employment.endDate !== null && employment.endDate < employment.startDate) {
-      throw invalidChange('종료일이 적용일보다 빠릅니다. 날짜를 다시 확인해 주세요.');
-    }
-
-    const doc = {
-      personId,
-      tenantId,
-      name: parsed.name,
-      nickname: parsed.nickname || '',
-      email: (parsed.email || '').trim().toLowerCase(),
-      departmentTop: parsed.departmentTop || '',
-      departmentMid: parsed.departmentMid || '',
-      departmentSub: parsed.departmentSub || '',
-      title: parsed.title || '',
-      grade: parsed.grade || '',
-      workLocation: parsed.workLocation || '',
-      note: parsed.note || '',
-      joinedAt: employment.startDate,
-      employments: [employment],
-      uid: null,
-      // 시트에서 온 인력이 아니라는 걸 남긴다 — 시트 재동기화가 덮어쓰면 안 된다.
-      source: { sheet: null, origin: 'manual', createdBy: actorId, createdAt: timestamp },
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      updatedBy: actorId,
-    };
 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
@@ -172,7 +299,134 @@ export function mountPersonRoutes(app, {
     });
 
     return { status: 201, body: { person: doc } };
-  }));
+  });
+
+  const createPersonWithProfile = asyncHandler(async (req, res) => {
+    const { tenantId, actorId, actorRole, actorEmail, requestId, idempotencyKey } = req.context;
+    const { parsed } = req.personCreateCommand;
+    const timestamp = now();
+    const requestFingerprint = buildRequestFingerprint({
+      method: req.method,
+      path: req.path,
+      body: req.body,
+    });
+    const { personId, employment, doc } = buildPersonCreateDocument(
+      req.personCreateCommand,
+      req.context,
+      timestamp,
+    );
+    const ref = db.doc(`orgs/${tenantId}/persons/${personId}`);
+
+    const result = await db.runTransaction(async (tx) => {
+      const lock = await idempotencyService.checkInTransaction(tx, {
+        tenantId,
+        idempotencyKey,
+        requestFingerprint,
+        actorId,
+        nowDate: new Date(timestamp),
+      });
+      if (lock.mode === 'replay') {
+        const replayPersonId = lock.body?.personId || lock.body?.person?.personId || personId;
+        const replayRef = db.doc(`orgs/${tenantId}/persons/${replayPersonId}`);
+        const replaySnapshot = await tx.get(replayRef);
+        if (!replaySnapshot.exists) {
+          throw createHttpError(404, '명부에 없는 인력입니다.', 'person_not_found');
+        }
+        return {
+          replayed: true,
+          status: lock.status,
+          body: {
+            person: serializePersonDirectoryItem(replaySnapshot.data() || {}),
+            professionalProfile: {
+              revision: lock.body?.revision ?? lock.body?.professionalProfile?.revision ?? 1,
+              changed: lock.body?.changed ?? lock.body?.professionalProfile?.changed ?? true,
+            },
+          },
+        };
+      }
+      const lockError = idempotencyError(lock);
+      if (lockError) throw lockError;
+
+      const snap = await tx.get(ref);
+      if (snap.exists) {
+        throw createHttpError(409, `이미 명부에 있는 인력입니다: ${parsed.name}`, 'person_already_exists');
+      }
+
+      const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+      const auditEntries = [{
+        tenantId,
+        entityType: 'person',
+        entityId: personId,
+        action: 'CREATE',
+        actorId,
+        actorRole,
+        actorEmailEnc,
+        requestId,
+        details: `인력 등록: ${parsed.name} (${employment.type})`,
+        metadata: {
+          source: 'bff',
+          employmentType: employment.type,
+          startDate: employment.startDate,
+        },
+        timestamp,
+      }];
+      if (req.personCreateCommand.includesProfile) {
+        auditEntries.push({
+          tenantId,
+          entityType: 'person',
+          entityId: personId,
+          action: 'PROFILE_UPDATE',
+          actorId,
+          actorRole,
+          actorEmailEnc,
+          requestId,
+          details: '전문 프로필 등록',
+          metadata: {
+            source: 'bff',
+            fields: ['educationRecords', 'englishEvidence', 'certifications'],
+            previousRevision: 0,
+            nextRevision: 1,
+          },
+          timestamp,
+        });
+      }
+      await auditChainService.appendManyInTransaction(tx, auditEntries);
+      tx.set(ref, doc);
+      const revision = req.personCreateCommand.includesProfile ? 1 : 0;
+      const changed = req.personCreateCommand.includesProfile;
+      const body = {
+        person: serializePersonDirectoryItem(doc),
+        professionalProfile: { revision, changed },
+      };
+      const receipt = { personId, revision, changed };
+      idempotencyService.completeInTransaction(tx, {
+        ref: lock.ref,
+        tenantId,
+        idempotencyKey,
+        requestFingerprint,
+        responseStatus: 201,
+        responseBody: receipt,
+        actorId,
+        requestId,
+        method: req.method,
+        path: req.path,
+        nowDate: new Date(timestamp),
+      });
+      return { replayed: false, status: 201, body };
+    });
+
+    if (result.replayed) res.setHeader('x-idempotency-replayed', '1');
+    res.status(result.status).json(result.body);
+  });
+
+  app.post(
+    '/api/v1/persons',
+    preventPersonCaching,
+    preparePersonCreate(rbacPolicy),
+    (req, res, next) => (req.personCreateCommand.profileProvided
+      ? createPersonWithProfile(req, res, next)
+      : createLegacyPerson(req, res, next)),
+  );
 
   app.post('/api/v1/persons/:personId/employments', createMutatingRoute(idempotencyService, async (req) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.personWrite, 'change a person employment');

@@ -439,6 +439,38 @@ export const personEmploymentSchema = z.object({
   note: z.string().trim().max(500).optional(),
 }).strict();
 
+const PROFESSIONAL_PROFILE_TEXT = z.string().max(80);
+
+const professionalProfileEducationRecordSchema = z.object({
+  attainmentCode: PROFESSIONAL_PROFILE_TEXT,
+  institutionName: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  countryCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  major: PROFESSIONAL_PROFILE_TEXT.nullish(),
+}).strict();
+
+const professionalProfileEnglishEvidenceSchema = z.object({
+  testCode: PROFESSIONAL_PROFILE_TEXT,
+  scaleCode: PROFESSIONAL_PROFILE_TEXT,
+  resultValue: PROFESSIONAL_PROFILE_TEXT,
+  otherTestName: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  testedAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+}).strict();
+
+const professionalProfileCertificationSchema = z.object({
+  label: PROFESSIONAL_PROFILE_TEXT,
+}).strict();
+
+export const professionalProfileInputSchema = z.object({
+  educationRecords: z.array(professionalProfileEducationRecordSchema).max(10).optional(),
+  englishEvidence: z.array(professionalProfileEnglishEvidenceSchema).max(10).optional(),
+  certifications: z.array(professionalProfileCertificationSchema).max(20).optional(),
+}).strict();
+
+export const personProfessionalProfilePutSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  profile: professionalProfileInputSchema,
+}).strict();
+
 export const personCreateSchema = z.object({
   personId: z.string().trim().min(1).max(200).regex(/^[^/]+$/).optional(),
   name: z.string().trim().min(1).max(100),
@@ -458,6 +490,7 @@ export const personCreateSchema = z.object({
     endDate: ISO_DATE_STRING.nullish(),
     note: z.string().trim().max(500).optional(),
   }).strict(),
+  professionalProfile: professionalProfileInputSchema.optional(),
 }).strict();
 
 export const personProfileSchema = z.object({

@@ -1,7 +1,8 @@
 import {
-  asyncHandler, assertActorRoleAllowed, createHttpError, createMutatingRoute, ROUTE_ROLES, readOptionalText,
+  asyncHandler, assertActorPermissionAllowed, assertActorRoleAllowed, createHttpError, createMutatingRoute, ROUTE_ROLES, readOptionalText,
 } from '../bff-utils.mjs';
 import { buildParticipationDashboardSnapshot, buildProjectParticipationSnapshot, selectParticipationDashboardYear } from '../participation-dashboard.mjs';
+import { getProfessionalProfileCatalog } from '../professional-profile.mjs';
 import {
   PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
   resolveParticipationSettlementSystem,
@@ -12,6 +13,95 @@ import {
   participationSheetRanges,
   toParticipationSheetInput,
 } from '../participation-sheet-ranges.mjs';
+
+const PROFILE_READ_PERMISSION = 'person:professional_profile:read';
+const PROFILE_FILTER_KEYS = ['education', 'englishEvidence', 'certification'];
+const PROFILE_MISSING = '__MISSING__';
+const PROFILE_FILTER_VALUE_MAX_LENGTH = 80;
+const CERTIFICATION_FILTER_MAX_COUNT = 20;
+
+function invalidProfessionalProfileFilter(message) {
+  return createHttpError(400, message, 'invalid_professional_profile_filter');
+}
+
+function actorCanReadProfessionalProfiles(rbacPolicy, req) {
+  try {
+    assertActorPermissionAllowed(
+      rbacPolicy,
+      req,
+      PROFILE_READ_PERMISSION,
+      'read participation professional profiles',
+    );
+    return true;
+  } catch (error) {
+    if (error?.statusCode === 403) return false;
+    throw error;
+  }
+}
+
+function hasProfessionalProfileQuery(query) {
+  return PROFILE_FILTER_KEYS.some((key) => Object.hasOwn(query || {}, key));
+}
+
+function profileQueryValues(value, label) {
+  if (value === undefined) return [];
+  const rawValues = Array.isArray(value) ? value : [value];
+  const values = rawValues.map((rawValue) => {
+    if (typeof rawValue !== 'string') {
+      throw invalidProfessionalProfileFilter(`${label} 필터 형식이 올바르지 않습니다.`);
+    }
+    const normalized = rawValue.trim();
+    if (Array.from(normalized).length > PROFILE_FILTER_VALUE_MAX_LENGTH) {
+      throw invalidProfessionalProfileFilter(`${label} 필터 값은 80자 이하여야 합니다.`);
+    }
+    return normalized;
+  }).filter(Boolean);
+  return values;
+}
+
+function singleProfileQueryValue(value, label) {
+  const rawCount = Array.isArray(value) ? value.length : value === undefined ? 0 : 1;
+  if (rawCount > 1) {
+    throw invalidProfessionalProfileFilter(`${label} 필터는 하나만 선택할 수 있습니다.`);
+  }
+  const values = profileQueryValues(value, label);
+  return values[0] || null;
+}
+
+function parseProfessionalProfileFilters(query, catalog) {
+  const education = singleProfileQueryValue(query?.education, '최종학력');
+  const englishEvidence = singleProfileQueryValue(query?.englishEvidence, '영어 증빙');
+  const certificationValues = profileQueryValues(query?.certification, '자격증');
+  if (certificationValues.length > CERTIFICATION_FILTER_MAX_COUNT) {
+    throw invalidProfessionalProfileFilter('자격증 필터는 최대 20개까지 선택할 수 있습니다.');
+  }
+  const certifications = [...new Set(certificationValues)];
+
+  const educationCodes = new Set([
+    ...catalog.educationAttainments.map(({ code }) => code),
+    PROFILE_MISSING,
+  ]);
+  const englishCodes = new Set([
+    ...catalog.englishTests.map(({ code }) => code),
+    'OVERSEAS_EDUCATION',
+    PROFILE_MISSING,
+  ]);
+  if (education && !educationCodes.has(education)) {
+    throw invalidProfessionalProfileFilter('알 수 없는 최종학력 필터입니다.');
+  }
+  if (englishEvidence && !englishCodes.has(englishEvidence)) {
+    throw invalidProfessionalProfileFilter('알 수 없는 영어 증빙 필터입니다.');
+  }
+  if (certifications.includes(PROFILE_MISSING) && certifications.length > 1) {
+    throw invalidProfessionalProfileFilter('자격증 미입력과 다른 자격증을 함께 선택할 수 없습니다.');
+  }
+  return { education, englishEvidence, certifications };
+}
+
+function preventParticipationDashboardCaching(_req, res, next) {
+  res.setHeader('Cache-Control', 'private, no-store');
+  next();
+}
 
 /** 캐시플로우 시트 연동과 같은 방식으로 서비스 계정 주소를 얻는다. */
 function resolveSystemAccountEmail(googleSheetsService) {
@@ -98,9 +188,28 @@ function participationPreviewBody(analysis, extra = {}) {
   };
 }
 
-export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsService, idempotencyService } = {}) {
-  app.get('/api/v1/participation-dashboard', asyncHandler(async (req, res) => {
+export function mountParticipationDashboardRoutes(app, {
+  db,
+  now,
+  googleSheetsService,
+  idempotencyService,
+  rbacPolicy,
+  professionalProfileCatalog = getProfessionalProfileCatalog(),
+} = {}) {
+  app.get('/api/v1/participation-dashboard', preventParticipationDashboardCaching, asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read participation dashboard');
+    const professionalProfileAccess = actorCanReadProfessionalProfiles(rbacPolicy, req);
+    const profileQueryRequested = hasProfessionalProfileQuery(req.query);
+    if (profileQueryRequested && !professionalProfileAccess) {
+      throw createHttpError(
+        403,
+        '전문 프로필 필터를 사용할 권한이 없습니다.',
+        'profile_filter_forbidden',
+      );
+    }
+    const profileFilters = professionalProfileAccess
+      ? parseProfessionalProfileFilters(req.query, professionalProfileCatalog)
+      : { education: null, englishEvidence: null, certifications: [] };
     if (!db) throw createHttpError(503, '참여율 대시보드를 읽을 수 없습니다.', 'firestore_unconfigured');
     const tenantId = readOptionalText(req.context?.tenantId);
     if (!tenantId) throw createHttpError(400, 'tenantId is required.', 'tenant_required');
@@ -118,7 +227,11 @@ export function mountParticipationDashboardRoutes(app, { db, now, googleSheetsSe
       generatedAt: new Date().toISOString(),
     });
     res.status(200).json({
-      ...selectParticipationDashboardYear(snapshot, req.query.year, req.query.ruleId),
+      ...selectParticipationDashboardYear(snapshot, req.query.year, req.query.ruleId, {
+        professionalProfileAccess,
+        professionalProfileCatalog,
+        ...profileFilters,
+      }),
       projects: projectsSnap.docs.map((doc) => {
         const project = doc.data() || {};
         return { id: doc.id, name: readOptionalText(project.name) || doc.id, clientOrg: readOptionalText(project.clientOrg) };
