@@ -716,16 +716,6 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
       ? project.items
       : project?.settlementStatuses?.items;
     if (!projectId || !yearMonth || !Array.isArray(statusItems)) return;
-    const snapshot = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
-    const requestStatus = snapshot.exists ? readOptionalText(snapshot.data()?.status) : '';
-    // 요청 문서가 없으면 월 상태는 JVM 이 준 것을 그대로 둔다. 마감은 그것과 무관하게 붙인다.
-    const status = !snapshot.exists
-      ? null
-      : requestStatus === 'APPROVED'
-        ? 'COMPLETED'
-        : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
-          ? 'PENDING_APPROVAL'
-          : 'WAITING_FOR_UPDATE';
     // 마감의 단일 소스는 JVM 이다 (CashflowWeekDeadline). JVM 이 보낸 값을 그대로 쓰고,
     // 아직 값을 보내지 않는 구버전 응답에만 parity 표 사본으로 채운다. 사본이 판정을
     // 이기기 시작하면 규칙이 조용히 갈린다 - 그래서 순서가 JVM 먼저다.
@@ -739,9 +729,7 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
         || cashflowWeeklyApproverDeadlineAt(deadlineAt);
       return { ...item, deadlineAt, approverDeadlineAt };
     };
-    const alignedItems = statusItems
-      .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item))
-      .map(withDeadlines);
+    const alignedItems = statusItems.map(withDeadlines);
     if (Array.isArray(project?.items)) {
       project.items = alignedItems;
     } else {

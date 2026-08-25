@@ -79,7 +79,6 @@ import dev.merryai.innerplatform.weekly.domain.CellAddress;
 import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator;
-import dev.merryai.innerplatform.weekly.domain.CashflowMonthSettlementLifecycle;
 import dev.merryai.innerplatform.weekly.domain.ApproverDeadlineCalculator;
 import dev.merryai.innerplatform.weekly.domain.CashflowCloseDeadline;
 import dev.merryai.innerplatform.weekly.domain.CashflowWeekDeadline;
@@ -366,12 +365,9 @@ public class WeeklyExpenseCommandService {
         String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0
             ? request.yearMonth() : boundary.yearMonth();
         Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> statusesByProject;
-        Map<String, String> monthCloseRequestStatuses;
         Map<String, CashflowLedgerSource> sourcesByProject;
         CompletableFuture<Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>>> statusesFuture =
             CompletableFuture.supplyAsync(() -> persistence.findCashflowSettlementStatusesBatch(actor.tenantId(), projectIds, request.yearMonth()));
-        CompletableFuture<Map<String, String>> monthCloseRequestsFuture =
-            CompletableFuture.supplyAsync(() -> persistence.findCashflowMonthCloseRequestStatusesBatch(actor.tenantId(), projectIds, request.yearMonth()));
         CompletableFuture<Map<String, CashflowLedgerSource>> sourcesFuture =
             CompletableFuture.supplyAsync(() -> persistence.findCashflowLedgerSources(
                 actor.tenantId(), projectIds, CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
@@ -380,11 +376,6 @@ public class WeeklyExpenseCommandService {
             statusesByProject = statusesFuture.join();
         } catch (RuntimeException unavailable) {
             statusesByProject = Map.of();
-        }
-        try {
-            monthCloseRequestStatuses = monthCloseRequestsFuture.join();
-        } catch (RuntimeException unavailable) {
-            monthCloseRequestStatuses = Map.of();
         }
         try {
             sourcesByProject = sourcesFuture.join();
@@ -402,7 +393,6 @@ public class WeeklyExpenseCommandService {
                 ));
             } else {
                 statuses = settlementStatusesResponse(projectId, request.yearMonth(), records);
-                statuses = resolveMonthSettlementStatus(statuses, monthCloseRequestStatuses.get(projectId));
             }
             CashflowProjectionActualSummaryBatchResponse.Item summary = null;
             CashflowLedgerSource source = sourcesByProject.get(projectId);
@@ -416,25 +406,6 @@ public class WeeklyExpenseCommandService {
             items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary));
         }
         return new CashflowWeeklyOverviewResponse("1", request.yearMonth(), items, errors);
-    }
-
-    private CashflowSettlementStatusesResponse resolveMonthSettlementStatus(
-        CashflowSettlementStatusesResponse response,
-        String monthCloseRequestStatus
-    ) {
-        return new CashflowSettlementStatusesResponse(
-            response.projectId(),
-            response.yearMonth(),
-            response.items().stream().map(item -> item.period().equals("MONTH")
-                ? new CashflowSettlementStatusesResponse.Item(
-                    item.period(),
-                    CashflowMonthSettlementLifecycle.resolveMonthStatus(item.status(), monthCloseRequestStatus),
-                    item.submittedAt(), item.submittedBy(), item.approvedAt(), item.approvedBy(), item.revision(),
-                    item.deadlineAt(), item.approverDeadlineAt()
-                )
-                : item
-            ).toList()
-        );
     }
 
     public CashflowProjectionActualSummaryBatchResponse.Item readCashflowProjectionActualSummary(
