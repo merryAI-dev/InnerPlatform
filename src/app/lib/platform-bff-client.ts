@@ -131,6 +131,8 @@ export interface ParticipationSheetPreview {
     errorCount: number;
   } | null;
   blocking: Array<{ code: string; message: string; rowIndex?: number; month?: string }>;
+  /** 막지는 않지만 사용자가 인지해야 하는 것들 - 기간 불일치 등. 구버전 응답엔 없다. */
+  warnings?: Array<{ code: string; message: string }>;
   months: string[];
   rows: Array<{
     rowIndex: number;
