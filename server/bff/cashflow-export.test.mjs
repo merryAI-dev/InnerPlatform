@@ -49,6 +49,73 @@ describe('cashflow export bff helper', () => {
     })).toThrow();
   });
 
+  it('accepts canonical accountTypes, department, and sortBy export filters', () => {
+    const parsed = parseWithSchema(cashflowExportSchema, {
+      scope: 'all',
+      projectIds: ['project-a', 'project-b'],
+      department: 'CIC1',
+      accountTypes: ['DEDICATED', 'OTHER'],
+      sortBy: 'DEPARTMENT',
+      startYearMonth: '2024-01',
+      endYearMonth: '2024-12',
+      variant: 'multi-sheet',
+    });
+
+    expect(parsed).toMatchObject({
+      department: 'CIC1',
+      accountTypes: ['DEDICATED', 'OTHER'],
+      sortBy: 'DEPARTMENT',
+    });
+  });
+
+  it('accepts selected scope only with an explicit project list', () => {
+    const base = {
+      scope: 'selected',
+      startYearMonth: '2024-01',
+      endYearMonth: '2024-12',
+      variant: 'multi-sheet',
+    };
+
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      ...base,
+      projectIds: ['project-a'],
+    })).not.toThrow();
+    expect(() => parseWithSchema(cashflowExportSchema, base)).toThrow();
+  });
+
+  it('keeps legacy accountType including OTHER while rejecting ambiguous or invalid filters', () => {
+    const base = {
+      scope: 'all',
+      startYearMonth: '2024-01',
+      endYearMonth: '2024-12',
+      variant: 'multi-sheet',
+    };
+
+    expect(() => parseWithSchema(cashflowExportSchema, { ...base, accountType: 'OTHER' })).not.toThrow();
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      ...base,
+      accountType: 'DEDICATED',
+      accountTypes: ['DEDICATED'],
+    })).toThrow();
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      ...base,
+      accountTypes: ['DEDICATED', 'DEDICATED'],
+    })).toThrow();
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      ...base,
+      accountTypes: ['UNKNOWN'],
+    })).toThrow();
+    expect(() => parseWithSchema(cashflowExportSchema, { ...base, sortBy: 'UNKNOWN' })).toThrow();
+  });
+
+  it('names selected exports without claiming that every project was included', () => {
+    expect(buildCashflowExportFileName({
+      scope: 'selected',
+      yearMonths: ['2024-01', '2024-12'],
+      variant: 'multi-sheet',
+    })).toContain('선택사업_개별시트');
+  });
+
   it('rejects raw week 6 for cashflow week writes because storage uses financeWeek 1..5', () => {
     expect(() => parseWithSchema(cashflowWeekAmountsSchema, {
       yearMonth: '2026-08',
@@ -231,5 +298,48 @@ describe('cashflow export bff helper', () => {
     expect(worksheet.getColumn(1).width).toBeGreaterThanOrEqual(22);
     expect(header.getCell(1).font.bold).toBe(true);
     expect(sales.getCell(2).numFmt).toContain('#,##0');
+  });
+
+  it('orders workbook sheets by department, project name, and id when requested', async () => {
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'multi-sheet',
+      sortBy: 'DEPARTMENT',
+      yearMonths: ['2024-01'],
+      projects: [
+        { id: 'p3', name: '가 사업', shortName: 'A-B-가', department: '센터B', weeks: [] },
+        { id: 'p2', name: '나 사업', shortName: 'B-A-나', department: '센터A', weeks: [] },
+        { id: 'p1', name: '가 사업', shortName: 'D-A-가-2', department: '센터A', weeks: [] },
+        { id: 'p0', name: '가 사업', shortName: 'C-A-가-1', department: '센터A', weeks: [] },
+      ],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+
+    expect(workbook.worksheets.map(({ name }) => name)).toEqual(['C-A-가-1', 'D-A-가-2', 'B-A-나', 'A-B-가']);
+  });
+
+  it('orders combined workbook project sections by department too', async () => {
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'combined',
+      sortBy: 'DEPARTMENT',
+      scope: 'selected',
+      yearMonths: ['2024-01'],
+      projects: [
+        { id: 'p-b', name: '가 사업', department: '센터B', weeks: [] },
+        { id: 'p-a2', name: '나 사업', department: '센터A', weeks: [] },
+        { id: 'p-a1', name: '가 사업', department: '센터A', weeks: [] },
+      ],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('선택 사업');
+    const projectNames = worksheet
+      .getSheetValues()
+      .filter((row) => Array.isArray(row) && row[1] === '사업')
+      .map((row) => row[2]);
+
+    expect(projectNames).toEqual(['가 사업', '나 사업', '가 사업']);
   });
 });

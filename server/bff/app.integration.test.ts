@@ -1313,6 +1313,369 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(byId(entriesAfterUnrelatedUpdate.docs)).toEqual(byId(secondEntries.docs));
   });
 
+  it('creates a Person and professional profile atomically without copying profile values into audit or idempotency records', async () => {
+    const personId = 'person-created-with-profile';
+    const idempotencyKey = 'idem-person-create-with-profile-001';
+    const payload = {
+      personId,
+      name: '새 프로필',
+      email: 'created-profile-secret@example.com',
+      employment: {
+        type: 'FULL_TIME',
+        state: 'WORKING',
+        effectiveFrom: '2026-01-01',
+      },
+      professionalProfile: {
+        educationRecords: [{
+          attainmentCode: 'BACHELOR_GRADUATED',
+          institutionName: 'private-create-university',
+          countryCode: 'KR',
+          major: 'private-create-major',
+        }],
+        englishEvidence: [{
+          testCode: 'TOEFL',
+          scaleCode: 'TOEFL_IBT_120',
+          resultValue: '105',
+          testedAt: '2025-11',
+        }],
+        certifications: [{ label: 'private-create-certificate' }],
+      },
+    };
+    const created = await api
+      .post('/api/v1/persons')
+      .set({ ...defaultHeaders, 'idempotency-key': idempotencyKey })
+      .send(payload);
+
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({
+      person: { personId, name: '새 프로필' },
+      professionalProfile: { revision: 1, changed: true },
+    });
+    expect(created.body.person).not.toHaveProperty('professionalProfile');
+    const stored = (await db.doc(`orgs/${tenantId}/persons/${personId}`).get()).data();
+    expect(stored?.professionalProfile).toMatchObject({
+      schemaVersion: 1,
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED' }],
+      englishEvidence: [{ testCode: 'TOEFL', resultValue: '105' }],
+      certifications: [{ key: 'private-create-certificate', label: 'private-create-certificate' }],
+      provenance: { revision: 1, source: 'PEOPLE_MANUAL' },
+    });
+
+    const replay = await api
+      .post('/api/v1/persons')
+      .set({ ...defaultHeaders, 'idempotency-key': idempotencyKey })
+      .send(payload);
+    expect(replay.status).toBe(201);
+    expect(replay.headers['x-idempotency-replayed']).toBe('1');
+    expect(replay.body).toEqual(created.body);
+
+    const auditLogs = await db.collection(`orgs/${tenantId}/audit_logs`).get();
+    const personAuditActions = auditLogs.docs
+      .map((doc) => doc.data())
+      .filter((entry) => entry.entityId === personId)
+      .map((entry) => entry.action)
+      .sort();
+    expect(personAuditActions).toEqual(['CREATE', 'PROFILE_UPDATE']);
+    const idempotencyDocs = await db.collection(`orgs/${tenantId}/idempotency_keys`).get();
+    const createIdempotency = idempotencyDocs.docs
+      .map((doc) => doc.data())
+      .find((entry) => entry.idempotencyKey === idempotencyKey);
+    expect(createIdempotency?.responseBody).toEqual({ personId, revision: 1, changed: true });
+    const protectedRecords = JSON.stringify({
+      auditLogs: auditLogs.docs.map((doc) => doc.data()),
+      idempotency: createIdempotency,
+    });
+    for (const rawValue of [
+      'created-profile-secret@example.com',
+      'private-create-university',
+      'private-create-major',
+      'TOEFL_IBT_120',
+      '2025-11',
+      'private-create-certificate',
+    ]) {
+      expect(protectedRecords).not.toContain(rawValue);
+    }
+
+    const forbiddenEmptyProfilePersonId = 'person-created-empty-profile-forbidden';
+    const forbiddenEmptyProfileKey = 'idem-person-create-empty-profile-forbidden-001';
+    const forbiddenEmptyProfile = await api
+      .post('/api/v1/persons')
+      .set({
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'tenant-admin-without-profile-permission',
+        'x-actor-role': 'tenant_admin',
+        'idempotency-key': forbiddenEmptyProfileKey,
+      })
+      .send({
+        personId: forbiddenEmptyProfilePersonId,
+        name: '권한 없는 빈 프로필',
+        employment: {
+          type: 'FULL_TIME',
+          state: 'WORKING',
+          effectiveFrom: '2026-01-01',
+        },
+        professionalProfile: {
+          educationRecords: [],
+          englishEvidence: [],
+          certifications: [],
+        },
+      });
+    expect(forbiddenEmptyProfile.status).toBe(403);
+    expect((await db.doc(`orgs/${tenantId}/persons/${forbiddenEmptyProfilePersonId}`).get()).exists).toBe(false);
+    const forbiddenEmptyProfileReceipt = (await db.collection(`orgs/${tenantId}/idempotency_keys`).get()).docs
+      .map((doc) => doc.data())
+      .find((entry) => entry.idempotencyKey === forbiddenEmptyProfileKey);
+    expect(forbiddenEmptyProfileReceipt).toBeUndefined();
+
+    const emptyProfilePersonId = 'person-created-empty-profile';
+    const emptyProfileKey = 'idem-person-create-empty-profile-001';
+    const emptyProfileCreated = await api
+      .post('/api/v1/persons')
+      .set({ ...defaultHeaders, 'idempotency-key': emptyProfileKey })
+      .send({
+        personId: emptyProfilePersonId,
+        name: '빈 프로필',
+        employment: {
+          type: 'FULL_TIME',
+          state: 'WORKING',
+          effectiveFrom: '2026-01-01',
+        },
+        professionalProfile: {
+          educationRecords: [],
+          englishEvidence: [],
+          certifications: [],
+        },
+      });
+    expect(emptyProfileCreated.status).toBe(201);
+    expect(emptyProfileCreated.body).toMatchObject({
+      person: { personId: emptyProfilePersonId, name: '빈 프로필' },
+      professionalProfile: { revision: 0, changed: false },
+    });
+    const emptyProfileStored = (await db.doc(`orgs/${tenantId}/persons/${emptyProfilePersonId}`).get()).data();
+    expect(emptyProfileStored).not.toHaveProperty('professionalProfile');
+    const emptyProfileAudit = (await db.collection(`orgs/${tenantId}/audit_logs`).get()).docs
+      .map((doc) => doc.data())
+      .filter((entry) => entry.entityId === emptyProfilePersonId);
+    expect(emptyProfileAudit.map((entry) => entry.action)).toEqual(['CREATE']);
+    const emptyProfileReceipt = (await db.collection(`orgs/${tenantId}/idempotency_keys`).get()).docs
+      .map((doc) => doc.data())
+      .find((entry) => entry.idempotencyKey === emptyProfileKey);
+    expect(emptyProfileReceipt?.responseBody).toEqual({
+      personId: emptyProfilePersonId,
+      revision: 0,
+      changed: false,
+    });
+  });
+
+  it('persists a People professional profile and exposes only its server-derived dashboard summary and filters', async () => {
+    const personId = 'person-profile-filter';
+    const projectIdForProfile = 'p-profile-filter';
+    const idempotencyKey = 'idem-professional-profile-integration-001';
+    await db.doc(`orgs/${tenantId}/persons/${personId}`).set({
+      personId,
+      name: '김프로필',
+      email: 'profile-secret@example.com',
+      note: 'private-person-note',
+      joinedAt: '2026-01-01',
+    });
+    await db.doc(`orgs/${tenantId}/projects/${projectIdForProfile}`).set({
+      id: projectIdForProfile,
+      name: '프로필 필터 사업',
+      clientOrg: 'KOICA',
+      settlementSystem: 'RCMS',
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+    });
+    await db.doc(`orgs/${tenantId}/partEntries/pte-${projectIdForProfile}-profile`).set({
+      id: `pte-${projectIdForProfile}-profile`,
+      projectId: projectIdForProfile,
+      projectName: '프로필 필터 사업',
+      personId,
+      memberId: 'project-team:profile',
+      memberName: '김프로필',
+      source: 'PROJECT_TEAM_SYNC',
+      rate: 30,
+      periodStart: '2026-01',
+      periodEnd: '2026-12',
+      monthlyRates: { '2026-01': 30 },
+    });
+
+    const profilePayload = {
+      expectedRevision: 0,
+      profile: {
+        educationRecords: [{
+          attainmentCode: 'MASTER_GRADUATED',
+          institutionName: 'University of Sussex',
+          countryCode: 'GB',
+          major: 'private-major-secret',
+        }],
+        englishEvidence: [{
+          testCode: 'TOEIC',
+          scaleCode: 'TOEIC_990',
+          resultValue: '920',
+          testedAt: '2026-05',
+        }],
+        certifications: [{ label: 'PMP' }, { label: 'ODA 전문가' }],
+      },
+    };
+    const saved = await api
+      .put(`/api/v1/persons/${personId}/professional-profile`)
+      .set({ ...defaultHeaders, 'idempotency-key': idempotencyKey })
+      .send(profilePayload);
+
+    expect(saved.status).toBe(200);
+    const storedPerson = (await db.doc(`orgs/${tenantId}/persons/${personId}`).get()).data();
+    expect(storedPerson?.professionalProfile).toMatchObject({
+      schemaVersion: 1,
+      educationRecords: [{
+        attainmentCode: 'MASTER_GRADUATED',
+        institutionName: 'University of Sussex',
+        countryCode: 'GB',
+        major: 'private-major-secret',
+      }],
+      englishEvidence: [{
+        testCode: 'TOEIC',
+        scaleCode: 'TOEIC_990',
+        resultValue: '920',
+        testedAt: '2026-05',
+      }],
+      certifications: [{ key: 'pmp', label: 'PMP' }, { key: 'oda 전문가', label: 'ODA 전문가' }],
+      provenance: { revision: 1, source: 'PEOPLE_MANUAL' },
+    });
+    expect(saved.body).toEqual({
+      profile: storedPerson?.professionalProfile,
+      revision: 1,
+      changed: true,
+    });
+
+    const replay = await api
+      .put(`/api/v1/persons/${personId}/professional-profile`)
+      .set({ ...defaultHeaders, 'idempotency-key': idempotencyKey })
+      .send(profilePayload);
+    expect(replay.status).toBe(200);
+    expect(replay.headers['x-idempotency-replayed']).toBe('1');
+    expect(replay.body).toEqual(saved.body);
+
+    await db.doc(`orgs/${tenantId}/members/viewer-profile`).set({
+      uid: 'viewer-profile',
+      email: 'viewer-profile@example.com',
+      role: 'viewer',
+      status: 'ACTIVE',
+    });
+    const forbiddenReplay = await api
+      .put(`/api/v1/persons/${personId}/professional-profile`)
+      .set({
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'viewer-profile',
+        'x-actor-role': 'viewer',
+        'idempotency-key': idempotencyKey,
+      })
+      .send(profilePayload);
+    expect(forbiddenReplay.status).toBe(403);
+
+    const peopleResponse = await api.get('/api/v1/persons').set(defaultHeaders);
+    expect(peopleResponse.status).toBe(200);
+    expect(peopleResponse.body.capabilities).toEqual({
+      professionalProfileRead: true,
+      professionalProfileWrite: true,
+    });
+    const directoryPerson = peopleResponse.body.items.find((person: { personId: string }) => person.personId === personId);
+    expect(directoryPerson).toMatchObject({ personId, name: '김프로필' });
+    expect(directoryPerson).not.toHaveProperty('professionalProfile');
+    expect(directoryPerson).not.toHaveProperty('note');
+
+    const protectedCollections = [
+      'projects',
+      'partEntries',
+      'persons',
+      'participation_rules',
+      'audit_logs',
+      'audit_chain',
+      'idempotency_keys',
+    ];
+    const snapshotProtectedCollections = async () => Object.fromEntries(await Promise.all(
+      protectedCollections.map(async (collectionName) => {
+        const snapshot = await db.collection(`orgs/${tenantId}/${collectionName}`).get();
+        return [collectionName, snapshot.docs
+          .map((doc) => ({ id: doc.id, data: doc.data() }))
+          .sort((left, right) => left.id.localeCompare(right.id))];
+      }),
+    ));
+    const beforeDashboardRead = await snapshotProtectedCollections();
+    const dashboard = await api
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=all&education=MASTER_GRADUATED&englishEvidence=TOEIC&certification=pmp')
+      .set(defaultHeaders);
+
+    expect(dashboard.status).toBe(200);
+    expect(dashboard.headers['cache-control']).toContain('no-store');
+    expect(dashboard.body.professionalProfileAccess).toBe(true);
+    expect(dashboard.body.selectedProfileFilters).toEqual({
+      education: 'MASTER_GRADUATED',
+      englishEvidence: 'TOEIC',
+      certifications: ['pmp'],
+    });
+    expect(dashboard.body.members).toEqual([
+      expect.objectContaining({
+        memberId: personId,
+        memberName: '김프로필',
+        projectCount: 1,
+        profileSummary: {
+          highestEducationDisplayText: '석사 졸업 · University of Sussex',
+          englishEvidenceDisplayText: 'TOEIC 920 · 해외 대학',
+          certificationsDisplayText: 'PMP · ODA 전문가',
+        },
+        months: expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-01', rate: 30, isConfirmed: true }),
+        ]),
+      }),
+    ]);
+    expect(dashboard.body.profileFilterOptions.education).toContainEqual({
+      value: 'MASTER_GRADUATED', label: '석사 졸업', memberCount: 1,
+    });
+    expect(dashboard.body.profileFilterOptions.englishEvidence).toEqual(expect.arrayContaining([
+      { value: 'TOEIC', label: 'TOEIC', memberCount: 1 },
+      { value: 'OVERSEAS_EDUCATION', label: '해외 대학', memberCount: 1 },
+    ]));
+    expect(dashboard.body.profileFilterOptions.certifications).toEqual(expect.arrayContaining([
+      { value: 'pmp', label: 'PMP', memberCount: 1 },
+      { value: 'oda 전문가', label: 'ODA 전문가', memberCount: 1 },
+    ]));
+    expect(JSON.stringify(dashboard.body)).not.toContain('profile-secret@example.com');
+    expect(JSON.stringify(dashboard.body)).not.toContain('private-person-note');
+    expect(JSON.stringify(dashboard.body)).not.toContain('private-major-secret');
+    expect(JSON.stringify(dashboard.body.members)).not.toContain('"testedAt"');
+    expect(JSON.stringify(dashboard.body.members)).not.toContain('"major"');
+    expect(JSON.stringify(dashboard.body.members)).not.toContain('"countryCode"');
+    expect(JSON.stringify(dashboard.body.members)).not.toContain('"resultValue"');
+    expect(JSON.stringify(dashboard.body.members)).not.toContain('"professionalProfile"');
+    expect(await snapshotProtectedCollections()).toEqual(beforeDashboardRead);
+
+    const auditAndIdempotency = JSON.stringify({
+      auditLogs: beforeDashboardRead.audit_logs,
+      auditChain: beforeDashboardRead.audit_chain,
+      idempotencyKeys: beforeDashboardRead.idempotency_keys,
+    });
+    const profileIdempotency = beforeDashboardRead.idempotency_keys
+      .map(({ data }) => data)
+      .find((entry) => entry.idempotencyKey === idempotencyKey);
+    expect(profileIdempotency?.responseBody).toEqual({ personId, revision: 1, changed: true });
+    for (const rawProfileValue of ['University of Sussex', 'private-major-secret', 'TOEIC_990', '2026-05', 'PMP', 'ODA 전문가']) {
+      expect(auditAndIdempotency).not.toContain(rawProfileValue);
+    }
+
+    const noMatch = await api
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=all&education=DOCTOR_GRADUATED')
+      .set(defaultHeaders);
+    expect(noMatch.status).toBe(200);
+    expect(noMatch.body.members).toEqual([]);
+    expect(noMatch.body.profileFilterOptions.education).toContainEqual({
+      value: 'MASTER_GRADUATED', label: '석사 졸업', memberCount: 1,
+    });
+    expect(noMatch.body.profileFilterOptions.education).toContainEqual({
+      value: 'DOCTOR_GRADUATED', label: '박사 졸업', memberCount: 0,
+    });
+  });
+
   it('normalizes project revenue fields through project upsert', async () => {
     const response = await api
       .post('/api/v1/projects')
@@ -2066,7 +2429,45 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       variant: 'multi-sheet',
     });
     expect(mismatchedFilter.status).toBe(404);
-    expect(JSON.parse(mismatchedFilter.body.toString()).error).toBe('selected_project_not_found');
+    expect(JSON.parse(mismatchedFilter.body.toString()).error).toBe('not_found');
+  });
+
+  it('cross-filters selected projects by canonical department and account types before sorting the workbook', async () => {
+    const projects = [
+      { id: 'p-cross-b', name: '가 사업', shortName: 'A-B', department: '센터B', accountType: 'OTHER' },
+      { id: 'p-cross-a2', name: '나 사업', shortName: 'B-A2', department: '센터A', accountType: 'OTHER' },
+      { id: 'p-cross-a1', name: '가 사업', shortName: 'C-A1', department: '센터A', accountType: 'DEDICATED' },
+      { id: 'p-cross-account', name: '다 사업', shortName: 'D-ACCOUNT', department: '센터A', accountType: 'OPERATING' },
+    ];
+    for (const project of projects) {
+      await db.doc(`orgs/${tenantId}/projects/${project.id}`).set(project);
+    }
+
+    const response = await downloadCashflowExport({
+      scope: 'selected',
+      projectIds: projects.map(({ id }) => id),
+      department: '센터A',
+      accountTypes: ['DEDICATED', 'OTHER'],
+      sortBy: 'DEPARTMENT',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+
+    expect(response.status).toBe(200);
+    expect(decodeURIComponent(response.headers['content-disposition'])).toContain('선택사업_개별시트');
+    const workbook = await readWorkbook(response.body);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['C-A1', 'B-A2']);
+
+    const missingProject = await downloadCashflowExport({
+      scope: 'selected',
+      projectIds: ['p-cross-a1', 'missing-project'],
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+    expect(missingProject.status).toBe(404);
+    expect(JSON.parse(missingProject.body.toString()).error).toBe('selected_project_not_found');
   });
 
   it('accepts legacy basis payloads for export requests', async () => {

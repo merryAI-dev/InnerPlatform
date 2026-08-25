@@ -26,6 +26,8 @@ export type PlatformPermission =
   | 'contact:write'
   | 'contact:image:read'
   | 'contact:delete'
+  | 'person:professional_profile:read'
+  | 'person:professional_profile:write'
   | 'user:manage'
   | 'tenant:manage';
 
@@ -56,6 +58,8 @@ const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'contact:write',
   'contact:image:read',
   'contact:delete',
+  'person:professional_profile:read',
+  'person:professional_profile:write',
   'user:manage',
   'tenant:manage',
 ]);

@@ -435,6 +435,7 @@ export function createEditLeaseService({
       tenantId: current.tenantId,
       idempotencyKey: current.idempotencyKey,
       requestFingerprint,
+      actorId: current.actorId,
       nowDate: new Date(nowMs),
     });
   }

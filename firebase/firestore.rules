@@ -96,7 +96,7 @@ service cloud.firestore {
     // BFF 전용 PII 컬렉션: 클라이언트 SDK 직접 접근 금지.
     // BFF(Admin SDK)는 rules를 우회하므로 검증, 감사, idempotency를 서버에서 강제한다.
     function isBffOnlyCollection(collection) {
-      return collection in ['contacts', 'business_card_imports', 'contact_events'];
+      return collection in ['contacts', 'business_card_imports', 'contact_events', 'persons'];
     }
 
     // 일반 org 멤버 catchall에서 제외할 컬렉션.
@@ -235,6 +235,10 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/contact_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/persons/{personId} {
       allow read, write: if false;
     }
 

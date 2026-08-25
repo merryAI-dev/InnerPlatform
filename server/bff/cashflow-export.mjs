@@ -287,7 +287,18 @@ function makeUniqueSheetName(baseName, usedNames) {
   return fallback.slice(0, 31);
 }
 
-function buildWorkbookSpec({ projects, yearMonths, variant }) {
+function compareProjects(left, right, sortBy) {
+  if (sortBy === 'DEPARTMENT') {
+    const departmentOrder = normalizeSpace(left.department).localeCompare(normalizeSpace(right.department), 'ko');
+    if (departmentOrder) return departmentOrder;
+  }
+  const leftTitle = normalizeProjectTitle(left);
+  const rightTitle = normalizeProjectTitle(right);
+  if (leftTitle !== rightTitle) return leftTitle.localeCompare(rightTitle, 'ko');
+  return String(left.id || '').localeCompare(String(right.id || ''));
+}
+
+function buildWorkbookSpec({ projects, yearMonths, variant, sortBy = 'PROJECT_NAME', scope = 'all' }) {
   if (variant === 'single-project') {
     const project = projects[0];
     if (!project) return { sheets: [] };
@@ -300,25 +311,15 @@ function buildWorkbookSpec({ projects, yearMonths, variant }) {
   }
   if (variant === 'combined') {
     const rows = [];
-    const sortedProjects = [...projects].sort((left, right) => {
-      const leftLabel = normalizeProjectTitle(left);
-      const rightLabel = normalizeProjectTitle(right);
-      if (leftLabel !== rightLabel) return leftLabel.localeCompare(rightLabel, 'ko');
-      return String(left.id || '').localeCompare(String(right.id || ''));
-    });
+    const sortedProjects = [...projects].sort((left, right) => compareProjects(left, right, sortBy));
     for (const project of sortedProjects) {
       rows.push(...buildProjectWorkbookRows({ project, yearMonths, includeBothModes: true }));
       rows.push([]);
     }
-    return { sheets: [{ name: '전체 사업', rows }] };
+    return { sheets: [{ name: scope === 'selected' ? '선택 사업' : '전체 사업', rows }] };
   }
   const usedNames = new Set();
-  const sortedProjects = [...projects].sort((left, right) => {
-    const leftLabel = normalizeProjectLabel(left);
-    const rightLabel = normalizeProjectLabel(right);
-    if (leftLabel !== rightLabel) return leftLabel.localeCompare(rightLabel, 'ko');
-    return String(left.id || '').localeCompare(String(right.id || ''));
-  });
+  const sortedProjects = [...projects].sort((left, right) => compareProjects(left, right, sortBy));
   return {
     sheets: sortedProjects.map((project) => ({
       name: makeUniqueSheetName(normalizeProjectLabel(project), usedNames),
@@ -332,7 +333,8 @@ export function buildCashflowExportFileName({ scope, projectName, yearMonths, va
   if (scope === 'single') {
     return `캐시플로_추출_${normalizeSpace(projectName || '단일사업')}_${period || '기간미지정'}.xlsx`;
   }
-  const suffix = variant === 'combined' ? '전체사업_통합시트' : '전체사업_개별시트';
+  const scopeLabel = scope === 'selected' ? '선택사업' : '전체사업';
+  const suffix = variant === 'combined' ? `${scopeLabel}_통합시트` : `${scopeLabel}_개별시트`;
   return `캐시플로_추출_${suffix}_${period || '기간미지정'}.xlsx`;
 }
 
@@ -378,8 +380,14 @@ function applyCashflowWorksheetFormat(worksheet) {
   });
 }
 
-export async function buildCashflowExportWorkbookBuffer({ projects, yearMonths, variant }) {
-  const workbookSpec = buildWorkbookSpec({ projects, yearMonths, variant });
+export async function buildCashflowExportWorkbookBuffer({
+  projects,
+  yearMonths,
+  variant,
+  sortBy = 'PROJECT_NAME',
+  scope = 'all',
+}) {
+  const workbookSpec = buildWorkbookSpec({ projects, yearMonths, variant, sortBy, scope });
   const workbook = new ExcelJS.Workbook();
   for (const sheet of workbookSpec.sheets) {
     const worksheet = workbook.addWorksheet(sheet.name);

@@ -12,6 +12,7 @@ import type {
   TransactionState,
 } from '../data/types';
 import type { EmploymentState, EmploymentType } from '../platform/person-employment';
+import type { ProfessionalProfileInput } from './person-professional-profile-client';
 import { PlatformApiClient } from '../platform/api-client';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 import {
@@ -62,6 +63,17 @@ export interface ParticipationDashboardMember {
   months: ParticipationDashboardMonth[];
   projects?: ParticipationDashboardProject[];
   warnings: Array<{ yearMonth: string; rate: number }>;
+  profileSummary?: {
+    highestEducationDisplayText: string;
+    englishEvidenceDisplayText: string;
+    certificationsDisplayText: string;
+  };
+}
+
+export interface ParticipationDashboardProfileFilterOption {
+  value: string;
+  label: string;
+  memberCount: number;
 }
 
 export interface ParticipationDashboardRule {
@@ -87,6 +99,17 @@ export interface ParticipationDashboardSnapshot {
   unlinkedEntryCount: number;
   filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string; projectCount?: number }> };
   projects: Array<{ id: string; name: string; clientOrg: string }>;
+  professionalProfileAccess?: boolean;
+  selectedProfileFilters?: {
+    education: string | null;
+    englishEvidence: string | null;
+    certifications: string[];
+  };
+  profileFilterOptions?: {
+    education: ParticipationDashboardProfileFilterOption[];
+    englishEvidence: ParticipationDashboardProfileFilterOption[];
+    certifications: ParticipationDashboardProfileFilterOption[];
+  };
 }
 
 /** 참여율 시트 검증 결과. 읽기 전용이라 무엇도 바뀌지 않는다. */
@@ -2181,14 +2204,28 @@ export async function fetchParticipationDashboardViaBff(params: {
   actor: ActorLike;
   year?: string;
   ruleId?: string;
+  education?: string;
+  englishEvidence?: string;
+  certifications?: string[];
+  signal?: AbortSignal;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationDashboardSnapshot> {
   const query = new URLSearchParams();
   if (/^\d{4}$/.test(params.year || '')) query.set('year', params.year || '');
   if (params.ruleId) query.set('ruleId', params.ruleId);
+  if (params.education) query.set('education', params.education);
+  if (params.englishEvidence) query.set('englishEvidence', params.englishEvidence);
+  for (const certification of params.certifications || []) {
+    if (certification) query.append('certification', certification);
+  }
   const response = await resolveClient(params.client).get<ParticipationDashboardSnapshot>(
     `/api/v1/participation-dashboard${query.size ? `?${query}` : ''}`,
-    { tenantId: params.tenantId, actor: toRequestActor(params.actor), timeoutMs: 10_000 },
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      signal: params.signal,
+      timeoutMs: 10_000,
+    },
   );
   return response.data;
 }
@@ -2663,14 +2700,24 @@ export async function deepSyncAuthGovernanceUsersViaBff(params: {
 export async function fetchPersonsViaBff(params: {
   tenantId: string;
   actor: ActorLike;
+  signal?: AbortSignal;
   client?: PlatformApiClientLike;
-}): Promise<{ items: PersonRecord[]; total: number }> {
+}): Promise<{
+  items: PersonRecord[];
+  total: number;
+  capabilities: { professionalProfileRead: boolean; professionalProfileWrite: boolean };
+}> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.get<{ items: PersonRecord[]; total: number }>(
+  const response = await apiClient.get<{
+    items: PersonRecord[];
+    total: number;
+    capabilities: { professionalProfileRead: boolean; professionalProfileWrite: boolean };
+  }>(
     '/api/v1/persons',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      signal: params.signal,
       timeoutMs: 10000,
     },
   );
@@ -2712,6 +2759,7 @@ export async function changePersonEmploymentViaBff(params: {
 export async function createPersonViaBff(params: {
   tenantId: string;
   actor: ActorLike;
+  idempotencyKey: string;
   person: {
     name: string;
     nickname?: string;
@@ -2721,16 +2769,25 @@ export async function createPersonViaBff(params: {
     grade?: string;
     note?: string;
     employment: { type: string; state: string; effectiveFrom: string; endDate?: string | null; note?: string };
+    professionalProfile?: ProfessionalProfileInput;
   };
   client?: PlatformApiClientLike;
-}): Promise<{ person: PersonRecord }> {
+}): Promise<{
+  person: PersonRecord;
+  professionalProfile?: { revision: number; changed: boolean };
+}> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<{ person: PersonRecord }>(
+  const response = await apiClient.post<{
+    person: PersonRecord;
+    professionalProfile?: { revision: number; changed: boolean };
+  }>(
     '/api/v1/persons',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.person,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
       timeoutMs: 15000,
     },
   );
@@ -4228,10 +4285,13 @@ export async function exportCashflowWorkbookViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   body: {
-    scope: 'all' | 'single';
+    scope: 'all' | 'single' | 'selected';
     projectId?: string;
     projectIds?: string[];
     accountType?: AccountType;
+    accountTypes?: AccountType[];
+    department?: string;
+    sortBy?: 'PROJECT_NAME' | 'DEPARTMENT';
     startYearMonth: string;
     endYearMonth: string;
     variant: 'single-project' | 'combined' | 'multi-sheet';

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Briefcase, CalendarClock, Plus, RefreshCw, Search, UserPlus, Users,
+  AlertTriangle, Briefcase, CalendarClock, GraduationCap, Plus, RefreshCw, Search, UserPlus, Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { featureFlags } from '../../config/feature-flags';
@@ -40,6 +40,11 @@ import { Separator } from '../ui/separator';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../ui/table';
+import {
+  NewPersonProfessionalProfileFields,
+  ProfessionalProfileEditor,
+} from './ProfessionalProfileEditor';
+import type { ProfessionalProfileInput } from '../../lib/person-professional-profile-client';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -182,10 +187,12 @@ interface PersonRow {
  * 인력 표. 근로형태 열은 두지 않는다 — 이름 옆에 붙는 신분 표시가 되기 때문이다.
  * 계약 형태가 필요한 자리는 계약 관리 다이얼로그뿐이고, 거기서는 그대로 보인다.
  */
-function PeopleTable({ rows, loading, onOpen }: {
+function PeopleTable({ rows, loading, onOpen, canReadProfile, onOpenProfile }: {
   rows: PersonRow[];
   loading: boolean;
   onOpen: (person: PersonRecord) => void;
+  canReadProfile: boolean;
+  onOpenProfile: (person: PersonRecord) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -198,7 +205,7 @@ function PeopleTable({ rows, loading, onOpen }: {
             <TableHead className="min-w-[110px]">직급</TableHead>
             <TableHead className="min-w-[100px]">입사일</TableHead>
             <TableHead className="min-w-[100px]">근속</TableHead>
-            <TableHead className="w-24" />
+            <TableHead className="w-40" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -235,7 +242,21 @@ function PeopleTable({ rows, loading, onOpen }: {
               <TableCell className="text-xs tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
               <TableCell className="text-xs tabular-nums">{tenure?.label || '-'}</TableCell>
               <TableCell>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]">계약 관리</Button>
+                <div className="flex items-center justify-end gap-1">
+                  {canReadProfile ? (
+                    <Button
+                      variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]"
+                      aria-label={`${person.name} 전문 프로필`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenProfile(person);
+                      }}
+                    >
+                      <GraduationCap className="h-3 w-3" /> 전문 프로필
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]">계약 관리</Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -249,6 +270,8 @@ export function PeopleDirectoryPage() {
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
   const { projects } = useAppStore();
+  const authUserRef = useRef(authUser);
+  authUserRef.current = authUser;
 
   const [people, setPeople] = useState<PersonRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -256,33 +279,104 @@ export function PeopleDirectoryPage() {
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | EmploymentType | 'SEPARATED'>('ALL');
   const [selected, setSelected] = useState<PersonRecord | null>(null);
+  const [profilePerson, setProfilePerson] = useState<PersonRecord | null>(null);
+  const [profileCapabilities, setProfileCapabilities] = useState({ read: false, write: false });
   const [draft, setDraft] = useState<EmploymentDraft>(emptyDraft());
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [newPerson, setNewPerson] = useState({ name: '', nickname: '', departmentTop: '', title: '' });
+  const [newProfessionalProfile, setNewProfessionalProfile] = useState<ProfessionalProfileInput | null>(null);
+  const [newProfessionalProfileValid, setNewProfessionalProfileValid] = useState(true);
+  const peopleLoadSequenceRef = useRef(0);
+  const peopleLoadControllerRef = useRef<AbortController | null>(null);
+  const loadedDirectoryScopeRef = useRef<string | null>(null);
+  const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const mutationSequenceRef = useRef(0);
 
-  const enabled = featureFlags.platformApiEnabled && !!authUser?.idToken;
+  const actorReady = Boolean(authUser?.idToken);
+  const directoryScopeKey = `${orgId}\u0000${authUser?.uid || ''}\u0000${authUser?.role || ''}\u0000${actorReady ? 'ready' : 'not-ready'}`;
+  const directoryScopeRef = useRef(directoryScopeKey);
+  directoryScopeRef.current = directoryScopeKey;
+  const enabled = featureFlags.platformApiEnabled && actorReady;
   const asOf = today();
+  const directoryScopeLoaded = loadedDirectoryScopeRef.current === directoryScopeKey;
+  const scopedPeople = directoryScopeLoaded ? people : [];
+  const scopedProfileCapabilities = directoryScopeLoaded
+    ? profileCapabilities
+    : { read: false, write: false };
 
   const load = async () => {
-    if (!authUser || !enabled) return;
-    setLoading(true);
+    if (directoryScopeRef.current !== directoryScopeKey) return;
+    peopleLoadControllerRef.current?.abort();
+    peopleLoadControllerRef.current = null;
+    const sequence = peopleLoadSequenceRef.current + 1;
+    peopleLoadSequenceRef.current = sequence;
+    loadedDirectoryScopeRef.current = null;
     setError(null);
+    setPeople([]);
+    setProfileCapabilities({ read: false, write: false });
+    setProfilePerson(null);
+    setNewProfessionalProfile(null);
+    const actor = authUserRef.current;
+    if (!actor || !actor.idToken || !featureFlags.platformApiEnabled) {
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    peopleLoadControllerRef.current = controller;
+    setLoading(true);
     try {
-      const response = await fetchPersonsViaBff({ tenantId: orgId, actor: authUser });
+      const response = await fetchPersonsViaBff({
+        tenantId: orgId,
+        actor,
+        signal: controller.signal,
+      });
+      if (directoryScopeRef.current !== directoryScopeKey
+        || sequence !== peopleLoadSequenceRef.current || controller.signal.aborted) return;
+      const professionalProfileRead = response.capabilities
+        && response.capabilities.professionalProfileRead === true;
+      const professionalProfileWrite = response.capabilities
+        && response.capabilities.professionalProfileWrite === true;
+      loadedDirectoryScopeRef.current = directoryScopeKey;
       setPeople(response.items);
+      setProfileCapabilities({ read: professionalProfileRead, write: professionalProfileWrite });
+      if (!professionalProfileRead) setProfilePerson(null);
+      if (!professionalProfileWrite) setNewProfessionalProfile(null);
     } catch (err: any) {
+      if (directoryScopeRef.current !== directoryScopeKey
+        || sequence !== peopleLoadSequenceRef.current || controller.signal.aborted) return;
+      setProfileCapabilities({ read: false, write: false });
+      setProfilePerson(null);
+      setNewProfessionalProfile(null);
+      loadedDirectoryScopeRef.current = directoryScopeKey;
       setError(err?.message || '인력 명부를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
-      setLoading(false);
+      if (directoryScopeRef.current === directoryScopeKey
+        && sequence === peopleLoadSequenceRef.current && !controller.signal.aborted) setLoading(false);
     }
   };
 
-  useEffect(() => { void load(); }, [orgId, authUser?.uid, authUser?.idToken]);
+  useEffect(() => {
+    mutationSequenceRef.current += 1;
+    setSaving(false);
+    setSelected(null);
+    setSearchText('');
+    setNewPerson({ name: '', nickname: '', departmentTop: '', title: '' });
+    setDraft(emptyDraft());
+    setAddOpen(false);
+    setNewProfessionalProfile(null);
+    setNewProfessionalProfileValid(true);
+    createAttemptRef.current = null;
+    void load();
+    return () => {
+      peopleLoadSequenceRef.current += 1;
+      peopleLoadControllerRef.current?.abort();
+    };
+  }, [orgId, authUser?.uid, authUser?.role, actorReady]);
 
   const rows = useMemo(() => {
     const query = searchText.trim().toLowerCase();
-    return people
+    return scopedPeople
       .map((person) => {
         const current = resolveCurrentEmployment(person as unknown as Person, asOf);
         return {
@@ -299,7 +393,7 @@ export function PeopleDirectoryPage() {
           .some((value) => String(value || '').toLowerCase().includes(query));
       })
       .sort((a, b) => a.person.name.localeCompare(b.person.name, 'ko'));
-  }, [people, searchText, typeFilter, asOf]);
+  }, [scopedPeople, searchText, typeFilter, asOf]);
 
   // 근로형태는 이름 옆에 붙는 신분 표시라 목록에서 보여주지 않는다. 인턴은 섞지 않고
   // 아래 별도 표로 뗀다 - 한 표에 두면 근로형태를 가려도 순서와 빈칸으로 드러난다.
@@ -315,18 +409,18 @@ export function PeopleDirectoryPage() {
 
   const counts = useMemo(() => {
     const base = { MAIN: 0, INTERN: 0, SEPARATED: 0 };
-    people.forEach((person) => {
+    scopedPeople.forEach((person) => {
       const current = resolveCurrentEmployment(person as unknown as Person, asOf);
       if (!current) base.SEPARATED += 1;
       else if (current.type === 'INTERN') base.INTERN += 1;
       else base.MAIN += 1;
     });
     return base;
-  }, [people, asOf]);
+  }, [scopedPeople, asOf]);
 
   const unregistered = useMemo(
-    () => findUnregisteredAssignees(projects, people),
-    [projects, people],
+    () => (directoryScopeLoaded ? findUnregisteredAssignees(projects, scopedPeople) : []),
+    [directoryScopeLoaded, projects, scopedPeople],
   );
 
   const openPerson = (person: PersonRecord) => {
@@ -334,8 +428,19 @@ export function PeopleDirectoryPage() {
     setDraft(emptyDraft('change'));
   };
 
+  const openNewPerson = (prefill = { name: '', nickname: '', departmentTop: '', title: '' }) => {
+    setNewPerson(prefill);
+    setDraft(emptyDraft('add'));
+    setNewProfessionalProfile(null);
+    setNewProfessionalProfileValid(true);
+    setAddOpen(true);
+  };
+
   const submitEmployment = async () => {
     if (!authUser || !selected) return;
+    const submitScope = directoryScopeKey;
+    const mutationSequence = mutationSequenceRef.current + 1;
+    mutationSequenceRef.current = mutationSequence;
     setSaving(true);
     try {
       const result = await changePersonEmploymentViaBff({
@@ -349,48 +454,72 @@ export function PeopleDirectoryPage() {
         endDate: draft.endDate || null,
         note: draft.note || undefined,
       });
+      if (directoryScopeRef.current !== submitScope || mutationSequenceRef.current !== mutationSequence) return;
       const updated = { ...selected, employments: result.employments };
       setPeople((prev) => prev.map((item) => (item.personId === updated.personId ? updated : item)));
       setSelected(updated);
       setDraft(emptyDraft('change'));
       toast.success(`${selected.name}님의 계약을 ${draft.mode === 'add' ? '추가' : '변경'}했습니다.`);
     } catch (err: any) {
+      if (directoryScopeRef.current !== submitScope || mutationSequenceRef.current !== mutationSequence) return;
       toast.error(err?.message || '계약을 저장하지 못했습니다.');
     } finally {
-      setSaving(false);
+      if (directoryScopeRef.current === submitScope && mutationSequenceRef.current === mutationSequence) {
+        setSaving(false);
+      }
     }
   };
 
   const submitNewPerson = async (employment: EmploymentDraft) => {
     if (!authUser) return;
     if (!newPerson.name.trim()) { toast.error('이름을 입력해 주세요.'); return; }
+    const personPayload = {
+      name: newPerson.name.trim(),
+      nickname: newPerson.nickname.trim(),
+      departmentTop: newPerson.departmentTop.trim(),
+      title: newPerson.title.trim(),
+      employment: {
+        type: employment.type,
+        state: employment.state,
+        effectiveFrom: employment.effectiveFrom,
+        endDate: employment.endDate || null,
+        note: employment.note || undefined,
+      },
+      ...(newProfessionalProfile ? { professionalProfile: newProfessionalProfile } : {}),
+    };
+    const fingerprint = JSON.stringify(personPayload);
+    if (createAttemptRef.current?.fingerprint !== fingerprint) {
+      createAttemptRef.current = {
+        fingerprint,
+        key: `person-create:${crypto.randomUUID()}`,
+      };
+    }
+    const submitScope = directoryScopeKey;
+    const mutationSequence = mutationSequenceRef.current + 1;
+    mutationSequenceRef.current = mutationSequence;
     setSaving(true);
     try {
       await createPersonViaBff({
         tenantId: orgId,
         actor: authUser,
-        person: {
-          name: newPerson.name.trim(),
-          nickname: newPerson.nickname.trim(),
-          departmentTop: newPerson.departmentTop.trim(),
-          title: newPerson.title.trim(),
-          employment: {
-            type: employment.type,
-            state: employment.state,
-            effectiveFrom: employment.effectiveFrom,
-            endDate: employment.endDate || null,
-            note: employment.note || undefined,
-          },
-        },
+        idempotencyKey: createAttemptRef.current.key,
+        person: personPayload,
       });
+      if (directoryScopeRef.current !== submitScope || mutationSequenceRef.current !== mutationSequence) return;
+      createAttemptRef.current = null;
       toast.success(`${newPerson.name}님을 명부에 등록했습니다.`);
       setAddOpen(false);
       setNewPerson({ name: '', nickname: '', departmentTop: '', title: '' });
+      setNewProfessionalProfile(null);
+      setNewProfessionalProfileValid(true);
       await load();
     } catch (err: any) {
+      if (directoryScopeRef.current !== submitScope || mutationSequenceRef.current !== mutationSequence) return;
       toast.error(err?.message || '인력을 등록하지 못했습니다.');
     } finally {
-      setSaving(false);
+      if (directoryScopeRef.current === submitScope && mutationSequenceRef.current === mutationSequence) {
+        setSaving(false);
+      }
     }
   };
 
@@ -424,7 +553,8 @@ export function PeopleDirectoryPage() {
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             className="h-8 pl-9 text-sm" placeholder="이름·별명·소속 검색…"
-            value={searchText} onChange={(event) => setSearchText(event.target.value)}
+            value={directoryScopeLoaded ? searchText : ''}
+            onChange={(event) => setSearchText(event.target.value)}
           />
         </div>
         {/* 근로형태별 필터를 없앴다. 필터를 누르는 것만으로도 누가 어느 형태인지 드러난다. */}
@@ -441,16 +571,16 @@ export function PeopleDirectoryPage() {
           </Button>
         ))}
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void load()} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void load()} disabled={loading || !directoryScopeLoaded}>
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> 새로고침
           </Button>
-          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openNewPerson()}>
             <UserPlus className="h-3.5 w-3.5" /> 인력 등록
           </Button>
         </div>
       </div>
 
-      {error ? (
+      {directoryScopeLoaded && error ? (
         <Card className="border-rose-200 bg-rose-50">
           <CardContent className="py-4 text-sm text-rose-800">{error}</CardContent>
         </Card>
@@ -480,8 +610,7 @@ export function PeopleDirectoryPage() {
                         size="sm" variant="outline"
                         className="h-6 gap-1 border-amber-300 bg-white px-2 text-[11px] text-amber-900"
                         onClick={() => {
-                          setNewPerson({ name: item.name, nickname: item.nickname, departmentTop: '', title: '' });
-                          setAddOpen(true);
+                          openNewPerson({ name: item.name, nickname: item.nickname, departmentTop: '', title: '' });
                         }}
                       >
                         <Plus className="h-3 w-3" /> 명부에 등록
@@ -495,7 +624,10 @@ export function PeopleDirectoryPage() {
         </Card>
       ) : null}
 
-      <PeopleTable rows={mainRows} loading={loading} onOpen={openPerson} />
+      <PeopleTable
+        rows={mainRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
+        canReadProfile={scopedProfileCapabilities.read} onOpenProfile={setProfilePerson}
+      />
 
       {internRows.length > 0 || counts.INTERN > 0 ? (
         <section className="space-y-2">
@@ -503,7 +635,10 @@ export function PeopleDirectoryPage() {
             <h2 className="text-sm font-semibold text-slate-900">인턴</h2>
             <span className="text-[11px] tabular-nums text-slate-500">{counts.INTERN}명</span>
           </div>
-          <PeopleTable rows={internRows} loading={loading} onOpen={openPerson} />
+          <PeopleTable
+            rows={internRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
+            canReadProfile={scopedProfileCapabilities.read} onOpenProfile={setProfilePerson}
+          />
         </section>
       ) : null}
 
@@ -513,7 +648,7 @@ export function PeopleDirectoryPage() {
       </p>
 
       {/* ── 계약 관리 ── */}
-      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}>
+      <Dialog open={!!selected && directoryScopeLoaded} onOpenChange={(open) => { if (!open) setSelected(null); }}>
         <DialogContent className="flex max-h-[85vh] max-w-[680px] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
@@ -588,9 +723,29 @@ export function PeopleDirectoryPage() {
         </DialogContent>
       </Dialog>
 
+      {profilePerson && scopedProfileCapabilities.read && authUser ? (
+        <ProfessionalProfileEditor
+          tenantId={orgId}
+          actor={authUser}
+          personId={profilePerson.personId}
+          personName={profilePerson.name}
+          canWrite={scopedProfileCapabilities.write}
+          onClose={() => setProfilePerson(null)}
+        />
+      ) : null}
+
       {/* ── 인력 등록 ── */}
-      <Dialog open={addOpen} onOpenChange={(open) => { if (!open) setAddOpen(false); }}>
-        <DialogContent className="max-w-[620px]">
+      <Dialog
+        open={addOpen && directoryScopeLoaded}
+        onOpenChange={(open) => {
+          if (!open && !saving) {
+            setAddOpen(false);
+            setNewProfessionalProfile(null);
+            setNewProfessionalProfileValid(true);
+          }
+        }}
+      >
+        <DialogContent className="max-w-[780px]">
           <DialogHeader>
             <DialogTitle className="text-base">인력 등록</DialogTitle>
             <DialogDescription>
@@ -633,9 +788,32 @@ export function PeopleDirectoryPage() {
           <p className="text-[12px] font-semibold text-slate-700">첫 계약</p>
           <EmploymentForm draft={draft} onChange={setDraft} disabled={saving} />
 
+          {scopedProfileCapabilities.write ? (
+            <>
+              <Separator className="my-1" />
+              <NewPersonProfessionalProfileFields
+                tenantId={orgId}
+                actor={authUser!}
+                disabled={saving}
+                onChange={(profile, valid) => {
+                  setNewProfessionalProfile(profile);
+                  setNewProfessionalProfileValid(valid);
+                }}
+              />
+            </>
+          ) : null}
+
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setAddOpen(false)} disabled={saving}>취소</Button>
-            <Button size="sm" onClick={() => void submitNewPerson(draft)} disabled={saving}>
+            <Button
+              variant="outline" size="sm"
+              onClick={() => {
+                setAddOpen(false);
+                setNewProfessionalProfile(null);
+                setNewProfessionalProfileValid(true);
+              }}
+              disabled={saving}
+            >취소</Button>
+            <Button size="sm" onClick={() => void submitNewPerson(draft)} disabled={saving || !newProfessionalProfileValid}>
               {saving ? '등록 중…' : '등록'}
             </Button>
           </div>

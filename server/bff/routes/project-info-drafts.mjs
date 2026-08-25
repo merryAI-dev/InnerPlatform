@@ -605,6 +605,7 @@ export function createProjectInfoDraftService({
       tenantId: current.tenantId,
       idempotencyKey: current.idempotencyKey,
       requestFingerprint: fingerprint,
+      actorId: current.actorId,
       nowDate,
     });
   }

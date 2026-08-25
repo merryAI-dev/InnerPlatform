@@ -104,6 +104,7 @@ import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
 import { mountPersonRoutes } from './routes/persons.mjs';
+import { mountPersonProfessionalProfileRoutes } from './routes/person-professional-profiles.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
@@ -129,6 +130,7 @@ import {
   mountCashflowEditDraftRoutes,
 } from './routes/cashflow-edit-drafts.mjs';
 import { createHttpError, resolveErrorResponse } from './bff-utils.mjs';
+import { getProfessionalProfileCatalog } from './professional-profile.mjs';
 
 function formatSeoulDate(value) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -730,6 +732,7 @@ export function createBffApp(options = {}) {
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
+  const professionalProfileCatalog = options.professionalProfileCatalog || getProfessionalProfileCatalog();
   const editLeaseService = options.editLeaseService || (editLeasesEnabled
     ? createEditLeaseService({
       db,
@@ -1573,7 +1576,14 @@ export function createBffApp(options = {}) {
     service: cashflowPeriodPolicyService,
     idempotencyService,
   });
-  mountParticipationDashboardRoutes(app, { db, now, googleSheetsService, idempotencyService });
+  mountParticipationDashboardRoutes(app, {
+    db,
+    now,
+    googleSheetsService,
+    idempotencyService,
+    rbacPolicy,
+    professionalProfileCatalog,
+  });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,
@@ -1616,6 +1626,16 @@ export function createBffApp(options = {}) {
     idempotencyService,
     auditChainService,
     piiProtector,
+    rbacPolicy,
+  });
+  mountPersonProfessionalProfileRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    auditChainService,
+    piiProtector,
+    rbacPolicy,
+    catalog: professionalProfileCatalog,
   });
 
   // ── Guide Q&A chatbot ──

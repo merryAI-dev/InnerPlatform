@@ -48,6 +48,17 @@ describe('rbac helpers', () => {
     expect(hasPermission('viewer', 'cashflow:export')).toBe(false);
   });
 
+  it('limits professional-profile access to admin and finance', () => {
+    expect(hasPermission('admin', 'person:professional_profile:read')).toBe(true);
+    expect(hasPermission('admin', 'person:professional_profile:write')).toBe(true);
+    expect(hasPermission('finance', 'person:professional_profile:read')).toBe(true);
+    expect(hasPermission('finance', 'person:professional_profile:write')).toBe(true);
+    expect(hasPermission('pm', 'person:professional_profile:read')).toBe(false);
+    expect(hasPermission('pm', 'person:professional_profile:write')).toBe(false);
+    expect(hasPermission('viewer', 'person:professional_profile:read')).toBe(false);
+    expect(hasPermission('viewer', 'person:professional_profile:write')).toBe(false);
+  });
+
   it('keeps viewer least-privileged but allows evidence drive workflows', () => {
     expect(hasPermission('viewer', 'project:write')).toBe(true);
     expect(hasPermission('viewer', 'project:evidence_drive:write')).toBe(true);

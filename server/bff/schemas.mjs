@@ -439,6 +439,38 @@ export const personEmploymentSchema = z.object({
   note: z.string().trim().max(500).optional(),
 }).strict();
 
+const PROFESSIONAL_PROFILE_TEXT = z.string().max(80);
+
+const professionalProfileEducationRecordSchema = z.object({
+  attainmentCode: PROFESSIONAL_PROFILE_TEXT,
+  institutionName: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  countryCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  major: PROFESSIONAL_PROFILE_TEXT.nullish(),
+}).strict();
+
+const professionalProfileEnglishEvidenceSchema = z.object({
+  testCode: PROFESSIONAL_PROFILE_TEXT,
+  scaleCode: PROFESSIONAL_PROFILE_TEXT,
+  resultValue: PROFESSIONAL_PROFILE_TEXT,
+  otherTestName: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  testedAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+}).strict();
+
+const professionalProfileCertificationSchema = z.object({
+  label: PROFESSIONAL_PROFILE_TEXT,
+}).strict();
+
+export const professionalProfileInputSchema = z.object({
+  educationRecords: z.array(professionalProfileEducationRecordSchema).max(10).optional(),
+  englishEvidence: z.array(professionalProfileEnglishEvidenceSchema).max(10).optional(),
+  certifications: z.array(professionalProfileCertificationSchema).max(20).optional(),
+}).strict();
+
+export const personProfessionalProfilePutSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  profile: professionalProfileInputSchema,
+}).strict();
+
 export const personCreateSchema = z.object({
   personId: z.string().trim().min(1).max(200).regex(/^[^/]+$/).optional(),
   name: z.string().trim().min(1).max(100),
@@ -458,6 +490,7 @@ export const personCreateSchema = z.object({
     endDate: ISO_DATE_STRING.nullish(),
     note: z.string().trim().max(500).optional(),
   }).strict(),
+  professionalProfile: professionalProfileInputSchema.optional(),
 }).strict();
 
 export const personProfileSchema = z.object({
@@ -473,10 +506,13 @@ export const personProfileSchema = z.object({
 }).strict();
 
 export const cashflowExportSchema = z.object({
-  scope: z.enum(['all', 'single']),
+  scope: z.enum(['all', 'single', 'selected']),
   projectId: z.string().trim().optional(),
   projectIds: z.array(z.string().trim().min(1).max(200).regex(/^[^/]+$/)).min(1).max(200).optional(),
-  accountType: z.enum(['DEDICATED', 'OPERATING', 'NONE']).optional(),
+  accountType: z.enum(['DEDICATED', 'OPERATING', 'NONE', 'OTHER']).optional(),
+  accountTypes: z.array(z.enum(['DEDICATED', 'OPERATING', 'NONE', 'OTHER'])).min(1).max(4).optional(),
+  department: z.string().trim().min(1).max(100).optional(),
+  sortBy: z.enum(['PROJECT_NAME', 'DEPARTMENT']).default('PROJECT_NAME'),
   basis: z.enum(['공급가액', '공급대가', '기타', 'NONE']).optional(),
   startYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
   endYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
@@ -489,7 +525,7 @@ export const cashflowExportSchema = z.object({
       message: 'projectId is required when scope=single',
     });
   }
-  if (value.scope === 'all' && value.variant === 'single-project') {
+  if (value.scope !== 'single' && value.variant === 'single-project') {
     ctx.addIssue({
       code: 'custom',
       path: ['variant'],
@@ -500,7 +536,14 @@ export const cashflowExportSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['projectIds'],
-      message: 'projectIds is only supported when scope=all',
+      message: 'projectIds is only supported for multi-project scopes',
+    });
+  }
+  if (value.scope === 'selected' && !value.projectIds) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['projectIds'],
+      message: 'projectIds is required when scope=selected',
     });
   }
   if (value.projectIds && new Set(value.projectIds).size !== value.projectIds.length) {
@@ -508,6 +551,20 @@ export const cashflowExportSchema = z.object({
       code: 'custom',
       path: ['projectIds'],
       message: 'projectIds must not contain duplicates',
+    });
+  }
+  if (value.accountTypes && new Set(value.accountTypes).size !== value.accountTypes.length) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['accountTypes'],
+      message: 'accountTypes must not contain duplicates',
+    });
+  }
+  if (value.accountType && value.accountTypes) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['accountTypes'],
+      message: 'accountType and accountTypes cannot be used together',
     });
   }
 });

@@ -20,12 +20,25 @@ function resolveNowDate(value, fallback) {
   return date;
 }
 
+function hasDifferentActor(data, actorId) {
+  return data.actorId !== actorId;
+}
+
+function actorConflict(ref) {
+  return {
+    mode: 'conflict',
+    reason: 'Idempotency key was already used by a different actor',
+    ...(ref ? { ref } : {}),
+  };
+}
+
 export function createIdempotencyService(db, { now = () => new Date() } = {}) {
   return {
     async checkInTransaction(tx, {
       tenantId,
       idempotencyKey,
       requestFingerprint,
+      actorId,
       nowDate,
     }) {
       const ref = db.doc(idempotencyDocPath(tenantId, idempotencyKey));
@@ -37,6 +50,7 @@ export function createIdempotencyService(db, { now = () => new Date() } = {}) {
       }
 
       const data = snap.data() || {};
+      if (hasDifferentActor(data, actorId)) return actorConflict(ref);
       if (data.requestFingerprint && data.requestFingerprint !== requestFingerprint) {
         return {
           mode: 'conflict',
@@ -131,6 +145,7 @@ export function createIdempotencyService(db, { now = () => new Date() } = {}) {
         }
 
         const data = snap.data() || {};
+        if (hasDifferentActor(data, actorId)) return actorConflict();
         if (data.requestFingerprint && data.requestFingerprint !== requestFingerprint) {
           return {
             mode: 'conflict',
