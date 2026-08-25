@@ -68,6 +68,7 @@ import {
   applyCashflowVarianceIntentViaBff,
   applyWeeklySubmissionStatusIntentViaBff,
   applyEvidenceRequiredMapIntentViaBff,
+  fetchParticipationDashboardViaBff,
   fetchPersonsViaBff,
   createPersonViaBff,
   previewParticipationSheetByLinkViaBff,
@@ -85,6 +86,33 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('forwards professional profile filters and cancellation to the participation BFF', async () => {
+    const snapshot = { professionalProfileAccess: true, members: [] };
+    const client = asMockClient({
+      get: vi.fn().mockResolvedValue({ data: snapshot }),
+      post: vi.fn(),
+      request: vi.fn(),
+    });
+    const controller = new AbortController();
+
+    await expect(fetchParticipationDashboardViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin' },
+      year: '2026',
+      ruleId: 'koica',
+      education: 'MASTER_GRADUATED',
+      englishEvidence: 'TOEIC',
+      certifications: ['pmp', 'oda 전문가'],
+      signal: controller.signal,
+      client,
+    })).resolves.toBe(snapshot);
+
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/participation-dashboard?year=2026&ruleId=koica&education=MASTER_GRADUATED&englishEvidence=TOEIC&certification=pmp&certification=oda+%EC%A0%84%EB%AC%B8%EA%B0%80',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
   it('keeps profile capability outside the global PersonRecord items', async () => {
     const response = {
       items: [{ personId: 'person-a', name: '김정태' }],

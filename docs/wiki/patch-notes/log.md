@@ -301,3 +301,7 @@
 ## [2026-08-09] patch-note | cashflow-month-cell-count | 결산 셀 수를 정책 파생 상수로 통합
 - pages: [shared-label-policy](./pages/shared-label-policy.md)
 - summary: 한 달 결산 셀 수를 policy JSON 파생 상수(`CASHFLOW_MONTH_CELL_COUNT`)로 통합했다. BFF 라우트의 리터럴 160과 안내 문구가 상수를 따르고, JVM 하드코딩 카탈로그는 같은 JSON 을 대조하는 parity 테스트로 고정된다. 라인이 추가되면 두 런타임이 함께 움직인다.
+
+## [2026-08-25] patch-note | admin-participation-profile | 전문 프로필 레이블과 서버 필터
+- pages: [admin-participation](./pages/admin-participation.md)
+- summary: 참여율 표에 최종학력·영어·자격증 레이블을 추가하고, 권한이 있는 관리자에게만 URL 동기화 데이터 필터를 제공한다. 자격증은 최대 20개까지 선택하며 연속 선택 요청은 짧게 묶어 서버 집계를 조회한다.
