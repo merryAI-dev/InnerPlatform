@@ -969,3 +969,34 @@ describe('참여율 월별 저장 경로', () => {
     expect(patch.teamMembersDetailed).toEqual(expected);
   });
 });
+
+describe('실제 투입인력 (staffing)', () => {
+  it('personId 없는 슬롯은 미정(null)으로 정규화하고 운영매니저는 채워진 슬롯만 남긴다', async () => {
+    const { normalizeProjectStaffing } = await import('./project-editor');
+    const staffing = normalizeProjectStaffing({
+      lead: { personId: 'p-1', name: '김신영', nickname: '가든' },
+      pm: { personId: '', name: '이름만' },
+      operators: [null, { personId: 'p-2', name: '최유진', nickname: '고야' }, { name: '아이디없음' }],
+      settlementSupport: '도담',
+    });
+    expect(staffing.lead).toEqual({ personId: 'p-1', name: '김신영', nickname: '가든' });
+    expect(staffing.pm).toBeNull();
+    expect(staffing.operators).toEqual([{ personId: 'p-2', name: '최유진', nickname: '고야' }]);
+    expect(staffing.settlementSupport).toBe('도담');
+  });
+
+  it('드래프트→페이로드→요약까지 staffing 이 유지된다', async () => {
+    const { createProjectEditorDraft, buildProjectRequestPayloadFromDraft, formatProjectStaffingSummary } = await import('./project-editor');
+    const draft = createProjectEditorDraft({
+      staffing: {
+        lead: { personId: 'p-1', name: '김신영', nickname: '가든' },
+        pm: null,
+        operators: [],
+        settlementSupport: '써니',
+      },
+    });
+    const payload = buildProjectRequestPayloadFromDraft(draft);
+    expect(payload.staffing?.lead?.personId).toBe('p-1');
+    expect(formatProjectStaffingSummary(payload.staffing)).toBe('총괄 가든 / 실무 미정 / 운영 미정 / 정산지원 써니');
+  });
+});

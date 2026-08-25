@@ -726,6 +726,7 @@ export interface Project {
   participantCondition: string;  // 참여기업 조건
   note?: string;                  // PM/관리자 참고 메모
   teamMembersDetailed?: ProjectTeamMemberAssignment[];
+  staffing?: ProjectStaffing;    // 실제 투입인력 (총괄·실무책임자·운영매니저·정산지원)
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
   projectPurpose?: string;
   totalRevenueAmount?: number;
@@ -888,6 +889,26 @@ export interface ProjectRequestContractAnalysis {
   };
 }
 
+/** 실제 투입인력 역할 슬롯. 인력 명부(persons) 스냅샷 - 참여율 시트와 독립인 책임 메타데이터다. */
+export interface ProjectStaffingSlot {
+  /** 인력 명부(orgs/{org}/persons) 문서 id. 명부 밖 인물은 담지 않는다. */
+  personId: string;
+  name: string;
+  nickname: string;
+}
+
+/** 실제 투입인력. 슬롯이 비어 있으면(null) "미정" 상태다 - 채용 전 자리를 허용한다. */
+export interface ProjectStaffing {
+  /** 총괄책임자 - 사업 최종 책임자 */
+  lead: ProjectStaffingSlot | null;
+  /** 실무책임자 (PM) */
+  pm: ProjectStaffingSlot | null;
+  /** 운영 매니저 (1인 이상, 가변) */
+  operators: ProjectStaffingSlot[];
+  /** 정산지원 - 도담/써니 중 택1, 해당 없으면 빈 문자열 */
+  settlementSupport: string;
+}
+
 export interface ProjectTeamMemberAssignment {
   /** 인력 명부(orgs/{org}/persons)의 SSOT 식별자 */
   personId?: string;
@@ -960,6 +981,7 @@ export interface ProjectRequestPayload {
   teamName: string;
   teamMembers: string;
   teamMembersDetailed?: ProjectTeamMemberAssignment[];
+  staffing?: ProjectStaffing;
   participantCondition: string;
   note: string;
   contractDocument: FileAttachment | null;
