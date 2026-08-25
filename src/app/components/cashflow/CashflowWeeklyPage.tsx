@@ -461,7 +461,7 @@ export function CashflowWeeklyPage() {
                             period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
-                            onAction={(action) => void transition(project.id, 'MONTH', action, yearMonth)}
+                            onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}
                           />
                         )}
                         <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
