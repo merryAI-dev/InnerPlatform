@@ -17,6 +17,7 @@
     "test:e2e": "npx playwright test --config playwright.harness.config.mjs",
     "test:e2e:cashflow-export": "npx playwright test --config playwright.cashflow-export.config.mjs",
     "test:e2e:participation": "npx playwright test --config playwright.participation.config.mjs",
+    "test:e2e:people-profile": "npx playwright test --config playwright.people-profile.config.mjs",
     "test:settlement:integration": "bash scripts/test_settlement_product_completeness_integration.sh",
     "bff:dev": "node server/bff/server.mjs",
     "mcp:myscube": "node server/mcp/server.mjs",

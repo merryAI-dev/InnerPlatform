@@ -12,6 +12,7 @@ import type {
   TransactionState,
 } from '../data/types';
 import type { EmploymentState, EmploymentType } from '../platform/person-employment';
+import type { ProfessionalProfileInput } from './person-professional-profile-client';
 import { PlatformApiClient } from '../platform/api-client';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 import {
@@ -2663,14 +2664,24 @@ export async function deepSyncAuthGovernanceUsersViaBff(params: {
 export async function fetchPersonsViaBff(params: {
   tenantId: string;
   actor: ActorLike;
+  signal?: AbortSignal;
   client?: PlatformApiClientLike;
-}): Promise<{ items: PersonRecord[]; total: number }> {
+}): Promise<{
+  items: PersonRecord[];
+  total: number;
+  capabilities: { professionalProfileRead: boolean; professionalProfileWrite: boolean };
+}> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.get<{ items: PersonRecord[]; total: number }>(
+  const response = await apiClient.get<{
+    items: PersonRecord[];
+    total: number;
+    capabilities: { professionalProfileRead: boolean; professionalProfileWrite: boolean };
+  }>(
     '/api/v1/persons',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      signal: params.signal,
       timeoutMs: 10000,
     },
   );
@@ -2712,6 +2723,7 @@ export async function changePersonEmploymentViaBff(params: {
 export async function createPersonViaBff(params: {
   tenantId: string;
   actor: ActorLike;
+  idempotencyKey: string;
   person: {
     name: string;
     nickname?: string;
@@ -2721,16 +2733,25 @@ export async function createPersonViaBff(params: {
     grade?: string;
     note?: string;
     employment: { type: string; state: string; effectiveFrom: string; endDate?: string | null; note?: string };
+    professionalProfile?: ProfessionalProfileInput;
   };
   client?: PlatformApiClientLike;
-}): Promise<{ person: PersonRecord }> {
+}): Promise<{
+  person: PersonRecord;
+  professionalProfile?: { revision: number; changed: boolean };
+}> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<{ person: PersonRecord }>(
+  const response = await apiClient.post<{
+    person: PersonRecord;
+    professionalProfile?: { revision: number; changed: boolean };
+  }>(
     '/api/v1/persons',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.person,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
       timeoutMs: 15000,
     },
   );
