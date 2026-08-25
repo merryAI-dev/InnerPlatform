@@ -12,9 +12,9 @@ import type { PersonRecord } from '../../lib/platform-bff-client';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
 
 describe('CashflowWeeklyPage settlement status surface', () => {
-  it('shows the prior-month close and weekly status columns without cashflow amounts', () => {
+  it('shows the selected-month close and weekly status columns without cashflow amounts', () => {
     expect(source).toContain('title="전사 현금흐름 현황"');
-    expect(source).toContain("monthCloseTargetLabel || '직전 월'");
+    expect(source).toContain('{Number(yearMonth.slice(5, 7))}월 결산');
     expect(source).toContain('조직장</th>');
     expect(source).toContain('책임자</th>');
     expect(source).toContain("border-l-2 border-slate-300");
@@ -27,7 +27,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).not.toContain("['P - A'");
     expect(source).not.toContain('금액 조회 오류');
     expect(source).not.toContain('>조회 오류</span>');
-    expect(source).toContain('monthCloseTargetLabel');
+    expect(source).not.toContain('monthCloseTargetLabel');
     expect(source).toContain('실무자 결재:');
     expect(source).toContain('조직장 승인:');
     expect(source).not.toContain('PeriodAmounts');
@@ -38,7 +38,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action, overview?.monthCloseTargetYearMonth || yearMonth)}");
+    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action)}");
     // 2026-08-20: 진행 바로 바꿨다가 헷갈린다는 피드백으로 배지로 롤백. 기간 줄만 유지.
     expect(source).toContain('주정산 이전');
     expect(source).toContain('결산 전');
