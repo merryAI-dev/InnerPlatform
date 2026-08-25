@@ -24,13 +24,12 @@ import { pathToFileURL } from 'node:url';
 import ExcelJS from 'exceljs';
 import { createFirestoreDb, resolveProjectId } from '../server/bff/firestore.mjs';
 import { PARTICIPATION_FORMAT_CURRENT_ID } from '../server/bff/participation-sheet-ranges.mjs';
+import { composeRosterRows, normalizeRosterPeople } from '../server/bff/participation-roster-push.mjs';
 
 function flag(name, fallback = '') {
   const index = process.argv.indexOf(name);
   return index < 0 ? fallback : (process.argv[index + 1] || fallback);
 }
-const text = (value) => String(value || '').trim();
-
 function columnLetter(index) { // 1-based
   let letters = '';
   while (index > 0) {
@@ -45,14 +44,8 @@ const FIXED_HEADERS = ['닉네임', '이름', '역할', '투입시작월', '투�
 const FIRST_MONTH_COL = FIXED_HEADERS.length + 1; // G
 const MONTH_COLS = 252;      // 최대 21개 연도 범위를 담고, 화면은 선택 연도 12개월만 보여 준다.
 const DATA_ROWS = 60;        // 명단 + 교체·재투입용 여유 줄
-// 아직 누구인지 모르는 자리. 시트가 플랫폼보다 먼저 만들어지고 매번 갱신되지도 않으므로
-// 채용 예정·미배정·확인 중을 한 가지 말로 담는다.
-//
-// 이름이 적히는 순간 자리표시자가 아니라 실제 사람이다. 닉네임 칸은 미정N 인 채로 두어도
-// 되고, 반영은 이름으로 사람을 찾는다. People 등록이 아직이면 연결 대기로 남고 등록 후보
-// 목록에 오른다 - 사전 등록을 놓쳐도 되돌아올 길이 있다.
-const PLACEHOLDER_KINDS = ['미정'];
-const PLACEHOLDER_COUNT = 10;
+// 명단 구성(정렬·자리표시자 미정-1~10)은 participation-roster-push.mjs 가 단일 출처다.
+// 푸시가 갱신하는 명단과 여기서 처음 새기는 명단이 달라지면 그게 드리프트의 시작이다.
 // 양식 이름·버전. 숨김 참조 탭 F1 에 새겨지고, 반영 파이프라인이 이 값으로 양식을 검증한다.
 // 형식이 바뀌면 버전을 올린다 - 옛 복사본은 옛 버전으로 식별되므로 조용히 잘못 읽히지 않는다.
 const TEMPLATE_FORMAT_ID = PARTICIPATION_FORMAT_CURRENT_ID;
@@ -114,17 +107,11 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
   // ── 참조 탭(숨김): People 드롭다운 + 기간 설정용 월 목록 ──
   const ref = workbook.addWorksheet('참조');
   ref.addRow(['닉네임', '이름', '', '월']);
-  people.forEach((person, index) => {
-    ref.getCell(index + 2, 1).value = person.nickname;
-    ref.getCell(index + 2, 2).value = person.name;
+  const rosterRows = composeRosterRows(people);
+  rosterRows.forEach(([nickname, name], index) => {
+    ref.getCell(index + 2, 1).value = nickname;
+    if (name) ref.getCell(index + 2, 2).value = name;
   });
-  let placeholderRow = people.length + 2;
-  for (const kind of PLACEHOLDER_KINDS) {
-    for (let index = 1; index <= PLACEHOLDER_COUNT; index += 1) {
-      ref.getCell(placeholderRow, 1).value = `${kind}-${index}`;
-      placeholderRow += 1;
-    }
-  }
   let monthRow = 2;
   for (let year = SETTING_MONTHS_FROM; year <= SETTING_MONTHS_TO; year += 1) {
     for (let month = 1; month <= 12; month += 1) {
@@ -132,7 +119,7 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
       monthRow += 1;
     }
   }
-  const nicknameListEnd = placeholderRow - 1;
+  const nicknameListEnd = rosterRows.length + 1;
   const settingMonthsEnd = monthRow - 1;
   ref.getCell(1, 6).value = TEMPLATE_FORMAT_ID;
   ref.state = 'hidden';
@@ -294,11 +281,7 @@ async function main() {
   const outDir = flag('--out', '.');
   const db = createFirestoreDb({ projectId: firebaseProjectId });
   const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
-  const people = peopleSnap.docs
-    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
-    .map((person) => ({ nickname: text(person.nickname), name: text(person.name) }))
-    .filter((person) => person.nickname)
-    .sort((left, right) => left.nickname.localeCompare(right.nickname, 'ko'));
+  const people = normalizeRosterPeople(peopleSnap.docs.map((doc) => doc.data() || {}));
   const workbook = buildParticipationSheetWorkbook({ people });
 
   mkdirSync(outDir, { recursive: true });
