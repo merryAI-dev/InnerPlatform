@@ -43,7 +43,9 @@ async function readPendingRosterEvents(db, tenantId) {
   };
 }
 
-export function mountParticipationRosterRoutes(app, { db, now = () => new Date().toISOString(), idempotencyService } = {}) {
+export function mountParticipationRosterRoutes(app, {
+  db, now = () => new Date().toISOString(), idempotencyService, processRosterEventInline,
+} = {}) {
   app.get('/api/v1/participation-roster/push-status', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read participation roster push status');
     if (!db) throw createHttpError(503, '명단 푸시 상태를 읽을 수 없습니다.', 'firestore_unconfigured');
@@ -60,6 +62,7 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
         return {
           spreadsheetId: readOptionalText(status.spreadsheetId) || null,
           spreadsheetTitle: readOptionalText(status.spreadsheetTitle) || readOptionalText(status.spreadsheetId) || doc.id,
+          sheetTabs: Array.isArray(status.sheetTabs) ? status.sheetTabs.map((tab) => readOptionalText(tab)).filter(Boolean) : [],
           projects: Array.isArray(status.projects) ? status.projects : [],
           ok: status.ok === true,
           // active=false: 링크 해제·종료로 지금은 팬아웃 대상이 아닌 시트의 이력.
@@ -104,6 +107,27 @@ export function mountParticipationRosterRoutes(app, { db, now = () => new Date()
       createdAt: now(),
     });
     await enqueueOutboxEvent(db, event);
-    return { status: 202, body: { ok: true, eventId: event.id, eventType: event.eventType } };
+
+    // 사람이 버튼을 누르고 결과를 기다리는 동작이므로 같은 요청 안에서 즉시 처리한다.
+    // 인라인이 실패해도 이벤트는 대기열에 남아 크론이 이어받는다 - 202 로 그 사실을 알린다.
+    let inline = { processed: false, reason: 'inline_unavailable' };
+    if (typeof processRosterEventInline === 'function') {
+      try {
+        inline = await processRosterEventInline(event.id);
+      } catch (error) {
+        inline = { processed: false, reason: 'inline_error', error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    const status = inline.processed && inline.succeeded ? 200 : 202;
+    return {
+      status,
+      body: {
+        ok: true,
+        eventId: event.id,
+        eventType: event.eventType,
+        processed: inline.processed === true,
+        succeeded: inline.succeeded === true,
+      },
+    };
   }));
 }

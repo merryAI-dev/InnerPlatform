@@ -47,12 +47,18 @@ export function RosterPushPanel({ orgId, actor }: { orgId: string; actor: ActorL
   const push = async () => {
     setPushing(true);
     try {
-      await triggerRosterPushViaBff({
+      const result = await triggerRosterPushViaBff({
         tenantId: orgId,
         actor,
         idempotencyKey: `roster-push:${crypto.randomUUID()}`,
       });
-      toast.success('명단 갱신을 대기열에 넣었습니다. 다음 자동 실행 때 시트에 반영됩니다.');
+      if (result.processed && result.succeeded) {
+        toast.success('명단을 시트에 즉시 반영했습니다. 시트별 결과가 아래 표에 업데이트됐습니다.');
+      } else if (result.processed) {
+        toast.warning('명단 갱신을 실행했지만 일부가 실패했습니다. 아래 표의 실패 사유를 확인해 주세요.');
+      } else {
+        toast.success('명단 갱신을 대기열에 넣었습니다. 다음 자동 실행 때 시트에 반영됩니다.');
+      }
       await load();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '명단 갱신 실행에 실패했습니다.');
@@ -73,7 +79,7 @@ export function RosterPushPanel({ orgId, actor }: { orgId: string; actor: ActorL
           <div className="flex-1">
             <p className="text-sm font-semibold text-slate-900">참여율 시트 명단 동기화</p>
             <p className="text-xs text-slate-500">
-              명부의 채용·퇴사를 연동된 참여율 시트의 닉네임 목록에 반영합니다. 실행하면 대기열에 들어가고, 매일 02:30 자동 처리됩니다.
+              명부의 채용·퇴사를 연동된 참여율 시트의 닉네임 목록에 반영합니다. 실행하면 즉시 반영되고, 매일 02:30 자동 실행도 돌아갑니다.
             </p>
           </div>
           <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void load()} disabled={loading}>
@@ -116,7 +122,15 @@ export function RosterPushPanel({ orgId, actor }: { orgId: string; actor: ActorL
               <TableBody>
                 {statuses.map((status) => (
                   <TableRow key={status.spreadsheetId || status.spreadsheetTitle}>
-                    <TableCell className="text-sm text-slate-800">{status.spreadsheetTitle}</TableCell>
+                    <TableCell className="text-sm text-slate-800">
+                      {status.spreadsheetTitle}
+                      {status.sheetTabs.length > 0 ? (
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          탭 {status.sheetTabs.length}개: {status.sheetTabs.slice(0, 6).join(' · ')}
+                          {status.sheetTabs.length > 6 ? ` 외 ${status.sheetTabs.length - 6}개` : ''}
+                        </p>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-xs text-slate-600">
                       {status.projects.map((project) => project.projectName).join(', ') || '-'}
                     </TableCell>

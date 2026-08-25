@@ -119,6 +119,7 @@ describe('participation.roster.changed 핸들러', () => {
     expect(statusWrites[0].value).toMatchObject({
       ok: true,
       spreadsheetTitle: '제목:sheet-alpha-000000000001',
+      sheetTabs: ['참조'],
       lastSuccessAt: NOW,
       reason: null,
     });

@@ -16,6 +16,7 @@ import {
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
   processOutboxBatch,
+  processOutboxEventById,
 } from './outbox.mjs';
 import {
   createWorkQueueJob,
@@ -852,6 +853,21 @@ export function createBffApp(options = {}) {
     });
   const participationRosterOutboxHandler = options.participationRosterOutboxHandler
     || createParticipationRosterChangedOutboxHandler({ db, googleSheetsService, now });
+  // outbox 소비의 단일 핸들러 맵. 크론 배치와 인라인 처리(명단 갱신 즉시 실행)가 같은 맵을
+  // 쓴다 - 두 경로가 다른 맵을 들면 한쪽만 아는 이벤트 타입이 생긴다.
+  const outboxEventHandlers = {
+    'project.registration.submitted': projectRegistrationOutboxHandler,
+    'project.info.submitted': projectInfoOutboxHandler,
+    [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
+    [PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE]: participationRosterOutboxHandler,
+  };
+  // 명단 갱신은 사람이 버튼을 누르고 결과를 기다리는 동작이다. 매일 1회 크론만 기다리게
+  // 하면 버튼이 거짓말이 된다 - enqueue 직후 같은 요청 안에서 인라인 처리한다.
+  const processRosterEventInline = (eventId) => processOutboxEventById(db, eventId, {
+    now,
+    eventHandlers: outboxEventHandlers,
+    maxAttempts: outboxMaxAttempts,
+  });
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -998,12 +1014,7 @@ export function createBffApp(options = {}) {
       limit,
       maxAttempts,
       now,
-      eventHandlers: {
-        'project.registration.submitted': projectRegistrationOutboxHandler,
-        'project.info.submitted': projectInfoOutboxHandler,
-        [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
-        [PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE]: participationRosterOutboxHandler,
-      },
+      eventHandlers: outboxEventHandlers,
     });
 
     res.status(200).json({
@@ -1610,7 +1621,9 @@ export function createBffApp(options = {}) {
     rbacPolicy,
     professionalProfileCatalog,
   });
-  mountParticipationRosterRoutes(app, { db, now, idempotencyService });
+  mountParticipationRosterRoutes(app, {
+    db, now, idempotencyService, processRosterEventInline,
+  });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,

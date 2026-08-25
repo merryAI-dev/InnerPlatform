@@ -124,8 +124,8 @@ function classifySheetsError(error) {
 
 // invalid_link 는 spreadsheetId 가 없다 - 원본 링크는 link 로 따로 나른다.
 // 링크 문자열을 id 자리에 넣으면 '/' 때문에 Firestore 문서 id 로 못 쓴다.
-function refusal({ spreadsheetId = '', link = '', spreadsheetTitle = '', reason, message }) {
-  return { ok: false, spreadsheetId, link, spreadsheetTitle, reason, message };
+function refusal({ spreadsheetId = '', link = '', spreadsheetTitle = '', sheetTabs = [], reason, message }) {
+  return { ok: false, spreadsheetId, link, spreadsheetTitle, sheetTabs, reason, message };
 }
 
 /**
@@ -160,11 +160,14 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people, 
     });
   }
   const spreadsheetTitle = meta.spreadsheetTitle || normalizedId;
+  // 워크북 안의 탭 이름들. 상태 화면이 "이게 어느 워크북인지" 를 제목만으로 못 알아볼 때
+  // 탭 구성이 두 번째 단서가 된다 - 이미 메타로 받은 값이라 추가 호출은 없다.
+  const sheetTabs = (meta.availableSheets || []).map((sheet) => sheet.title);
 
   const refTab = (meta.availableSheets || []).find((sheet) => sheet.title === PARTICIPATION_REF_TAB);
   if (!refTab) {
     return refusal({
-      spreadsheetId: normalizedId, spreadsheetTitle,
+      spreadsheetId: normalizedId, spreadsheetTitle, sheetTabs,
       reason: 'format_mismatch', message: `양식이 다릅니다 - '${PARTICIPATION_REF_TAB}' 탭이 없습니다.`,
     });
   }
@@ -176,7 +179,7 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people, 
     const marker = text(markerMatrix?.[0]?.[0]);
     if (!isSupportedParticipationFormat(marker)) {
       return refusal({
-        spreadsheetId: normalizedId, spreadsheetTitle,
+        spreadsheetId: normalizedId, spreadsheetTitle, sheetTabs,
         reason: 'format_mismatch',
         message: marker ? `양식이 다릅니다 - 알 수 없는 형식: ${marker}` : '양식이 다릅니다 - 형식 마커(참조!F1)가 없습니다.',
       });
@@ -189,7 +192,7 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people, 
     const existingTenantMarker = text(markerMatrix?.[0]?.[1]);
     if (existingTenantMarker && existingTenantMarker !== ourTenantMarker) {
       return refusal({
-        spreadsheetId: normalizedId, spreadsheetTitle,
+        spreadsheetId: normalizedId, spreadsheetTitle, sheetTabs,
         reason: 'tenant_mismatch',
         message: `다른 테넌트의 시트입니다(${existingTenantMarker}) - 쓰지 않았습니다.`,
       });
@@ -202,7 +205,7 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people, 
     const mergedRows = mergeRosterRows(people, existingRows);
     if (mergedRows.length < existingCount) {
       return refusal({
-        spreadsheetId: normalizedId, spreadsheetTitle,
+        spreadsheetId: normalizedId, spreadsheetTitle, sheetTabs,
         reason: 'roster_shrunk',
         message: `명단이 줄어듭니다(기존 ${existingCount}행 → ${mergedRows.length}행) - 쓰지 않았습니다.`,
       });
@@ -221,13 +224,13 @@ export async function pushRosterToSheet({ sheetsService, spreadsheetId, people, 
       updates,
     }), '명단 쓰기');
     return {
-      ok: true, spreadsheetId: normalizedId, spreadsheetTitle,
+      ok: true, spreadsheetId: normalizedId, spreadsheetTitle, sheetTabs,
       writtenRows: mergedRows.length,
       preservedRows: mergedRows.length - people.length - PLACEHOLDER_COUNT,
     };
   } catch (error) {
     return refusal({
-      spreadsheetId: normalizedId, spreadsheetTitle,
+      spreadsheetId: normalizedId, spreadsheetTitle, sheetTabs,
       reason: classifySheetsError(error),
       message: error?.message || '참조 명단을 쓰지 못했습니다.',
     });
