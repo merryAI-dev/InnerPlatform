@@ -24,13 +24,12 @@ import { pathToFileURL } from 'node:url';
 import ExcelJS from 'exceljs';
 import { createFirestoreDb, resolveProjectId } from '../server/bff/firestore.mjs';
 import { PARTICIPATION_FORMAT_CURRENT_ID } from '../server/bff/participation-sheet-ranges.mjs';
+import { composeRosterRows, normalizeRosterPeople, tenantMarkerOf } from '../server/bff/participation-roster-push.mjs';
 
 function flag(name, fallback = '') {
   const index = process.argv.indexOf(name);
   return index < 0 ? fallback : (process.argv[index + 1] || fallback);
 }
-const text = (value) => String(value || '').trim();
-
 function columnLetter(index) { // 1-based
   let letters = '';
   while (index > 0) {
@@ -45,21 +44,15 @@ const FIXED_HEADERS = ['닉네임', '이름', '역할', '투입시작월', '투�
 const FIRST_MONTH_COL = FIXED_HEADERS.length + 1; // G
 const MONTH_COLS = 252;      // 최대 21개 연도 범위를 담고, 화면은 선택 연도 12개월만 보여 준다.
 const DATA_ROWS = 60;        // 명단 + 교체·재투입용 여유 줄
-// 아직 누구인지 모르는 자리. 시트가 플랫폼보다 먼저 만들어지고 매번 갱신되지도 않으므로
-// 채용 예정·미배정·확인 중을 한 가지 말로 담는다.
-//
-// 이름이 적히는 순간 자리표시자가 아니라 실제 사람이다. 닉네임 칸은 미정N 인 채로 두어도
-// 되고, 반영은 이름으로 사람을 찾는다. People 등록이 아직이면 연결 대기로 남고 등록 후보
-// 목록에 오른다 - 사전 등록을 놓쳐도 되돌아올 길이 있다.
-const PLACEHOLDER_KINDS = ['미정'];
-const PLACEHOLDER_COUNT = 10;
+// 명단 구성(정렬·자리표시자 미정-1~10)은 participation-roster-push.mjs 가 단일 출처다.
+// 푸시가 갱신하는 명단과 여기서 처음 새기는 명단이 달라지면 그게 드리프트의 시작이다.
 // 양식 이름·버전. 숨김 참조 탭 F1 에 새겨지고, 반영 파이프라인이 이 값으로 양식을 검증한다.
 // 형식이 바뀌면 버전을 올린다 - 옛 복사본은 옛 버전으로 식별되므로 조용히 잘못 읽히지 않는다.
 const TEMPLATE_FORMAT_ID = PARTICIPATION_FORMAT_CURRENT_ID;
 const SETTING_MONTHS_FROM = 2000;
 const SETTING_MONTHS_TO = 2099;
 
-export function buildParticipationSheetWorkbook({ people = [] } = {}) {
+export function buildParticipationSheetWorkbook({ people = [], tenantId = '' } = {}) {
   const workbook = new ExcelJS.Workbook();
 
   // ── 안내 탭 ──
@@ -114,17 +107,11 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
   // ── 참조 탭(숨김): People 드롭다운 + 기간 설정용 월 목록 ──
   const ref = workbook.addWorksheet('참조');
   ref.addRow(['닉네임', '이름', '', '월']);
-  people.forEach((person, index) => {
-    ref.getCell(index + 2, 1).value = person.nickname;
-    ref.getCell(index + 2, 2).value = person.name;
+  const rosterRows = composeRosterRows(people);
+  rosterRows.forEach(([nickname, name], index) => {
+    ref.getCell(index + 2, 1).value = nickname;
+    if (name) ref.getCell(index + 2, 2).value = name;
   });
-  let placeholderRow = people.length + 2;
-  for (const kind of PLACEHOLDER_KINDS) {
-    for (let index = 1; index <= PLACEHOLDER_COUNT; index += 1) {
-      ref.getCell(placeholderRow, 1).value = `${kind}-${index}`;
-      placeholderRow += 1;
-    }
-  }
   let monthRow = 2;
   for (let year = SETTING_MONTHS_FROM; year <= SETTING_MONTHS_TO; year += 1) {
     for (let month = 1; month <= 12; month += 1) {
@@ -132,9 +119,11 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
       monthRow += 1;
     }
   }
-  const nicknameListEnd = placeholderRow - 1;
   const settingMonthsEnd = monthRow - 1;
   ref.getCell(1, 6).value = TEMPLATE_FORMAT_ID;
+  // 시트 소유 테넌트 표식(G1). 명단 푸시가 이 값으로 교차 테넌트 덮어쓰기를 거부한다.
+  // 빌더가 안 새겨도 첫 푸시가 선점하지만, 새기고 태어나는 쪽이 한 단계 안전하다.
+  if (tenantId) ref.getCell(1, 7).value = tenantMarkerOf(tenantId);
   ref.state = 'hidden';
 
   // ── 참여율 관리 탭 ──
@@ -220,8 +209,10 @@ export function buildParticipationSheetWorkbook({ people = [] } = {}) {
   });
   // 경고(warning)이지 거부(stop)가 아니다. People 에 아직 없는 사람도 급여 기록은 지금
   // 적혀야 한다. 잘못 적힌 이름은 반영 때 "연결 대기" 로 잡히므로 조용히 사라지지 않는다.
+  // 범위는 열린 상한(1000행)이다 - 만든 시점의 명단 길이로 고정하면 명단 푸시로 늘어난
+  // 사람이 드롭다운에서 조용히 빠진다. 빈 행은 구글 시트 드롭다운이 무시한다.
   sheet.dataValidations.add(`A${dataStartRow}:A${dataEndRow}`, {
-    type: 'list', allowBlank: true, errorStyle: 'warning', formulae: [`참조!$A$2:$A$${nicknameListEnd}`],
+    type: 'list', allowBlank: true, errorStyle: 'warning', formulae: ['참조!$A$2:$A$1000'],
     showErrorMessage: true, errorTitle: 'People에 없는 이름이에요',
     error: '그대로 진행해도 됩니다 - 이름 칸에 실명을 적어 주세요. People 등록이 되면 반영할 때 자동으로 연결됩니다. 아직 누구인지 모르면 미정-1~10 을 고르고, 사람이 정해지면 이름만 채우면 됩니다.',
   });
@@ -294,12 +285,8 @@ async function main() {
   const outDir = flag('--out', '.');
   const db = createFirestoreDb({ projectId: firebaseProjectId });
   const peopleSnap = await db.collection(`orgs/${tenantId}/persons`).get();
-  const people = peopleSnap.docs
-    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
-    .map((person) => ({ nickname: text(person.nickname), name: text(person.name) }))
-    .filter((person) => person.nickname)
-    .sort((left, right) => left.nickname.localeCompare(right.nickname, 'ko'));
-  const workbook = buildParticipationSheetWorkbook({ people });
+  const people = normalizeRosterPeople(peopleSnap.docs.map((doc) => doc.data() || {}));
+  const workbook = buildParticipationSheetWorkbook({ people, tenantId });
 
   mkdirSync(outDir, { recursive: true });
   const filePath = join(outDir, 'MYSC_참여율_표준양식_v2.xlsx');

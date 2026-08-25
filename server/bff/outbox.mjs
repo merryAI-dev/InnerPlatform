@@ -7,6 +7,10 @@ const HANDLER_REQUIRED_EVENT_TYPES = new Set([
   'project.registration.submitted',
   'project.info.submitted',
   DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+  // participation-roster-worker.mjs 의 이벤트. 리터럴인 이유: 그 모듈이 이 파일을
+  // import 하므로 역방향 import 는 순환이 된다. 핸들러 없는 실행 경로가 이 이벤트를
+  // 조용히 DONE 처리하면 명단 갱신이 사라진 채 성공으로 보인다.
+  'participation.roster.changed',
 ]);
 const DEFAULT_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
 

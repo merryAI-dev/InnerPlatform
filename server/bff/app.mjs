@@ -114,6 +114,11 @@ import { mountCashflowPeriodPolicyRoutes } from './routes/cashflow-period-policy
 import { createCashflowPeriodPolicyService } from './cashflow-period-policy-service.mjs';
 import { createCashflowPeriodPolicyFirestoreAdapter } from './cashflow-period-policy-firestore-adapter.mjs';
 import { mountParticipationDashboardRoutes } from './routes/participation-dashboard.mjs';
+import { mountParticipationRosterRoutes } from './routes/participation-roster.mjs';
+import {
+  PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE,
+  createParticipationRosterChangedOutboxHandler,
+} from './participation-roster-worker.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
 import {
@@ -845,6 +850,8 @@ export function createBffApp(options = {}) {
     || createDraftAttachmentCleanupOutboxHandler({
       draftStorageService: projectRegistrationDraftStorageService,
     });
+  const participationRosterOutboxHandler = options.participationRosterOutboxHandler
+    || createParticipationRosterChangedOutboxHandler({ db, googleSheetsService, now });
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -995,6 +1002,7 @@ export function createBffApp(options = {}) {
         'project.registration.submitted': projectRegistrationOutboxHandler,
         'project.info.submitted': projectInfoOutboxHandler,
         [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
+        [PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE]: participationRosterOutboxHandler,
       },
     });
 
@@ -1602,6 +1610,7 @@ export function createBffApp(options = {}) {
     rbacPolicy,
     professionalProfileCatalog,
   });
+  mountParticipationRosterRoutes(app, { db, now, idempotencyService });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,

@@ -139,7 +139,8 @@ service cloud.firestore {
         'transactions',
         'comments',
         'evidences',
-        'budget_evidence_maps'
+        'budget_evidence_maps',
+        'participation_roster_push_status'
       ];
     }
 

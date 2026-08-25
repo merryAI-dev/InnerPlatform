@@ -272,7 +272,7 @@ export function createGoogleSheetsService(options = {}) {
       : [];
   }
 
-  async function batchUpdateValues({ spreadsheetId, sheetName, updates, accessToken }) {
+  async function batchUpdateValues({ spreadsheetId, sheetName, updates, accessToken, valueInputOption = 'USER_ENTERED' }) {
     const normalizedId = extractSpreadsheetId(spreadsheetId);
     const normalizedSheetName = normalizeSheetTitle(sheetName);
     const normalizedUpdates = Array.isArray(updates)
@@ -300,7 +300,7 @@ export function createGoogleSheetsService(options = {}) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          valueInputOption: 'USER_ENTERED',
+          valueInputOption,
           data: normalizedUpdates,
         }),
       },
