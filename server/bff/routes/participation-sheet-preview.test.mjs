@@ -228,7 +228,7 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
     expect(requestedRanges).toEqual([{ sheetName: '참조', rangeA1: 'F1' }]);
   });
 
-  it('시트 기간이 계약 기간과 다르면 막고 양쪽을 알려준다', async () => {
+  it('시트 기간이 계약 기간과 다르면 막지 않고 경고로 양쪽을 알려준다', async () => {
     const { app } = createApp({
       documents: withProject(),
       ranges: sheetRanges({
@@ -237,9 +237,10 @@ describe('막히는 경우 - 조용히 끝나지 않는다', () => {
       }),
     });
     const response = await request(app).get(url);
-    expect(response.body.ok).toBe(false);
-    expect(response.body.blocking[0].code).toBe('participation_period_mismatch');
-    expect(response.body.blocking[0].message).toContain('2026-03');
+    expect(response.body.ok).toBe(true);
+    expect(response.body.blocking).toEqual([]);
+    expect(response.body.warnings[0].code).toBe('participation_period_mismatch');
+    expect(response.body.warnings[0].message).toContain('2026-03');
   });
 });
 
@@ -307,11 +308,11 @@ describe('저장 전 연동 - 링크와 기간을 요청에 담는다', () => {
     expect(response.body.rows[0]).toMatchObject({ personId: 'p-kim', baseRate: 30 });
   });
 
-  it('화면의 계약 기간과 다르면 막는다 - 저장본이 아니라 지금 값과 맞춰야 한다', async () => {
+  it('화면의 계약 기간과 달라도 막지 않고 경고한다 - 저장본이 아니라 지금 값과 대조한다', async () => {
     const { app } = createApp({ documents: PEOPLE });
     const response = await request(app).get(query({ contractEnd: '2026-06-30' }));
-    expect(response.body.ok).toBe(false);
-    expect(response.body.blocking[0].code).toBe('participation_period_mismatch');
+    expect(response.body.ok).toBe(true);
+    expect(response.body.warnings[0].code).toBe('participation_period_mismatch');
   });
 
   it('링크가 없으면 무엇을 넣어야 하는지 알려준다', async () => {

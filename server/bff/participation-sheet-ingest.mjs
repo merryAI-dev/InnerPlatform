@@ -442,12 +442,18 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
   const parsed = parseParticipationSheet(sheet);
   const formatIssues = validateParticipationFormat(parsed);
   if (formatIssues.length) {
-    return { ok: false, blocking: formatIssues, parsed, rows: [], entries: [], missing: [], summary: null };
+    return { ok: false, blocking: formatIssues, warnings: [], parsed, rows: [], entries: [], missing: [], summary: null };
   }
+  // 기간 불일치는 막지 않고 경고한다 (2026-08-25 보람 결정 - 계약 문서 기간 규칙 개정).
+  // 막으면 "시트 먼저 vs 플랫폼 먼저" 순서 강제가 현장에서 오류만 가중시킨다. 값은
+  // YYYY-MM 키로 저장되므로 기간이 달라도 달이 어긋나지는 않는다 - 사용자가 인지하고
+  // 진행하는 것으로 충분하다. 단 플랫폼 계약 기간 자체가 없으면 대조가 불가능하므로 막는다.
+  const warnings = [];
   const periodIssue = validatePeriodAgainstProject({ period: parsed.period, project });
-  if (periodIssue) {
-    return { ok: false, blocking: [periodIssue], parsed, rows: [], entries: [], missing: [], summary: null };
+  if (periodIssue?.code === 'participation_project_period_missing') {
+    return { ok: false, blocking: [periodIssue], warnings, parsed, rows: [], entries: [], missing: [], summary: null };
   }
+  if (periodIssue) warnings.push(periodIssue);
 
   const rows = resolvePeopleIdentity({ rows: parsed.rows, people });
   const { errors, missing } = validateStintRows({ rows, months: parsed.months });
@@ -458,6 +464,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
   return {
     ok: blocking.length === 0,
     blocking,
+    warnings,
     parsed,
     rows,
     entries,
@@ -473,6 +480,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
       missingCount: missing.length,
       candidateCount: candidates.length,
       errorCount: blocking.length,
+      warningCount: warnings.length,
     },
   };
 }

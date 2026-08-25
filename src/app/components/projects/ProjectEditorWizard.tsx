@@ -744,6 +744,7 @@ export function ProjectEditorWizard({
   const [teamSyncing, setTeamSyncing] = useState(false);
   const [teamSyncNotice, setTeamSyncNotice] = useState('');
   const [teamSyncError, setTeamSyncError] = useState('');
+  const [teamSyncWarning, setTeamSyncWarning] = useState('');
   // 표는 시트를 그대로 옮긴 것이다. 저장된 명단이 아니라 방금 읽은 시트를 보여 준다.
   const [teamSyncPreview, setTeamSyncPreview] = useState<ParticipationSheetPreview | null>(null);
   const [teamSyncSignature, setTeamSyncSignature] = useState<string | null>(null);
@@ -1328,6 +1329,7 @@ export function ProjectEditorWizard({
     setTeamSyncing(true);
     setTeamSyncSignature(null);
     setTeamSyncError('');
+    setTeamSyncWarning('');
     void previewParticipationSheetByLinkViaBff({
       tenantId: orgId,
       actor: user,
@@ -1346,6 +1348,8 @@ export function ProjectEditorWizard({
         const mappedTeamMembers = mapParticipationSheetPreviewToProjectTeamMembers(preview);
         update('teamMembersDetailed', mappedTeamMembers);
         setTeamSyncPreview(preview);
+        // 막지는 않지만 알아야 하는 것들(기간 불일치 등). 서버가 적어 준 문구 그대로.
+        setTeamSyncWarning((preview.warnings || []).map((warning) => warning.message).slice(0, 2).join(' / '));
         setTeamSyncSignature(participationSheetSyncSignature({
           sheetLink,
           contractStart: draft.contractStart,
@@ -2921,6 +2925,11 @@ export function ProjectEditorWizard({
           {teamSyncError ? (
             <p className={cn('rounded-lg border border-red-200 bg-red-50 px-4 py-3', FORM_ERROR_CLASS)} role="alert">
               {teamSyncError}
+            </p>
+          ) : null}
+          {teamSyncWarning ? (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
+              ⚠ {teamSyncWarning} — 그대로 진행할 수 있지만, 기간이 다른 채로 반영된다는 뜻입니다.
             </p>
           ) : null}
           {teamSyncNotice ? (

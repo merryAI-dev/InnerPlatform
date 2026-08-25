@@ -169,6 +169,7 @@ function participationPreviewBody(analysis, extra = {}) {
     ok: analysis.ok,
     summary: analysis.summary,
     blocking: analysis.blocking,
+    warnings: analysis.warnings || [],
     months: analysis.parsed.months,
     rows: analysis.rows.map((row) => ({
       rowIndex: row.rowIndex,
