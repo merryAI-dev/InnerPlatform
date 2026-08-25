@@ -274,6 +274,7 @@ export function mountMemberRoutes(app, {
         tenantId,
         idempotencyKey: operationIdempotencyKey,
         requestFingerprint: operationFingerprint,
+        actorId,
         nowDate: new Date(timestamp),
       });
       if (idempotency.mode === 'replay') return { replayed: true, body: idempotency.body };

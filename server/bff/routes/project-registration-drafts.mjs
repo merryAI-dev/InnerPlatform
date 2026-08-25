@@ -482,6 +482,7 @@ export function createProjectRegistrationDraftService({
       tenantId: current.tenantId,
       idempotencyKey: current.idempotencyKey,
       requestFingerprint,
+      actorId: current.actorId,
       nowDate,
     });
   }
