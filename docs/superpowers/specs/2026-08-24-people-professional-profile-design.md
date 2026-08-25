@@ -62,7 +62,7 @@
 
 카탈로그는 각 code의 `label`과 최고학력 선정을 위한 `rank`를 가진다. 독립적인 level/status 조합은 저장하지 않으므로 유효하지 않은 조합이 생기지 않는다.
 
-영어 시험은 시험명과 점수 체계를 분리한다. 예를 들어 `TOEFL`은 `TOEFL_IBT_120`, `TOEFL_IBT_6`, `TOEFL_PBT_677` 같은 scale code를 가질 수 있다. 카탈로그의 각 scale은 결과 형식, 범위, 단위 또는 허용 등급을 정의한다. 첫 facet code는 다음과 같다.
+영어 시험은 시험명과 점수 체계를 분리한다. 예를 들어 `TOEFL`은 `TOEFL_IBT_120`, `TOEFL_IBT_6`, `TOEFL_PBT_677` 같은 scale code를 가질 수 있다. 카탈로그의 각 scale은 결과 형식, 범위, 단위 또는 허용 등급을 정의한다. 국가 입력도 같은 카탈로그의 ISO 3166-1 alpha-2 option을 사용한다. 공백과 소문자는 정규화하되 존재하지 않는 두 글자 코드는 거부한다. 첫 facet code는 다음과 같다.
 
 - `TOEIC`
 - `TOEFL`
@@ -118,7 +118,7 @@ BFF는 카탈로그 rank가 가장 높은 학력 레코드 하나를 `최종학�
 
 | 영역 | 화면 라벨 | 서버 표시 예시 |
 |---|---|---|
-| 열·입력 | 최종학력 | `석사 · University of Sussex` |
+| 열·입력 | 최종학력 | `석사 졸업 · University of Sussex` |
 | 열·입력 | 영어 증빙 | `TOEIC 920 · 해외 대학` |
 | 열·입력 | 자격증 | `PMP · ODA 전문가` |
 | 공통 상태 | 미입력 | `—` 및 접근성 이름 `미입력` |
@@ -189,7 +189,9 @@ Firestore rules의 BFF-only collection 목록에 `persons`를 추가하고 직�
 - 실제 변경은 People 문서 갱신과 `PROFILE_UPDATE` audit을 하나의 Firestore transaction으로 commit한다.
 - audit에는 변경된 섹션명, previousRevision, nextRevision만 기록한다. 학교·점수·등급·자격증 원문은 기록하지 않는다.
 - People 신규 등록 폼이 프로필을 함께 보내면 기존 `personWrite`와 `person:professional_profile:write` permission을 모두 요구한다. 하나라도 없으면 person 생성 전 전체 요청을 `403`으로 거부한다. 저장 시 동일한 schema·normalizer와 transaction audit을 사용한다.
-- 성공 응답은 항상 서버 정규화 결과를 담은 `profile`, 현재 `revision`, `changed`를 반환한다. 실제 변경은 `changed: true`, 동일 내용과 stale-but-same no-op은 `changed: false`이다. `409`는 `currentRevision`만 반환하고 최신 프로필은 별도 GET으로 다시 읽는다.
+- PUT 성공 응답은 서버가 정규화한 `{ profile, revision, changed }`를 반환한다. 실제 변경은 `changed: true`, 동일 내용과 stale-but-same no-op은 `changed: false`이다. `409`는 `currentRevision`만 반환하고 최신 profile은 별도 GET으로 다시 읽는다.
+- `idempotency_keys`에는 request fingerprint와 PII-free `{ personId, revision, changed }` receipt만 남고 profile 원문은 남지 않아야 한다. 동일 actor의 replay는 현재 person 문서를 다시 읽어 canonical `{ profile, revision, changed }` 응답을 재구성하며 `private, no-store`를 유지한다.
+- 신규 사람 등록 응답도 directory allowlist와 profile revision receipt만 반환하며 profile 원문을 idempotency response에 넣지 않는다. 빈 세 배열은 기존 미입력 상태와 같으므로 `professionalProfile` 필드를 저장하지 않고 revision `0`, PROFILE_UPDATE audit 없음으로 처리한다.
 
 ### 참여율 조회
 
@@ -304,12 +306,13 @@ People 등록·상세 화면에 `전문 프로필` 영역을 추가한다.
 2. People BFF 테스트
    - catalog 및 한 사람 profile GET
    - 신규 등록과 전문 프로필 PUT의 저장·재조회
-   - idempotency replay와 동일 내용 PUT은 profile·revision·audit 모두 불변
+   - idempotency replay와 동일 내용 PUT은 profile·revision·audit 모두 불변이며 idempotency responseBody에 profile 원문이 없음
    - 실제 내용 변경만 revision 1 증가
    - stale expectedRevision 충돌과 동일 내용 stale no-op
    - permission별 허용·차단과 tenant 격리
    - admin·finance 허용, pm·viewer 차단 및 legacy role을 재도입하지 않는 계약
-   - profile을 포함한 person 생성은 기본 create·profile write permission을 모두 요구
+   - profile을 포함한 person 생성은 기본 create·profile write permission을 모두 요구하고 CREATE+PROFILE audit과 person을 한 transaction으로 저장
+   - 빈 profile 포함 생성은 profile 미저장/revision 0/PROFILE_UPDATE audit 없음
    - People 목록 capability와 프로필 미포함 계약
    - 잘못된 입력과 audit 실패의 원자적 no-write
    - audit에 프로필 원문 값이 없음
@@ -335,7 +338,7 @@ People 등록·상세 화면에 `전문 프로필` 영역을 추가한다.
 
 ## 배포
 
-외부 API, 새 secret, Firestore index 또는 데이터 migration은 없다. `persons`를 BFF-only로 만드는 Firestore rules를 앱 코드보다 먼저 배포한다. 배포 전에 현재 repo의 People frontend 경로가 모두 BFF를 사용하는 contract와 emulator test가 초록이어야 한다.
+외부 API, 새 secret, Firestore index 또는 데이터 migration은 없다. 먼저 PR을 열고 exact head SHA의 CI·리뷰를 초록으로 고정한다. 그 SHA에서 `persons`를 BFF-only로 만드는 Firestore rules를 명시적 production project에 dry-run 후 앱 코드보다 먼저 배포한다. 배포 전에 현재 repo의 People frontend 경로가 모두 BFF를 사용하는 contract와 emulator test가 초록이어야 한다.
 
 그 다음 PR의 CI 성공으로 `main` 자동 Production Deploy를 사용하며 수동 production deploy는 하지 않는다. 배포 후 다음을 canary로 확인한다.
 

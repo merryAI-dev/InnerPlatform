@@ -155,6 +155,7 @@ expect(deriveProfessionalProfileFacts(input)).toMatchObject({
 Also assert:
 
 - whitespace becomes `null` for institution/country/major/otherTestName/testedAt;
+- ` kr ` becomes `KR`, valid ISO alpha-2 such as `GB` passes, and `ZZ`/`ABC` fail against the catalog country allowlist;
 - missing profile normalizes to empty arrays and revision 0;
 - equal-rank education keeps the earlier record;
 - highest-education filter uses only the winning record, not any lower record;
@@ -200,7 +201,7 @@ The JSON must contain:
 
 Add English tests/scales for `TOEIC_990`, `TOEFL_IBT_120`, `TOEFL_IBT_6`, `TOEFL_PBT_677`, OPIc grades, IELTS 0–9, TEPS 0–600, and free-text `OTHER`. Keep labels/order/result validation in this file rather than React or route code.
 
-Load the JSON through a statically traceable module-relative URL (or an explicit Vercel `includeFiles` entry), not an unconstrained runtime path. Add a packaging contract test that imports the catalog through the same production entry so a locally passing but serverless-missing JSON cannot ship.
+Load the JSON with a statically traceable module-relative import used by the production BFF entry, not an unconstrained runtime path. In `professional-profile.test.mjs`, import the catalog through `api/bff.js`'s production dependency chain or the exact catalog module it statically imports and assert the policy data is available; a locally passing but serverless-missing JSON must fail.
 
 - [ ] **Step 4: Implement pure catalog/domain helpers**
 
@@ -282,7 +283,8 @@ Run:
 
 ```bash
 npx vitest run src/app/platform/rbac.test.ts src/app/platform/firestore-rules-policy.test.ts
-npm run bff:test:integration -- --runInBand
+npm run policy:verify
+npm run bff:test:integration
 ```
 
 Expected: permission checks fail and direct persons access is still allowed. If the integration script does not accept the extra argument, run `npm run bff:test:integration` unchanged.
@@ -326,6 +328,7 @@ Run:
 
 ```bash
 npx vitest run src/app/platform/rbac.test.ts src/app/platform/firestore-rules-policy.test.ts
+npm run policy:verify
 npm run bff:test:integration
 ```
 
