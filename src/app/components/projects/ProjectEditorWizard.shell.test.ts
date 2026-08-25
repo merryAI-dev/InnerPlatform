@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectEditorWizard.tsx'), 'utf8');
+// 폼 레이아웃 체계는 project-form-layout.tsx 로 승격됐다 - 골격 계약은 그 파일을 본다.
+const layoutSource = readFileSync(resolve(import.meta.dirname, 'project-form-layout.tsx'), 'utf8');
 const adminWizardSource = readFileSync(resolve(import.meta.dirname, 'ProjectWizard.tsx'), 'utf8');
 const portalRegisterSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectRegister.tsx'), 'utf8');
 const portalEditSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectEdit.tsx'), 'utf8');
@@ -179,7 +181,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('shows which account the sheet must be shared with', () => {
     expect(source).toContain('fetchParticipationSystemAccountViaBff(');
-    expect(source).toContain('에 보기 권한으로 공유해 주세요.');
+    // 명단 자동 갱신(참조 푸시)에는 편집 권한이 필요하다 - 보기 권한 안내는 되돌아오면 안 된다.
+    expect(source).toContain('에 편집자 권한으로 공유해 주세요.');
+    expect(source).not.toContain('보기 권한으로 공유');
   });
 
   it('does not judge the sheet again in the browser', () => {
@@ -618,28 +622,33 @@ describe('ProjectEditorWizard form skeleton contract', () => {
   const renderBody = source.slice(source.indexOf('function getProjectEditorAutosaveStorageKey'));
 
   it('routes every field through one row component instead of per-field markup', () => {
-    expect(source).toContain('function ProjectFormRow(');
-    expect(source).toContain('function ProjectFormSection(');
+    expect(layoutSource).toContain('export function ProjectFormRow(');
+    expect(layoutSource).toContain('export function ProjectFormSection(');
+    // 위저드는 정의하지 않고 가져다 쓴다 - 정의가 되살아나면 이중 출처다.
+    expect(source).not.toContain('function ProjectFormRow(');
+    expect(source).toContain("from './project-form-layout'");
     // 라벨·필수·부연·도움말·오류의 자리를 한 번만 정한다.
-    expect(source).toContain('hints?: ReactNode[];');
-    expect(source).toContain('errors?: string[];');
-    expect(source).toContain('lg:grid-cols-[168px_minmax(0,1fr)]');
+    expect(layoutSource).toContain('hints?: ReactNode[];');
+    expect(layoutSource).toContain('errors?: string[];');
+    expect(layoutSource).toContain('lg:grid-cols-[168px_minmax(0,1fr)]');
+    // 컨트롤 폭 통일점 - 개별 컨트롤 max-w 금지의 근거.
+    expect(layoutSource).toContain('max-w-xl');
     // 라벨 열이 고정폭이라 `*` 가 저절로 세로 정렬된다. 왼쪽 세로 마커는 두지 않는다.
     expect(source).not.toContain('border-l-4');
   });
 
   it('keeps type to four roles and spacing to three values', () => {
-    expect(source).toContain("const FORM_SECTION_CLASS = 'text-[14px] font-bold");
-    expect(source).toContain("const FORM_LABEL_CLASS = 'text-[12px] font-semibold");
-    expect(source).toContain("const FORM_VALUE_CLASS = 'text-[13px]'");
-    expect(source).toContain("const FORM_NUMERIC_VALUE_CLASS = 'text-[13px] tabular-nums'");
-    expect(source).toContain("const FORM_HINT_CLASS = 'text-[11px] font-normal");
+    expect(layoutSource).toContain("export const FORM_SECTION_CLASS = 'text-[14px] font-bold");
+    expect(layoutSource).toContain("export const FORM_LABEL_CLASS = 'text-[12px] font-semibold");
+    expect(layoutSource).toContain("export const FORM_VALUE_CLASS = 'text-[13px]'");
+    expect(layoutSource).toContain("export const FORM_NUMERIC_VALUE_CLASS = 'text-[13px] tabular-nums'");
+    expect(layoutSource).toContain("export const FORM_HINT_CLASS = 'text-[11px] font-normal");
     // text-xs 와 text-[12px] 는 같은 12px 를 두 이름으로 부르던 중복이었다. 이름을 하나로 모았다.
     expect(renderBody).not.toContain('text-xs');
     expect(renderBody).not.toContain('text-[10px]');
     expect(renderBody).not.toContain("'text-[12px]");
-    expect(source).toContain("const FORM_FIELD_STACK_CLASS = 'space-y-4'");
-    expect(source).toContain("const FORM_SECTION_STACK_CLASS = 'space-y-6'");
+    expect(layoutSource).toContain("export const FORM_FIELD_STACK_CLASS = 'space-y-4'");
+    expect(layoutSource).toContain("export const FORM_SECTION_STACK_CLASS = 'space-y-6'");
   });
 
   it('gives the accent colour exactly one meaning and keeps errors red', () => {
