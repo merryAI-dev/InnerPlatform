@@ -341,10 +341,31 @@ test('server capabilities fail closed and a tenant change aborts a stale people 
   await seedAdmin(page);
   let capabilities = { professionalProfileRead: true, professionalProfileWrite: false };
   let slowOldResponse = false;
+  const oldTenantAssignee = '구테넌트담당자';
+  const oldTenantProject = '구테넌트사업';
+  const oldTenantSearch = '구테넌트 검색어';
 
   await installBaseApi(page, {
     capabilities,
     onApi: async (route, url) => {
+      if (url.pathname === '/api/v1/projects' && route.request().method() === 'GET') {
+        const tenantId = route.request().headers()['x-tenant-id'];
+        await fulfillJson(route, {
+          items: tenantId === TENANT_ID ? [{
+            id: 'old-tenant-project',
+            name: oldTenantProject,
+            shortName: oldTenantProject,
+            teamMembersDetailed: [{
+              memberName: oldTenantAssignee,
+              memberNickname: '구담당',
+              role: '운영매니저',
+              participationRate: 40,
+            }],
+          }] : [],
+          nextCursor: null,
+        });
+        return true;
+      }
       if (url.pathname === '/api/v1/persons/person-a/professional-profile' && route.request().method() === 'GET') {
         await fulfillJson(route, { profile: storedProfile(), revision: 1 });
         return true;
@@ -373,6 +394,7 @@ test('server capabilities fail closed and a tenant change aborts a stale people 
   });
 
   await openPeople(page);
+  await expect(page.getByText(oldTenantAssignee, { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: `${personA.name} 전문 프로필` })).toBeVisible();
   await page.getByRole('button', { name: `${personA.name} 전문 프로필` }).click();
   const readOnlyDialog = page.getByRole('dialog', { name: /김메리 — 전문 프로필/ });
@@ -392,6 +414,7 @@ test('server capabilities fail closed and a tenant change aborts a stale people 
   await page.getByRole('button', { name: '새로고침' }).click();
   await expect(page.getByRole('button', { name: `${personA.name} 전문 프로필` })).toBeVisible();
 
+  await page.getByPlaceholder('이름·별명·소속 검색…').fill(oldTenantSearch);
   slowOldResponse = true;
   await page.getByRole('button', { name: '새로고침' }).click();
   await expect(page.getByText(personA.name, { exact: true })).toHaveCount(0);
@@ -399,15 +422,137 @@ test('server capabilities fail closed and a tenant change aborts a stale people 
   await page.getByRole('button', { name: '인력 등록' }).click();
   const scopedCreateDialog = page.getByRole('dialog', { name: '인력 등록' });
   await scopedCreateDialog.getByText('이름', { exact: true }).locator('..').getByRole('textbox').fill('이 tenant에 남으면 안 됨');
+  await page.evaluate(({ oldAssignee, oldProject, oldSearch }) => {
+    (window as any).__directoryScopeLeaks = [];
+    const observer = new MutationObserver(() => {
+      const text = document.body.textContent || '';
+      const searchValue = (document.querySelector('input[placeholder="이름·별명·소속 검색…"]') as HTMLInputElement | null)?.value;
+      if (text.includes(oldAssignee) || text.includes(oldProject) || searchValue === oldSearch) {
+        (window as any).__directoryScopeLeaks.push({ oldAssignee, oldProject, oldSearch, searchValue });
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    (window as any).__directoryScopeObserver = observer;
+  }, { oldAssignee: oldTenantAssignee, oldProject: oldTenantProject, oldSearch: oldTenantSearch });
   await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent('mysc:tenant-changed', { detail: { tenantId: 'org002' } }));
   });
   await expect(scopedCreateDialog).toHaveCount(0);
   await expect(page.getByText(personB.name, { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__directoryScopeLeaks)).toEqual([]);
   await page.waitForTimeout(550);
   await expect(page.getByText(personA.name, { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /전문 프로필$/ })).toHaveCount(0);
 });
+
+for (const outcome of ['success', 'error'] as const) {
+  test(`A-B-A scope transition ignores the old non-abort PUT ${outcome}`, async ({ page }) => {
+    let personAGetCount = 0;
+    let releaseOldSave: (() => void) | null = null;
+
+    await page.route('**/api/v1/**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/api/v1/person-professional-profile/catalog') {
+        await fulfillJson(route, catalog);
+        return;
+      }
+      const match = url.pathname.match(/^\/api\/v1\/persons\/([^/]+)\/professional-profile$/);
+      if (!match) {
+        await fulfillJson(route, { code: 'e2e_unhandled', message: url.pathname }, 500);
+        return;
+      }
+      const personId = decodeURIComponent(match[1]);
+      if (route.request().method() === 'PUT') {
+        await new Promise<void>((resolve) => { releaseOldSave = resolve; });
+        if (outcome === 'success') {
+          await fulfillJson(route, {
+            profile: storedProfile({
+              revision: 2,
+              certifications: ['OLD A RESPONSE'],
+              institutionName: 'Old A response',
+            }),
+            revision: 2,
+            changed: true,
+          });
+        } else {
+          await fulfillJson(route, { code: 'old_a_save_failed', message: 'old A save failed' }, 500);
+        }
+        return;
+      }
+      if (personId === 'person-a') {
+        personAGetCount += 1;
+        const returnedToA = personAGetCount > 1;
+        await fulfillJson(route, {
+          profile: storedProfile(returnedToA ? {
+            revision: 9,
+            certifications: ['A latest'],
+            institutionName: 'A latest canonical',
+          } : {}),
+          revision: returnedToA ? 9 : 1,
+        });
+        return;
+      }
+      await fulfillJson(route, {
+        profile: storedProfile({ certifications: ['B canonical'], institutionName: 'B canonical' }),
+        revision: 1,
+      });
+    });
+
+    await page.goto('/login');
+    await page.evaluate(async () => {
+      const React = (await import('/node_modules/.vite/deps/react.js')).default;
+      const ReactDom = (await import('/node_modules/.vite/deps/react-dom_client.js')).default;
+      const { ProfessionalProfileEditor } = await import('/src/app/components/people/ProfessionalProfileEditor.tsx');
+      const host = document.createElement('div');
+      document.body.append(host);
+      const root = ReactDom.createRoot(host);
+      function Harness() {
+        const [person, setPerson] = React.useState({ id: 'person-a', name: '김메리' });
+        (window as any).__abaProfileHarness = {
+          switchPerson: (id: string, name: string) => setPerson({ id, name }),
+        };
+        return React.createElement(ProfessionalProfileEditor, {
+          tenantId: 'org001',
+          actor: { uid: 'actor-a', role: 'admin', idToken: 'token-1' },
+          personId: person.id,
+          personName: person.name,
+          canWrite: true,
+          onClose: () => root.unmount(),
+        });
+      }
+      root.render(React.createElement(Harness));
+    });
+
+    let dialog = page.getByRole('dialog', { name: /김메리 — 전문 프로필/ });
+    const firstDraft = dialog.getByLabel('자격증 이름');
+    await expect(firstDraft).toHaveValue('PMP');
+    await firstDraft.fill('old A pending save');
+    await dialog.getByRole('button', { name: '전문 프로필 저장' }).click();
+    await expect.poll(() => releaseOldSave !== null).toBe(true);
+
+    await page.evaluate(() => (window as any).__abaProfileHarness.switchPerson('person-b', '이메리'));
+    dialog = page.getByRole('dialog', { name: /이메리 — 전문 프로필/ });
+    await expect(dialog.getByLabel('자격증 이름')).toHaveValue('B canonical');
+    await page.evaluate(() => (window as any).__abaProfileHarness.switchPerson('person-a', '김메리'));
+    dialog = page.getByRole('dialog', { name: /김메리 — 전문 프로필/ });
+    await expect(dialog.getByLabel('자격증 이름')).toHaveValue('A latest');
+
+    const response = page.waitForResponse((candidate) => (
+      candidate.request().method() === 'PUT'
+      && candidate.url().includes('/api/v1/persons/person-a/professional-profile')
+    ));
+    releaseOldSave!();
+    await response;
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+
+    await expect(dialog.getByLabel('자격증 이름')).toHaveValue('A latest');
+    await expect(dialog.locator('#education-institution-0')).toHaveValue('A latest canonical');
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByText('김메리님의 전문 프로필을 저장했습니다.')).toHaveCount(0);
+  });
+}
 
 test('token refresh preserves the live draft, while person change and close abort scoped GETs', async ({ page }) => {
   const authHeaders: string[] = [];
@@ -502,10 +647,25 @@ test('token refresh preserves the live draft, while person change and close abor
   expect(authHeaders.at(-1)).toBe('Bearer token-2');
 
   slowPersonB = true;
+  await page.evaluate(() => {
+    (window as any).__profileScopeLeaks = [];
+    const observer = new MutationObserver(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      if (!dialog?.textContent?.includes('이메리 — 전문 프로필')) return;
+      const values = Array.from(dialog.querySelectorAll('input, textarea'))
+        .map((field) => (field as HTMLInputElement | HTMLTextAreaElement).value);
+      if (values.includes('token refresh draft')) {
+        (window as any).__profileScopeLeaks.push({ title: '이메리', values });
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    (window as any).__profileScopeObserver = observer;
+  });
   await page.evaluate(() => (window as any).__profileHarness.switchPerson('person-b', '이메리'));
   dialog = page.getByRole('dialog', { name: /이메리 — 전문 프로필/ });
   await expect(dialog.getByText('전문 프로필을 불러오는 중…')).toBeVisible();
   await expect(dialog.getByText('token refresh draft', { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__profileScopeLeaks)).toEqual([]);
   await expect(dialog.getByRole('button', { name: '전문 프로필 저장' })).toBeDisabled();
   await expect.poll(() => profileGets).toBeGreaterThan(getsBeforeRefresh);
 

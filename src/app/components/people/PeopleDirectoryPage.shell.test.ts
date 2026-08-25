@@ -50,8 +50,8 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
   it('서버 capability만 보관하고 역할명으로 권한을 추론하지 않는다', () => {
     expect(source).toContain('response.capabilities.professionalProfileRead === true');
     expect(source).toContain('response.capabilities.professionalProfileWrite === true');
-    expect(source).toContain('profileCapabilities.read');
-    expect(source).toContain('profileCapabilities.write');
+    expect(source).toContain('scopedProfileCapabilities.read');
+    expect(source).toContain('scopedProfileCapabilities.write');
     expect(source).not.toContain("authUser.role === 'admin'");
     expect(source).not.toContain("authUser.role === 'finance'");
   });
@@ -83,7 +83,7 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
     expect(source).toContain('const directoryScopeKey =');
     expect(source).toContain('directoryScopeRef.current = directoryScopeKey');
     expect(source).toContain('if (directoryScopeRef.current !== directoryScopeKey) return');
-    expect(source).toContain("setNewPerson({ name: '', nickname: '', departmentTop: '', title: '' });\n    setDraft(emptyDraft());\n    setAddOpen(false);");
+    expect(source).toContain("setSearchText('');\n    setNewPerson({ name: '', nickname: '', departmentTop: '', title: '' });\n    setDraft(emptyDraft());\n    setAddOpen(false);");
     expect(source).toContain('createAttemptRef.current = null;\n    void load();');
     expect(source).toContain('if (directoryScopeRef.current !== submitScope || mutationSequenceRef.current !== mutationSequence) return');
     expect(source).toContain('if (directoryScopeRef.current === submitScope && mutationSequenceRef.current === mutationSequence)');
@@ -95,17 +95,29 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
     expect(source).not.toContain('[orgId, authUser?.uid, authUser?.role, authUser?.idToken]');
   });
 
+  it('effect가 실행되기 전에도 현재 tenant·actor scope가 소유한 목록과 capability만 렌더한다', () => {
+    expect(source).toContain('const loadedDirectoryScopeRef = useRef<string | null>(null)');
+    expect(source).toContain('const directoryScopeLoaded = loadedDirectoryScopeRef.current === directoryScopeKey');
+    expect(source).toContain('const scopedPeople = directoryScopeLoaded ? people : []');
+    expect(source).toContain('const scopedProfileCapabilities = directoryScopeLoaded');
+    expect(source).toContain('directoryScopeLoaded ? findUnregisteredAssignees(projects, scopedPeople) : []');
+    expect(source).toContain("value={directoryScopeLoaded ? searchText : ''}");
+    expect(source).toContain('{directoryScopeLoaded && error ? (');
+    expect(source).toContain('open={!!selected && directoryScopeLoaded}');
+    expect(source).toContain('open={addOpen && directoryScopeLoaded}');
+  });
+
   it('읽기 capability가 있을 때만 사람별 전문 프로필 action/editor를 조립한다', () => {
     expect(source).toContain('{canReadProfile ? (');
-    expect(source).toContain('canReadProfile={profileCapabilities.read}');
+    expect(source).toContain('canReadProfile={scopedProfileCapabilities.read}');
     expect(source).toContain('onOpenProfile={setProfilePerson}');
-    expect(source).toContain('profilePerson && profileCapabilities.read');
+    expect(source).toContain('profilePerson && scopedProfileCapabilities.read');
     expect(source).toContain('<ProfessionalProfileEditor');
     expect(source).toContain('aria-label={`${person.name} 전문 프로필`}');
   });
 
   it('신규 등록은 쓰기 capability와 실제 입력이 있을 때만 프로필을 POST한다', () => {
-    expect(source).toContain('profileCapabilities.write ? (');
+    expect(source).toContain('scopedProfileCapabilities.write ? (');
     expect(source).toContain('<NewPersonProfessionalProfileFields');
     expect(source).toContain('...(newProfessionalProfile ? { professionalProfile: newProfessionalProfile } : {})');
     expect(source).toContain('setNewProfessionalProfile(null)');

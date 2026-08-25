@@ -289,6 +289,7 @@ export function PeopleDirectoryPage() {
   const [newProfessionalProfileValid, setNewProfessionalProfileValid] = useState(true);
   const peopleLoadSequenceRef = useRef(0);
   const peopleLoadControllerRef = useRef<AbortController | null>(null);
+  const loadedDirectoryScopeRef = useRef<string | null>(null);
   const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const mutationSequenceRef = useRef(0);
 
@@ -298,6 +299,11 @@ export function PeopleDirectoryPage() {
   directoryScopeRef.current = directoryScopeKey;
   const enabled = featureFlags.platformApiEnabled && actorReady;
   const asOf = today();
+  const directoryScopeLoaded = loadedDirectoryScopeRef.current === directoryScopeKey;
+  const scopedPeople = directoryScopeLoaded ? people : [];
+  const scopedProfileCapabilities = directoryScopeLoaded
+    ? profileCapabilities
+    : { read: false, write: false };
 
   const load = async () => {
     if (directoryScopeRef.current !== directoryScopeKey) return;
@@ -305,6 +311,7 @@ export function PeopleDirectoryPage() {
     peopleLoadControllerRef.current = null;
     const sequence = peopleLoadSequenceRef.current + 1;
     peopleLoadSequenceRef.current = sequence;
+    loadedDirectoryScopeRef.current = null;
     setError(null);
     setPeople([]);
     setProfileCapabilities({ read: false, write: false });
@@ -330,6 +337,7 @@ export function PeopleDirectoryPage() {
         && response.capabilities.professionalProfileRead === true;
       const professionalProfileWrite = response.capabilities
         && response.capabilities.professionalProfileWrite === true;
+      loadedDirectoryScopeRef.current = directoryScopeKey;
       setPeople(response.items);
       setProfileCapabilities({ read: professionalProfileRead, write: professionalProfileWrite });
       if (!professionalProfileRead) setProfilePerson(null);
@@ -340,6 +348,7 @@ export function PeopleDirectoryPage() {
       setProfileCapabilities({ read: false, write: false });
       setProfilePerson(null);
       setNewProfessionalProfile(null);
+      loadedDirectoryScopeRef.current = directoryScopeKey;
       setError(err?.message || '인력 명부를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       if (directoryScopeRef.current === directoryScopeKey
@@ -351,6 +360,7 @@ export function PeopleDirectoryPage() {
     mutationSequenceRef.current += 1;
     setSaving(false);
     setSelected(null);
+    setSearchText('');
     setNewPerson({ name: '', nickname: '', departmentTop: '', title: '' });
     setDraft(emptyDraft());
     setAddOpen(false);
@@ -366,7 +376,7 @@ export function PeopleDirectoryPage() {
 
   const rows = useMemo(() => {
     const query = searchText.trim().toLowerCase();
-    return people
+    return scopedPeople
       .map((person) => {
         const current = resolveCurrentEmployment(person as unknown as Person, asOf);
         return {
@@ -383,7 +393,7 @@ export function PeopleDirectoryPage() {
           .some((value) => String(value || '').toLowerCase().includes(query));
       })
       .sort((a, b) => a.person.name.localeCompare(b.person.name, 'ko'));
-  }, [people, searchText, typeFilter, asOf]);
+  }, [scopedPeople, searchText, typeFilter, asOf]);
 
   // 근로형태는 이름 옆에 붙는 신분 표시라 목록에서 보여주지 않는다. 인턴은 섞지 않고
   // 아래 별도 표로 뗀다 - 한 표에 두면 근로형태를 가려도 순서와 빈칸으로 드러난다.
@@ -399,18 +409,18 @@ export function PeopleDirectoryPage() {
 
   const counts = useMemo(() => {
     const base = { MAIN: 0, INTERN: 0, SEPARATED: 0 };
-    people.forEach((person) => {
+    scopedPeople.forEach((person) => {
       const current = resolveCurrentEmployment(person as unknown as Person, asOf);
       if (!current) base.SEPARATED += 1;
       else if (current.type === 'INTERN') base.INTERN += 1;
       else base.MAIN += 1;
     });
     return base;
-  }, [people, asOf]);
+  }, [scopedPeople, asOf]);
 
   const unregistered = useMemo(
-    () => findUnregisteredAssignees(projects, people),
-    [projects, people],
+    () => (directoryScopeLoaded ? findUnregisteredAssignees(projects, scopedPeople) : []),
+    [directoryScopeLoaded, projects, scopedPeople],
   );
 
   const openPerson = (person: PersonRecord) => {
@@ -543,7 +553,8 @@ export function PeopleDirectoryPage() {
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             className="h-8 pl-9 text-sm" placeholder="이름·별명·소속 검색…"
-            value={searchText} onChange={(event) => setSearchText(event.target.value)}
+            value={directoryScopeLoaded ? searchText : ''}
+            onChange={(event) => setSearchText(event.target.value)}
           />
         </div>
         {/* 근로형태별 필터를 없앴다. 필터를 누르는 것만으로도 누가 어느 형태인지 드러난다. */}
@@ -560,7 +571,7 @@ export function PeopleDirectoryPage() {
           </Button>
         ))}
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void load()} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void load()} disabled={loading || !directoryScopeLoaded}>
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> 새로고침
           </Button>
           <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openNewPerson()}>
@@ -569,7 +580,7 @@ export function PeopleDirectoryPage() {
         </div>
       </div>
 
-      {error ? (
+      {directoryScopeLoaded && error ? (
         <Card className="border-rose-200 bg-rose-50">
           <CardContent className="py-4 text-sm text-rose-800">{error}</CardContent>
         </Card>
@@ -614,8 +625,8 @@ export function PeopleDirectoryPage() {
       ) : null}
 
       <PeopleTable
-        rows={mainRows} loading={loading} onOpen={openPerson}
-        canReadProfile={profileCapabilities.read} onOpenProfile={setProfilePerson}
+        rows={mainRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
+        canReadProfile={scopedProfileCapabilities.read} onOpenProfile={setProfilePerson}
       />
 
       {internRows.length > 0 || counts.INTERN > 0 ? (
@@ -625,8 +636,8 @@ export function PeopleDirectoryPage() {
             <span className="text-[11px] tabular-nums text-slate-500">{counts.INTERN}명</span>
           </div>
           <PeopleTable
-            rows={internRows} loading={loading} onOpen={openPerson}
-            canReadProfile={profileCapabilities.read} onOpenProfile={setProfilePerson}
+            rows={internRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
+            canReadProfile={scopedProfileCapabilities.read} onOpenProfile={setProfilePerson}
           />
         </section>
       ) : null}
@@ -637,7 +648,7 @@ export function PeopleDirectoryPage() {
       </p>
 
       {/* ── 계약 관리 ── */}
-      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}>
+      <Dialog open={!!selected && directoryScopeLoaded} onOpenChange={(open) => { if (!open) setSelected(null); }}>
         <DialogContent className="flex max-h-[85vh] max-w-[680px] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
@@ -712,20 +723,20 @@ export function PeopleDirectoryPage() {
         </DialogContent>
       </Dialog>
 
-      {profilePerson && profileCapabilities.read && authUser ? (
+      {profilePerson && scopedProfileCapabilities.read && authUser ? (
         <ProfessionalProfileEditor
           tenantId={orgId}
           actor={authUser}
           personId={profilePerson.personId}
           personName={profilePerson.name}
-          canWrite={profileCapabilities.write}
+          canWrite={scopedProfileCapabilities.write}
           onClose={() => setProfilePerson(null)}
         />
       ) : null}
 
       {/* ── 인력 등록 ── */}
       <Dialog
-        open={addOpen}
+        open={addOpen && directoryScopeLoaded}
         onOpenChange={(open) => {
           if (!open && !saving) {
             setAddOpen(false);
@@ -777,7 +788,7 @@ export function PeopleDirectoryPage() {
           <p className="text-[12px] font-semibold text-slate-700">첫 계약</p>
           <EmploymentForm draft={draft} onChange={setDraft} disabled={saving} />
 
-          {profileCapabilities.write ? (
+          {scopedProfileCapabilities.write ? (
             <>
               <Separator className="my-1" />
               <NewPersonProfessionalProfileFields

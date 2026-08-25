@@ -474,14 +474,21 @@ export function ProfessionalProfileEditor({
   const aliveRef = useRef(true);
   const currentScopeRef = useRef(scopeKey);
   currentScopeRef.current = scopeKey;
+  const scopeGenerationRef = useRef({ key: scopeKey, generation: 0 });
+  if (scopeGenerationRef.current.key !== scopeKey) {
+    scopeGenerationRef.current = { key: scopeKey, generation: scopeGenerationRef.current.generation + 1 };
+  }
+  const renderScopeRef = useRef(scopeKey);
   const loadedScopeRef = useRef<string | null>(null);
   const loadControllerRef = useRef<AbortController | null>(null);
   const saveAttemptRef = useRef<ProfessionalProfileSaveAttempt | null>(null);
+  const scopeLoaded = renderScopeRef.current === scopeKey;
 
   useEffect(() => {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+      renderScopeRef.current = '';
       loadedScopeRef.current = null;
       loadControllerRef.current?.abort();
     };
@@ -492,12 +499,14 @@ export function ProfessionalProfileEditor({
     const controller = new AbortController();
     loadControllerRef.current = controller;
     const scopeClient = clientRef.current;
+    renderScopeRef.current = scopeKey;
     loadedScopeRef.current = null;
     saveAttemptRef.current = null;
     setCatalog(null);
     setDraft(createEmptyProfessionalProfileDraft());
     setExpectedRevision(0);
     setLoading(true);
+    setSaving(false);
     setError(null);
     void Promise.all([
       scopeClient.getCatalog(controller.signal),
@@ -572,19 +581,25 @@ export function ProfessionalProfileEditor({
     setSaving(true);
     setError(null);
     const saveScope = scopeKey;
+    const saveGeneration = scopeGenerationRef.current.generation;
     try {
       const canonical = await clientRef.current.save(personId, {
         expectedRevision,
         profile,
         idempotencyKey,
       });
-      if (!aliveRef.current || currentScopeRef.current !== saveScope || loadedScopeRef.current !== saveScope) return;
+      if (!aliveRef.current
+        || currentScopeRef.current !== saveScope
+        || scopeGenerationRef.current.generation !== saveGeneration
+        || loadedScopeRef.current !== saveScope) return;
       setDraft(storedProfileToDraft(canonical.profile));
       setExpectedRevision(canonical.revision);
       saveAttemptRef.current = null;
       toast.success(`${personName}님의 전문 프로필을 저장했습니다.`);
     } catch (saveError: unknown) {
-      if (!aliveRef.current || currentScopeRef.current !== saveScope) return;
+      if (!aliveRef.current
+        || currentScopeRef.current !== saveScope
+        || scopeGenerationRef.current.generation !== saveGeneration) return;
       if (readErrorCode(saveError) === 'professional_profile_revision_conflict') {
         setError({
           kind: 'conflict',
@@ -597,7 +612,7 @@ export function ProfessionalProfileEditor({
         });
       }
     } finally {
-      if (aliveRef.current) setSaving(false);
+      if (aliveRef.current && scopeGenerationRef.current.generation === saveGeneration) setSaving(false);
     }
   };
 
@@ -624,7 +639,7 @@ export function ProfessionalProfileEditor({
 
         {!canWrite ? <Badge variant="secondary" className="w-fit text-[10px]">조회 전용</Badge> : null}
 
-        {error ? (
+        {scopeLoaded && error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">
             <p>{error.message}</p>
             <Button
@@ -638,7 +653,7 @@ export function ProfessionalProfileEditor({
         ) : null}
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6 py-1">
-          {loading || !catalog ? (
+          {loading || !catalog || !scopeLoaded ? (
             <div className="py-12 text-center text-sm text-slate-500">전문 프로필을 불러오는 중…</div>
           ) : (
             <ProfessionalProfileFields

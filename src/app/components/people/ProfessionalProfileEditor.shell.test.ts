@@ -72,12 +72,19 @@ describe('ProfessionalProfileEditor draft contract', () => {
 
   it('fails closed on a tenant/person scope transition and cannot save a stale draft', () => {
     expect(source).toContain('const scopeKey =');
+    expect(source).toContain('const scopeGenerationRef = useRef({ key: scopeKey, generation: 0 })');
+    expect(source).toContain('scopeGenerationRef.current = { key: scopeKey, generation: scopeGenerationRef.current.generation + 1 }');
+    expect(source).toContain('const saveGeneration = scopeGenerationRef.current.generation');
+    expect(source).toContain('scopeGenerationRef.current.generation !== saveGeneration');
+    expect(source).toContain('const renderScopeRef = useRef(scopeKey)');
+    expect(source).toContain('const scopeLoaded = renderScopeRef.current === scopeKey');
     expect(source).toContain('loadedScopeRef.current = null');
     expect(source).toContain('setCatalog(null)');
     expect(source).toContain('setDraft(createEmptyProfessionalProfileDraft())');
     expect(source).toContain('setExpectedRevision(0)');
     expect(source).toContain('saveAttemptRef.current = null');
     expect(source).toContain('loadedScopeRef.current = scopeKey');
+    expect(source).toContain('loading || !catalog || !scopeLoaded');
     expect(source).toContain('if (loadedScopeRef.current !== scopeKey || loading || !catalog) return');
   });
 
