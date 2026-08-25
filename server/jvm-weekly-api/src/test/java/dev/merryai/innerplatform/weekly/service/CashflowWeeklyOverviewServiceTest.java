@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,12 +33,12 @@ class CashflowWeeklyOverviewServiceTest {
             persistence, authorization, new ObjectMapper(), false, "live"
         );
         List<String> projectIds = List.of("project-a", "project-b");
-        WeeklyExpensePersistence.CashflowSettlementStatusRecord month =
-            new WeeklyExpensePersistence.CashflowSettlementStatusRecord("MONTH", "WAITING_FOR_UPDATE", "", "", "", "", 1);
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord completedMonth =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord("MONTH", "COMPLETED", "", "", "", "", 1);
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord pendingMonth =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord("MONTH", "PENDING_APPROVAL", "", "", "", "", 1);
         when(persistence.findCashflowSettlementStatusesBatch("tenant-a", projectIds, "2026-08"))
-            .thenReturn(Map.of("project-a", List.of(month), "project-b", List.of(month)));
-        when(persistence.findCashflowMonthCloseRequestStatusesBatch("tenant-a", projectIds, "2026-08"))
-            .thenReturn(Map.of("project-a", "APPROVED", "project-b", "PENDING"));
+            .thenReturn(Map.of("project-a", List.of(completedMonth), "project-b", List.of(pendingMonth)));
         when(persistence.findCashflowLedgerSources(anyString(), anyList(), anyString(), anyString()))
             .thenReturn(Map.of(
                 "project-a", new CashflowLedgerSource(List.of(), List.of()),
@@ -51,6 +52,7 @@ class CashflowWeeklyOverviewServiceTest {
         assertThat(response.items()).hasSize(2);
         assertThat(response.items().get(0).settlementStatuses().items().getFirst().status()).isEqualTo("COMPLETED");
         assertThat(response.items().get(1).settlementStatuses().items().getFirst().status()).isEqualTo("PENDING_APPROVAL");
+        verify(persistence, never()).findCashflowMonthCloseRequestStatusesBatch("tenant-a", projectIds, "2026-08");
         assertThat(response.items()).allSatisfy(item -> assertThat(item.settlementStatuses().items().getFirst())
             .extracting(
                 CashflowSettlementStatusesResponse.Item::deadlineAt,

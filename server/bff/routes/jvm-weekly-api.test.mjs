@@ -800,7 +800,7 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
-  it('uses the canonical month-close request as the MONTH status source of truth', async () => {
+  it('preserves the JVM MONTH status even when a month-close request is pending', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
       requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08', status: 'PENDING',
@@ -826,7 +826,7 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.items).toEqual([
           {
             period: 'MONTH',
-            status: 'PENDING_APPROVAL',
+            status: 'COMPLETED',
             deadlineAt: '2026-09-10T15:00:00.000Z',
             approverDeadlineAt: '2026-09-13T15:00:00.000Z',
           },
@@ -844,7 +844,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => expect(response.body.items[0].items[0]).toEqual({
         period: 'MONTH',
-        status: 'PENDING_APPROVAL',
+        status: 'COMPLETED',
         deadlineAt: '2026-09-10T15:00:00.000Z',
         approverDeadlineAt: '2026-09-13T15:00:00.000Z',
       }));
@@ -996,7 +996,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(response.body.items[0].settlementStatuses.items).toEqual([
       {
         period: 'MONTH',
-        status: 'PENDING_APPROVAL',
+        status: 'COMPLETED',
         deadlineAt: '2026-09-10T15:00:00.000Z',
         approverDeadlineAt: '2026-09-13T15:00:00.000Z',
       },
