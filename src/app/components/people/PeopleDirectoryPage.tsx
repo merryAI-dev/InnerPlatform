@@ -44,6 +44,7 @@ import {
   NewPersonProfessionalProfileFields,
   ProfessionalProfileEditor,
 } from './ProfessionalProfileEditor';
+import { RosterPushPanel } from './RosterPushPanel';
 import type { ProfessionalProfileInput } from '../../lib/person-professional-profile-client';
 
 function today(): string {
@@ -646,6 +647,9 @@ export function PeopleDirectoryPage() {
         근속은 입사일과 오늘({asOf}) 기준으로 매번 다시 계산합니다. 계약 이력은 지우지 않고 쌓습니다 —
         지난 기간의 참여율이 왜 그 기준이었는지 설명할 근거가 남아야 하기 때문입니다.
       </p>
+
+      {/* ── 참여율 시트 명단 동기화: 명부를 고쳤으면 시트에 미는 것까지가 한 동선 ── */}
+      {authUser ? <RosterPushPanel orgId={orgId} actor={authUser} /> : null}
 
       {/* ── 계약 관리 ── */}
       <Dialog open={!!selected && directoryScopeLoaded} onOpenChange={(open) => { if (!open) setSelected(null); }}>
