@@ -814,6 +814,7 @@ export function ProjectEditorWizard({
   const exitInFlightRef = useRef(false);
   const leaveApprovedRef = useRef(false);
   const draftRef = useRef(draft);
+  const autosaveErrorRef = useRef<string>('');
   const lastPersistedFingerprintRef = useRef(JSON.stringify(createProjectEditorDraft(initialDraft)));
   const lastResetKeyRef = useRef<string | null>(null);
   const initialDraftFingerprint = useMemo(() => JSON.stringify(createProjectEditorDraft(initialDraft)), [initialDraft]);
@@ -943,11 +944,17 @@ export function ProjectEditorWizard({
       writeStoredProjectEditorDraft(autosave.key, storedDraft);
       await autosave.onSave?.(storedDraft.draft, nextStepIndex);
       lastPersistedFingerprintRef.current = JSON.stringify(storedDraft.draft);
+      autosaveErrorRef.current = '';
       setLastAutosavedAt(now);
       setAutosaveState('saved');
       return true;
     } catch (error) {
       console.error('[ProjectEditorWizard] autosave failed:', error);
+      // 서버가 적어 준 원인을 실패 토스트가 보여줄 수 있게 남겨 둔다 - "잠시 후 다시"만으로는
+      // 리스 만료·검증 거부·네트워크를 구분할 수 없어 사람이 같은 실패를 반복한다.
+      autosaveErrorRef.current = error instanceof Error ? (
+        (error as { serverMessage?: string }).serverMessage || error.message
+      ) : String(error);
       setLastAutosavedAt(now);
       setAutosaveState('error');
       return false;
@@ -961,7 +968,7 @@ export function ProjectEditorWizard({
     }
     if (hasUnsavedInput && autosave?.key && !autosave.disabled && !readOnly) {
       if (!await persistAutosaveSnapshot(draft, stepIndex)) {
-        toast.error('임시저장에 실패해 수정 세션을 종료하지 않았습니다.');
+        toast.error(`임시저장에 실패해 수정 세션을 종료하지 않았습니다.${autosaveErrorRef.current ? ` (${autosaveErrorRef.current})` : ''}`);
         return false;
       }
     }
@@ -1075,7 +1082,7 @@ export function ProjectEditorWizard({
     }
     const saved = await persistAutosaveSnapshot(draft, stepIndex);
     if (saved) toast.success('임시저장되었습니다.');
-    else toast.error('임시저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    else toast.error(`임시저장에 실패했습니다.${autosaveErrorRef.current ? ` (${autosaveErrorRef.current})` : ' 잠시 후 다시 시도해 주세요.'}`);
   };
 
   const handleActionSubmit = async (actionId: string) => {
@@ -2905,8 +2912,8 @@ export function ProjectEditorWizard({
           hints={[
             '월별 참여율은 이 시트의 [참여율 관리] 탭에 적습니다. 표준양식을 복사해 이 사업 전용 시트를 만든 뒤 링크를 넣어 주세요.',
             sheetSystemAccount
-              ? `만든 시트를 ${sheetSystemAccount} 에 보기 권한으로 공유해 주세요. 공유하지 않으면 연동이 되지 않습니다.`
-              : '만든 시트를 MYSC 시스템 계정에 보기 권한으로 공유해야 연동이 됩니다.',
+              ? `만든 시트를 ${sheetSystemAccount} 에 편집자 권한으로 공유해 주세요. 공유하지 않으면 연동·명단 자동 갱신이 되지 않습니다.`
+              : '만든 시트를 MYSC 시스템 계정에 편집자 권한으로 공유해야 연동·명단 자동 갱신이 됩니다.',
             '저장한 시트 내용은 참여율 연동과 사람별 참여율 집계에 사용됩니다.',
           ]}
         >
@@ -2937,7 +2944,7 @@ export function ProjectEditorWizard({
           ) : null}
           {teamSyncWarning ? (
             <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
-              ⚠ {teamSyncWarning} — 그대로 진행할 수 있지만, 기간이 다른 채로 반영된다는 뜻입니다.
+              ⚠ {teamSyncWarning}
             </p>
           ) : null}
           {teamSyncNotice ? (

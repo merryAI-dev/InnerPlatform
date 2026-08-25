@@ -247,7 +247,7 @@ export function validatePeriodAgainstProject({ period, project } = {}) {
   if (start !== projectStart || end !== projectEnd) {
     return issue(
       'participation_period_mismatch',
-      `시트 기간(${start}~${end})이 사업 계약 기간(${projectStart}~${projectEnd})과 다릅니다.`,
+      `시트에 기입된 인력별 참여 기간(${start}~${end})과 플랫폼 상의 계약 기간(${projectStart}~${projectEnd})이 달라서 확인 부탁드립니다.`,
       { sheetPeriod: { start, end }, projectPeriod: { start: projectStart, end: projectEnd } },
     );
   }
