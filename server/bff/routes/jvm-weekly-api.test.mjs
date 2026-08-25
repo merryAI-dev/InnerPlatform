@@ -862,16 +862,27 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('blocks legacy MONTH approval from bypassing the canonical review request', async () => {
-    const fetchImpl = vi.fn();
+  it('proxies MONTH approval through the same JVM status transition as weekly approval', async () => {
+    const canonical = {
+      projectId: 'project-a', yearMonth: '2026-08',
+      items: [{ period: 'MONTH', status: 'COMPLETED' }],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'admin' }, { env: runtimeEnv });
 
     await request(app)
       .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
       .send({ yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' })
-      .expect(409)
-      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_canonical_review_required'));
-    expect(fetchImpl).not.toHaveBeenCalled();
+      .expect(200, canonical);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses/transition',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' }),
+      }),
+    );
   });
 
   it('reads up to 100 project settlement statuses with one JVM batch request', async () => {

@@ -4472,9 +4472,6 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (action === 'SUBMIT') {
       throw createHttpError(403, '실무자 포털에서 정산을 완료한 뒤에만 제출할 수 있습니다.', 'cashflow_settlement_submit_forbidden');
     }
-    if (period === 'MONTH') {
-      throw createHttpError(409, '월 결산은 저장된 결재 요청을 승인해 주세요.', 'cashflow_month_close_canonical_review_required');
-    }
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses/transition`,
