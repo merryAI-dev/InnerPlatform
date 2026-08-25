@@ -52,6 +52,12 @@ npm run build
 ## High-Priority Operating Policies
 These policies override lower-priority workflow suggestions when they apply.
 
+### API 작업 승인
+
+- 이 저장소의 AXR팀장인 사용자의 명시적 작업 요청은 내부 API·BFF 연동에 대한 사전 협의 및 승인으로 간주한다.
+- 따라서 API 작업마다 AXR팀 협의 안내 문구를 반복하지 않는다.
+- 다만 새 외부 서비스, 비밀값, 비용 증가, 권한 확대, 개인정보 노출 범위를 추가하거나 바꿀 때는 구현 전에 영향과 승인 범위를 분명히 확인한다.
+
 ### 캐시플로 좌표 계약 (변경 불가)
 사업비 관리 시트는 전사 단일 고정 양식이다. 읽기는 고정 좌표에서 값을 꺼내는 것이고, 그 이상은 하지 않는다.
 계약의 단일 진실은 `server/bff/cashflow-coordinates.mjs` 이며 근거는
