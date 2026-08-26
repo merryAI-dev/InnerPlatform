@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   BarChart3,
   CalendarRange,
   Check,
   ChevronsUpDown,
+  Columns2,
   Download,
-  ExternalLink,
   FileSpreadsheet,
   FolderSearch,
   Layers3,
@@ -59,6 +59,7 @@ import {
   type CashflowExportRecentWeek,
 } from '../../platform/cashflow-export-dashboard';
 import { formatCashflowExecutiveApprover, formatCashflowManager } from './CashflowWeeklyPage';
+import { CashflowExportProjectPane } from './CashflowExportProjectPane';
 
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
 const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
@@ -111,7 +112,7 @@ function SettlementWeekStrip({
 }) {
   if (loading) {
     return (
-      <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
+      <div data-testid={`cashflow-export-week-${week.yearMonth}-${week.period}`} className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
         <p className="font-semibold text-stone-700">{week.displayLabel}</p>
         <p role="status" className="mt-1 text-[10px] text-stone-500">불러오는 중…</p>
       </div>
@@ -119,7 +120,7 @@ function SettlementWeekStrip({
   }
   if (error || !item) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
+      <div data-testid={`cashflow-export-week-${week.yearMonth}-${week.period}`} className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
         <p className="font-semibold text-stone-800">{week.displayLabel}</p>
         <p role="alert" className="mt-1 text-[10px] font-medium text-amber-800">주정산 정보를 불러오지 못함</p>
       </div>
@@ -127,7 +128,7 @@ function SettlementWeekStrip({
   }
   const presentation = settlementStatusPresentation(item.status);
   return (
-    <div className="rounded-lg border border-stone-200 bg-white px-2.5 py-2">
+    <div data-testid={`cashflow-export-week-${week.yearMonth}-${week.period}`} className="rounded-lg border border-stone-200 bg-white px-2.5 py-2">
       <div className="flex items-center justify-between gap-2">
         <p className="font-semibold text-zinc-950">{week.displayLabel}</p>
         <Badge variant="outline" className={`shrink-0 text-[9px] ${presentation.className}`}>{presentation.label}</Badge>
@@ -166,12 +167,13 @@ function SelectionField(props: {
   icon: typeof BarChart3;
   label: string;
   helper: string;
+  showHelper?: boolean;
   value: string;
   testId: string;
   toneClass: string;
   children: ReactNode;
 }) {
-  const { icon: Icon, label, testId, toneClass, children } = props;
+  const { icon: Icon, label, helper, showHelper = false, testId, toneClass, children } = props;
   return (
     <div data-testid={testId} className={`space-y-2 rounded-xl border p-3 ${toneClass}`}>
       <div className="flex items-center gap-2">
@@ -181,12 +183,15 @@ function SelectionField(props: {
         <Label className="text-[11px] font-medium tracking-[0.01em] text-stone-700">{label}</Label>
       </div>
       {children}
+      {showHelper ? <p className="text-[10px] leading-relaxed text-stone-500">{helper}</p> : null}
     </div>
   );
 }
 
 export function CashflowExportPage() {
-  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const operationsTableRef = useRef<HTMLDivElement>(null);
+  const operationsTableScrollLeftRef = useRef(0);
   const { projects, persons } = useAppStore();
   const { user } = useAuth();
   const { orgId } = useFirebase();
@@ -216,6 +221,56 @@ export function CashflowExportPage() {
     () => [...projects].sort((left, right) => left.name.localeCompare(right.name, 'ko')),
     [projects],
   );
+  const panelProjectParam = searchParams.get('project');
+  const panelProjectId = panelProjectParam?.trim() || '';
+  const panelProject = useMemo(
+    () => sortedProjects.find((project) => project.id === panelProjectId) || null,
+    [panelProjectId, sortedProjects],
+  );
+
+  useLayoutEffect(() => {
+    const table = operationsTableRef.current;
+    if (!table) return undefined;
+    const savedScrollLeft = operationsTableScrollLeftRef.current;
+    table.scrollLeft = savedScrollLeft;
+    const frame = window.requestAnimationFrame(() => {
+      if (operationsTableRef.current) operationsTableRef.current.scrollLeft = savedScrollLeft;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [panelProjectId]);
+
+  const openProjectPanel = useCallback((projectId: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('project', projectId);
+      return next;
+    });
+  }, [setSearchParams]);
+
+  const closeProjectPanel = useCallback(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('project');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    if (panelProjectParam !== null && !panelProjectId) {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.delete('project');
+        return next;
+      }, { replace: true });
+      return;
+    }
+    if (!panelProjectId || sortedProjects.length === 0 || panelProject) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('project');
+      return next;
+    }, { replace: true });
+  }, [panelProject, panelProjectId, panelProjectParam, setSearchParams, sortedProjects.length]);
 
   const departments = useMemo(() => Array.from(new Set(
     sortedProjects.map((project) => project.department).filter(Boolean),
@@ -439,7 +494,12 @@ export function CashflowExportPage() {
   }
 
   return (
-    <div className="space-y-4" data-testid="cashflow-export-page">
+    <div data-testid="cashflow-export-page">
+      <div
+        data-testid="cashflow-export-split-layout"
+        className={panelProject ? 'lg:grid lg:grid-cols-2 lg:items-start lg:gap-4' : ''}
+      >
+        <div data-testid="cashflow-export-primary-pane" className="min-w-0 space-y-4">
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
@@ -595,7 +655,8 @@ export function CashflowExportPage() {
             step="5"
             icon={BarChart3}
             label="통장 유형 다중선택"
-            helper="프로젝트 등록 시 선택한 통장 유형을 여러 개 함께 고를 수 있습니다."
+            helper="정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다."
+            showHelper
             value={accountTypeFilterLabel}
             testId="cashflow-export-step-account-type"
             toneClass={monochromeSurfaceClass}
@@ -795,10 +856,16 @@ export function CashflowExportPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div
+            ref={operationsTableRef}
             data-testid="cashflow-export-operations-table"
             role="region"
             aria-label="다운로드 대상 사업 운영 현황"
             tabIndex={0}
+            onScroll={(event) => {
+              if (event.currentTarget.scrollWidth > event.currentTarget.clientWidth) {
+                operationsTableScrollLeftRef.current = event.currentTarget.scrollLeft;
+              }
+            }}
             className="max-h-[620px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-300"
           >
             <table className="w-full min-w-[1320px] text-[11px]">
@@ -828,16 +895,18 @@ export function CashflowExportPage() {
                       <td className="px-4 py-3 font-semibold text-zinc-950">{project.name}</td>
                       <td className="px-3 py-3 text-stone-700">{formatCashflowExecutiveApprover(project, persons)}</td>
                       <td className="px-3 py-3 text-stone-700">{formatCashflowManager(project, persons)}</td>
-                      <td className="min-w-[340px] space-y-2 px-3 py-3">
-                        {recentWeeks.map((week) => (
-                          <SettlementWeekStrip
-                            key={`${project.id}:${week.yearMonth}:${week.period}`}
-                            week={week}
-                            item={findCashflowExportSettlementStatus(scopedOperations.settlementResults, project.id, week)}
-                            loading={false}
-                            error={Boolean(scopedOperations.statusErrors[settlementErrorKey(project.id, week.yearMonth)])}
-                          />
-                        ))}
+                      <td className="min-w-[420px] px-3 py-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          {recentWeeks.map((week) => (
+                            <SettlementWeekStrip
+                              key={`${project.id}:${week.yearMonth}:${week.period}`}
+                              week={week}
+                              item={findCashflowExportSettlementStatus(scopedOperations.settlementResults, project.id, week)}
+                              loading={false}
+                              error={Boolean(scopedOperations.statusErrors[settlementErrorKey(project.id, week.yearMonth)])}
+                            />
+                          ))}
+                        </div>
                       </td>
                       <td className="px-3 py-3 text-center">
                         {summaryError ? (
@@ -860,10 +929,11 @@ export function CashflowExportPage() {
                           type="button"
                           size="sm"
                           variant="outline"
+                          aria-label={`${project.name} 보기`}
                           className="h-7 gap-1 text-[11px]"
-                          onClick={() => navigate(`/cashflow/projects/${project.id}?ym=${encodeURIComponent(currentYearMonth)}&view=compare#projection-actual-comparison`)}
+                          onClick={() => openProjectPanel(project.id)}
                         >
-                          <ExternalLink className="h-3.5 w-3.5" /> 사업 보기
+                          <Columns2 className="h-3.5 w-3.5" /> 사업 보기
                         </Button>
                       </td>
                     </tr>
@@ -877,6 +947,15 @@ export function CashflowExportPage() {
           </div>
         </CardContent>
       </Card>
+        </div>
+        {panelProject ? (
+          <CashflowExportProjectPane
+            project={panelProject}
+            yearMonth={currentYearMonth}
+            onClose={closeProjectPanel}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -53,7 +53,11 @@ async function fulfillJson(route: Route, body: unknown) {
   });
 }
 
-async function openCashflowExportWithPlatformApi(page: Page, role = 'admin') {
+async function openCashflowExportWithPlatformApi(
+  page: Page,
+  role = 'admin',
+  options: { path?: string; projectResponseDelayMs?: number } = {},
+) {
   await page.clock.setFixedTime(new Date('2026-09-01T03:00:00.000Z'));
   await page.addInitScript((actorRole) => {
     localStorage.setItem('mysc-auth-user', JSON.stringify({
@@ -71,9 +75,10 @@ async function openCashflowExportWithPlatformApi(page: Page, role = 'admin') {
 
   const weeklyOverviewBodies: Array<{ projectIds?: string[]; yearMonth?: string }> = [];
   const settlementBatchBodies: Array<{ projectIds?: string[]; yearMonth?: string }> = [];
-  await page.route('**/api/v1/projects?limit=200*', (route) => fulfillJson(route, {
-    items: projects, nextCursor: null,
-  }));
+  await page.route('**/api/v1/projects?limit=200*', async (route) => {
+    if (options.projectResponseDelayMs) await new Promise((resolve) => setTimeout(resolve, options.projectResponseDelayMs));
+    await fulfillJson(route, { items: projects, nextCursor: null });
+  });
   await page.route('**/api/v1/persons', (route) => fulfillJson(route, {
     items: people, total: people.length,
     capabilities: { professionalProfileRead: true, professionalProfileWrite: true },
@@ -81,6 +86,7 @@ async function openCashflowExportWithPlatformApi(page: Page, role = 'admin') {
   let weeklyOverviewCalls = 0;
   let settlementBatchCalls = 0;
   let strictSummaryCalls = 0;
+  const detailRequestUrls: string[] = [];
   await page.route('**/api/v1/cashflow/weekly-overview', async (route) => {
     weeklyOverviewCalls += 1;
     const body = route.request().postDataJSON() as { projectIds?: string[]; yearMonth?: string };
@@ -169,12 +175,97 @@ async function openCashflowExportWithPlatformApi(page: Page, role = 'admin') {
     });
   });
 
-  await page.goto('/cashflow/export');
+  await page.route('**/api/v1/projects/cashflow-e2e-*/cashflow-sheet-lab/**', async (route) => {
+    const url = new URL(route.request().url());
+    const projectId = decodeURIComponent(url.pathname.split('/')[4] || '');
+    detailRequestUrls.push(`${route.request().method()} ${url.pathname}${url.search}`);
+    if (url.pathname.endsWith('/config')) {
+      await fulfillJson(route, {
+        projectId,
+        configured: true,
+        config: {
+          sourceYear: 2026,
+          value: 'https://docs.google.com/spreadsheets/d/cashflow-e2e-sheet',
+          sheetName: '현금흐름',
+          spreadsheetId: 'cashflow-e2e-sheet',
+        },
+        systemAccountEmail: 'cashflow-system@mysc.co.kr',
+        accessPolicy: {
+          googleAuth: 'service_account',
+          serviceAccountEmail: 'cashflow-system@mysc.co.kr',
+          sheetPermission: 'shared_with_mysc_system_account',
+        },
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/mirror')) {
+      await fulfillJson(route, {
+        projectId,
+        status: 'FRESH',
+        sourceRevision: 'cashflow-e2e-source',
+        targetRevisionAtFetch: 'cashflow-e2e-source',
+        capturedAt: '2026-09-01T03:00:00.000Z',
+        yearMonths: ['2026-09'],
+        cells: [],
+        sheetFacts: {},
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/changes/probe')) {
+      await fulfillJson(route, {
+        status: 'AVAILABLE', mirrorLoaded: true, sheetChangedSinceMirror: false,
+        checkedAt: '2026-09-01T03:00:00.000Z',
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/apply-status')) {
+      await fulfillJson(route, { projectId, status: 'IDLE', stagedRun: null, applyInput: null });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.route('**/api/v1/cashflow/cashflow-e2e-*/**', async (route) => {
+    const url = new URL(route.request().url());
+    const projectId = decodeURIComponent(url.pathname.split('/')[4] || '');
+    detailRequestUrls.push(`${route.request().method()} ${url.pathname}${url.search}`);
+    if (url.pathname.endsWith('/activity')) {
+      await fulfillJson(route, {
+        projectId,
+        source: url.searchParams.get('source') || undefined,
+        events: [], errors: [], nextCursor: null,
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/month-close/requests/current')) {
+      await fulfillJson(route, { request: null });
+      return;
+    }
+    if (url.pathname.endsWith('/month-close')) {
+      await fulfillJson(route, {
+        ok: true,
+        commandName: 'cashflow.month_close.status',
+        projectId,
+        yearMonth: url.searchParams.get('yearMonth') || '2026-09',
+        status: 'OPEN',
+        revision: 0,
+        closeEligible: false,
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/weekly-update-compliance')) {
+      await fulfillJson(route, { items: [], nextCursor: '', onTimeCount: 0, missedCount: 0 });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto(options.path || '/cashflow/export');
   if (role === 'viewer') {
     await expect(page.getByRole('heading', { name: '이 화면을 열 수 없습니다' })).toBeVisible();
   } else {
     await expect(page.getByTestId('cashflow-export-page')).toBeVisible();
-    await expect(page.getByRole('cell', { name: '가 사업' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: '가 사업', exact: true })).toBeVisible();
   }
   return {
     getWeeklyOverviewCalls: () => weeklyOverviewCalls,
@@ -182,6 +273,8 @@ async function openCashflowExportWithPlatformApi(page: Page, role = 'admin') {
     getSettlementBatchCalls: () => settlementBatchCalls,
     getSettlementBatchBodies: () => settlementBatchBodies,
     getStrictSummaryCalls: () => strictSummaryCalls,
+    getDetailRequestCalls: () => detailRequestUrls.length,
+    getDetailRequestUrls: () => [...detailRequestUrls],
   };
 }
 
@@ -192,7 +285,7 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   });
   const requests = await openCashflowExportWithPlatformApi(page);
   const table = page.getByTestId('cashflow-export-operations-table');
-  const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '가 사업' }) });
+  const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '가 사업', exact: true }) });
 
   await expect(row).toContainText('김조직(헤드)');
   await expect(row).toContainText('이담당');
@@ -207,14 +300,14 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   await expect(row).toContainText('9/1(화) 10:00');
   await expect(row).toContainText('차액 -12,345원');
   await expect(row).toContainText('2026. 08. 25. 16:48');
-  const missingRow = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '나 사업' }) });
+  const missingRow = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '나 사업', exact: true }) });
   await expect(missingRow).toContainText('주정산 이전');
   await expect(missingRow).toContainText('주정산 정보를 불러오지 못함');
   await expect(missingRow).toContainText('제출 전');
   await expect(missingRow).toContainText('승인 전');
   await expect(missingRow).toContainText('시트 저장값 없음');
   await expect(missingRow).toContainText('불러온 기록 없음');
-  const partialErrorRow = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '다 사업' }) });
+  const partialErrorRow = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '다 사업', exact: true }) });
   await expect(partialErrorRow).toContainText('주정산 정보를 불러오지 못함');
   await expect(partialErrorRow).toContainText('시트 현황을 불러오지 못함');
   await expect(table.getByRole('columnheader').allTextContents()).resolves.toEqual([
@@ -222,6 +315,9 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   ]);
   await expect(page.getByText('BFF 서버의 최신 현금흐름 데이터')).toHaveCount(0);
   await expect(page.getByText('확인 불가')).toHaveCount(0);
+  await expect(page.getByText('정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.')).toHaveCount(1);
+  await expect(page.getByText('워크북의 사업 순서를 사업명 또는 소속 기준으로 정합니다.')).toHaveCount(0);
+  await expect(page.getByText('담당 조직을 기준으로 다운로드 대상을 좁힙니다.')).toHaveCount(0);
   expect(requests.getWeeklyOverviewCalls()).toBe(1);
   expect(requests.getWeeklyOverviewBodies()).toEqual([{
     projectIds: ['cashflow-e2e-a', 'cashflow-e2e-b', 'cashflow-e2e-c'], yearMonth: '2026-09',
@@ -240,12 +336,279 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   expect(consoleErrors).toEqual([]);
 });
 
+test('split view opens a project beside the export page and keeps both recent weeks on one row', async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && !message.text().startsWith('Warning: Function components cannot be given refs.')) {
+      runtimeErrors.push(message.text());
+    }
+  });
+  page.on('pageerror', (error) => runtimeErrors.push(error.stack || error.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requests = await openCashflowExportWithPlatformApi(page, 'admin', {
+    path: '/cashflow/export?foo=keep',
+  });
+  expect(requests.getDetailRequestCalls()).toBe(0);
+
+  await page.getByTestId('cashflow-export-sort').click();
+  await page.getByRole('option', { name: '소속(CIC/센터)' }).click();
+  const table = page.getByTestId('cashflow-export-operations-table');
+  const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '가 사업', exact: true }) });
+  const weekStrips = row.locator('[data-testid^="cashflow-export-week-"]');
+  await expect(weekStrips).toHaveCount(2);
+  const firstWeek = await weekStrips.nth(0).boundingBox();
+  const secondWeek = await weekStrips.nth(1).boundingBox();
+  expect(firstWeek).not.toBeNull();
+  expect(secondWeek).not.toBeNull();
+  expect(Math.abs((firstWeek?.y ?? 0) - (secondWeek?.y ?? 0))).toBeLessThan(2);
+  await table.evaluate((element) => { element.scrollLeft = 120; });
+  const openButton = row.getByRole('button', { name: '가 사업 보기' });
+  await openButton.scrollIntoViewIfNeeded();
+  const leftScrollBeforeOpen = await table.evaluate((element) => element.scrollLeft);
+  const pageScrollBeforeOpen = await page.evaluate(() => window.scrollY);
+  const weeklyCallsBeforeOpen = requests.getWeeklyOverviewCalls();
+  const settlementCallsBeforeOpen = requests.getSettlementBatchCalls();
+  expect(weeklyCallsBeforeOpen).toBe(1);
+  expect(settlementCallsBeforeOpen).toBe(1);
+
+  await openButton.click();
+  await expect(page.getByText('예기치 못한 오류가 발생했습니다'), runtimeErrors.join('\n')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/cashflow\/export\?.*project=cashflow-e2e-a/);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
+  const primaryPane = page.getByTestId('cashflow-export-primary-pane');
+  const projectPane = page.getByTestId('cashflow-export-project-pane');
+  await expect(projectPane).toBeVisible();
+  await page.waitForTimeout(1_000);
+  expect(runtimeErrors).toEqual([]);
+  expect(requests.getDetailRequestCalls()).toBeGreaterThan(0);
+  expect(requests.getWeeklyOverviewCalls()).toBe(weeklyCallsBeforeOpen);
+  expect(requests.getSettlementBatchCalls()).toBe(settlementCallsBeforeOpen);
+  const primaryBox = await primaryPane.boundingBox();
+  const projectBox = await projectPane.boundingBox();
+  const appMain = page.getByTestId('cashflow-export-page').locator('xpath=ancestor::main[1]');
+  const appMainBox = await appMain.boundingBox();
+  const closeButtonBox = await projectPane.getByRole('button', { name: '가 사업 상세 닫기' }).boundingBox();
+  expect(primaryBox).not.toBeNull();
+  expect(projectBox).not.toBeNull();
+  expect(appMainBox).not.toBeNull();
+  expect(closeButtonBox).not.toBeNull();
+  expect(primaryBox?.width ?? 0).toBeGreaterThan(500);
+  expect(projectBox?.width ?? 0).toBeGreaterThan(500);
+  expect(Math.abs((primaryBox?.width ?? 0) - (projectBox?.width ?? 0))).toBeLessThan(40);
+  expect((projectBox?.x ?? 0) - ((primaryBox?.x ?? 0) + (primaryBox?.width ?? 0))).toBeGreaterThanOrEqual(8);
+  expect(projectBox?.y ?? 0).toBeGreaterThanOrEqual(appMainBox?.y ?? 0);
+  expect((projectBox?.y ?? 0) + (projectBox?.height ?? 0)).toBeLessThanOrEqual((appMainBox?.y ?? 0) + (appMainBox?.height ?? 0));
+  expect(closeButtonBox?.y ?? 0).toBeGreaterThanOrEqual(appMainBox?.y ?? 0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageScrollBeforeOpen);
+  expect(await table.evaluate((element) => element.scrollLeft)).toBe(leftScrollBeforeOpen);
+
+  await page.setViewportSize({ width: 2000, height: 900 });
+  const projectSlot = page.getByTestId('cashflow-export-project-pane-slot');
+  await expect.poll(async () => {
+    const [paneBox, slotBox] = await Promise.all([projectPane.boundingBox(), projectSlot.boundingBox()]);
+    return Math.abs((paneBox?.x ?? 0) - (slotBox?.x ?? 0));
+  }).toBeLessThan(2);
+  const paneXBeforeSidebarCollapse = (await projectPane.boundingBox())?.x ?? 0;
+  const slotXBeforeSidebarCollapse = (await projectSlot.boundingBox())?.x ?? 0;
+  const sidebar = page.getByRole('button', { name: '홈으로 이동' }).locator('xpath=ancestor::aside[1]');
+  await sidebar.locator('button').last().click();
+  await expect.poll(async () => (await projectSlot.boundingBox())?.x ?? 0).not.toBe(slotXBeforeSidebarCollapse);
+  await expect.poll(async () => {
+    const [paneBox, slotBox] = await Promise.all([projectPane.boundingBox(), projectSlot.boundingBox()]);
+    return Math.abs((paneBox?.x ?? 0) - (slotBox?.x ?? 0));
+  }).toBeLessThan(2);
+  expect((await projectPane.boundingBox())?.x ?? 0).not.toBe(paneXBeforeSidebarCollapse);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  const rateTiles = projectPane.locator('[title="BFF/JVM 서버 요약값"]');
+  await expect(rateTiles).toHaveCount(2);
+  const projectionRateBox = await rateTiles.nth(0).boundingBox();
+  const actualRateBox = await rateTiles.nth(1).boundingBox();
+  expect(projectionRateBox).not.toBeNull();
+  expect(actualRateBox).not.toBeNull();
+  expect(Math.abs((projectionRateBox?.y ?? 0) - (actualRateBox?.y ?? 0))).toBeGreaterThan(40);
+
+  const detailSearch = projectPane.getByLabel('실제 반영 기록 검색');
+  await detailSearch.fill('크기 변경에도 유지');
+  const paneScroll = projectPane.getByTestId('cashflow-export-project-pane-scroll');
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expect(projectPane).not.toHaveAttribute('role', 'dialog');
+  await expect(detailSearch).toHaveValue('크기 변경에도 유지');
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await paneScroll.evaluate((element) => { element.scrollTop = 50; });
+  const paneScrollBeforeResize = await paneScroll.evaluate((element) => element.scrollTop);
+  const detailCallsBeforeResize = requests.getDetailRequestCalls();
+  await page.setViewportSize({ width: 1023, height: 800 });
+  await expect(projectPane).toHaveAttribute('role', 'dialog');
+  await expect(detailSearch).toHaveValue('크기 변경에도 유지');
+  await expect.poll(async () => Math.abs(
+    (await paneScroll.evaluate((element) => element.scrollTop)) - paneScrollBeforeResize,
+  )).toBeLessThan(2);
+  await page.waitForTimeout(300);
+  expect(requests.getDetailRequestCalls()).toBe(detailCallsBeforeResize);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(detailSearch).toHaveValue('크기 변경에도 유지');
+  await table.evaluate((element) => { element.scrollLeft = 120; });
+  const leftScrollBeforeClose = await table.evaluate((element) => element.scrollLeft);
+
+  await page.goBack();
+  await expect(projectPane).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
+  await expect(page.getByTestId('cashflow-export-step-sort')).toContainText('소속(CIC/센터)');
+  expect(await table.evaluate((element) => element.scrollLeft)).toBe(await table.evaluate((element, savedScrollLeft) => (
+    Math.min(savedScrollLeft, Math.max(0, element.scrollWidth - element.clientWidth))
+  ), leftScrollBeforeClose));
+  const detailCallsAfterClose = requests.getDetailRequestCalls();
+  await page.waitForTimeout(300);
+  expect(requests.getDetailRequestCalls()).toBe(detailCallsAfterClose);
+
+  await page.goForward();
+  await expect(projectPane).toBeVisible();
+  await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBe(leftScrollBeforeClose);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
+  await page.getByRole('button', { name: '가 사업 상세 닫기' }).click();
+  await expect(projectPane).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
+  await page.goBack();
+  await expect(projectPane).toHaveCount(0);
+
+  await page.setViewportSize({ width: 375, height: 800 });
+  await row.getByRole('button', { name: '가 사업 보기' }).click();
+  await expect(projectPane).toBeVisible();
+  const mobileBox = await projectPane.boundingBox();
+  expect(mobileBox).not.toBeNull();
+  expect(mobileBox?.width ?? 0).toBeGreaterThanOrEqual(374);
+  expect(mobileBox?.height ?? 0).toBeGreaterThanOrEqual(799);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden');
+  await row.getByRole('button', { name: '가 사업 보기' }).evaluate((element) => (element as HTMLElement).focus());
+  await page.keyboard.press('Tab');
+  await expect.poll(() => projectPane.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  const paneFocusTargets = projectPane.locator([
+    'a[href]:visible',
+    'button:not([disabled]):visible',
+    'input:not([disabled]):visible',
+    'select:not([disabled]):visible',
+    'textarea:not([disabled]):visible',
+    '[tabindex]:not([tabindex="-1"]):visible',
+  ].join(','));
+  await expect.poll(() => paneFocusTargets.count()).toBeGreaterThan(1);
+  await paneFocusTargets.last().focus();
+  await page.keyboard.press('Tab');
+  await expect(paneFocusTargets.first()).toBeFocused();
+  await paneFocusTargets.first().focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(paneFocusTargets.last()).toBeFocused();
+  await page.evaluate(() => {
+    const overlay = document.createElement('div');
+    overlay.dataset.testid = 'cashflow-export-nested-dialog-probe';
+    overlay.setAttribute('role', 'dialog');
+    overlay.style.cssText = 'position:fixed;inset:20px;z-index:100;background:white';
+    document.body.append(overlay);
+  });
+  await page.keyboard.press('Escape');
+  await expect(projectPane).toBeVisible();
+  await page.getByTestId('cashflow-export-nested-dialog-probe').evaluate((element) => element.remove());
+  await page.keyboard.press('Escape');
+  await expect(projectPane).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('');
+  await expect(row.getByRole('button', { name: '가 사업 보기' })).toBeFocused();
+
+  let downloadRequestBody: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/cashflow-exports', async (route) => {
+    downloadRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      headers: {
+        'content-disposition': "attachment; filename=\"cashflow-export.xlsx\"; filename*=UTF-8''cashflow-filtered.xlsx",
+      },
+      body: 'test-workbook',
+    });
+  });
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('cashflow-export-download').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('cashflow-filtered.xlsx');
+  expect(downloadRequestBody).toEqual({
+    scope: 'all',
+    sortBy: 'DEPARTMENT',
+    startYearMonth: '2026-01',
+    endYearMonth: '2026-12',
+    variant: 'multi-sheet',
+  });
+
+  await row.getByRole('button', { name: '가 사업 보기' }).click();
+  await page.reload();
+  await expect(page.getByTestId('cashflow-export-project-pane')).toBeVisible();
+  await page.getByRole('button', { name: '가 사업 상세 닫기' }).click();
+  await expect(page.getByTestId('cashflow-export-project-pane')).toHaveCount(0);
+});
+
+test('split view preserves a delayed valid deep link and removes only an invalid project query', async ({ browser }) => {
+  const validContext = await browser.newContext({ baseURL: 'http://localhost:4175', viewport: { width: 1440, height: 900 } });
+  const validPage = await validContext.newPage();
+  const validRequests = await openCashflowExportWithPlatformApi(validPage, 'admin', {
+    path: '/cashflow/export?foo=keep&project=cashflow-e2e-a',
+    projectResponseDelayMs: 300,
+  });
+  await expect(validPage.getByTestId('cashflow-export-project-pane')).toBeVisible();
+  const validUrl = new URL(validPage.url());
+  expect(validUrl.pathname).toBe('/cashflow/export');
+  expect(validUrl.searchParams.get('foo')).toBe('keep');
+  expect(validUrl.searchParams.get('project')).toBe('cashflow-e2e-a');
+  expect(validRequests.getDetailRequestCalls()).toBeGreaterThan(0);
+  await validContext.close();
+
+  const invalidContext = await browser.newContext({ baseURL: 'http://localhost:4175', viewport: { width: 1440, height: 900 } });
+  const invalidPage = await invalidContext.newPage();
+  const invalidRequests = await openCashflowExportWithPlatformApi(invalidPage, 'admin', {
+    path: '/cashflow/export?foo=keep&project=ghost-project',
+  });
+  await expect(invalidPage).toHaveURL(/\/cashflow\/export\?foo=keep$/);
+  await expect(invalidPage.getByTestId('cashflow-export-project-pane')).toHaveCount(0);
+  expect(invalidRequests.getDetailRequestCalls()).toBe(0);
+  await invalidContext.close();
+
+  const blankContext = await browser.newContext({ baseURL: 'http://localhost:4175', viewport: { width: 1440, height: 900 } });
+  const blankPage = await blankContext.newPage();
+  const blankRequests = await openCashflowExportWithPlatformApi(blankPage, 'admin', {
+    path: '/cashflow/export?foo=keep&project=%20%20',
+  });
+  await expect(blankPage).toHaveURL(/\/cashflow\/export\?foo=keep$/);
+  await expect(blankPage.getByTestId('cashflow-export-project-pane')).toHaveCount(0);
+  expect(blankRequests.getDetailRequestCalls()).toBe(0);
+  await blankContext.close();
+});
+
+test('split view replaces the mounted project detail when another project is selected', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requests = await openCashflowExportWithPlatformApi(page);
+  const rowA = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '가 사업', exact: true }) });
+  const rowB = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '나 사업', exact: true }) });
+
+  await rowA.getByRole('button', { name: '가 사업 보기' }).click();
+  const pane = page.getByTestId('cashflow-export-project-pane');
+  await expect(pane.getByRole('heading', { name: '가 사업' })).toBeVisible();
+  await rowB.getByRole('button', { name: '나 사업 보기' }).click();
+  await expect(page).toHaveURL(/project=cashflow-e2e-b/);
+  await expect(page.getByTestId('cashflow-export-project-pane')).toHaveCount(1);
+  await expect(pane.getByRole('heading', { name: '나 사업' })).toBeVisible();
+  await expect.poll(() => requests.getDetailRequestUrls().some((url) => url.includes('cashflow-e2e-b'))).toBe(true);
+});
+
 test('does not fetch operations data for a user without export permission', async ({ page }) => {
-  const requests = await openCashflowExportWithPlatformApi(page, 'viewer');
+  const requests = await openCashflowExportWithPlatformApi(
+    page,
+    'viewer',
+    { path: '/cashflow/export?project=cashflow-e2e-a' },
+  );
   await page.waitForTimeout(250);
   expect(requests.getWeeklyOverviewCalls()).toBe(0);
   expect(requests.getSettlementBatchCalls()).toBe(0);
   expect(requests.getStrictSummaryCalls()).toBe(0);
+  expect(requests.getDetailRequestCalls()).toBe(0);
 });
 
 test('API-enabled export cross-filters two selected projects and downloads the posted workbook', async ({ page }) => {
