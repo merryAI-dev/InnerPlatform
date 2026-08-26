@@ -315,6 +315,7 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   ]);
   await expect(page.getByText('BFF 서버의 최신 현금흐름 데이터')).toHaveCount(0);
   await expect(page.getByText('확인 불가')).toHaveCount(0);
+  await expect(page.getByText('정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.')).toBeVisible();
   expect(requests.getWeeklyOverviewCalls()).toBe(1);
   expect(requests.getWeeklyOverviewBodies()).toEqual([{
     projectIds: ['cashflow-e2e-a', 'cashflow-e2e-b', 'cashflow-e2e-c'], yearMonth: '2026-09',
@@ -379,24 +380,87 @@ test('split view opens a project beside the export page and keeps both recent we
   expect(requests.getSettlementBatchCalls()).toBe(settlementCallsBeforeOpen);
   const primaryBox = await primaryPane.boundingBox();
   const projectBox = await projectPane.boundingBox();
+  const appMain = page.getByTestId('cashflow-export-page').locator('xpath=ancestor::main[1]');
+  const appMainBox = await appMain.boundingBox();
+  const closeButtonBox = await projectPane.getByRole('button', { name: '가 사업 상세 닫기' }).boundingBox();
   expect(primaryBox).not.toBeNull();
   expect(projectBox).not.toBeNull();
+  expect(appMainBox).not.toBeNull();
+  expect(closeButtonBox).not.toBeNull();
   expect(primaryBox?.width ?? 0).toBeGreaterThan(500);
   expect(projectBox?.width ?? 0).toBeGreaterThan(500);
   expect(Math.abs((primaryBox?.width ?? 0) - (projectBox?.width ?? 0))).toBeLessThan(40);
   expect((projectBox?.x ?? 0) - ((primaryBox?.x ?? 0) + (primaryBox?.width ?? 0))).toBeGreaterThanOrEqual(8);
+  expect(projectBox?.y ?? 0).toBeGreaterThanOrEqual(appMainBox?.y ?? 0);
+  expect((projectBox?.y ?? 0) + (projectBox?.height ?? 0)).toBeLessThanOrEqual((appMainBox?.y ?? 0) + (appMainBox?.height ?? 0));
+  expect(closeButtonBox?.y ?? 0).toBeGreaterThanOrEqual(appMainBox?.y ?? 0);
   expect(await page.evaluate(() => window.scrollY)).toBe(pageScrollBeforeOpen);
+  expect(await table.evaluate((element) => element.scrollLeft)).toBe(leftScrollBeforeOpen);
+
+  await page.setViewportSize({ width: 2000, height: 900 });
+  const projectSlot = page.getByTestId('cashflow-export-project-pane-slot');
+  await expect.poll(async () => {
+    const [paneBox, slotBox] = await Promise.all([projectPane.boundingBox(), projectSlot.boundingBox()]);
+    return Math.abs((paneBox?.x ?? 0) - (slotBox?.x ?? 0));
+  }).toBeLessThan(2);
+  const paneXBeforeSidebarCollapse = (await projectPane.boundingBox())?.x ?? 0;
+  const slotXBeforeSidebarCollapse = (await projectSlot.boundingBox())?.x ?? 0;
+  const sidebar = page.getByRole('button', { name: '홈으로 이동' }).locator('xpath=ancestor::aside[1]');
+  await sidebar.locator('button').last().click();
+  await expect.poll(async () => (await projectSlot.boundingBox())?.x ?? 0).not.toBe(slotXBeforeSidebarCollapse);
+  await expect.poll(async () => {
+    const [paneBox, slotBox] = await Promise.all([projectPane.boundingBox(), projectSlot.boundingBox()]);
+    return Math.abs((paneBox?.x ?? 0) - (slotBox?.x ?? 0));
+  }).toBeLessThan(2);
+  expect((await projectPane.boundingBox())?.x ?? 0).not.toBe(paneXBeforeSidebarCollapse);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  const rateTiles = projectPane.locator('[title="BFF/JVM 서버 요약값"]');
+  await expect(rateTiles).toHaveCount(2);
+  const projectionRateBox = await rateTiles.nth(0).boundingBox();
+  const actualRateBox = await rateTiles.nth(1).boundingBox();
+  expect(projectionRateBox).not.toBeNull();
+  expect(actualRateBox).not.toBeNull();
+  expect(Math.abs((projectionRateBox?.y ?? 0) - (actualRateBox?.y ?? 0))).toBeGreaterThan(40);
+
+  const detailSearch = projectPane.getByLabel('실제 반영 기록 검색');
+  await detailSearch.fill('크기 변경에도 유지');
+  const paneScroll = projectPane.getByTestId('cashflow-export-project-pane-scroll');
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expect(projectPane).not.toHaveAttribute('role', 'dialog');
+  await expect(detailSearch).toHaveValue('크기 변경에도 유지');
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await paneScroll.evaluate((element) => { element.scrollTop = 50; });
+  const paneScrollBeforeResize = await paneScroll.evaluate((element) => element.scrollTop);
+  const detailCallsBeforeResize = requests.getDetailRequestCalls();
+  await page.setViewportSize({ width: 1023, height: 800 });
+  await expect(projectPane).toHaveAttribute('role', 'dialog');
+  await expect(detailSearch).toHaveValue('크기 변경에도 유지');
+  await expect.poll(async () => Math.abs(
+    (await paneScroll.evaluate((element) => element.scrollTop)) - paneScrollBeforeResize,
+  )).toBeLessThan(2);
+  await page.waitForTimeout(300);
+  expect(requests.getDetailRequestCalls()).toBe(detailCallsBeforeResize);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(detailSearch).toHaveValue('크기 변경에도 유지');
+  await table.evaluate((element) => { element.scrollLeft = 120; });
+  const leftScrollBeforeClose = await table.evaluate((element) => element.scrollLeft);
 
   await page.goBack();
   await expect(projectPane).toHaveCount(0);
   await expect(page.getByTestId('cashflow-export-step-sort')).toContainText('소속(CIC/센터)');
-  expect(await table.evaluate((element) => element.scrollLeft)).toBe(leftScrollBeforeOpen);
+  expect(await table.evaluate((element) => element.scrollLeft)).toBe(await table.evaluate((element, savedScrollLeft) => (
+    Math.min(savedScrollLeft, Math.max(0, element.scrollWidth - element.clientWidth))
+  ), leftScrollBeforeClose));
   const detailCallsAfterClose = requests.getDetailRequestCalls();
   await page.waitForTimeout(300);
   expect(requests.getDetailRequestCalls()).toBe(detailCallsAfterClose);
 
   await page.goForward();
   await expect(projectPane).toBeVisible();
+  await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBe(leftScrollBeforeClose);
   await page.getByRole('button', { name: '가 사업 상세 닫기' }).click();
   await expect(projectPane).toHaveCount(0);
   await page.goBack();
@@ -410,9 +474,23 @@ test('split view opens a project beside the export page and keeps both recent we
   expect(mobileBox?.width ?? 0).toBeGreaterThanOrEqual(374);
   expect(mobileBox?.height ?? 0).toBeGreaterThanOrEqual(799);
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden');
+  await row.getByRole('button', { name: '가 사업 보기' }).evaluate((element) => (element as HTMLElement).focus());
+  await page.keyboard.press('Tab');
+  await expect.poll(() => projectPane.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.evaluate(() => {
+    const overlay = document.createElement('div');
+    overlay.dataset.testid = 'cashflow-export-nested-dialog-probe';
+    overlay.setAttribute('role', 'dialog');
+    overlay.style.cssText = 'position:fixed;inset:20px;z-index:100;background:white';
+    document.body.append(overlay);
+  });
+  await page.keyboard.press('Escape');
+  await expect(projectPane).toBeVisible();
+  await page.getByTestId('cashflow-export-nested-dialog-probe').evaluate((element) => element.remove());
   await page.keyboard.press('Escape');
   await expect(projectPane).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('');
+  await expect(row.getByRole('button', { name: '가 사업 보기' })).toBeFocused();
 
   let downloadRequestBody: Record<string, unknown> | undefined;
   await page.route('**/api/v1/cashflow-exports', async (route) => {
@@ -469,6 +547,16 @@ test('split view preserves a delayed valid deep link and removes only an invalid
   await expect(invalidPage.getByTestId('cashflow-export-project-pane')).toHaveCount(0);
   expect(invalidRequests.getDetailRequestCalls()).toBe(0);
   await invalidContext.close();
+
+  const blankContext = await browser.newContext({ baseURL: 'http://localhost:4175', viewport: { width: 1440, height: 900 } });
+  const blankPage = await blankContext.newPage();
+  const blankRequests = await openCashflowExportWithPlatformApi(blankPage, 'admin', {
+    path: '/cashflow/export?foo=keep&project=%20%20',
+  });
+  await expect(blankPage).toHaveURL(/\/cashflow\/export\?foo=keep$/);
+  await expect(blankPage.getByTestId('cashflow-export-project-pane')).toHaveCount(0);
+  expect(blankRequests.getDetailRequestCalls()).toBe(0);
+  await blankContext.close();
 });
 
 test('split view replaces the mounted project detail when another project is selected', async ({ page }) => {

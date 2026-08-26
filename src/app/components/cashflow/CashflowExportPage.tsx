@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import {
   BarChart3,
@@ -167,12 +167,13 @@ function SelectionField(props: {
   icon: typeof BarChart3;
   label: string;
   helper: string;
+  showHelper?: boolean;
   value: string;
   testId: string;
   toneClass: string;
   children: ReactNode;
 }) {
-  const { icon: Icon, label, testId, toneClass, children } = props;
+  const { icon: Icon, label, helper, showHelper = false, testId, toneClass, children } = props;
   return (
     <div data-testid={testId} className={`space-y-2 rounded-xl border p-3 ${toneClass}`}>
       <div className="flex items-center gap-2">
@@ -182,12 +183,15 @@ function SelectionField(props: {
         <Label className="text-[11px] font-medium tracking-[0.01em] text-stone-700">{label}</Label>
       </div>
       {children}
+      {showHelper ? <p className="text-[10px] leading-relaxed text-stone-500">{helper}</p> : null}
     </div>
   );
 }
 
 export function CashflowExportPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const operationsTableRef = useRef<HTMLDivElement>(null);
+  const operationsTableScrollLeftRef = useRef(0);
   const { projects, persons } = useAppStore();
   const { user } = useAuth();
   const { orgId } = useFirebase();
@@ -217,11 +221,23 @@ export function CashflowExportPage() {
     () => [...projects].sort((left, right) => left.name.localeCompare(right.name, 'ko')),
     [projects],
   );
-  const panelProjectId = searchParams.get('project')?.trim() || '';
+  const panelProjectParam = searchParams.get('project');
+  const panelProjectId = panelProjectParam?.trim() || '';
   const panelProject = useMemo(
     () => sortedProjects.find((project) => project.id === panelProjectId) || null,
     [panelProjectId, sortedProjects],
   );
+
+  useLayoutEffect(() => {
+    const table = operationsTableRef.current;
+    if (!table) return undefined;
+    const savedScrollLeft = operationsTableScrollLeftRef.current;
+    table.scrollLeft = savedScrollLeft;
+    const frame = window.requestAnimationFrame(() => {
+      if (operationsTableRef.current) operationsTableRef.current.scrollLeft = savedScrollLeft;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [panelProjectId]);
 
   const openProjectPanel = useCallback((projectId: string) => {
     setSearchParams((current) => {
@@ -240,13 +256,21 @@ export function CashflowExportPage() {
   }, [setSearchParams]);
 
   useEffect(() => {
+    if (panelProjectParam !== null && !panelProjectId) {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.delete('project');
+        return next;
+      }, { replace: true });
+      return;
+    }
     if (!panelProjectId || sortedProjects.length === 0 || panelProject) return;
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.delete('project');
       return next;
     }, { replace: true });
-  }, [panelProject, panelProjectId, setSearchParams, sortedProjects.length]);
+  }, [panelProject, panelProjectId, panelProjectParam, setSearchParams, sortedProjects.length]);
 
   const departments = useMemo(() => Array.from(new Set(
     sortedProjects.map((project) => project.department).filter(Boolean),
@@ -632,6 +656,7 @@ export function CashflowExportPage() {
             icon={BarChart3}
             label="통장 유형 다중선택"
             helper="정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다."
+            showHelper
             value={accountTypeFilterLabel}
             testId="cashflow-export-step-account-type"
             toneClass={monochromeSurfaceClass}
@@ -831,10 +856,16 @@ export function CashflowExportPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div
+            ref={operationsTableRef}
             data-testid="cashflow-export-operations-table"
             role="region"
             aria-label="다운로드 대상 사업 운영 현황"
             tabIndex={0}
+            onScroll={(event) => {
+              if (event.currentTarget.scrollWidth > event.currentTarget.clientWidth) {
+                operationsTableScrollLeftRef.current = event.currentTarget.scrollLeft;
+              }
+            }}
             className="max-h-[620px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-300"
           >
             <table className="w-full min-w-[1320px] text-[11px]">

@@ -58,7 +58,9 @@ Expected: 새 패널 파일·query wiring·가로 layout이 없어 FAIL.
 
 **Files:**
 - Create: `src/app/components/cashflow/CashflowExportProjectPane.tsx`
+- Modify: `src/app/components/cashflow/CashflowProjectSheet.tsx`
 - Test: `src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts`
+- Test: `src/app/components/cashflow/CashflowProjectSheet.shell.test.ts`
 
 - [ ] **Step 1: 기존 provider와 상세 화면만 조합하는 최소 wrapper 작성**
 
@@ -105,14 +107,16 @@ function CashflowExportProjectPaneBody({ project, yearMonth }: BodyProps) {
 }
 ```
 
-패널의 독립 스크롤 영역이 마운트되면 기존 `#projection-actual-comparison` 섹션으로 이동한다. 전역 문서가 아니라 패널 ref 아래에서만 찾는다.
+패널의 독립 스크롤 영역이 마운트되면 기존 `#projection-actual-comparison` 섹션으로 이동한다. 전역 문서가 아니라 패널 ref 아래에서만 찾는다. 데스크톱·모바일 모두 동일한 body portal을 유지해 breakpoint 전환으로 provider가 remount되지 않게 한다. 앱 헤더·상태바 사이의 가용 영역에 패널을 고정하고, 분할 열 위치가 sidebar 변화로 이동하면 함께 갱신한다.
+
+`CashflowProjectSheet`에는 default `false`인 `compact` prop만 추가한다. 패널에서만 이를 켜 viewport 기준으로 과밀해지는 grid를 세로로 쌓고, 데이터 요청·계산·mutation과 기존 route 기본 layout은 그대로 둔다.
 
 - [ ] **Step 3: shell 테스트를 GREEN으로 전환**
 
 Run:
 
 ```bash
-npx vitest run src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts
+npx vitest run src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts src/app/components/cashflow/CashflowProjectSheet.shell.test.ts
 ```
 
 Expected: PASS.
@@ -163,12 +167,12 @@ const closeProjectPanel = () => setSearchParams((current) => {
 
 도움말은 `정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.`로 변경한다. 필터 field와 BFF payload는 변경하지 않는다.
 
-- [ ] **Step 4: invalid project query를 fail-close하고 shell 테스트를 GREEN으로 전환**
+- [ ] **Step 4: 판정 가능한 invalid project query를 URL에서 제거하고, 명부 0건·초기 로딩은 상세 요청 없이 fail-close한 뒤 shell 테스트를 GREEN으로 전환**
 
 Run:
 
 ```bash
-npx vitest run src/app/components/cashflow/CashflowExportPage.shell.test.ts src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts
+npx vitest run src/app/components/cashflow/CashflowExportPage.shell.test.ts src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts src/app/components/cashflow/CashflowProjectSheet.shell.test.ts
 ```
 
 Expected: PASS.
@@ -190,7 +194,7 @@ Expected: PASS.
 - [ ] **Step 3: 전체 관련 검증 실행**
 
 ```bash
-npx vitest run src/app/components/cashflow/CashflowExportPage.shell.test.ts src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts src/app/platform/cashflow-export-filters.test.ts src/app/platform/cashflow-export-dashboard.test.ts src/app/lib/platform-bff-client.test.ts
+npx vitest run src/app/components/cashflow/CashflowExportPage.shell.test.ts src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts src/app/components/cashflow/CashflowProjectSheet.shell.test.ts src/app/platform/cashflow-export-filters.test.ts src/app/platform/cashflow-export-dashboard.test.ts src/app/lib/platform-bff-client.test.ts
 npm run test:e2e:cashflow-export
 npm run typecheck
 npm run build
@@ -214,6 +218,8 @@ git add src/app/components/cashflow/CashflowExportPage.tsx \
   src/app/components/cashflow/CashflowExportPage.shell.test.ts \
   src/app/components/cashflow/CashflowExportProjectPane.tsx \
   src/app/components/cashflow/CashflowExportProjectPane.shell.test.ts \
+  src/app/components/cashflow/CashflowProjectSheet.tsx \
+  src/app/components/cashflow/CashflowProjectSheet.shell.test.ts \
   tests/e2e/admin-cashflow-export-api.spec.ts
 git commit -m "feat(cashflow): add export project split view"
 ```

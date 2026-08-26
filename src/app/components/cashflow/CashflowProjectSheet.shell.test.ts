@@ -365,7 +365,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('isAltRow: rowIndex % 2 === 1');
     expect(source).toContain("'text-emerald-700' : 'text-red-700'");
     expect(source).toContain("'bg-[#EAF0F5] text-sky-700'");
-    expect(source).toContain('data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-border bg-border');
+    expect(source).toContain('data-cashflow-settlement-actions className={`grid gap-px overflow-hidden rounded-md border border-border bg-border');
     expect(source).toContain("surface: 'border-border bg-accent'");
     expect(source).toContain('text-card-foreground">주간 정산');
     expect(source).toContain('text-card-foreground">월 결산');
@@ -1153,5 +1153,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('Number(change.afterAmount || 0)');
     expect(source).toContain("state === 'EMPTY' ? null : undefined");
     expect(source).toContain("<span className=\"text-red-700\">확인 불가</span>");
+  });
+
+  it('keeps the established layout by default and stacks responsive grids only in a narrow host', () => {
+    expect(source).toContain('compact = false');
+    expect(source).toContain('compact?: boolean;');
+    expect(source).toContain("compact ? '' : 'md:grid-cols-3'");
+    expect(source).toContain("compact ? '' : 'xl:grid-cols-[minmax(0,1fr)_320px]'");
   });
 });

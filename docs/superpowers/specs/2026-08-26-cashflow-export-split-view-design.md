@@ -28,8 +28,9 @@ URL 동기화 분할 패널이 예측 가능성과 변경 범위의 균형이 �
 ```
 
 - 왼쪽은 기존 페이지이며 state와 스크롤을 유지한다.
-- 오른쪽은 독립 스크롤 영역이다. 패널을 열 때 비교 섹션으로 이동한다.
+- 오른쪽은 앱 헤더와 상태바 사이에 고정된 독립 스크롤 영역이다. 패널을 열 때 비교 섹션으로 이동한다.
 - 1024px 미만에서는 오른쪽 패널이 화면 전체를 덮고 명시적인 닫기 버튼을 제공한다.
+- 패널은 데스크톱·모바일 모두 같은 body portal에 남아 breakpoint 전환으로 상세 state가 remount되지 않는다.
 - 최근 두 주 카드는 표의 주정산 셀 안에서 항상 `grid-cols-2`로 배치한다. 표 자체가 이미 가로 스크롤을 제공하므로 카드를 다시 세로로 접지 않는다.
 
 ## 상태와 URL
@@ -43,8 +44,8 @@ URL 동기화 분할 패널이 예측 가능성과 변경 범위의 균형이 �
 ## 컴포넌트 경계
 
 - `CashflowExportPage.tsx`: query를 소유하고 2열 레이아웃, 열기·닫기, 최근 주차 2열 배치만 담당한다.
-- `CashflowExportProjectPane.tsx`: 선택 사업을 받아 `CashflowWeekProvider` 안에서 기존 `CashflowProjectSheet`를 마운트한다. 패널이 닫히면 컴포넌트 전체가 unmount된다.
-- `CashflowProjectSheet.tsx`: 변경하지 않는다. 사업 상세의 기존 데이터·권한·mutation 계약을 그대로 사용한다.
+- `CashflowExportProjectPane.tsx`: 선택 사업을 받아 `CashflowWeekProvider` 안에서 기존 `CashflowProjectSheet`를 마운트한다. 패널이 닫히면 컴포넌트 전체가 unmount된다. 분할 열의 실제 위치·폭만 측정해 portal 패널을 정렬한다.
+- `CashflowProjectSheet.tsx`: 데이터·권한·mutation 계약은 그대로 둔다. additive `compact` layout prop(default `false`)만 두어 분할 패널에서 viewport breakpoint 기반 grid 여섯 곳을 세로로 쌓고, 기존 route의 기본 layout은 바꾸지 않는다.
 
 새 endpoint, 새 저장소 read, 새 계산은 없다. 패널이 열린 동안 기존 사업 상세가 원래 route에서 하던 요청만 수행한다.
 
@@ -63,8 +64,10 @@ URL 동기화 분할 패널이 예측 가능성과 변경 범위의 균형이 �
 - 오른쪽 패널은 `aside`와 명확한 accessible name을 가진다.
 - 닫기 버튼은 사업명을 포함한 accessible label을 사용한다.
 - Escape는 패널만 닫고 페이지를 떠나지 않는다.
+- 내부 dialog·sheet sync overlay가 열려 있으면 그 작업을 우선하며 패널을 닫지 않는다.
+- 모바일은 포커스를 패널 안에 가두고, 닫으면 원래 `사업 보기` 버튼으로 돌려보낸다.
 - 데스크톱 양쪽 영역과 모바일 패널은 키보드로 스크롤할 수 있다.
-- 유효하지 않은 project query는 빈 상세나 오류 화면을 잠깐 노출하지 않는다.
+- 유효하지 않은 project query는 빈 상세나 오류 화면을 잠깐 노출하지 않는다. 사업 명부가 비어 있지 않아 판정 가능한 경우 URL에서도 제거하며, 명부 0건과 초기 로딩이 모두 `projects=[]`인 기존 전역 계약에서는 별도 상태를 추가하지 않고 패널·상세 요청만 fail-close한다.
 - 상세 내부 오류는 기존 `CashflowProjectSheet`의 표현을 그대로 따른다.
 
 ## 검증
