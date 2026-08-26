@@ -46,6 +46,7 @@ describe('project-cic', () => {
       'CIC3',
       'CIC4',
       'DXR팀',
+      'EXR팀',
     ]);
   });
 });
