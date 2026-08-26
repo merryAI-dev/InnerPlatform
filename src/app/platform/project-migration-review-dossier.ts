@@ -1,6 +1,10 @@
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  LABOR_SETTLEMENT_BASIS_LABELS,
+  normalizeLaborSettlementBasis,
+  normalizeSettlementSystemCode,
+  SETTLEMENT_SYSTEM_LABELS,
   normalizeAccountType,
   normalizeBasis,
   normalizeProjectContractType,
@@ -43,6 +47,8 @@ export interface MigrationReviewDossier {
     basisLabel: string;
     accountTypeLabel: string;
     fundInputModeLabel: string;
+    settlementSystemLabel: string;
+    laborSettlementBasisLabel: string;
   };
   budget: {
     currencyLabel: string;
@@ -53,10 +59,14 @@ export interface MigrationReviewDossier {
     finalPaymentNote: string;
     totalRevenueAmountLabel: string;
     supportAmountLabel: string;
+    advanceInterimBelow70Reason: string;
+    finalPaymentExpectedWeek: string;
   };
   people: {
     teamName: string;
     members: string[];
+    staffingSummary: string;
+    participationSheetLink: string;
   };
   notes: {
     description: string;
@@ -117,7 +127,7 @@ const REQUEST_FIELD_LABELS: Record<string, string> = {
   name: '프로젝트명', officialContractName: '공식 계약명', type: '프로젝트 유형', status: '프로젝트 상태', phase: '프로젝트 단계',
   description: '상세 설명', clientOrg: '계약 대상', businessManagementGoogleFolderLink: '사업관리 구글 드라이브',
   participationSheetLink: '참여율 시트 링크', staffing: '실제 투입인력', department: '담당조직',
-  groupwareName: '그룹웨어명', currency: '통화', contractAmount: '계약금액', salesVatAmount: '매출부가세', totalRevenueAmount: '총수익',
+  currency: '통화', contractAmount: '계약금액', salesVatAmount: '매출부가세', totalRevenueAmount: '총수익',
   totalActualCost: '총실비(원가)', supportAmount: '총지원금', financialInputFlags: '재무 입력 상태', registrationRequirementsVersion: '등록 양식 버전',
   financialYears: '연도별 계약·재무', registrationConfirmations: '등록 확인 사항', registrationOptionalDocumentNotes: '선택 증빙 메모', checkout: '종료 확인 사항',
   contractStart: '계약 시작일', contractEnd: '계약 종료일', contractType: '계약서 유형', settlementType: '정산 유형', basis: '정산 기준',
@@ -151,7 +161,10 @@ function formatSubmittedValue(value: unknown): string {
 function buildSubmittedFields(request: ProjectRequest | null) {
   const payload = resolveProjectRequestPayload(request);
   if (!payload) return [{ key: 'payload', label: '제출 원문', value: '요청 문서가 없습니다.', wide: true, missing: true }];
-  const keys = [...Object.keys(REQUEST_FIELD_LABELS), ...Object.keys(payload).filter((key) => !(key in REQUEST_FIELD_LABELS))];
+  // 위저드에서 걷어낸 레거시 필드는 결재 문서에 그리지 않는다.
+  const hiddenKeys = new Set(['groupwareName']);
+  const keys = [...Object.keys(REQUEST_FIELD_LABELS), ...Object.keys(payload).filter((key) => !(key in REQUEST_FIELD_LABELS))]
+    .filter((key) => !hiddenKeys.has(key));
   return keys.map((key) => {
     const value = (payload as unknown as Record<string, unknown>)[key];
     const formatted = key === 'staffing' ? formatProjectStaffingSummary(value) : formatSubmittedValue(value);
@@ -352,6 +365,15 @@ export function buildMigrationReviewDossier(
       basisLabel: BASIS_LABELS[normalizeBasis(preferRequestPayloadForChange(request, project.basis, payload?.basis))] || '-',
       accountTypeLabel: ACCOUNT_TYPE_LABELS[normalizeAccountType(preferRequestPayloadForChange(request, project.accountType, payload?.accountType))] || '-',
       fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(preferRequestPayloadForChange(request, project.fundInputMode, payload?.fundInputMode))] || '-',
+      settlementSystemLabel: (() => {
+        const code = normalizeSettlementSystemCode(preferRequestPayloadForChange(request, project.settlementSystem, payload?.settlementSystem));
+        if (code === 'OTHER') {
+          const other = readable(preferRequestPayloadForChange(request, project.settlementSystemOther, payload?.settlementSystemOther), '');
+          return other ? `기타 · ${other}` : '기타';
+        }
+        return SETTLEMENT_SYSTEM_LABELS[code] || '-';
+      })(),
+      laborSettlementBasisLabel: LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(preferRequestPayloadForChange(request, project.laborSettlementBasis, payload?.laborSettlementBasis))] || '-',
     },
     budget: {
       currencyLabel: PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(preferRequestPayloadForChange(request, project.currency, payload?.currency))] || 'KRW',
@@ -365,10 +387,16 @@ export function buildMigrationReviewDossier(
       finalPaymentNote: readable(preferRequestPayloadForChange(request, project.finalPaymentNote, payload?.finalPaymentNote)),
       totalRevenueAmountLabel: formatStoredProjectAmount(preferRequestPayloadForChange(request, project.totalRevenueAmount, payload?.totalRevenueAmount)),
       supportAmountLabel: formatStoredProjectAmount(preferRequestPayloadForChange(request, project.supportAmount, payload?.supportAmount)),
+      advanceInterimBelow70Reason: readable(preferRequestPayloadForChange(request, project.advanceInterimBelow70Reason, payload?.advanceInterimBelow70Reason), ''),
+      finalPaymentExpectedWeek: readable(preferRequestPayloadForChange(request, project.finalPaymentExpectedWeek, payload?.finalPaymentExpectedWeek), ''),
     },
     people: {
       teamName: readable(currentTeamName),
       members,
+      staffingSummary: formatProjectStaffingSummary(
+        usePayloadAsCurrent ? (payload?.staffing ?? project.staffing) : (project.staffing ?? payload?.staffing),
+      ),
+      participationSheetLink: readable(preferRequestPayloadForChange(request, project.participationSheetLink, payload?.participationSheetLink), ''),
     },
     notes: {
       description: readable(preferRequestPayloadForChange(request, project.description, payload?.description)),
@@ -379,7 +407,7 @@ export function buildMigrationReviewDossier(
     audit: {
       requestSummary: readable(request?.humanSummary),
       requestVersion: request?.requestVersion ? `v${request.requestVersion}` : '-',
-      requestedByName: readable(request?.requestedByName),
+      requestedByName: readable(request?.requestedByName || payload?.registeredByName || project.registeredByName || project.managerName),
       requestedAt: formatDate(request?.requestedAt),
       requestUpdatedAt: formatDateTime(request?.updatedAt || request?.requestedAt),
       reviewedByName: readable(project.executiveReviewedByName || request?.reviewedByName),
