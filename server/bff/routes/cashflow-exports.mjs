@@ -5,7 +5,14 @@ import {
   readOptionalText,
 } from '../bff-utils.mjs';
 import { parseWithSchema, cashflowExportSchema } from '../schemas.mjs';
-import { buildCashflowExportFileName, buildCashflowExportWorkbookBuffer, expandCashflowYearMonthRange } from '../cashflow-export.mjs';
+import {
+  buildCashflowExportFileName,
+  buildCashflowExportSourceFromMirror,
+  buildCashflowExportWorkbookBuffer,
+  CashflowExportSourceUnavailableError,
+  expandCashflowYearMonthRange,
+} from '../cashflow-export.mjs';
+import { CashflowTemplateMismatchError } from '../cashflow-coordinates.mjs';
 
 function encodeContentDisposition(fileName) {
   const fallback = 'cashflow-export.xlsx';
@@ -74,16 +81,27 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
       throw createHttpError(404, '추출할 프로젝트가 없습니다.', 'not_found');
     }
 
-    const weekQuery = db.collection(`orgs/${tenantId}/cashflow_weeks`)
-      .where('yearMonth', '>=', yearMonths[0])
-      .where('yearMonth', '<=', yearMonths[yearMonths.length - 1]);
-    const weekSnap = await weekQuery.get();
-    const weeksByProject = new Map();
-    for (const doc of weekSnap.docs) {
-      const week = { id: doc.id, ...doc.data() };
-      const bucket = weeksByProject.get(week.projectId) || [];
-      bucket.push(week);
-      weeksByProject.set(week.projectId, bucket);
+    const sourceByProject = new Map();
+    try {
+      const mirrorSnapshots = await Promise.all(projects.map((project) => (
+        db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${project.id}`).get()
+      )));
+      for (let index = 0; index < projects.length; index += 1) {
+        const project = projects[index];
+        const mirrorSnapshot = mirrorSnapshots[index];
+        const mirror = mirrorSnapshot.exists ? mirrorSnapshot.data() : null;
+        sourceByProject.set(project.id, buildCashflowExportSourceFromMirror({
+          projectId: project.id,
+          mirror,
+          yearMonths,
+        }));
+      }
+    } catch (error) {
+      if (error instanceof CashflowExportSourceUnavailableError
+        || error instanceof CashflowTemplateMismatchError) {
+        throw createHttpError(409, error.message, error.code);
+      }
+      throw error;
     }
 
     const transactionProjectIds = new Set(projects.map((project) => project.id));
@@ -113,7 +131,7 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
       name: project.name,
       shortName: project.shortName,
       department: project.department,
-      weeks: weeksByProject.get(project.id) || [],
+      ...(sourceByProject.get(project.id) || {}),
       transactions: transactionsByProject.get(project.id) || [],
     }));
 

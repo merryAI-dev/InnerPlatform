@@ -3,6 +3,7 @@ import request from 'supertest';
 import ExcelJS from 'exceljs';
 import { createBffApp } from './app.mjs';
 import { createFirestoreDb } from './firestore.mjs';
+import { CASHFLOW_ALL_LINES } from './cashflow-policy.mjs';
 
 const describeIfEmulator = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
 
@@ -48,6 +49,110 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     return workbook;
   }
 
+  async function seedCashflowExportMirror({
+    targetProjectId,
+    projectionAmount = 0,
+    actualAmount = 0,
+    projectionBalance = projectionAmount,
+    actualBalance = actualAmount,
+  }: {
+    targetProjectId: string;
+    projectionAmount?: number;
+    actualAmount?: number;
+    projectionBalance?: number;
+    actualBalance?: number;
+  }) {
+    const sourceRevision = `sha256:${Buffer.from(targetProjectId).toString('hex').padEnd(64, '0').slice(0, 64)}`;
+    const cells: Array<Record<string, unknown>> = [];
+    for (const mode of ['projection', 'actual']) {
+      for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          const amount = mode === 'projection' ? projectionAmount : actualAmount;
+          const selected = weekNo === 1 && lineId === 'SALES_IN';
+          cells.push({
+            mode,
+            yearMonth: '2026-01',
+            weekNo,
+            lineId,
+            direction: lineId.endsWith('_IN') ? 'IN' : 'OUT',
+            state: selected ? (amount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+            ...(selected ? { amount } : {}),
+          });
+        }
+      }
+    }
+    const weeklyCalculationChecks = [];
+    for (const mode of ['projection', 'actual']) {
+      for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+        const amount = mode === 'projection' ? projectionAmount : actualAmount;
+        const balance = mode === 'projection' ? projectionBalance : actualBalance;
+        weeklyCalculationChecks.push({
+          mode,
+          yearMonth: '2026-01',
+          weekNo,
+          reported: {
+            openingBalance: 0,
+            depositTotal: weekNo === 1 ? amount : 0,
+            withdrawalTotal: 0,
+            balance,
+          },
+        });
+      }
+    }
+    const annualMode = (amount: number, balance: number) => ({
+      source: 'ANNUAL',
+      lineAmounts: { SALES_IN: amount },
+      lineStates: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+        lineId,
+        lineId === 'SALES_IN' ? (amount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+      ])),
+      totalIn: amount,
+      totalOut: 0,
+      net: balance,
+    });
+    const annualCells: Array<Record<string, unknown>> = [];
+    const annualDerivedCells: Array<Record<string, unknown>> = [];
+    for (const mode of ['projection', 'actual']) {
+      const amount = mode === 'projection' ? projectionAmount : actualAmount;
+      const balance = mode === 'projection' ? projectionBalance : actualBalance;
+      for (const lineId of CASHFLOW_ALL_LINES) {
+        const selected = lineId === 'SALES_IN';
+        annualCells.push({
+          mode,
+          year: 2024,
+          periodKind: 'ANNUAL',
+          lineId,
+          direction: lineId.endsWith('_IN') ? 'IN' : 'OUT',
+          state: selected ? (amount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+          ...(selected ? { amount } : {}),
+        });
+      }
+      annualDerivedCells.push(
+        { mode, year: 2024, periodKind: 'ANNUAL', derivedKind: 'deposit_total', state: amount === 0 ? 'ZERO' : 'VALUE', amount },
+        { mode, year: 2024, periodKind: 'ANNUAL', derivedKind: 'withdrawal_total', state: 'ZERO', amount: 0 },
+        { mode, year: 2024, periodKind: 'ANNUAL', derivedKind: 'balance', state: 'VALUE', amount: balance },
+      );
+    }
+    await db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${targetProjectId}`).set({
+      projectId: targetProjectId,
+      weeklyYear: 2026,
+      status: 'FRESH',
+      sourceRevision,
+      appliedSourceRevision: sourceRevision,
+      cells,
+      annualCells,
+      annualDerivedCells,
+      sheetFacts: {
+        weeklyCalculationChecks,
+        annualCashflowTotals: [{
+          year: 2024,
+          projection: annualMode(9_999, 9_999),
+          actual: annualMode(9_999, 9_999),
+        }],
+      },
+    });
+  }
+
   async function clearCollection(path: string): Promise<void> {
     const snap = await db.collection(path).get();
     if (snap.empty) return;
@@ -83,6 +188,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'members',
       'persons',
       'cashflow_weeks',
+      'cashflow_sheet_mirrors',
       'outbox_deliveries',
       'idempotency_keys',
       'relation_rules',
@@ -2269,7 +2375,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(ledgerSnap.data()?.name).toBe('전용통장 원장');
   });
 
-  it('exports non-zero cashflow values from cashflow_weeks', async () => {
+  it('exports non-zero cashflow values from the applied sheet mirror instead of stale cashflow_weeks', async () => {
     await api
       .post('/api/v1/projects')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-cashflow-project-001' })
@@ -2285,8 +2391,8 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       weekNo: 1,
       weekStart: '2025-12-31',
       weekEnd: '2026-01-06',
-      projection: { SALES_IN: 1250 },
-      actual: { SALES_IN: 900 },
+      projection: { SALES_IN: 111 },
+      actual: { SALES_IN: 222 },
       createdAt: '2026-01-02T00:00:00.000Z',
       updatedAt: '2026-01-03T00:00:00.000Z',
     });
@@ -2299,6 +2405,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       createdAt: '2026-01-05T00:00:00.000Z',
       updatedAt: '2026-01-05T00:00:00.000Z',
     }, { merge: true });
+
+    await seedCashflowExportMirror({
+      targetProjectId: 'p-cashflow-001',
+      projectionAmount: 1250,
+      actualAmount: 900,
+      projectionBalance: 6250,
+      actualBalance: 4900,
+    });
 
     const response = await downloadCashflowExport({
       scope: 'single',
@@ -2318,10 +2432,13 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     const salesRow = rows.find((row) => row[0] === '매출액(입금)');
 
     expect(salesRow).toBeTruthy();
-    expect(salesRow).toEqual([
-      '매출액(입금)',
-      1250, 0, 0, 0, 0, 1250,
+    expect(salesRow).toEqual(['매출액(입금)', 1250]);
+    expect(rows.find((row) => row[0] === '잔액')).toEqual([
+      '잔액', 6250, 6250, 6250, 6250, 6250,
     ]);
+    const salesRowNumber = worksheet.getSheetValues()
+      .findIndex((row) => Array.isArray(row) && row[1] === '매출액(입금)');
+    expect(worksheet.getCell(salesRowNumber, 7).value).toBeNull();
   });
 
   it('filters exported projects by accountType', async () => {
@@ -2376,11 +2493,17 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       updatedAt: '2026-01-04T00:00:00.000Z',
     }, { merge: true });
 
+    await seedCashflowExportMirror({
+      targetProjectId: 'p-cashflow-002a',
+      projectionAmount: 700,
+      actualAmount: 500,
+    });
+
     const response = await downloadCashflowExport({
       scope: 'all',
       accountType: 'DEDICATED',
-      startYearMonth: '2026-01',
-      endYearMonth: '2026-01',
+      startYearMonth: '2024-01',
+      endYearMonth: '2024-12',
       variant: 'multi-sheet',
     });
 
@@ -2391,13 +2514,11 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     const worksheet = workbook.getWorksheet('Dedicated Project');
     const rows = worksheet.getSheetValues().filter(Boolean).map((row) => (Array.isArray(row) ? row.slice(1) : []));
-    expect(rows[0]).toEqual(['사업', 'Dedicated Project', '사업 ID', 'p-cashflow-002a', '거래 수', 1]);
+    expect(rows[0]).toEqual(['사업', 'Dedicated Project', '사업 ID', 'p-cashflow-002a', '거래 수', 0]);
     const salesRow = rows.find((row) => row[0] === '매출액(입금)');
 
-    expect(salesRow).toEqual([
-      '매출액(입금)',
-      700, 0, 0, 0, 0, 700,
-    ]);
+    expect(salesRow).toEqual(['매출액(입금)', 700]);
+    expect(rows.find((row) => row[0] === '항목')).toEqual(['항목', '2024']);
   });
 
   it('exports only the explicitly selected project ids', async () => {
@@ -2407,6 +2528,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         .set({ ...defaultHeaders, 'idempotency-key': `idem-${id}` })
         .send({ id, name, accountType: 'NONE' });
     }
+    await seedCashflowExportMirror({ targetProjectId: 'p-selected-b' });
 
     const response = await downloadCashflowExport({
       scope: 'all',
@@ -2442,6 +2564,8 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     for (const project of projects) {
       await db.doc(`orgs/${tenantId}/projects/${project.id}`).set(project);
     }
+    await seedCashflowExportMirror({ targetProjectId: 'p-cross-a1' });
+    await seedCashflowExportMirror({ targetProjectId: 'p-cross-a2' });
 
     const response = await downloadCashflowExport({
       scope: 'selected',
@@ -2480,6 +2604,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         basis: '공급가액',
         accountType: 'NONE',
       });
+    await seedCashflowExportMirror({ targetProjectId: 'p-cashflow-legacy-basis' });
 
     const response = await downloadCashflowExport({
       scope: 'all',
