@@ -7,7 +7,9 @@ import {
   type PlatformApiClientLike,
 } from './platform-bff-client';
 
-export const PROJECT_INFO_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+export /** Vercel 본문 4.5MB - base64 팽창 여유. 넘으면 서명 URL 직접 업로드로 우회한다. */
+const DIRECT_UPLOAD_THRESHOLD_BYTES = 3 * 1024 * 1024;
+const PROJECT_INFO_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export type ProjectInfoDocumentKind =
   | 'contract'
   | 'customer_business_registration'
@@ -264,17 +266,49 @@ export function createProjectInfoDraftClient(options: {
       }
       const bytes = new Uint8Array(await input.file.arrayBuffer());
       if (bytes.byteLength !== input.file.size) throw new Error('Attachment size does not match its content');
+      const mimeType = resolveProjectDocumentMimeType(input.documentKind, input.file);
+      const common = {
+        expectedDraftRevision: revision(input.expectedDraftRevision),
+        documentKind: input.documentKind,
+        fileName: input.file.name,
+        mimeType,
+        fileSize: input.file.size,
+      };
+
+      // Vercel 서버리스는 요청 본문을 4.5MB 에서 자른다(413). base64 팽창(~33%)을 감안해
+      // 3MB 를 넘는 파일은 BFF 가 발급한 서명 URL 로 스토리지에 직접 올리고, BFF 에는
+      // 경로만 보낸다 - 검증·저장 계약은 인라인 경로와 동일하다.
+      let contentBody: Record<string, unknown>;
+      if (input.file.size > DIRECT_UPLOAD_THRESHOLD_BYTES) {
+        const session = await client.post<unknown>(`${path}/attachments/upload-url`, {
+          ...request,
+          headers: ownershipHeaders(sessionId, ownership),
+          body: {
+            documentKind: input.documentKind,
+            fileName: input.file.name,
+            mimeType,
+            fileSize: input.file.size,
+          },
+        });
+        const sessionBody = object(session.data, 'attachment upload session');
+        const uploadUrl = String(sessionBody.uploadUrl || '');
+        const storagePath = String(sessionBody.storagePath || '');
+        if (!uploadUrl || !storagePath) throw new Error('Invalid attachment upload session response');
+        const put = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'content-type': mimeType },
+          body: bytes,
+        });
+        if (!put.ok) throw new Error('파일 저장소 업로드에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+        contentBody = { ...common, storagePath };
+      } else {
+        contentBody = { ...common, contentBase64: bytesToBase64(bytes) };
+      }
+
       const response = await client.post<unknown>(`${path}/attachments`, {
         ...request,
         headers: ownershipHeaders(sessionId, ownership),
-        body: {
-          expectedDraftRevision: revision(input.expectedDraftRevision),
-          documentKind: input.documentKind,
-          fileName: input.file.name,
-          mimeType: resolveProjectDocumentMimeType(input.documentKind, input.file),
-          fileSize: input.file.size,
-          contentBase64: bytesToBase64(bytes),
-        },
+        body: contentBody,
       });
       const body = object(response.data, 'project information attachment');
       return { draft: parseDraft(body.draft, projectId), attachment: parseAttachment(body.attachment) };
