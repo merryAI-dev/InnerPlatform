@@ -194,6 +194,62 @@ describe('cashflow export bff helper', () => {
     expect(worksheet.getCell(rowFor('잔액'), 2).value).toBe(5900);
   });
 
+  it.each([
+    ['depositTotal', { depositTotal: null, withdrawalTotal: 0, balance: 777 }],
+    ['withdrawalTotal', { depositTotal: 901, withdrawalTotal: null, balance: 777 }],
+    ['balance', { depositTotal: 901, withdrawalTotal: 0, balance: null }],
+    ['all totals', { depositTotal: null, withdrawalTotal: null, balance: null }],
+  ])('copies an EMPTY declared %s as a blank without changing the other stored totals', async (_field, reported) => {
+    const mirror = completeMirror('proj-a');
+    const declared = mirror.sheetFacts.weeklyCalculationChecks.find((check) => (
+      check.mode === 'projection' && check.yearMonth === '2026-01' && check.weekNo === 1
+    ));
+    declared.reported = { ...declared.reported, ...reported };
+
+    const source = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror, yearMonths: ['2026-01'],
+    });
+    expect(source.weeks[0].projectionTotals).toEqual({
+      totalIn: reported.depositTotal,
+      totalOut: reported.withdrawalTotal,
+      balance: reported.balance,
+    });
+
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'single-project',
+      yearMonths: ['2026-01'],
+      projects: [{ id: 'proj-a', name: '빈 합계 사업', ...source }],
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('Projection');
+    const rowFor = (label) => worksheet.getSheetValues()
+      .findIndex((row) => Array.isArray(row) && row[1] === label);
+    expect(worksheet.getCell(rowFor('입금 합계'), 2).value).toBe(reported.depositTotal);
+    expect(worksheet.getCell(rowFor('출금 합계'), 2).value).toBe(reported.withdrawalTotal);
+    expect(worksheet.getCell(rowFor('잔액'), 2).value).toBe(reported.balance);
+  });
+
+  it.each([
+    ['missing', 'missing'],
+    ['undefined', undefined],
+    ['string', '0'],
+    ['boolean', false],
+    ['decimal', 0.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+  ])('rejects a %s declared weekly total instead of coercing it', (_label, invalidValue) => {
+    const mirror = completeMirror('proj-a');
+    const declared = mirror.sheetFacts.weeklyCalculationChecks[0];
+    if (invalidValue === 'missing') delete declared.reported.balance;
+    else declared.reported.balance = invalidValue;
+
+    expect(() => buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror, yearMonths: ['2026-01'],
+    })).toThrow(CashflowTemplateMismatchError);
+  });
+
   it('maps a whole annual coordinate to one stored annual column without monthly synthesis', () => {
     const { annual, weeks } = buildCashflowExportSourceFromMirror({
       projectId: 'proj-a',
