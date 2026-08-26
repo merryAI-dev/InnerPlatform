@@ -2890,8 +2890,8 @@ function storedSheetFormulaProjectionActualSummary({ projectId, mirror, comparis
       || !Number.isInteger(rowWeekNo)
       || rowWeekNo < 1
       || rowWeekNo > 5
-      || typeof rowAmount !== 'number'
-      || !Number.isSafeInteger(rowAmount)) return null;
+      || (rowAmount !== null
+        && (typeof rowAmount !== 'number' || !Number.isSafeInteger(rowAmount)))) return null;
     return { yearMonth: rowYearMonth, weekNo: rowWeekNo, amount: rowAmount };
   });
   if (rows.some((row) => !row)) return null;
@@ -2900,8 +2900,9 @@ function storedSheetFormulaProjectionActualSummary({ projectId, mirror, comparis
 
   const asOf = comparisonBoundary?.asOfWeek;
   const latest = rows
-    .filter((row) => row.yearMonth < asOf?.yearMonth
-      || (row.yearMonth === asOf?.yearMonth && row.weekNo <= asOf?.weekNo))
+    .filter((row) => row.amount !== null
+      && (row.yearMonth < asOf?.yearMonth
+        || (row.yearMonth === asOf?.yearMonth && row.weekNo <= asOf?.weekNo)))
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
     .at(-1);
   if (!latest) return null;
@@ -2912,7 +2913,7 @@ function storedSheetFormulaProjectionActualSummary({ projectId, mirror, comparis
     const value = rows.find((row) => row.yearMonth === requestedMonth && row.weekNo === weekNo);
     return { period, differenceAmount: value?.amount ?? null };
   });
-  const fromMonth = `${readWeeklyYear(mirror.weeklyYear) ?? Number(latest.yearMonth.slice(0, 4))}-01`;
+  const fromMonth = `${latest.yearMonth.slice(0, 4)}-01`;
   const settlementMatches = latest.amount === 0;
   return {
     projectId,
@@ -2941,7 +2942,15 @@ function storedMirrorCapturedAt(projectId, mirror) {
 async function readWeeklyOverviewMirrors({ db, tenantId, projectIds, comparisonBoundary, yearMonth }) {
   if (!db?.doc || typeof db.getAll !== 'function') throw new Error('cashflow mirror batch store unavailable');
   const refs = projectIds.map((projectId) => db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`));
-  const snapshots = await db.getAll(...refs);
+  const snapshots = await db.getAll(...refs, {
+    fieldMask: [
+      'projectId',
+      'weeklyYear',
+      'sourceRevision',
+      'capturedAt',
+      'sheetFacts.projectionActualDifferences',
+    ],
+  });
   if (!Array.isArray(snapshots) || snapshots.length !== projectIds.length) {
     throw new Error('cashflow mirror batch response invalid');
   }

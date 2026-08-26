@@ -985,7 +985,7 @@ describe('JVM weekly API BFF proxy', () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
-    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv, db: { ...source.db, getAll },
     });
@@ -1012,7 +1012,16 @@ describe('JVM weekly API BFF proxy', () => {
     ]);
     expect(response.body.errors).toEqual([]);
     expect(getAll).toHaveBeenCalledTimes(1);
-    expect(getAll.mock.calls[0]).toHaveLength(61);
+    expect(getAll.mock.calls[0]).toHaveLength(62);
+    expect(getAll.mock.calls[0].at(-1)).toEqual({
+      fieldMask: [
+        'projectId',
+        'weeklyYear',
+        'sourceRevision',
+        'capturedAt',
+        'sheetFacts.projectionActualDifferences',
+      ],
+    });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -1025,12 +1034,16 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource({ mirrorStatus: 'STALE' });
     const mirrorPath = 'orgs/tenant-a/cashflow_sheet_mirrors/project-a';
     const mirror = source.documents.get(mirrorPath);
+    mirror.weeklyYear = 2027;
     mirror.appliedSourceRevision = `sha256:${'f'.repeat(64)}`;
     mirror.capturedAt = '2026-08-25T07:48:00.000Z';
     mirror.sheetFacts.projectionActualDifferences = [
-      { yearMonth: '2026-08', weekNo: 4, amount: -12_345, sourceCell: 'A14' },
+      { yearMonth: '2026-08', weekNo: 2, amount: -12_345, sourceCell: 'A14' },
+      { yearMonth: '2026-08', weekNo: 3, amount: 0, sourceCell: 'B14' },
+      { yearMonth: '2026-08', weekNo: 4, amount: null, sourceCell: 'C14' },
+      { yearMonth: '2027-01', weekNo: 1, amount: 999, sourceCell: 'D14' },
     ];
-    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
     const canonical = {
       version: '1',
       yearMonth: '2026-08',
@@ -1066,8 +1079,18 @@ describe('JVM weekly API BFF proxy', () => {
         projectionActualSummary: {
           projectId: 'project-a',
           source: 'SHEET_FORMULA',
-          differenceAmount: -12_345,
-          comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
+          fromMonth: '2026-01',
+          differenceAmount: 0,
+          settlementMatches: true,
+          comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 3 },
+          display: {
+            periodLabel: '누적 2026-01~2026-08 3주차',
+          },
+          periods: expect.arrayContaining([
+            { period: 'WEEK_2', differenceAmount: -12_345 },
+            { period: 'WEEK_3', differenceAmount: 0 },
+            { period: 'WEEK_4', differenceAmount: null },
+          ]),
         },
       }],
       errors: [{ projectId: 'project-a', code: 'STATUS_UNAVAILABLE' }],
@@ -1097,6 +1120,11 @@ describe('JVM weekly API BFF proxy', () => {
         { yearMonth: '2026-08', weekNo: '4', amount: 1 },
       ];
     }],
+    ['malformed projection amount', (mirror) => {
+      mirror.sheetFacts.projectionActualDifferences = [
+        { yearMonth: '2026-08', weekNo: 4, amount: '1' },
+      ];
+    }],
     ['future-only projection rows', (mirror) => {
       mirror.sheetFacts.projectionActualDifferences = [
         { yearMonth: '2026-09', weekNo: 1, amount: 1 },
@@ -1110,7 +1138,7 @@ describe('JVM weekly API BFF proxy', () => {
     const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     mirror.capturedAt = '2026-08-25T07:48:00.000Z';
     mutateMirror(mirror, source);
-    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
     const canonical = {
       version: '1', yearMonth: '2026-08',
       items: [{
@@ -1182,7 +1210,7 @@ describe('JVM weekly API BFF proxy', () => {
     mirror.sheetFacts.projectionActualDifferences = [
       { yearMonth: '2026-08', weekNo: 4, amount: 77 },
     ];
-    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
     const canonical = {
       version: '1', yearMonth: '2026-08',
       items: [{
