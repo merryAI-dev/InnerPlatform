@@ -199,6 +199,30 @@ export function createProjectRegistrationDraftClient(options: {
       return parseDraftBody(response.data);
     },
 
+    /** 내가 임시저장한 진행 중 등록 초안 요약 목록. 이어서 작성할 초안을 고르는 용도. */
+    async list() {
+      const response = await client.get<unknown>('/api/v1/project-registration-drafts', {
+        ...request,
+        headers: sessionHeaders,
+      });
+      const body = requireObject(response.data, 'draft list');
+      const rows = Array.isArray(body.drafts) ? body.drafts : [];
+      return {
+        drafts: rows.flatMap((row) => {
+          if (!row || typeof row !== 'object') return [];
+          const entry = row as Record<string, unknown>;
+          const draftId = typeof entry.draftId === 'string' ? entry.draftId.trim() : '';
+          if (!draftId) return [];
+          return [{
+            draftId,
+            name: typeof entry.name === 'string' ? entry.name : '',
+            updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : '',
+            stepIndex: typeof entry.stepIndex === 'number' && Number.isInteger(entry.stepIndex) ? entry.stepIndex : 0,
+          }];
+        }),
+      };
+    },
+
     async save(
       draftId: string,
       ownership: { leaseId: string; fence: number },

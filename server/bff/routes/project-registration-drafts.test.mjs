@@ -42,6 +42,31 @@ function createDb(seed = {}) {
     };
   }
 
+  function collection(collectionPath) {
+    const prefix = `${collectionPath}/`;
+    const state = { filters: [], limit: Infinity };
+    const query = {
+      where(field, op, value) {
+        if (op !== '==') throw new Error('mock collection only supports ==');
+        state.filters.push([field, value]);
+        return query;
+      },
+      limit(count) {
+        state.limit = count;
+        return query;
+      },
+      async get() {
+        const docs = [...documents.entries()]
+          .filter(([docPath]) => docPath.startsWith(prefix) && !docPath.slice(prefix.length).includes('/'))
+          .map(([docPath, value]) => ({ id: docPath.slice(prefix.length), data: () => clone(value) }))
+          .filter((docRef) => state.filters.every(([field, value]) => (docRef.data() || {})[field] === value))
+          .slice(0, state.limit);
+        return { docs };
+      },
+    };
+    return query;
+  }
+
   async function runAttempt(callback, commit) {
     const writes = [];
     const tx = {
@@ -69,6 +94,7 @@ function createDb(seed = {}) {
   return {
     documents,
     doc,
+    collection,
     retryNextTransaction(beforeSecondAttempt) {
       retryBeforeSecondAttempt = beforeSecondAttempt || (() => undefined);
     },
@@ -675,6 +701,37 @@ describe('project registration draft service', () => {
       expectedDraftRevision: 0,
       payload: validRegistrationV2Payload(payloadOverrides),
     })).resolves.toMatchObject({ status: 200 });
+  });
+
+  it('lists only my active registration drafts, newest first', async () => {
+    const h = createHarness();
+    const row = (overrides) => ({
+      ownerUid: 'actor-a', ownerId: 'actor-a', tenantId: 'tenant-a',
+      resourceType: 'project-registration', draftRevision: 1, status: 'ACTIVE',
+      payload: { name: '' }, stepIndex: 2,
+      createdAt: '2026-08-20T00:00:00.000Z', updatedAt: '2026-08-20T00:00:00.000Z',
+      ...overrides,
+    });
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-old', row({
+      resourceId: 'draft-old', payload: { name: '지난주 초안' }, updatedAt: '2026-08-20T09:00:00.000Z',
+    }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-new', row({
+      resourceId: 'draft-new', payload: { name: '' }, updatedAt: '2026-08-25T09:00:00.000Z',
+    }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-submitted', row({
+      resourceId: 'draft-submitted', status: 'SUBMITTED', updatedAt: '2026-08-26T09:00:00.000Z',
+    }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-other-user', row({
+      resourceId: 'draft-other-user', ownerUid: 'actor-b', ownerId: 'actor-b', updatedAt: '2026-08-26T09:00:00.000Z',
+    }));
+
+    const listed = await h.service.listMine({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-list',
+    });
+    expect(listed.drafts).toEqual([
+      { draftId: 'draft-new', name: '', updatedAt: '2026-08-25T09:00:00.000Z', stepIndex: 2 },
+      { draftId: 'draft-old', name: '지난주 초안', updatedAt: '2026-08-20T09:00:00.000Z', stepIndex: 2 },
+    ]);
   });
 
   it('atomically submits only the stored private draft and replays after releasing the lease', async () => {
