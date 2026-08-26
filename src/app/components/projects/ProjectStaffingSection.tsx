@@ -11,7 +11,6 @@ import {
   FIELD_W_MD,
   FIELD_W_SM,
   FORM_CONTROL_CLASS,
-  ProjectFormFieldPair,
   ProjectFormRow,
   ProjectFormSection,
 } from './project-form-layout';
@@ -118,14 +117,12 @@ export function ProjectStaffingSection({
     >
       {loadError ? <p className="text-[11px] text-amber-700">{loadError}</p> : null}
 
-      <ProjectFormFieldPair>
-        <ProjectFormRow label="총괄책임자" note="사업 최종 책임자">
-          {picker(staffing.lead, (slot) => patch({ lead: slot }))}
-        </ProjectFormRow>
-        <ProjectFormRow label="실무책임자" note="실무 책임자 (PM)">
-          {picker(staffing.pm, (slot) => patch({ pm: slot }))}
-        </ProjectFormRow>
-      </ProjectFormFieldPair>
+      <ProjectFormRow label="총괄책임자" note="사업 최종 책임자">
+        {picker(staffing.lead, (slot) => patch({ lead: slot }))}
+      </ProjectFormRow>
+      <ProjectFormRow label="실무책임자" note="실무 책임자 (PM)">
+        {picker(staffing.pm, (slot) => patch({ pm: slot }))}
+      </ProjectFormRow>
 
       {operatorSlots.map((slot, index) => (
         <ProjectFormRow
