@@ -850,7 +850,12 @@ function assertRegistrationFinancials(payload, type) {
   if (type !== 'I1') {
     const contractStart = readOptionalText(payload.contractStart);
     const contractEnd = readOptionalText(payload.contractEnd);
-    if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+    // 종료 기간 없음(무기한)은 명시 플래그가 있을 때만 - 종료일이 함께 오면 모순이라 거부한다.
+    if (payload.contractEndUndecided === true) {
+      if (!isRealIsoDate(contractStart) || contractEnd) {
+        invalidRegistration('Project registration contract dates are invalid');
+      }
+    } else if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
       invalidRegistration('Project registration contract dates are invalid');
     }
   }
@@ -1342,11 +1347,19 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
 
   const contractStart = readOptionalText(payload.contractStart);
   const contractEnd = readOptionalText(payload.contractEnd);
-  if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+  const contractEndUndecided = payload.contractEndUndecided === true;
+  if (contractEndUndecided) {
+    if (!isRealIsoDate(contractStart) || contractEnd) {
+      invalidRegistration('Project registration v2 contract dates are invalid');
+    }
+  } else if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
     invalidRegistration('Project registration v2 contract dates are invalid');
   }
   const startYear = Number(contractStart.slice(0, 4));
-  const endYear = Number(contractEnd.slice(0, 4));
+  // 종료 기간 없음이면 재무 계획은 시작연도~현재 연도까지를 요구한다.
+  const endYear = contractEndUndecided
+    ? Math.max(startYear, new Date().getFullYear())
+    : Number(contractEnd.slice(0, 4));
   if (endYear - startYear > 20) {
     invalidRegistration('Project registration financialYears are invalid');
   }
@@ -1632,6 +1645,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     checkout: normalizeProjectCheckout(payload.checkout, settlementDetailsEnabled),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
+    contractEndUndecided: payload.contractEndUndecided === true ? true : undefined,
     contractType: normalizeProjectContractType(payload.contractType),
     settlementType,
     basis,
@@ -1814,6 +1828,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     checkout: pickValue('checkout'),
     contractStart: pickText('contractStart'),
     contractEnd: pickText('contractEnd'),
+    contractEndUndecided: pickValue('contractEndUndecided') === true ? true : undefined,
     contractType: normalizeProjectContractType(pickText('contractType')),
     settlementType,
     basis: Number(pickValue('registrationRequirementsVersion')) === 2 || settlementDetailsEnabled ? basis : 'NONE',
@@ -1983,6 +1998,9 @@ function buildProjectPatchFromChangeRequestPayloadInternal(payload = {}, current
     checkout: normalizeProjectCheckout(payload.checkout, settlementDetailsEnabled),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
+    contractEndUndecided: Object.hasOwn(payload, 'contractEndUndecided')
+      ? (payload.contractEndUndecided === true ? true : undefined)
+      : (currentProject.contractEndUndecided === true ? true : undefined),
     contractType: normalizeProjectContractType(payload.contractType),
     settlementType,
     basis: registrationVersion === 2 || settlementDetailsEnabled ? basis : 'NONE',
@@ -2061,6 +2079,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   contractType: '계약서 유형',
   contractStart: '계약 시작일',
   contractEnd: '계약 종료일',
+  contractEndUndecided: '종료 기간 없음',
   currency: '통화',
   contractAmount: '계약금액',
   salesVatAmount: '총매출부가세',
@@ -2115,7 +2134,7 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'participationSheetLink',
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
   'totalRevenueAmount', 'totalActualCost', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
-  'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
+  'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd', 'contractEndUndecided',
   'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem', 'settlementSystemOther',
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
   'paymentExpectedMonths', 'finalPaymentExpectedWeek', 'interestRefundPolicy', 'quoteSubmissionDeferred',
@@ -2133,6 +2152,7 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
 
 function projectInfoChangeValue(value) {
   if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'boolean') return value ? '예' : '아니오';
   if (typeof value === 'object') {
     if (readOptionalText(value?.name)) return readOptionalText(value.name);
     return JSON.stringify(value);

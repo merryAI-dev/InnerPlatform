@@ -359,7 +359,13 @@ export function buildMigrationReviewDossier(
     },
     contract: {
       projectTypeLabel: PROJECT_TYPE_LABELS[normalizeProjectType(preferRequestPayloadForChange(request, project.type, payload?.type))] || readable(project.type || payload?.type),
-      periodLabel: `${readable(preferRequestPayloadForChange(request, project.contractStart, payload?.contractStart))} ~ ${readable(preferRequestPayloadForChange(request, project.contractEnd, payload?.contractEnd))}`,
+      periodLabel: (() => {
+        const start = readable(preferRequestPayloadForChange(request, project.contractStart, payload?.contractStart));
+        const openEnded = (usePayloadAsCurrent ? payload?.contractEndUndecided : (project.contractEndUndecided ?? payload?.contractEndUndecided)) === true;
+        const end = readable(preferRequestPayloadForChange(request, project.contractEnd, payload?.contractEnd));
+        // 종료 기간 없음(명시 플래그)은 미입력('-')과 다른 상태라 다르게 적는다.
+        return `${start} ~ ${openEnded ? '종료 기간 없음' : end}`;
+      })(),
       contractType: readable(normalizeProjectContractType(preferRequestPayloadForChange(request, project.contractType, payload?.contractType))),
       settlementTypeLabel: SETTLEMENT_TYPE_LABELS[normalizeSettlementType(preferRequestPayloadForChange(request, project.settlementType, payload?.settlementType))] || '-',
       basisLabel: BASIS_LABELS[normalizeBasis(preferRequestPayloadForChange(request, project.basis, payload?.basis))] || '-',

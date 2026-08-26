@@ -698,6 +698,7 @@ export interface Project {
   contractAmount: number;        // 총 사업비 금액(매출부가세 포함)
   contractStart: string;
   contractEnd: string;
+  contractEndUndecided?: boolean;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;      // 전용통장/운영통장
@@ -951,6 +952,7 @@ export interface ProjectRequestPayload {
   checkout?: ProjectCheckout;
   contractStart: string;
   contractEnd: string;
+  contractEndUndecided?: boolean;
   contractType?: string;
   settlementType: SettlementType;
   basis: Basis;
