@@ -203,6 +203,7 @@ type PortalTimelineNode = {
   kind: 'weekly' | 'monthly' | 'monthly-executed' | 'project-end';
   label: string;
   statusLabel: string;
+  periodLabel?: string;
   tone: PortalTimelineTone;
   current: boolean;
 };
@@ -1684,6 +1685,7 @@ export function CashflowProjectSheet({
           kind: 'weekly',
           label: `${week.label} 주정산`,
           statusLabel: week.statusLabel || '확인 불가',
+          periodLabel: `${week.weekStart} ~ ${week.weekEnd}`,
           tone: week.surfaceTone,
           current: week.isCurrent,
         };
@@ -3404,6 +3406,7 @@ export function CashflowProjectSheet({
                     <div className={`min-h-10 text-[12px] leading-4 ${portalTimelineTextClass(node.tone)}`}>
                       {node.label}
                       <div className="mt-0.5">{node.statusLabel}</div>
+                      {node.periodLabel ? <div className="mt-0.5 text-slate-500">{node.periodLabel}</div> : null}
                     </div>
                     <span className={`mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full border text-[12px] font-bold ${portalTimelineDotClass(node.tone)}`}>
                       {node.tone === 'closed' || node.tone === 'success' ? '✓' : node.tone === 'danger' ? '!' : node.tone === 'warning' ? '…' : '·'}
