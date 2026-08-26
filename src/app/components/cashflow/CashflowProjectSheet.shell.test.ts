@@ -401,10 +401,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(cashflowTables).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
   });
 
-  it('shows week codes without redundant date ranges in both cashflow tables', () => {
+  it('keeps cashflow tables compact and shows server-owned date ranges in the practitioner timeline', () => {
     expect(source).toContain('{week.label}');
     expect(source).not.toContain('formatShortWeekRange');
     expect(source).not.toContain('week.weekStart.slice(5)');
+    expect(source).toContain('periodLabel: `${week.weekStart} ~ ${week.weekEnd}`');
+    expect(source).toContain('node.periodLabel ? <div className="mt-0.5 text-slate-500">{node.periodLabel}</div> : null');
   });
 
   it('keeps monthly labels while making a closed month a gray locked column group', () => {

@@ -46,6 +46,7 @@ import {
   readCashflowCumulativeCloseAuthority,
 } from '../cashflow-close-calendar.mjs';
 import {
+  cashflowSettlementYearMonthForRequest,
   cashflowMonthCloseRequestAuditPath,
   cashflowMonthCloseRequestPath,
   withdrawPendingCumulativeCloseRequest,
@@ -441,6 +442,14 @@ function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvail
   if (requestStatus === 'REOPEN_REQUESTED') return { statusLabel: '재오픈 승인 대기', tone: 'warning' };
   if (requestStatus === 'REOPENED') return { statusLabel: '재결산 필요', tone: 'warning' };
   if (requestStatus === 'REJECTED') return { statusLabel: '월 결산 반려', tone: 'danger' };
+  if (requestStatus === 'APPROVED') {
+    return {
+      status: 'COMPLETED',
+      statusLabel: '월 결산 완료',
+      tone: 'success',
+      approvedAt: readOptionalText(requestRecord?.reviewedAt),
+    };
+  }
   const canonicalStatus = readOptionalText(settlementStatus?.status);
   if (canonicalStatus === 'COMPLETED') {
     return {
@@ -460,7 +469,7 @@ function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvail
   if (['PENDING', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)) {
     return { statusLabel: '조직장 승인 대기', tone: 'warning' };
   }
-  if (requestStatus === 'APPROVED' || (!requestRecord && readOptionalText(close?.status) === 'CLOSED')) {
+  if (!requestRecord && readOptionalText(close?.status) === 'CLOSED') {
     return { statusLabel: '월 결산 완료', tone: 'success' };
   }
   return { statusLabel: '결산 전', tone: 'neutral' };
@@ -5076,6 +5085,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   async function persistCumulativeMonthCloseRequest({ req, prepared, approverUid, expectedApproverUid, expectedProjectVersion }) {
     const yearMonth = readOptionalText(prepared.closeBody.yearMonth);
     const cumulativeMonths = cumulativeCloseMonths(yearMonth);
+    const settlementYearMonth = cumulativeMonths.at(-1);
     const requestId = `${prepared.rawProjectId}-${yearMonth}`;
     const sourceMonths = new Map((Array.isArray(prepared.cashflow?.readModel?.months) ? prepared.cashflow.readModel.months : [])
       .map((month) => [readOptionalText(month?.yearMonth), month]));
@@ -5132,7 +5142,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     };
     let preserveLegacyShape = false;
     return db.runTransaction(async (transaction) => {
-      const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${yearMonth}`);
+      const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${settlementYearMonth}`);
       const [projectSnapshot, approverSnapshot, requesterSnapshot, requestSnapshot, settlementStatusSnapshot] = await Promise.all([
         transaction.get(db.doc(`orgs/${req.context.tenantId}/projects/${prepared.rawProjectId}`)),
         transaction.get(db.doc(`orgs/${req.context.tenantId}/members/${approverUid}`)),
@@ -5285,7 +5295,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         transaction.set(settlementStatusRef, {
           tenantId: req.context.tenantId,
           projectId: prepared.rawProjectId,
-          yearMonth,
+          yearMonth: settlementYearMonth,
           periods: {
             ...settlementPeriods,
             MONTH: {
@@ -5990,7 +6000,8 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     const projectRef = db.doc(`orgs/${req.context.tenantId}/projects/${projectId}`);
     const reviewerRef = db.doc(`orgs/${req.context.tenantId}/members/${req.context.actorId}`);
-    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${projectId}-${initialRecord.yearMonth}`);
+    const settlementYearMonth = cashflowSettlementYearMonthForRequest(initialRecord);
+    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${projectId}-${settlementYearMonth}`);
     const reviewedAt = now().toISOString();
     const completeMonthSettlement = (transaction, snapshot) => {
       const status = snapshot.exists ? snapshot.data() || {} : {};
@@ -5999,7 +6010,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       transaction.set(settlementStatusRef, {
         tenantId: req.context.tenantId,
         projectId,
-        yearMonth: initialRecord.yearMonth,
+        yearMonth: settlementYearMonth,
         periods: {
           ...periods,
           MONTH: {

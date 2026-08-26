@@ -1311,7 +1311,7 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
-  it('uses the canonical month settlement status for an executed-cycle approval', async () => {
+  it('unifies canonical and approved workflow status for an executed-cycle approval', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
       requestId: 'project-a-2026-08',
@@ -1350,6 +1350,26 @@ describe('JVM weekly API BFF proxy', () => {
       now: () => new Date('2026-08-25T07:00:00.000Z'),
     });
 
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.presentation.monthClose).toEqual({
+          status: 'COMPLETED',
+          statusLabel: '월 결산 완료',
+          tone: 'success',
+          approvedAt: '2026-08-25T06:45:00.000Z',
+        });
+      });
+
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
+      ...source.documents.get('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08'),
+      status: 'APPROVED',
+      reviewedAt: '2026-08-25T06:45:00.000Z',
+    });
+    canonicalSettlementStatuses.items[0] = {
+      period: 'MONTH', status: 'WAITING_FOR_UPDATE', approvedAt: '', approvedBy: '', revision: 0,
+    };
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
       .expect(200)
@@ -7170,6 +7190,9 @@ describe('JVM weekly API BFF proxy', () => {
       status: 'APPROVED', revision: 1,
       monthCloseResult: { status: 'CLOSED', revision: 1, auditId: 'audit-cumulative-close-1' },
     });
+    expect(source.documents.get('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-05').periods.MONTH)
+      .toMatchObject({ status: 'COMPLETED', approvedBy: 'finance-1' });
+    expect(source.documents.has('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-06')).toBe(false);
   });
 
   it('keeps the canonical cumulative close committed when the optional Slack publication fails', async () => {
@@ -7769,8 +7792,9 @@ describe('JVM weekly API BFF proxy', () => {
         }),
       ]),
     }));
-    const settlementPath = 'orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08';
+    const settlementPath = 'orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07';
     expect(source.documents.get(settlementPath).periods.MONTH).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(source.documents.has('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08')).toBe(false);
     const withdrawPayload = {
       expectedRevision: created.body.revision,
       expectedManifestHash: created.body.manifestHash,
