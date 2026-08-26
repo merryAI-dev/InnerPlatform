@@ -1971,4 +1971,75 @@ describe('project information private drafts', () => {
       documentKind: 'tax_invoice',
     }));
   });
+  it('issues a signed upload URL and accepts a storagePath attachment through the same contract', async () => {
+    const readIncomingUpload = vi.fn(async () => ({ buffer: VALID_PDF }));
+    const deleteIncomingUpload = vi.fn(async () => undefined);
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+      createIncomingUploadUrl: vi.fn(async (input) => ({
+        uploadUrl: 'https://storage.example/signed-put',
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/incoming/uuid-${input.fileName}`,
+        expiresAt: '2026-07-12T00:10:00.000Z',
+      })),
+      readIncomingUpload,
+      deleteIncomingUpload,
+    };
+    const h = harness({ storageService });
+    await openedDraft(h, 'open-direct');
+
+    const issued = await h.service.issueAttachmentUploadUrl({
+      ...h.base,
+      idempotencyKey: 'upload-url-direct',
+      documentKind: 'contract',
+      fileName: 'big-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+    });
+    expect(issued.status).toBe(200);
+    expect(issued.body.uploadUrl).toBe('https://storage.example/signed-put');
+    const { storagePath } = issued.body;
+    expect(storagePath).toContain('/incoming/');
+
+    const uploaded = await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'upload-direct',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'big-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      storagePath,
+    });
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.body.attachment.size).toBe(VALID_PDF.byteLength);
+    expect(readIncomingUpload).toHaveBeenCalledWith(expect.objectContaining({ path: storagePath }));
+    expect(deleteIncomingUpload).toHaveBeenCalledWith(expect.objectContaining({ path: storagePath }));
+  });
+
+  it('rejects a storagePath attachment when the direct upload cannot be found', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async () => { throw new Error('unexpected'); }),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+      readIncomingUpload: vi.fn(async () => { throw new Error('missing'); }),
+    };
+    const h = harness({ storageService });
+    await openedDraft(h, 'open-direct-missing');
+    await expect(h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'upload-direct-missing',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'big-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      storagePath: 'orgs/tenant-a/project-registration-drafts/x/incoming/uuid-big-contract.pdf',
+    })).rejects.toMatchObject({ code: 'draft_attachment_incoming_missing' });
+  });
 });

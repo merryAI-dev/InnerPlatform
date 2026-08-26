@@ -99,6 +99,57 @@ describe('project information draft client', () => {
     expect(submitted).toMatchObject({ status: 'SUBMITTED', projectVersion: 4 });
   });
 
+  it('uploads files over the direct-upload threshold via a signed URL instead of base64', async () => {
+    const size = 4 * 1024 * 1024;
+    const api = {
+      post: vi.fn()
+        .mockResolvedValueOnce({ data: {
+          uploadUrl: 'https://storage.example/signed-put',
+          storagePath: 'orgs/mysc/project-registration-drafts/draft-a/incoming/uuid-big.docx',
+          expiresAt: '2026-08-26T00:10:00.000Z',
+        } })
+        .mockResolvedValueOnce({ data: {
+          draft: { ...DRAFT, draftRevision: 3 },
+          attachment: {
+            attachmentId: 'attachment-b', documentKind: 'proposal_word_original', path: 'private/big.docx',
+            name: 'big.docx', size, contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          },
+        } }),
+    } as unknown as ProjectInfoDraftApiClient;
+    const fetchMock = vi.fn(async () => ({ ok: true })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const client = createProjectInfoDraftClient({
+        tenantId: 'mysc',
+        actor: { uid: 'actor-a', role: 'pm', idToken: 'token-a' },
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        projectId: 'project-a',
+        client: api,
+      });
+      await client.upload({ leaseId: 'lease-a', fence: 3 }, {
+        expectedDraftRevision: 2,
+        documentKind: 'proposal_word_original',
+        file: {
+          name: 'big.docx',
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          size,
+          arrayBuffer: async () => new Uint8Array(size).buffer,
+        },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const path = '/api/v1/project-info-drafts/project-a';
+    expect(api.post).toHaveBeenNthCalledWith(1, `${path}/attachments/upload-url`, expect.objectContaining({
+      body: expect.objectContaining({ documentKind: 'proposal_word_original', fileSize: size }),
+    }));
+    expect(fetchMock).toHaveBeenCalledWith('https://storage.example/signed-put', expect.objectContaining({ method: 'PUT' }));
+    const confirmBody = (api.post as ReturnType<typeof vi.fn>).mock.calls[1][1].body;
+    expect(confirmBody.storagePath).toBe('orgs/mysc/project-registration-drafts/draft-a/incoming/uuid-big.docx');
+    expect(confirmBody.contentBase64).toBeUndefined();
+  });
+
   it('rejects unsafe project IDs and ownership before making requests', async () => {
     const { api } = harness();
     expect(() => createProjectInfoDraftClient({

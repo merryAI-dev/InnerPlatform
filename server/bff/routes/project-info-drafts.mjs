@@ -18,6 +18,7 @@ import {
   parseWithSchema,
   projectDraftAttachmentDeleteSchema,
   projectInfoDraftAttachmentSchema,
+  projectInfoDraftAttachmentUploadUrlSchema,
   projectInfoDraftOpenSchema,
   projectInfoDraftPatchSchema,
   projectInfoDraftRebaseSchema,
@@ -1021,9 +1022,24 @@ export function createProjectInfoDraftService({
       }
       const current = context(input);
       const expectedDraftRevision = Number(input?.expectedDraftRevision);
-      const buffer = Buffer.isBuffer(input?.buffer)
+      let buffer = Buffer.isBuffer(input?.buffer)
         ? input.buffer
         : (input?.buffer instanceof Uint8Array ? Buffer.from(input.buffer) : null);
+      // 큰 파일은 서명 URL 로 스토리지에 직접 올라온다(Vercel 본문 4.5MB 우회). 여기서는
+      // 그 경로를 읽어 같은 검증·저장 경로를 태운다 - 전송 수단만 다르고 계약은 같다.
+      const incomingPath = !buffer && input?.storagePath ? String(input.storagePath) : null;
+      if (incomingPath) {
+        if (!draftStorageService?.readIncomingUpload) {
+          throw createHttpError(503, '대용량 첨부 업로드가 아직 켜져 있지 않습니다.', 'draft_attachment_direct_unavailable');
+        }
+        try {
+          ({ buffer } = await draftStorageService.readIncomingUpload({
+            tenantId: current.tenantId, draftId: current.draftDocumentId, path: incomingPath,
+          }));
+        } catch {
+          throw createHttpError(422, '업로드된 파일을 찾지 못했습니다. 다시 업로드해 주세요.', 'draft_attachment_incoming_missing');
+        }
+      }
       if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0 || !buffer?.length) {
         throw createHttpError(400, 'Attachment request is invalid', 'draft_attachment_invalid');
       }
@@ -1170,11 +1186,40 @@ export function createProjectInfoDraftService({
             }
           }));
         }
+        if (incomingPath) {
+          await draftStorageService.deleteIncomingUpload?.({
+            tenantId: current.tenantId, draftId: current.draftDocumentId, path: incomingPath,
+          }).catch(() => {});
+        }
         return outcome;
       } catch (error) {
         await cleanup();
         throw error;
       }
+    },
+
+    /** 서명 URL 발급. 소유권(리스)·역할·이름/종류/크기를 먼저 확인하고 10분짜리 PUT URL 을 준다. */
+    async issueAttachmentUploadUrl(input) {
+      if (!draftStorageService?.createIncomingUploadUrl) {
+        throw createHttpError(503, '대용량 첨부 업로드가 아직 켜져 있지 않습니다.', 'draft_attachment_direct_unavailable');
+      }
+      const current = context(input);
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!DOCUMENT_KINDS.includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
+      const fileName = requiredText(input?.fileName, 'fileName');
+      const mimeType = requiredText(input?.mimeType, 'mimeType');
+      await db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const { draft } = await ownedDraft(tx, current);
+        assertActive(draft);
+        await assertLease(tx, current, nowDate);
+      });
+      const session = await draftStorageService.createIncomingUploadUrl({
+        tenantId: current.tenantId, draftId: current.draftDocumentId, fileName, mimeType,
+      });
+      return { status: 200, body: { uploadUrl: session.uploadUrl, storagePath: session.path, expiresAt: session.expiresAt } };
     },
 
     async removeAttachment(input) {
@@ -1540,12 +1585,22 @@ export function mountProjectInfoDraftRoutes(app, {
     }));
   }));
 
+  app.post('/api/v1/project-info-drafts/:projectId/attachments/upload-url', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'request a project information draft upload URL');
+    const parsed = parseWithSchema(projectInfoDraftAttachmentUploadUrlSchema, req.body);
+    sendOutcome(res, await projectInfoDraftService.issueAttachmentUploadUrl({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req),
+      ...parsed,
+    }));
+  }));
+
   app.post('/api/v1/project-info-drafts/:projectId/attachments', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'attach a project information draft file');
     const parsed = parseWithSchema(projectInfoDraftAttachmentSchema, req.body);
     sendOutcome(res, await projectInfoDraftService.addAttachment({
       ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req),
-      ...parsed, buffer: decodeBase64(parsed.contentBase64, parsed.fileSize),
+      ...parsed,
+      buffer: parsed.contentBase64 ? decodeBase64(parsed.contentBase64, parsed.fileSize) : undefined,
     }));
   }));
 

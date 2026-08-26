@@ -21,13 +21,30 @@ export const projectRegistrationDraftPatchSchema = z.object({
   stepIndex: z.number().int().nonnegative().optional(),
 }).strict();
 
-export const projectRegistrationDraftAttachmentSchema = z.object({
+// 내용은 둘 중 하나로 온다: 작은 파일은 base64 인라인, 큰 파일은 서명 URL 로 스토리지에
+// 직접 올린 뒤 그 경로(storagePath). Vercel 요청 본문 4.5MB 한도 때문에 큰 파일은
+// 인라인으로 올 수 없다.
+const projectDraftAttachmentBaseSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
   documentKind: z.enum(PROJECT_REGISTRATION_DOCUMENT_KINDS),
   fileName: NON_EMPTY_STRING.max(300),
   mimeType: NON_EMPTY_STRING.max(200),
   fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
-  contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH),
+  contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH).optional(),
+  storagePath: NON_EMPTY_STRING.max(1024).optional(),
+}).strict();
+const exactlyOneContent = (value) => Boolean(value.contentBase64) !== Boolean(value.storagePath);
+const exactlyOneContentMessage = { message: 'contentBase64 또는 storagePath 중 정확히 하나가 필요합니다.' };
+
+export const projectRegistrationDraftAttachmentSchema = projectDraftAttachmentBaseSchema
+  .refine(exactlyOneContent, exactlyOneContentMessage);
+
+/** 서명 URL 발급 요청. 내용 없이 이름·종류·크기만 미리 검증한다. */
+export const projectRegistrationDraftAttachmentUploadUrlSchema = z.object({
+  documentKind: z.enum(PROJECT_REGISTRATION_DOCUMENT_KINDS),
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
 }).strict();
 
 export const projectDraftAttachmentDeleteSchema = z.object({
@@ -46,7 +63,11 @@ export const projectInfoDraftPatchSchema = z.object({
   stepIndex: z.number().int().nonnegative().optional(),
 }).strict();
 
-export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachmentSchema.extend({
+export const projectInfoDraftAttachmentSchema = projectDraftAttachmentBaseSchema.extend({
+  documentKind: z.enum(PROJECT_INFO_DOCUMENT_KINDS),
+}).refine(exactlyOneContent, exactlyOneContentMessage);
+
+export const projectInfoDraftAttachmentUploadUrlSchema = projectRegistrationDraftAttachmentUploadUrlSchema.extend({
   documentKind: z.enum(PROJECT_INFO_DOCUMENT_KINDS),
 });
 
