@@ -8,7 +8,10 @@ import { Button } from '../ui/button';
 import { MemberPicker } from '../ui/member-picker';
 import { cn } from '../ui/utils';
 import {
+  FIELD_W_MD,
+  FIELD_W_SM,
   FORM_CONTROL_CLASS,
+  ProjectFormFieldPair,
   ProjectFormRow,
   ProjectFormSection,
 } from './project-form-layout';
@@ -98,7 +101,7 @@ export function ProjectStaffingSection({
 
   const picker = (slot: ProjectStaffingSlot | null, apply: (next: ProjectStaffingSlot | null) => void) => (
     <MemberPicker
-      className={cn('w-full', FORM_CONTROL_CLASS)}
+      className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}
       options={options}
       value={slot?.personId || ''}
       placeholder="인력 명부에서 선택 (미정 가능)"
@@ -115,12 +118,14 @@ export function ProjectStaffingSection({
     >
       {loadError ? <p className="text-[11px] text-amber-700">{loadError}</p> : null}
 
-      <ProjectFormRow label="총괄책임자" note="사업 최종 책임자">
-        {picker(staffing.lead, (slot) => patch({ lead: slot }))}
-      </ProjectFormRow>
-      <ProjectFormRow label="실무책임자" note="실무 책임자 (PM)">
-        {picker(staffing.pm, (slot) => patch({ pm: slot }))}
-      </ProjectFormRow>
+      <ProjectFormFieldPair>
+        <ProjectFormRow label="총괄책임자" note="사업 최종 책임자">
+          {picker(staffing.lead, (slot) => patch({ lead: slot }))}
+        </ProjectFormRow>
+        <ProjectFormRow label="실무책임자" note="실무 책임자 (PM)">
+          {picker(staffing.pm, (slot) => patch({ pm: slot }))}
+        </ProjectFormRow>
+      </ProjectFormFieldPair>
 
       {operatorSlots.map((slot, index) => (
         <ProjectFormRow
@@ -176,7 +181,7 @@ export function ProjectStaffingSection({
           onValueChange={(value) => patch({ settlementSupport: value === 'NONE' ? '' : value })}
           disabled={disabled}
         >
-          <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue placeholder="해당 없음" /></SelectTrigger>
+          <SelectTrigger className={cn(FIELD_W_SM, FORM_CONTROL_CLASS)}><SelectValue placeholder="해당 없음" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="NONE">해당 없음</SelectItem>
             {SETTLEMENT_SUPPORT_CHOICES.map((choice) => (
