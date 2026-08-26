@@ -1232,6 +1232,46 @@ export function ProjectEditorWizard({
     return () => { cancelled = true; };
   }, [orgId, user]);
 
+  /*
+   * 저장된 링크가 있으면 열 때 시트를 다시 읽어 화면을 복원한다. 새로고침할 때마다
+   * "다시 연동해 주세요" 가 뜨면 이미 연동한 사실 자체를 못 믿게 된다. 시트가 저장본과
+   * 같으면 조용히 연동 상태로 인정하고, 달라졌으면 명단은 덮지 않은 채 갱신을 안내한다.
+   */
+  const sheetRestoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (sheetRestoreAttemptedRef.current) return;
+    const sheetLink = String(draft.participationSheetLink || '').trim();
+    if (!sheetLink || !draft.contractStart || !draft.contractEnd || !orgId || !user) return;
+    if (teamSyncPreview || teamSyncing) return;
+    sheetRestoreAttemptedRef.current = true;
+    const { contractStart, contractEnd, teamMembersDetailed } = draft;
+    setTeamSyncing(true);
+    void previewParticipationSheetByLinkViaBff({
+      tenantId: orgId, actor: user, sheetLink, contractStart, contractEnd,
+    })
+      .then((preview) => {
+        if (!preview.ok) return;
+        const mapped = mapParticipationSheetPreviewToProjectTeamMembers(preview);
+        const sheetSignature = participationSheetSyncSignature({
+          sheetLink, contractStart, contractEnd, teamMembersDetailed: mapped,
+        });
+        const persistedSignature = participationSheetSyncSignature({
+          sheetLink, contractStart, contractEnd, teamMembersDetailed,
+        });
+        setTeamSyncPreview(preview);
+        setTeamSyncYear(preview.months[0]?.slice(0, 4) || '');
+        setTeamSyncWarning((preview.warnings || []).map((warning) => warning.message).slice(0, 2).join(' / '));
+        if (sheetSignature === persistedSignature) {
+          setTeamSyncSignature(sheetSignature);
+          setTeamSyncNotice(`저장된 참여율 시트 연동을 확인했습니다. 참여인력 ${preview.rows.length}명.`);
+        } else {
+          setTeamSyncNotice('시트 내용이 저장된 명단과 달라졌습니다. [연동하기]를 눌러 갱신해 주세요.');
+        }
+      })
+      .catch(() => { /* 자동 복원 실패는 화면을 막지 않는다. 연동하기 버튼이 그대로 있다. */ })
+      .finally(() => setTeamSyncing(false));
+  }, [draft, orgId, user, teamSyncPreview, teamSyncing]);
+
   const syncTeamFromSheet = () => {
     if (teamSyncing) return;
     const sheetLink = String(draft.participationSheetLink || '').trim();
