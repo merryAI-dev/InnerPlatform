@@ -15,7 +15,7 @@ import {
 
 export class CashflowExportSourceUnavailableError extends Error {
   constructor(detail) {
-    super('연결된 시트의 최신 반영값을 확인할 수 없습니다. 시트 값을 다시 불러온 뒤 내려받아 주세요.');
+    super('연결된 시트에 내려받을 저장값이 없습니다.');
     this.name = 'CashflowExportSourceUnavailableError';
     this.code = 'cashflow_export_source_unavailable';
     this.detail = detail;
@@ -88,19 +88,12 @@ function getMonthWeeks(yearMonth) {
   return getMonthFinanceWeeks(yearMonth);
 }
 
-function requireAppliedCashflowMirror({ projectId, mirror, yearMonths }) {
-  const sourceRevision = typeof mirror?.sourceRevision === 'string' ? mirror.sourceRevision.trim() : '';
-  const appliedSourceRevision = typeof mirror?.appliedSourceRevision === 'string'
-    ? mirror.appliedSourceRevision.trim()
-    : '';
+function requireCashflowMirror({ projectId, mirror, yearMonths }) {
   if (!mirror
     || mirror.projectId !== projectId
-    || mirror.status !== 'FRESH'
-    || !sourceRevision
-    || appliedSourceRevision !== sourceRevision
     || !Array.isArray(yearMonths)
     || yearMonths.length === 0) {
-    cashflowExportSourceUnavailable(`mirror identity or revision is unavailable for ${projectId}`);
+    cashflowExportSourceUnavailable(`mirror identity is unavailable for ${projectId}`);
   }
   if (!Number.isSafeInteger(mirror.weeklyYear)) {
     cashflowTemplateMismatch(`weekly year is invalid for ${projectId}`);
@@ -108,7 +101,7 @@ function requireAppliedCashflowMirror({ projectId, mirror, yearMonths }) {
   return requireWeeklyYear(mirror.weeklyYear);
 }
 
-function buildCashflowExportWeeksFromAppliedMirror({ projectId, mirror, yearMonths, weeklyYear }) {
+function buildCashflowExportWeeksFromMirror({ projectId, mirror, yearMonths, weeklyYear }) {
   if (!Array.isArray(mirror.cells)) {
     cashflowTemplateMismatch(`weekly cells are unavailable for ${projectId}`);
   }
@@ -214,7 +207,7 @@ function isWholeCalendarYear(yearMonths, year) {
   ));
 }
 
-function buildCashflowExportAnnualFromAppliedMirror({ projectId, mirror, year }) {
+function buildCashflowExportAnnualFromMirror({ projectId, mirror, year }) {
   if (!Array.isArray(mirror.annualCells) || !Array.isArray(mirror.annualDerivedCells)) {
     cashflowTemplateMismatch(`annual cells are unavailable for ${projectId}`);
   }
@@ -281,9 +274,9 @@ function buildCashflowExportAnnualFromAppliedMirror({ projectId, mirror, year })
 }
 
 export function buildCashflowExportSourceFromMirror({ projectId, mirror, yearMonths }) {
-  const weeklyYear = requireAppliedCashflowMirror({ projectId, mirror, yearMonths });
+  const weeklyYear = requireCashflowMirror({ projectId, mirror, yearMonths });
   if (yearMonths.every((yearMonth) => weekOrdinal(weeklyYear, yearMonth, 1) !== -1)) {
-    return { weeks: buildCashflowExportWeeksFromAppliedMirror({ projectId, mirror, yearMonths, weeklyYear }) };
+    return { weeks: buildCashflowExportWeeksFromMirror({ projectId, mirror, yearMonths, weeklyYear }) };
   }
 
   const year = Number(String(yearMonths[0] || '').slice(0, 4));
@@ -292,7 +285,7 @@ export function buildCashflowExportSourceFromMirror({ projectId, mirror, yearMon
     || !isWholeCalendarYear(yearMonths, year)) {
     cashflowExportSourceUnavailable(`requested period is not one complete cashflow coordinate for ${projectId}`);
   }
-  return { annual: buildCashflowExportAnnualFromAppliedMirror({ projectId, mirror, year }) };
+  return { annual: buildCashflowExportAnnualFromMirror({ projectId, mirror, year }) };
 }
 
 export function expandCashflowYearMonthRange(startYearMonth, endYearMonth) {

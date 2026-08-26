@@ -260,7 +260,7 @@ describe('cashflow export route contract', () => {
     expect(collectionReads.some((path) => path.endsWith('/cashflow_weeks'))).toBe(false);
   });
 
-  it('blocks the whole workbook when any selected project mirror is unavailable', async () => {
+  it('exports every selected mirror without re-validating upstream revision state', async () => {
     const app = createExportApp([
       { id: 'p-a', name: '가 사업', accountType: 'DEDICATED' },
       { id: 'p-b', name: '나 사업', accountType: 'DEDICATED' },
@@ -273,6 +273,8 @@ describe('cashflow export route contract', () => {
 
     const response = await request(app)
       .post('/api/v1/cashflow-exports')
+      .buffer(true)
+      .parse(parseBinaryResponse)
       .send({
         scope: 'selected',
         projectIds: ['p-a', 'p-b'],
@@ -280,9 +282,64 @@ describe('cashflow export route contract', () => {
         endYearMonth: '2026-01',
         variant: 'multi-sheet',
       })
-      .expect(409);
+      .expect(200);
 
-    expect(response.body).toMatchObject({ error: 'cashflow_export_source_unavailable' });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(response.body);
+    expect(workbook.worksheets.map(({ name }) => name)).toEqual(['가 사업', '나 사업']);
+    const secondSheetRows = workbook.getWorksheet('나 사업').getSheetValues()
+      .filter(Boolean)
+      .map((row) => Array.isArray(row) ? row.slice(1) : []);
+    expect(secondSheetRows.find((row) => row[0] === '매출액(입금)')).toEqual([
+      '매출액(입금)', 700,
+    ]);
+  });
+
+  it('exports the mirror-backed coordinate inner join without inventing rows for unavailable sources', async () => {
+    const app = createExportApp([
+      { id: 'p-a', name: '가 사업', accountType: 'DEDICATED' },
+      { id: 'p-b', name: '나 사업', accountType: 'DEDICATED' },
+      { id: 'p-c', name: '다 사업', accountType: 'DEDICATED' },
+    ], {
+      mirrors: {
+        'p-a': completeMirror('p-a', 900),
+        'p-b': completeMirror('p-b', 700, { weeklyYear: undefined }),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow-exports')
+      .buffer(true)
+      .parse(parseBinaryResponse)
+      .send({
+        scope: 'all',
+        startYearMonth: '2026-01',
+        endYearMonth: '2026-01',
+        variant: 'multi-sheet',
+      })
+      .expect(200);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(response.body);
+    expect(workbook.worksheets.map(({ name }) => name)).toEqual(['가 사업']);
+  });
+
+  it('returns no-data only when the mirror-backed result set is empty', async () => {
+    const app = createExportApp([
+      { id: 'p-a', name: '가 사업', accountType: 'DEDICATED' },
+    ]);
+
+    const response = await request(app)
+      .post('/api/v1/cashflow-exports')
+      .send({
+        scope: 'all',
+        startYearMonth: '2026-01',
+        endYearMonth: '2026-01',
+        variant: 'multi-sheet',
+      })
+      .expect(404);
+
+    expect(response.body).toMatchObject({ error: 'cashflow_export_source_not_found' });
   });
 
   it('reports a stored mirror shape violation as the canonical template mismatch', async () => {
