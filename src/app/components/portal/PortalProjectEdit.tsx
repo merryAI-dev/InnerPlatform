@@ -504,6 +504,15 @@ function ProjectInfoEditor({
     setWithdrawBusy(true);
     try {
       const result = await enqueueMutation(() => withOwnership((ownership) => draftClient.withdraw(ownership)));
+      if (result.kind === 'REGISTRATION') {
+        // 신규 등록 건은 등록 임시저장으로 복원된다. 이 수정 화면이 아니라 등록 위저드에서 이어간다.
+        setWithdrawOpen(false);
+        toast.success('등록 요청을 회수했습니다. 등록 임시저장에서 이어서 작성할 수 있습니다.');
+        navigate(result.registrationDraftId
+          ? `/portal/register-project/${result.registrationDraftId}`
+          : '/portal/register-project');
+        return;
+      }
       revisionRef.current = result.draft.draftRevision;
       rebasedVersionRef.current = result.canonicalVersion;
       setRecord(result.draft);
