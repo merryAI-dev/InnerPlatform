@@ -69,4 +69,14 @@ describe('CashflowExportPage authoritative export surface', () => {
   it('does not request operations data before export permission is established', () => {
     expect(source).toContain('!canExport || !bffEnabled');
   });
+
+  it('keeps the export context while opening a project in a horizontal split view', () => {
+    expect(source).toContain("searchParams.get('project')");
+    expect(source).toContain('CashflowExportProjectPane');
+    expect(source).toContain('cashflow-export-split-layout');
+    expect(source).toContain('cashflow-export-primary-pane');
+    expect(source).toContain('grid grid-cols-2 gap-2');
+    expect(source).toContain('정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.');
+    expect(source).not.toContain('navigate(`/cashflow/projects/');
+  });
 });
