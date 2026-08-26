@@ -24,4 +24,10 @@ describe('admin route provider scope', () => {
       cashflowWeeks: true,
     });
   });
+
+  it('keeps the export dashboard off the legacy cashflow week subscription', () => {
+    expect(resolveAdminProviderScope('/cashflow/export').cashflowWeeks).toBe(false);
+    expect(resolveAdminProviderScope('/cashflow/weekly').cashflowWeeks).toBe(true);
+    expect(resolveAdminProviderScope('/cashflow/projects/p1').cashflowWeeks).toBe(true);
+  });
 });

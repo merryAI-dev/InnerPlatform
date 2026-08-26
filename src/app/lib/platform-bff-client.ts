@@ -3736,6 +3736,10 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
       && Number.isSafeInteger(summary.differenceAmount)
       && Number.isSafeInteger(summary.settlementDifferenceAmount)
       && typeof summary.settlementMatches === 'boolean'
+      && typeof summary.display?.periodLabel === 'string'
+      && typeof summary.display.statusLabel === 'string'
+      && ['success', 'danger'].includes(summary.display.statusTone)
+      && typeof summary.display.differenceLabel === 'string'
       && Array.isArray(summary.periods)
       && summary.periods.every((period) => periods.has(period?.period)
         && (period?.differenceAmount === null || Number.isSafeInteger(period?.differenceAmount)))

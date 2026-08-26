@@ -305,6 +305,45 @@ describe('platform-bff-client', () => {
     }));
   });
 
+  it('preserves a complete v4 weekly status and stored mirror item', async () => {
+    const summary = {
+      projectId: 'p001', source: 'SHEET_FORMULA' as const, sourceRevision: 'source-1', fromMonth: '2026-01',
+      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 },
+      differenceAmount: -12_345, settlementDifferenceAmount: -12_345, settlementMatches: false,
+      display: {
+        periodLabel: '누적 2026-01~2026-08 5주차', statusLabel: '불일치',
+        statusTone: 'danger' as const, differenceLabel: '차액 -12,345원',
+      },
+      periods: ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].map((period) => ({
+        period: period as 'MONTH' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4' | 'WEEK_5',
+        differenceAmount: period === 'WEEK_5' ? -12_345 : null,
+      })),
+    };
+    const status = {
+      period: 'WEEK_5' as const, status: 'COMPLETED' as const,
+      deadlineAt: '2026-08-30T15:00:00.000Z', approverDeadlineAt: '2026-08-31T04:00:00.000Z',
+      submittedAt: '2026-08-31T01:00:00.000Z', submittedBy: 'pm-1',
+      approvedAt: '2026-08-31T02:00:00.000Z', approvedBy: 'head-1', revision: 2,
+    };
+    const data = {
+      version: '4' as const, yearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
+      items: [{
+        projectId: 'p001',
+        settlementStatuses: { projectId: 'p001', yearMonth: '2026-08', items: [status] },
+        projectionActualSummary: summary,
+        sheetCapturedAt: '2026-08-25T07:48:00.000Z',
+      }],
+      errors: [],
+    };
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' },
+      projectIds: ['p001'], yearMonth: '2026-08', client,
+    })).resolves.toBe(data);
+  });
+
   it.each([
     ['wrong response version', (data: any) => { data.version = '3'; }],
     ['foreign settlement project', (data: any) => { data.items[0].settlementStatuses.projectId = 'foreign'; }],
@@ -312,6 +351,13 @@ describe('platform-bff-client', () => {
     ['foreign summary project', (data: any) => {
       data.items[0].projectionActualSummary = {
         projectId: 'foreign', source: 'SHEET_FORMULA', sourceRevision: 'source-1', fromMonth: '2026-01',
+        comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 }, differenceAmount: 1,
+        settlementDifferenceAmount: 1, settlementMatches: false, periods: [],
+      };
+    }],
+    ['summary without its stored display labels', (data: any) => {
+      data.items[0].projectionActualSummary = {
+        projectId: 'p001', source: 'SHEET_FORMULA', sourceRevision: 'source-1', fromMonth: '2026-01',
         comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 }, differenceAmount: 1,
         settlementDifferenceAmount: 1, settlementMatches: false, periods: [],
       };
