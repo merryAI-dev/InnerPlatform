@@ -64,7 +64,7 @@ weekly-overview의 기존 `projectionActualSummary` 필드를 실제 mirror 저�
 - 서울 기준 현재 finance week 이하의 유효한 `(yearMonth, weekNo)` 중 가장 최신 행 하나의 `amount`만 선택한다. 금액을 합산하거나 다른 저장값에서 역산하지 않는다.
 - mirror의 `projectId`가 요청 projectId와 다르거나, 배열에 malformed 행 또는 중복 `(yearMonth, weekNo)`가 있거나, 미래 행만 있으면 summary는 `null`이다. 0으로 보정하거나 임의의 중복 행을 고르지 않는다.
 - mirror가 없거나 필요한 저장 행이 없으면 다운로드나 화면을 막지 않고 `시트 저장값 없음` 또는 `불러온 기록 없음`으로 표시한다.
-- JVM overview가 성공하고 `STATUS_UNAVAILABLE`이 아닌 projectId만 mirror 대상으로 삼는다. 권한 판단과 mirror read를 병렬로 시작하지 않는다.
+- JVM overview HTTP가 성공하면 요청한 projectId 전체의 scope 인가가 통과한 것이다. 그 뒤 요청 projectId 전체를 mirror 대상으로 삼으며, `STATUS_UNAVAILABLE`은 상태 저장소의 부분 실패일 뿐 mirror 제외 조건으로 사용하지 않는다. 권한 판단과 mirror read를 병렬로 시작하지 않는다.
 - production Firestore에서는 요청 chunk당 bounded `getAll` 한 번으로 mirror를 읽는다. 프로젝트별 `get()` N+1을 만들지 않는다.
 
 기존 strict P/A batch endpoint와 이를 사용하는 다른 화면은 변경하지 않는다.
