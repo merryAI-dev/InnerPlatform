@@ -11,18 +11,20 @@ const portalEditSource = readFileSync(resolve(import.meta.dirname, '../portal/Po
 const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
-  it('lists the seven registration documents as one table and keeps every per-slot detail', () => {
-    // 표 머리글은 이제 FORM_LABEL_CLASS(12/600) 토큰을 쓴다. 흩어진 font-medium/text-[11px]
-    // 대신 라벨 역할 하나만 남기려고 바꿨고, 열 구성과 의미는 그대로다.
-    expect(source).toContain('<th scope="col" className={cn(\'w-10 px-3 py-2\', FORM_LABEL_CLASS)}>#</th>');
-    expect(source).toContain('첨부 상태');
+  it('lists the seven registration documents as a status checklist and keeps every per-slot detail', () => {
+    // 표(5열) 대신 상태 우선 체크리스트다: 행마다 아이콘이 먼저 말하고, 액션은 오른쪽 한 곳.
+    // 미첨부는 오류가 아니라 대기이므로 필수만 앰버, 선택은 슬레이트로 말한다.
+    expect(source).toContain("divide-y divide-slate-100 border-y border-slate-200");
+    expect(source).toContain('CircleCheck className="h-4 w-4 text-emerald-600"');
+    expect(source).toContain("unmet ? 'text-amber-500' : 'text-slate-300'");
     // Stacked cards hid whether a slot was still missing; each row now states it.
     expect(source).toContain("deferred ? '이후 제출(예외 처리)' : '미첨부'");
-    expect(source).toContain('const unmet = isLinkSlot ? false');
-    // Details that only existed inside the old card must survive in the row below.
-    expect(source).toContain('const hasDetail = Boolean(uploadError || previewError || contractLocked || contractSummary)');
+    expect(source).toContain('const unmet = !attached && !deferred && slot.number <= 3');
+    // Details that only existed inside the old card must survive in the row.
     expect(source).toContain('분석 요약');
     expect(source).toContain('기존 계약서는 관리자 화면에서만 제거할 수 있습니다.');
+    expect(source).toContain('산출내역서(견적서) 이후 제출(예외 처리)');
+    expect(source).toContain("placeholder=\"https://drive.google.com/...\"");
   });
 
   it('lets an upload in flight be cancelled and takes back one that already landed', () => {

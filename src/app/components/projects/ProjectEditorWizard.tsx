@@ -16,6 +16,9 @@ import {
   X,
   Users,
   Wallet,
+  Circle,
+  CircleCheck,
+  Clock3,
 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useAuth } from '../../data/auth-store';
@@ -29,6 +32,9 @@ import {
 } from '../../lib/platform-bff-client';
 import { ProjectStaffingSection } from './ProjectStaffingSection';
 import {
+  FIELD_W_MD,
+  FIELD_W_SM,
+  FIELD_W_XS,
   FORM_CONTROL_CLASS,
   FORM_ERROR_CLASS,
   FORM_FIELD_STACK_CLASS,
@@ -1650,9 +1656,10 @@ export function ProjectEditorWizard({
 
   const renderBasicStep = () => (
     <ProjectFormSection title="기본 정보">
-      <ProjectFormRow label="담당조직(CIC)" required issueLabel="담당조직(CIC)" errors={fieldIssues('담당조직(CIC)')}>
+      <ProjectFormFieldPair>
+        <ProjectFormRow label="담당조직(CIC)" required issueLabel="담당조직(CIC)" errors={fieldIssues('담당조직(CIC)')}>
         <Select value={canUseSelectedDepartment ? selectedDepartment : undefined} onValueChange={(value) => update('department', value)}>
-          <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}>
+          <SelectTrigger className={cn(FIELD_W_SM, FORM_CONTROL_CLASS)}>
             <SelectValue placeholder="담당조직 선택" />
           </SelectTrigger>
           <SelectContent>
@@ -1662,10 +1669,9 @@ export function ProjectEditorWizard({
           </SelectContent>
         </Select>
       </ProjectFormRow>
-
-      <ProjectFormRow label="프로젝트 유형" required>
+        <ProjectFormRow label="프로젝트 유형" required>
         <Select value={draft.type} onValueChange={(value) => update('type', value as ProjectType)}>
-          <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+          <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
           <SelectContent>
             {projectTypeOptions.map((type) => (
               <SelectItem key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</SelectItem>
@@ -1673,6 +1679,7 @@ export function ProjectEditorWizard({
           </SelectContent>
         </Select>
       </ProjectFormRow>
+        </ProjectFormFieldPair>
 
       <ProjectFormRow
         label="공식 계약명"
@@ -1782,7 +1789,7 @@ export function ProjectEditorWizard({
         value={normalizeProjectContractType(draft.contractType)}
         onValueChange={(value) => update('contractType', normalizeProjectContractType(value))}
       >
-        <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+        <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
         <SelectContent>
           {contractTypeOptions.map((contractType) => (
             <SelectItem key={contractType} value={contractType}>{contractType}</SelectItem>
@@ -2033,130 +2040,109 @@ export function ProjectEditorWizard({
     // 필드 라벨의 `*` 와 같은 뜻으로 읽히게 한다.
     const requirementOf = (slotNumber: number) => (
       slotNumber <= 3
-        ? { label: '필수', tone: 'text-[#0176D3]' }
-        : { label: '선택', tone: 'text-slate-500' }
+        ? { label: '필수', tone: 'border-[#0176D3]/30 bg-[#0176D3]/5 text-[#0176D3]' }
+        : { label: '선택', tone: 'border-slate-200 bg-slate-50 text-slate-500' }
     );
 
     return (
-      <div className={cn('overflow-x-auto bg-white', FORM_VALUE_CLASS)}>
-        <table className="w-full min-w-[640px] border-collapse text-left">
-          <thead className="border-y border-slate-200 bg-slate-50">
-            <tr>
-              <th scope="col" className={cn('w-10 px-3 py-2', FORM_LABEL_CLASS)}>#</th>
-              <th scope="col" className={cn('px-3 py-2', FORM_LABEL_CLASS)}>서류</th>
-              <th scope="col" className={cn('px-3 py-2', FORM_LABEL_CLASS)}>첨부 상태</th>
-              <th scope="col" className={cn('w-16 px-3 py-2', FORM_LABEL_CLASS)}>구분</th>
-              <th scope="col" className={cn('w-px px-3 py-2 text-right', FORM_LABEL_CLASS)}>액션</th>
-            </tr>
-          </thead>
-            {REGISTRATION_DOCUMENT_SLOTS.map((slot) => {
-              const kind = slot.kinds[0];
-              const requirement = requirementOf(slot.number);
-              const isLinkSlot = slot.number === 5 || slot.number === 6;
-              const linkValue = slot.number === 5
-                ? draft.registrationConfirmations.proposalPptOriginal
-                : draft.registrationConfirmations.presentationPptOriginal;
-              const document = draft[PROJECT_DOCUMENT_FIELD[kind]] as FileAttachment | null;
-              const deferred = slot.number === 3 && draft.quoteSubmissionDeferred;
-              const status = isLinkSlot
-                ? (linkValue ? '링크 입력됨' : '미입력')
-                : document ? `${document.name} · ${(document.size / 1024 / 1024).toFixed(2)} MB`
-                  : deferred ? '이후 제출(예외 처리)' : '미첨부';
-              const unmet = isLinkSlot ? false : !document && !deferred && slot.number <= 3;
-              const uploadError = documentUploadError[kind];
-              const previewState = documentPreviewStates?.[kind];
-              const previewError = previewState?.status === 'error'
-                ? (previewState.error || '첨부 파일을 불러오지 못했습니다.')
-                : '';
-              const contractLocked = kind === 'contract'
-                && contractDocumentEditPolicy.isExistingContractDocumentLocked;
-              const contractSummary = kind === 'contract' ? draft.contractAnalysis?.summary : '';
-              const hasDetail = Boolean(uploadError || previewError || contractLocked || contractSummary);
+      /*
+       * 표(5열)가 아니라 체크리스트다. 서류 준비는 "칸을 채우는 일"이 아니라 "항목을
+       * 끝내는 일"이라, 행마다 상태 아이콘이 먼저 말하고 액션은 오른쪽 끝 한 곳에 둔다.
+       * 미첨부는 오류가 아니라 대기이므로 필수만 앰버로, 선택은 슬레이트로 말한다.
+       */
+      <div className={cn('divide-y divide-slate-100 border-y border-slate-200 bg-white', FORM_VALUE_CLASS)}>
+        {REGISTRATION_DOCUMENT_SLOTS.map((slot) => {
+          const kind = slot.kinds[0];
+          const requirement = requirementOf(slot.number);
+          const isLinkSlot = slot.number === 5 || slot.number === 6;
+          const linkValue = slot.number === 5
+            ? draft.registrationConfirmations.proposalPptOriginal
+            : draft.registrationConfirmations.presentationPptOriginal;
+          const document = draft[PROJECT_DOCUMENT_FIELD[kind]] as FileAttachment | null;
+          const deferred = slot.number === 3 && draft.quoteSubmissionDeferred;
+          const attached = isLinkSlot ? Boolean(String(linkValue || '').trim()) : Boolean(document);
+          const unmet = !attached && !deferred && slot.number <= 3;
+          const uploadError = documentUploadError[kind];
+          const previewState = documentPreviewStates?.[kind];
+          const previewError = previewState?.status === 'error'
+            ? (previewState.error || '첨부 파일을 불러오지 못했습니다.')
+            : '';
+          const contractLocked = kind === 'contract'
+            && contractDocumentEditPolicy.isExistingContractDocumentLocked;
+          const contractSummary = kind === 'contract' ? draft.contractAnalysis?.summary : '';
 
-              return (
-                /*
-                 * 한 서류가 여러 줄로 늘어난다(링크 입력·예외 처리 체크·오류·분석 요약).
-                 * 줄마다 밑선을 그으면 그 부연이 다음 서류처럼 읽히므로,
-                 * 밑선은 서류 묶음 하나에 하나만 - tbody 가 그 묶음이다.
-                 */
-                <tbody key={slot.number} className="border-b border-slate-100 align-top">
-                  <tr>
-                    <td className="px-3 py-3">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#001e46] text-[11px] font-semibold text-white">
-                        {slot.number}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <p className="font-medium text-slate-900">{slot.label}</p>
-                      {slot.description ? <p className={cn('mt-1', FORM_HINT_CLASS)}>{slot.description}</p> : null}
-                    </td>
-                    <td className={cn('px-3 py-3', unmet ? 'text-red-700' : 'text-slate-700')}>
-                      <span className="break-all">{status}</span>
-                    </td>
-                    <td className={cn('px-3 py-3', requirement.tone)}>{requirement.label}</td>
-                    <td className="px-3 py-3 text-right">
-                      {isLinkSlot ? null : renderProjectDocumentUpload(kind, {
-                        slotNumber: slot.number,
-                        label: slot.label,
-                        description: slot.description,
-                        rowAction: true,
-                      })}
-                    </td>
-                  </tr>
-                  {isLinkSlot ? (
-                    <tr>
-                      <td />
-                      <td colSpan={4} className="px-3 pb-3">
-                        <Input
-                          type="url"
-                          aria-label={slot.label}
-                          value={linkValue}
-                          onChange={(event) => update('registrationConfirmations', {
-                            ...draft.registrationConfirmations,
-                            [slot.number === 5 ? 'proposalPptOriginal' : 'presentationPptOriginal']: event.target.value,
-                          })}
-                          placeholder="https://drive.google.com/..."
-                          className={FORM_CONTROL_CLASS}
-                        />
-                      </td>
-                    </tr>
-                  ) : null}
-                  {hasDetail ? (
-                    <tr>
-                      <td />
-                      <td colSpan={4} className="px-3 pb-3">
-                        {uploadError ? <p className={FORM_ERROR_CLASS} role="alert">{uploadError}</p> : null}
-                        {previewError ? <p className={FORM_ERROR_CLASS} role="alert">{previewError}</p> : null}
-                        {contractLocked ? (
-                          <p className={FORM_HINT_CLASS}>기존 계약서는 관리자 화면에서만 제거할 수 있습니다.</p>
-                        ) : null}
-                        {contractSummary ? (
-                          <p className={cn('mt-1 text-slate-700', FORM_HINT_CLASS)}>
-                            <span className="font-semibold text-[#001e46]">분석 요약</span>
-                            <span className="ml-2">{contractSummary}</span>
-                          </p>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ) : null}
-                  {slot.number === 3 ? (
-                    <tr>
-                      <td />
-                      <td colSpan={4} className="px-3 pb-3">
-                        <label className={cn('flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
-                          <Checkbox
-                            checked={draft.quoteSubmissionDeferred === true}
-                            onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)}
-                          />
-                          산출내역서(견적서) 이후 제출(예외 처리)
-                        </label>
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              );
-            })}
-        </table>
+          const statusIcon = attached
+            ? <CircleCheck className="h-4 w-4 text-emerald-600" aria-label="첨부됨" />
+            : deferred
+              ? <Clock3 className="h-4 w-4 text-amber-600" aria-label="이후 제출" />
+              : <Circle className={cn('h-4 w-4', unmet ? 'text-amber-500' : 'text-slate-300')} aria-label="미첨부" />;
+          const statusText = isLinkSlot
+            ? null
+            : document ? `${document.name} · ${(document.size / 1024 / 1024).toFixed(2)} MB`
+              : deferred ? '이후 제출(예외 처리)' : '미첨부';
+
+          return (
+            <div key={slot.number} className="flex gap-3 py-3">
+              <div className="mt-0.5 shrink-0">{statusIcon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className={cn('tabular-nums text-slate-400', FORM_HINT_CLASS)}>{slot.number}</span>
+                  <p className="font-medium text-slate-900">{slot.label}</p>
+                  <span className={cn('rounded-full border px-1.5 py-px text-[11px] font-semibold leading-4', requirement.tone)}>
+                    {requirement.label}
+                  </span>
+                </div>
+                {slot.description ? <p className={cn('mt-0.5', FORM_HINT_CLASS)}>{slot.description}</p> : null}
+                {statusText ? (
+                  <p className={cn('mt-1 break-all', attached ? 'text-slate-700' : unmet ? 'text-amber-700' : 'text-slate-400')}>
+                    {statusText}
+                  </p>
+                ) : null}
+                {isLinkSlot ? (
+                  <Input
+                    type="url"
+                    aria-label={slot.label}
+                    value={linkValue}
+                    onChange={(event) => update('registrationConfirmations', {
+                      ...draft.registrationConfirmations,
+                      [slot.number === 5 ? 'proposalPptOriginal' : 'presentationPptOriginal']: event.target.value,
+                    })}
+                    placeholder="https://drive.google.com/..."
+                    className={cn('mt-1.5', FIELD_W_MD, FORM_CONTROL_CLASS)}
+                  />
+                ) : null}
+                {uploadError ? <p className={cn('mt-1', FORM_ERROR_CLASS)} role="alert">{uploadError}</p> : null}
+                {previewError ? <p className={cn('mt-1', FORM_ERROR_CLASS)} role="alert">{previewError}</p> : null}
+                {contractLocked ? (
+                  <p className={cn('mt-1', FORM_HINT_CLASS)}>기존 계약서는 관리자 화면에서만 제거할 수 있습니다.</p>
+                ) : null}
+                {contractSummary ? (
+                  <p className={cn('mt-1 text-slate-700', FORM_HINT_CLASS)}>
+                    <span className="font-semibold text-[#001e46]">분석 요약</span>
+                    <span className="ml-2">{contractSummary}</span>
+                  </p>
+                ) : null}
+                {slot.number === 3 ? (
+                  <label className={cn('mt-1.5 flex items-center gap-2 text-slate-700', FORM_VALUE_CLASS)}>
+                    <Checkbox
+                      checked={draft.quoteSubmissionDeferred === true}
+                      onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)}
+                    />
+                    산출내역서(견적서) 이후 제출(예외 처리)
+                  </label>
+                ) : null}
+              </div>
+              <div className="shrink-0 self-start">
+                {isLinkSlot ? null : renderProjectDocumentUpload(kind, {
+                  slotNumber: slot.number,
+                  label: slot.label,
+                  description: slot.description,
+                  rowAction: true,
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -2425,7 +2411,7 @@ export function ProjectEditorWizard({
       <ProjectFormSection title="계약 정보">
         <ProjectFormFieldPair>
           <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
-            <Input type="date" value={draft.contractStart} onChange={(event) => updateContractPeriod('contractStart', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+            <Input type="date" value={draft.contractStart} onChange={(event) => updateContractPeriod('contractStart', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
           </ProjectFormRow>
           <ProjectFormRow
             label="계약 종료일"
@@ -2433,7 +2419,7 @@ export function ProjectEditorWizard({
             issueLabel="계약 종료일"
             errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
           >
-            <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn('max-w-[200px]', FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+            <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
           </ProjectFormRow>
         </ProjectFormFieldPair>
 
@@ -2441,7 +2427,7 @@ export function ProjectEditorWizard({
         {canEditProjectStatus(mode) && isAdminMode(mode) ? (
           <ProjectFormRow label="프로젝트 구분">
             <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
-              <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+              <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
                   <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
@@ -2604,7 +2590,7 @@ export function ProjectEditorWizard({
             value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
             onValueChange={(value) => update('settlementType', value as SettlementType)}
           >
-            <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
+            <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
             <SelectContent>
               {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
@@ -2615,7 +2601,7 @@ export function ProjectEditorWizard({
         {usesRegistrationV2 ? (
           <ProjectFormRow label="정산 기준">
             <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+              <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
                   <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
@@ -2630,7 +2616,7 @@ export function ProjectEditorWizard({
         ) : (
           <ProjectFormRow label="정산 기준">
             <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
+              <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
               <SelectContent>
                 {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
                   <SelectItem key={key} value={key}>{value}</SelectItem>
@@ -2644,7 +2630,7 @@ export function ProjectEditorWizard({
           <>
             <ProjectFormRow label="통장 유형">
               <Select value={draft.accountType} onValueChange={(value) => update('accountType', value as AccountType)}>
-                <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([key, value]) => (
                     <SelectItem key={key} value={key}>{value}</SelectItem>
@@ -2654,7 +2640,7 @@ export function ProjectEditorWizard({
             </ProjectFormRow>
             <ProjectFormRow label="이자 반납 여부">
               <Select value={draft.interestRefundPolicy || undefined} onValueChange={(value) => update('interestRefundPolicy', value as InterestRefundPolicy)}>
-                <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue placeholder="이자 반납 여부 선택" /></SelectTrigger>
+                <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder="이자 반납 여부 선택" /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(INTEREST_REFUND_POLICY_LABELS) as [InterestRefundPolicy, string][]).map(([key, value]) => (
                     <SelectItem key={key} value={key}>{value}</SelectItem>
@@ -2671,7 +2657,7 @@ export function ProjectEditorWizard({
                 value={draft.settlementSystem === 'OTHER' && draft.settlementSystemOther.trim() ? `OTHER:${draft.settlementSystemOther.trim()}` : draft.settlementSystem}
                 onValueChange={updateSettlementSystem}
               >
-                <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {[
                     ...PROJECT_SETTLEMENT_SYSTEM_CODES,
@@ -2699,7 +2685,7 @@ export function ProjectEditorWizard({
             </ProjectFormRow>
             <ProjectFormRow label="인건비 정산 기준">
               <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
-                <SelectTrigger className={cn('w-full', FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+                <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
                     <SelectItem key={key} value={key}>{value}</SelectItem>
@@ -2743,7 +2729,7 @@ export function ProjectEditorWizard({
           ]}
         >
           <MemberPicker
-            className={cn('w-full', FORM_CONTROL_CLASS)}
+            className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}
             options={ownerOptions}
             value={draft.registeredById}
             placeholder="구성원 원장에서 선택"
@@ -2774,7 +2760,7 @@ export function ProjectEditorWizard({
           hints={['선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.']}
         >
           <MemberPicker
-            className={cn('w-full', FORM_CONTROL_CLASS)}
+            className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}
             options={executiveApproverOptions}
             value={draft.executiveApproverId}
             placeholder="구성원 원장에서 선택"

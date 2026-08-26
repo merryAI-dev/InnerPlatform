@@ -19,6 +19,19 @@ export const FORM_HINT_CLASS = 'text-[11px] font-normal leading-5 text-slate-500
 export const FORM_ERROR_CLASS = 'text-[11px] font-normal leading-5 text-red-700';
 export const FORM_FIELD_STACK_CLASS = 'space-y-4';
 export const FORM_SECTION_STACK_CLASS = 'space-y-6';
+/**
+ * 폭은 내용의 힌트다(Baymard: 폭이 기대 입력 길이와 다르면 사용자가 머뭇거린다).
+ * 임의 max-w 대신 아래 4토큰만 쓴다. 행 컨테이너(max-w-xl)가 바깥 한계다.
+ *   XS: 날짜·월·통화처럼 몇 글자짜리 값
+ *   SM: 조직·상태처럼 짧은 선택지
+ *   MD: 사람 픽커·이름이 긴 선택지
+ *   LG: 계약명·링크 - 행 한계까지
+ */
+export const FIELD_W_XS = 'w-full max-w-[11rem]';
+export const FIELD_W_SM = 'w-full max-w-[16rem]';
+export const FIELD_W_MD = 'w-full max-w-[24rem]';
+export const FIELD_W_LG = 'w-full max-w-xl';
+
 /** 입력 컨트롤의 기본 높이·글자. 값 13px 규칙을 컨트롤에도 그대로 적용한다. */
 export const FORM_CONTROL_CLASS = `h-9 ${FORM_VALUE_CLASS}`;
 export const FORM_NUMERIC_CONTROL_CLASS = `h-9 text-right ${FORM_NUMERIC_VALUE_CLASS}`;
