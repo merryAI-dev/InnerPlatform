@@ -2287,6 +2287,7 @@ export async function previewParticipationSheetByLinkViaBff(params: {
   sheetLink: string;
   contractStart: string;
   contractEnd: string;
+  contractEndUndecided?: boolean;
   projectId?: string;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationSheetPreview> {
@@ -2301,6 +2302,7 @@ export async function previewParticipationSheetByLinkViaBff(params: {
     sheetLink: params.sheetLink,
     contractStart: params.contractStart,
     contractEnd: params.contractEnd,
+    ...(params.contractEndUndecided ? { contractEndUndecided: '1' } : {}),
     ...(params.projectId ? { projectId: params.projectId } : {}),
   });
   const response = await resolveClient(params.client).get<ParticipationSheetPreview>(

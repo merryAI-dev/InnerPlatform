@@ -238,6 +238,21 @@ export function validatePeriodAgainstProject({ period, project } = {}) {
   const end = text(period?.end);
   const projectStart = text(project?.contractStart).slice(0, 7);
   const projectEnd = text(project?.contractEnd).slice(0, 7);
+  // 종료 기간 없음(무기한) 계약은 종료월 대조가 불가능하다. 시작월만 대조하고 경고로 안내한다.
+  if (project?.contractEndUndecided === true && MONTH_RE.test(projectStart) && !projectEnd) {
+    if (start !== projectStart) {
+      return issue(
+        'participation_period_mismatch',
+        `시트에 기입된 기간(${start}~${end})과 플랫폼 상의 계약 시작월(${projectStart})이 달라서 확인 부탁드립니다. 플랫폼 계약은 종료 기간 없음입니다.`,
+        { sheetPeriod: { start, end }, projectPeriod: { start: projectStart, end: '' } },
+      );
+    }
+    return issue(
+      'participation_period_open_ended',
+      `플랫폼 계약이 종료 기간 없음이라 시트 기간(${start}~${end})의 종료월 대조는 건너뛰었습니다.`,
+      { sheetPeriod: { start, end }, projectPeriod: { start: projectStart, end: '' } },
+    );
+  }
   if (!MONTH_RE.test(projectStart) || !MONTH_RE.test(projectEnd)) {
     return issue(
       'participation_project_period_missing',

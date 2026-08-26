@@ -1035,8 +1035,10 @@ export function ProjectEditorWizard({
   const usesRegistrationV2 = draft.registrationRequirementsVersion === 2;
   const hasMultiYearContract = Boolean(
     /^\d{4}-\d{2}-\d{2}$/.test(draft.contractStart)
-    && /^\d{4}-\d{2}-\d{2}$/.test(draft.contractEnd)
-    && draft.contractStart.slice(0, 4) !== draft.contractEnd.slice(0, 4),
+    && (draft.contractEndUndecided
+      ? Number(draft.contractStart.slice(0, 4)) < new Date().getFullYear()
+      : /^\d{4}-\d{2}-\d{2}$/.test(draft.contractEnd)
+        && draft.contractStart.slice(0, 4) !== draft.contractEnd.slice(0, 4)),
   );
   const settlementDetailsEnabled = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE';
   const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE';
@@ -1160,6 +1162,22 @@ export function ProjectEditorWizard({
    * 계약 기간을 고치면 진행 상태가 따라온다. 사람이 고르는 값이 아니라 날짜에서 나오는 값이다.
    * 불러오기만으로 저장된 상태를 바꾸지는 않는다 - 사람이 기간을 손댈 때만 다시 계산한다.
    */
+  const updateContractEndUndecided = (undecided: boolean) => {
+    setDraft((prev) => {
+      const next = { ...prev, contractEndUndecided: undecided, contractEnd: undecided ? '' : prev.contractEnd };
+      return createProjectEditorWizardDraft({
+        ...next,
+        status: deriveProjectStatusFromContractPeriod({
+          contractStart: next.contractStart,
+          contractEnd: next.contractEnd,
+          contractEndUndecided: next.contractEndUndecided,
+          currentStatus: next.status,
+          today: new Date().toISOString().slice(0, 10),
+        }),
+      });
+    });
+  };
+
   const updateContractPeriod = (key: 'contractStart' | 'contractEnd', value: string) => {
     setDraft((prev) => {
       const next = { ...prev, [key]: value };
@@ -1168,6 +1186,7 @@ export function ProjectEditorWizard({
         status: deriveProjectStatusFromContractPeriod({
           contractStart: next.contractStart,
           contractEnd: next.contractEnd,
+          contractEndUndecided: next.contractEndUndecided,
           currentStatus: next.status,
           today: new Date().toISOString().slice(0, 10),
         }),
@@ -1241,13 +1260,14 @@ export function ProjectEditorWizard({
   useEffect(() => {
     if (sheetRestoreAttemptedRef.current) return;
     const sheetLink = String(draft.participationSheetLink || '').trim();
-    if (!sheetLink || !draft.contractStart || !draft.contractEnd || !orgId || !user) return;
+    if (!sheetLink || !draft.contractStart || (!draft.contractEnd && !draft.contractEndUndecided) || !orgId || !user) return;
     if (teamSyncPreview || teamSyncing) return;
     sheetRestoreAttemptedRef.current = true;
     const { contractStart, contractEnd, teamMembersDetailed } = draft;
     setTeamSyncing(true);
     void previewParticipationSheetByLinkViaBff({
       tenantId: orgId, actor: user, sheetLink, contractStart, contractEnd,
+      contractEndUndecided: draft.contractEndUndecided,
     })
       .then((preview) => {
         if (!preview.ok) return;
@@ -1280,7 +1300,7 @@ export function ProjectEditorWizard({
       setTeamSyncError('참여율 시트 링크를 먼저 입력해 주세요.');
       return;
     }
-    if (!draft.contractStart || !draft.contractEnd) {
+    if (!draft.contractStart || (!draft.contractEnd && !draft.contractEndUndecided)) {
       setTeamSyncError('계약 시작일과 종료일을 먼저 입력해 주세요. 시트의 기간과 대조합니다.');
       return;
     }
@@ -1298,6 +1318,7 @@ export function ProjectEditorWizard({
       sheetLink,
       contractStart: draft.contractStart,
       contractEnd: draft.contractEnd,
+      contractEndUndecided: draft.contractEndUndecided,
     })
       .then((preview) => {
         if (!preview.ok) {
@@ -1503,7 +1524,7 @@ export function ProjectEditorWizard({
     if (!normalizedDepartment || !departmentOptionSet.has(normalizedDepartment)) issues.push({ step: 'basic', label: '담당조직(CIC)' });
     if (!draft.name.trim()) issues.push({ step: 'basic', label: '프로젝트명' });
     if ((usesRegistrationV2 || draft.type !== 'I1') && !draft.contractStart.trim()) issues.push({ step: 'financial', label: '계약 시작일' });
-    if ((usesRegistrationV2 || draft.type !== 'I1') && !draft.contractEnd.trim()) issues.push({ step: 'financial', label: '계약 종료일' });
+    if ((usesRegistrationV2 || draft.type !== 'I1') && !draft.contractEnd.trim() && !draft.contractEndUndecided) issues.push({ step: 'financial', label: '계약 종료일' });
     if (draft.type !== 'I1' && !hasContractAmountInput) issues.push({ step: 'financial', label: '계약금액' });
     if (usesRegistrationV2) {
       if (!draft.officialContractName.trim()) issues.push({ step: 'basic', label: '공식 계약명' });
@@ -1533,7 +1554,10 @@ export function ProjectEditorWizard({
         issues.push({ step: 'financial', label: '계약 종료일은 시작일 이후여야 합니다.' });
       }
       const startYear = Number(draft.contractStart.slice(0, 4));
-      const endYear = Number(draft.contractEnd.slice(0, 4));
+      // 종료 기간 없음이면 재무 계획은 시작연도~현재 연도까지를 요구한다.
+      const endYear = draft.contractEndUndecided && !draft.contractEnd.trim()
+        ? new Date().getFullYear()
+        : Number(draft.contractEnd.slice(0, 4));
       const expectedYears = Number.isSafeInteger(startYear) && Number.isSafeInteger(endYear) && startYear <= endYear
         ? Array.from({ length: endYear - startYear + 1 }, (_, offset) => startYear + offset)
         : [];
@@ -2459,7 +2483,25 @@ export function ProjectEditorWizard({
           issueLabel="계약 종료일"
           errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
         >
-          <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              type="date"
+              value={draft.contractEnd}
+              onChange={(event) => updateContractPeriod('contractEnd', event.target.value)}
+              disabled={draft.contractEndUndecided}
+              className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')}
+            />
+            {/* 종료일이 정해지지 않은 계약이 있다. 빈칸(미입력)과 구분하는 명시 선택이라
+                체크하면 종료일을 비우고 잠근다. */}
+            <label className="flex items-center gap-1.5 text-[13px] text-slate-700">
+              <Checkbox
+                checked={draft.contractEndUndecided}
+                onCheckedChange={(checked) => updateContractEndUndecided(checked === true)}
+                aria-label="종료 기간 없음"
+              />
+              종료 기간 없음
+            </label>
+          </div>
         </ProjectFormRow>
 
       {canEditProjectStatus(mode) && isAdminMode(mode) ? (
@@ -3241,7 +3283,7 @@ export function ProjectEditorWizard({
         <Card className="shadow-none lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start">
           <CardHeader className="pb-2"><CardTitle className={FORM_SECTION_CLASS}>계약/재무</CardTitle></CardHeader>
           <CardContent>
-            <ReviewRow label="기간" value={`${draft.contractStart || '-'} ~ ${draft.contractEnd || '-'}`} />
+            <ReviewRow label="기간" value={`${draft.contractStart || '-'} ~ ${draft.contractEndUndecided ? '종료 기간 없음' : draft.contractEnd || '-'}`} />
             <ReviewRow label="통화" value={PROJECT_CURRENCY_LABELS[draft.currency]} />
             <ReviewRow label="계약금액" value={formatStoredProjectAmount(draft.contractAmount, financialInputFlags.contractAmount)} />
             <ReviewRow label="총매출부가세" value={formatStoredProjectAmount(draft.salesVatAmount, financialInputFlags.salesVatAmount)} />
@@ -3680,7 +3722,7 @@ export function ProjectEditorWizard({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className={cn('flex items-center gap-2', FORM_HINT_CLASS)}>
             <CalendarRange className="h-4 w-4" />
-            <span>{draft.contractStart || '-'} ~ {draft.contractEnd || '-'}</span>
+            <span>{draft.contractStart || '-'} ~ {draft.contractEndUndecided ? '종료 기간 없음' : draft.contractEnd || '-'}</span>
             <span className="hidden lg:inline">·</span>
             <span className="hidden lg:inline">{draft.name || '프로젝트명 미입력'}</span>
             {autosave?.key ? (

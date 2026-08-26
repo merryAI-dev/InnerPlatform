@@ -28,4 +28,20 @@ describe('deriveProjectStatusFromContractPeriod', () => {
       currentStatus: 'CONTRACT_PENDING', today: '2026-06-01',
     })).toBe('CONTRACT_PENDING');
   });
+
+  it('종료 기간 없음 계약은 날짜 경과로 완료가 되지 않는다', () => {
+    expect(deriveProjectStatusFromContractPeriod({
+      contractStart: '2020-01-01', contractEnd: '', contractEndUndecided: true,
+      currentStatus: 'IN_PROGRESS', today: '2026-06-01',
+    })).toBe('IN_PROGRESS');
+    expect(deriveProjectStatusFromContractPeriod({
+      contractStart: '2027-01-01', contractEnd: '', contractEndUndecided: true,
+      currentStatus: 'IN_PROGRESS', today: '2026-06-01',
+    })).toBe('CONTRACT_PENDING');
+    // 플래그 없이 종료일만 비면 판정하지 않는다 (미입력과 구분)
+    expect(deriveProjectStatusFromContractPeriod({
+      contractStart: '2020-01-01', contractEnd: '',
+      currentStatus: 'IN_PROGRESS', today: '2026-06-01',
+    })).toBe('IN_PROGRESS');
+  });
 });
