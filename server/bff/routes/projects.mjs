@@ -1380,9 +1380,8 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
       if (typeof row.profitRate !== 'number' || !Number.isFinite(row.profitRate) || row.profitRate < 0 || row.profitRate > 1) {
         invalidRegistration(`Project registration financialYears.${year}.profitRate must be between 0 and 1`);
       }
-      if (row.confirmed !== true) {
-        invalidRegistration(`Project registration financialYears.${year} requires human confirmation`);
-      }
+      // 계약서 대조 확인 체크는 위저드에서 걷어냈다(2b62f0a9). 서버가 confirmed 를 계속
+      // 요구하면 모든 신규 등록이 영구히 막히므로 요구하지 않는다. 필드 자체는 이력용으로 남는다.
       rows.set(year, row);
     }
     for (let year = startYear; year <= endYear; year += 1) {

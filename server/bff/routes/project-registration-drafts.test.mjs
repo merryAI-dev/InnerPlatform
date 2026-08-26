@@ -273,8 +273,9 @@ function validRegistrationV2Payload(overrides = {}) {
       supportAmount: true,
     },
     financialYears: [
-      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
-      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+      // 계약서 대조 확인 체크는 걷어냈다 - confirmed:false 인 채로도 제출이 통과해야 한다.
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: false },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: false },
     ],
     registrationConfirmations: {
       laborIncludesFourInsurance: true,
@@ -994,7 +995,7 @@ describe('project registration draft service', () => {
 
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload).toMatchObject({
       registrationRequirementsVersion: 2,
-      financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
+      financialYears: [{ year: 2026, confirmed: false }, { year: 2027, confirmed: false }],
     });
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload)
       .not.toHaveProperty('groupwareName');
