@@ -260,6 +260,62 @@ describe('cashflow export route contract', () => {
     expect(collectionReads.some((path) => path.endsWith('/cashflow_weeks'))).toBe(false);
   });
 
+  it('downloads a canonical mirror with independently EMPTY declared totals', async () => {
+    const mirror = completeMirror('p-a', 900);
+    const declared = mirror.sheetFacts.weeklyCalculationChecks.find((check) => (
+      check.mode === 'projection' && check.yearMonth === '2026-01' && check.weekNo === 1
+    ));
+    declared.reported.depositTotal = null;
+    declared.reported.withdrawalTotal = 0;
+    declared.reported.balance = 777;
+    const app = createExportApp([
+      { id: 'p-a', name: '가 사업', accountType: 'DEDICATED' },
+    ], { mirrors: { 'p-a': mirror } });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow-exports')
+      .buffer(true)
+      .parse(parseBinaryResponse)
+      .send({
+        scope: 'single',
+        projectId: 'p-a',
+        startYearMonth: '2026-01',
+        endYearMonth: '2026-01',
+        variant: 'single-project',
+      })
+      .expect(200);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(response.body);
+    const worksheet = workbook.getWorksheet('Projection');
+    const rowFor = (label) => worksheet.getSheetValues()
+      .findIndex((row) => Array.isArray(row) && row[1] === label);
+    expect(worksheet.getCell(rowFor('입금 합계'), 2).value).toBeNull();
+    expect(worksheet.getCell(rowFor('출금 합계'), 2).value).toBe(0);
+    expect(worksheet.getCell(rowFor('잔액'), 2).value).toBe(777);
+  });
+
+  it('keeps rejecting a mirror with a missing declared weekly total', async () => {
+    const mirror = completeMirror('p-a', 900);
+    delete mirror.sheetFacts.weeklyCalculationChecks[0].reported.balance;
+    const app = createExportApp([
+      { id: 'p-a', name: '가 사업', accountType: 'DEDICATED' },
+    ], { mirrors: { 'p-a': mirror } });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow-exports')
+      .send({
+        scope: 'single',
+        projectId: 'p-a',
+        startYearMonth: '2026-01',
+        endYearMonth: '2026-01',
+        variant: 'single-project',
+      })
+      .expect(409);
+
+    expect(response.body).toMatchObject({ error: 'cashflow_sheet_template_mismatch' });
+  });
+
   it('exports every selected mirror without re-validating upstream revision state', async () => {
     const app = createExportApp([
       { id: 'p-a', name: '가 사업', accountType: 'DEDICATED' },

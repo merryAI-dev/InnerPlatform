@@ -46,6 +46,10 @@ function isCashflowExportCellValid(cell) {
     && (cell.state !== 'VALUE' || Number.isSafeInteger(cell.amount));
 }
 
+function isCashflowExportDeclaredAmountValid(value) {
+  return value === null || Number.isSafeInteger(value);
+}
+
 function normalizeSpace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -149,9 +153,9 @@ function buildCashflowExportWeeksFromMirror({ projectId, mirror, yearMonths, wee
     if (!CASHFLOW_EXPORT_MODES.includes(mode)
       || weekOrdinal(weeklyYear, check.yearMonth, weekNo) === -1
       || !reported
-      || !Number.isSafeInteger(reported.depositTotal)
-      || !Number.isSafeInteger(reported.withdrawalTotal)
-      || !Number.isSafeInteger(reported.balance)) {
+      || !isCashflowExportDeclaredAmountValid(reported.depositTotal)
+      || !isCashflowExportDeclaredAmountValid(reported.withdrawalTotal)
+      || !isCashflowExportDeclaredAmountValid(reported.balance)) {
       cashflowTemplateMismatch(`declared weekly totals are invalid for ${projectId}`);
     }
     const key = `${check.yearMonth}|${weekNo}|${mode}`;
