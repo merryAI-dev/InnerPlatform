@@ -4,7 +4,7 @@
 
 **Goal:** Replace the outdated `/cashflow/export` status table with a canonical seven-column operations view that shows the previous and current finance week, exact settlement timestamps, stored Projection-Actual, and the mirror capture time.
 
-**Architecture:** Keep workbook export, JVM mutations, sheet synchronization, and cashflow coordinates frozen. Enrich the existing BFF weekly-overview read model after the JVM response with one bounded mirror batch read, then have the frontend join exact `projectId + yearMonth + WEEK_n` status records for the two KST finance weeks. The export page performs no cashflow calculation and never reads Firestore directly.
+**Architecture:** Keep workbook export, JVM mutations, sheet synchronization, and cashflow coordinates frozen. Enrich the existing BFF weekly-overview read model after the JVM response with one bounded mirror batch read, then have the frontend join exact `projectId + yearMonth + WEEK_n` status records for the two KST finance weeks. The export page performs no cashflow calculation and never reads Firestore directly. Because the view trusts `cashflow_settlement_statuses`, lock that collection to server-only writes as the single Firestore rules exception.
 
 **Tech Stack:** React 18, TypeScript, Vite, Tailwind/shadcn, Node.js ESM BFF, Firestore Admin SDK, Vitest, Supertest, Playwright.
 
@@ -332,7 +332,8 @@ git commit -m "feat(cashflow): refresh export operations table"
 ### Task 4: Independent QA and release gates
 
 **Files:**
-- Inspect only: `server/bff/cashflow-coordinates.mjs`, cashflow workbook/export files, JVM tree, Firebase rules/indexes, sheet refresh/apply files.
+- Inspect only: `server/bff/cashflow-coordinates.mjs`, cashflow workbook/export files, JVM tree, Storage rules/Firestore indexes, sheet refresh/apply files.
+- Update only for the security exception: `firebase/firestore.rules` and its emulator policy test, adding `cashflow_settlement_statuses` to canonical server-only writes.
 - Update only if required by repository patch-note gate: the exact cashflow export patch-note files named by the commit hook.
 
 - [ ] **Step 1: Run scoped gates**
@@ -353,8 +354,10 @@ git diff --exit-code origin/main...HEAD -- \
   server/bff/cashflow-export.mjs \
   server/bff/routes/cashflow-exports.mjs \
   server/jvm-weekly-api \
-  firebase/firestore.rules firebase/storage.rules firebase/firestore.indexes.json
+  firebase/storage.rules firebase/firestore.indexes.json
 ```
+
+Verify separately that the Firestore rules diff is limited to the one server-only collection entry and its emulator regression.
 
 Also search the export page to prove there is no `cashflow_weeks`, Thursday cutoff, strict P/A batch hook, direct Firestore, or per-project HTTP loop.
 
@@ -364,4 +367,4 @@ Use the dedicated cashflow-export Playwright server. Verify desktop and 375px, b
 
 - [ ] **Step 4: Request code review and prepare landing**
 
-Run an independent diff/spec review. Do not push, merge, deploy, or dispatch workflows until review is GO. After a clean review, use the repository land-and-deploy path: PR, required CI, automatic `workflow_run` production deployment, and post-deploy canary. This change has no Firestore/JVM deployment step because those frozen surfaces remain unchanged.
+Run an independent diff/spec review. Do not push, merge, deploy, or dispatch workflows until review is GO. After a clean review, deploy and verify Firestore rules **before** merging because GitHub's production workflow does not deploy them. Then use the repository land-and-deploy path: PR, required CI, automatic `workflow_run` production deployment, and post-deploy canary. There is no JVM deployment because that frozen surface remains unchanged.

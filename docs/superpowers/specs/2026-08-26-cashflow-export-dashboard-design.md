@@ -12,7 +12,7 @@
 2. 월요일에도 직전 완료 내역이 사라지지 않도록 직전 주차와 현재 주차를 함께 보여준다.
 3. 주정산 상태·제출 시각·승인 시각은 기존 JVM weekly-overview 결과를 그대로 사용한다.
 4. 누적 Projection-Actual과 마지막 시트 불러오기 시각은 저장된 mirror를 그대로 사용한다.
-5. 엑셀 생성, 고정 좌표, 시트 동기화, JVM 상태 전이, Firestore rules는 변경하지 않는다.
+5. 엑셀 생성, 고정 좌표, 시트 동기화, JVM 상태 전이는 변경하지 않는다. 단, 화면이 읽는 주정산 상태 원장 `cashflow_settlement_statuses`는 클라이언트가 승인 상태를 위조하지 못하도록 서버 전용 쓰기로 잠근다.
 
 ## 화면 구조
 
@@ -95,7 +95,8 @@ weekly-overview의 기존 `projectionActualSummary` 필드를 실제 mirror 저�
 - cashflow export workbook 생성·필터·정렬·파일명
 - Google Sheet refresh/apply/publish 경로
 - JVM 정산 상태 저장·전이·deadline 판단
-- Firestore/Storage rules와 indexes
+- Storage rules와 Firestore indexes
+- `cashflow_settlement_statuses` 서버 전용 쓰기 경계 외의 Firestore rules
 - 주정산 페이지의 상태 변경 UI
 
 ## 검증
