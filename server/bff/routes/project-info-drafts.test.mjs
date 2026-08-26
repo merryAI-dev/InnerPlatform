@@ -32,9 +32,35 @@ function createDb(seed = {}) {
       ),
     };
   }
+  function collection(collectionPath) {
+    const prefix = `${collectionPath}/`;
+    const state = { filters: [], limit: Infinity };
+    const query = {
+      where(field, op, value) {
+        if (op !== '==') throw new Error('mock collection only supports ==');
+        state.filters.push([field, value]);
+        return query;
+      },
+      limit(count) {
+        state.limit = count;
+        return query;
+      },
+      async get() {
+        const docs = [...documents.entries()]
+          .filter(([docPath]) => docPath.startsWith(prefix) && !docPath.slice(prefix.length).includes('/'))
+          .map(([docPath, value]) => ({ id: docPath.slice(prefix.length), data: () => clone(value) }))
+          .filter((docRef) => state.filters.every(([field, value]) => (docRef.data() || {})[field] === value))
+          .slice(0, state.limit);
+        return { docs };
+      },
+    };
+    return query;
+  }
+
   return {
     documents,
     doc,
+    collection,
     async runTransaction(callback) {
       const writes = [];
       const tx = {
@@ -2074,5 +2100,66 @@ describe('project information private drafts', () => {
       fileSize: VALID_PDF.byteLength,
       storagePath: 'orgs/tenant-a/project-registration-drafts/x/incoming/uuid-big-contract.pdf',
     })).rejects.toMatchObject({ code: 'draft_attachment_incoming_missing' });
+  });
+
+  it('withdraws a pending registration request back into an active registration draft', async () => {
+    const h = harness();
+    await openedDraft(h, 'open-withdraw-reg');
+    h.db.documents.set('orgs/tenant-a/project_requests/pr-registration-1', {
+      id: 'pr-registration-1',
+      tenantId: 'tenant-a',
+      requestKind: 'REGISTRATION',
+      status: 'PENDING',
+      requestedBy: 'actor-a',
+      approvedProjectId: 'project-a',
+      sourceDraftId: 'registration-draft-1',
+      payload: { name: '회수 대상 등록', registrationRequirementsVersion: 2 },
+    });
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/registration-draft-1', {
+      ownerUid: 'actor-a', ownerId: 'actor-a', tenantId: 'tenant-a',
+      resourceType: 'project-registration', resourceId: 'registration-draft-1',
+      draftRevision: 8, status: 'SUBMITTED',
+      submittedAt: '2026-08-26T02:00:00.000Z',
+      submittedProjectId: 'project-a',
+      submittedProjectRequestId: 'pr-registration-1',
+      submittedOutboxId: 'outbox-registration-1',
+      createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-26T02:00:00.000Z',
+    });
+    h.db.documents.set('outbox/outbox-registration-1', {
+      id: 'outbox-registration-1', status: 'DONE',
+      payload: {
+        attachmentRefs: [{
+          documentKind: 'contract',
+          path: 'orgs/tenant-a/project-registration-drafts/registration-draft-1/a-contract.pdf',
+          name: 'contract.pdf', size: 9, contentType: 'application/pdf',
+        }],
+      },
+    });
+
+    const withdrawn = await h.service.withdraw({ ...h.base, idempotencyKey: 'withdraw-reg' });
+    expect(withdrawn.body).toEqual({
+      withdrawn: true, kind: 'REGISTRATION', registrationDraftId: 'registration-draft-1',
+    });
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/pr-registration-1')).toMatchObject({
+      status: 'WITHDRAWN', withdrawnBy: 'actor-a',
+    });
+    expect(h.db.documents.get('orgs/tenant-a/projects/project-a')).toMatchObject({
+      executiveReviewStatus: 'DUPLICATE_DISCARDED',
+    });
+    const restored = h.db.documents.get('orgs/tenant-a/projectRequestDrafts/registration-draft-1');
+    expect(restored).toMatchObject({
+      status: 'ACTIVE', draftRevision: 9,
+      payload: { name: '회수 대상 등록' },
+      submittedProjectId: null, submittedProjectRequestId: null, submittedOutboxId: null,
+    });
+    expect(restored.attachmentRefs).toHaveLength(1);
+    expect(restored.attachmentRefs[0].path).toContain('/project-registration-drafts/registration-draft-1/');
+  });
+
+  it('still rejects withdraw when nothing is pending for the project', async () => {
+    const h = harness();
+    await openedDraft(h, 'open-withdraw-none');
+    await expect(h.service.withdraw({ ...h.base, idempotencyKey: 'withdraw-none' }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'request_not_withdrawable' });
   });
 });
