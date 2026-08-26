@@ -209,8 +209,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
     expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
     // 라벨은 이제 ProjectFormRow 의 라벨 열이 그린다. 개별 <Label className="text-xs"> 는 사라졌다.
-    // 통화는 별도 폼 행이 아니라 계약금액 옆 열의 드롭다운이다. 금액과 떨어지면 단위가 멀어진다.
-    expect(source).not.toContain('<ProjectFormRow label="통화">');
+    // 통화는 사업 단위로 하나라 표 밖의 단독 행에서 고른다(2026-08-26 보람). 행마다 빈
+    // 통화 칸을 두면 표가 넓어지고, 합계 행의 드롭다운은 무엇의 단위인지 읽히지 않았다.
+    expect(source).toContain('<ProjectFormRow label="통화">');
     expect(source).toContain('aria-label="통화"');
     expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
   });
@@ -575,7 +576,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('never saves or submits a stale snapshot while an attachment mutation is in flight', () => {
-    expect(source).toContain('if (uploadInProgress || hasPendingRetryFile) return false;');
+    // 자동저장 가드는 렌더 시점 값이 아니라 ref 를 즉석에서 본다 - 대기 파일을 버리고
+    // 나가는 경로에서도 임시저장이 돼야 하기 때문이다.
+    expect(source).toContain('if (uploadInProgress || pendingRetryNow) return false;');
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 임시저장해 주세요.')");
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 최종 저장해 주세요.')");
     expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || (mode === 'portal-register' && !hasRequiredRegistrationDocuments)}");

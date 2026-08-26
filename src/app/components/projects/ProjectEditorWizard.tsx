@@ -45,7 +45,6 @@ import {
   FORM_SECTION_CLASS,
   FORM_SECTION_STACK_CLASS,
   FORM_VALUE_CLASS,
-  ProjectFormFieldPair,
   ProjectFormRow,
   ProjectFormSection,
   describeSubmitIssue,
@@ -832,7 +831,11 @@ export function ProjectEditorWizard({
     nextDraft: ProjectEditorDraft,
     nextStepIndex: number,
   ) => {
-    if (uploadInProgress || hasPendingRetryFile) return false;
+    // 재시도 대기 여부는 렌더 시점 값이 아니라 ref 를 즉석에서 본다 - 나가기 직전에
+    // 대기 파일을 버린 경우에도 임시저장이 진행돼야 한다.
+    const pendingRetryNow = [...registrationDocumentKinds, ...checkoutDocumentKinds]
+      .some((kind) => Boolean(retryDocumentFileRef.current[kind]));
+    if (uploadInProgress || pendingRetryNow) return false;
     if (readOnly || !autosave?.key || autosave.disabled) return false;
     if (mode === 'portal-register' && !hasRequiredRegistrationDocuments) return false;
     const now = new Date().toISOString();
@@ -866,9 +869,15 @@ export function ProjectEditorWizard({
   }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, hasPendingRetryFile, hasRequiredRegistrationDocuments, mode, readOnly, uploadInProgress]);
 
   const saveDraftAndRelease = useCallback(async () => {
-    if (uploadInProgress || hasPendingRetryFile) {
-      toast.error('첨부파일 업로드를 완료한 뒤 나갈 수 있습니다.');
+    if (uploadInProgress) {
+      toast.error('첨부파일을 업로드하는 중입니다. 잠시 기다리거나 해당 파일의 업로드 취소를 누른 뒤 나가 주세요.');
       return false;
+    }
+    // 업로드가 실패해 재시도 대기 중인 파일은 사람을 폼에 가두는 이유가 못 된다.
+    // 버리고 나간다 - 파일은 사용자 컴퓨터에 그대로 있으니 다시 첨부하면 된다.
+    if (hasPendingRetryFile) {
+      retryDocumentFileRef.current = {};
+      toast.info('업로드에 실패했던 첨부파일은 저장되지 않았습니다. 다음에 다시 첨부해 주세요.');
     }
     if (hasUnsavedInput && autosave?.key && !autosave.disabled && !readOnly) {
       if (!await persistAutosaveSnapshot(draft, stepIndex)) {
@@ -1656,30 +1665,28 @@ export function ProjectEditorWizard({
 
   const renderBasicStep = () => (
     <ProjectFormSection title="기본 정보">
-      <ProjectFormFieldPair>
-        <ProjectFormRow label="담당조직(CIC)" required issueLabel="담당조직(CIC)" errors={fieldIssues('담당조직(CIC)')}>
-        <Select value={canUseSelectedDepartment ? selectedDepartment : undefined} onValueChange={(value) => update('department', value)}>
-          <SelectTrigger className={cn(FIELD_W_SM, FORM_CONTROL_CLASS)}>
-            <SelectValue placeholder="담당조직 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            {normalizedDepartmentOptions.map((department) => (
-              <SelectItem key={department} value={department}>{department}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </ProjectFormRow>
-        <ProjectFormRow label="프로젝트 유형" required>
-        <Select value={draft.type} onValueChange={(value) => update('type', value as ProjectType)}>
-          <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {projectTypeOptions.map((type) => (
-              <SelectItem key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </ProjectFormRow>
-        </ProjectFormFieldPair>
+      <ProjectFormRow label="담당조직(CIC)" required issueLabel="담당조직(CIC)" errors={fieldIssues('담당조직(CIC)')}>
+      <Select value={canUseSelectedDepartment ? selectedDepartment : undefined} onValueChange={(value) => update('department', value)}>
+        <SelectTrigger className={cn(FIELD_W_SM, FORM_CONTROL_CLASS)}>
+          <SelectValue placeholder="담당조직 선택" />
+        </SelectTrigger>
+        <SelectContent>
+          {normalizedDepartmentOptions.map((department) => (
+            <SelectItem key={department} value={department}>{department}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </ProjectFormRow>
+      <ProjectFormRow label="프로젝트 유형" required>
+      <Select value={draft.type} onValueChange={(value) => update('type', value as ProjectType)}>
+        <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {projectTypeOptions.map((type) => (
+            <SelectItem key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </ProjectFormRow>
 
       <ProjectFormRow
         label="공식 계약명"
@@ -2229,6 +2236,18 @@ export function ProjectEditorWizard({
 
     return (
       <div className="space-y-2">
+        {/* 통화는 사업 단위로 하나라 표 밖에서 한 번 고른다. 행마다 빈 통화 칸을 두면
+            표가 넓어지고 합계 행의 드롭다운은 무엇의 단위인지 안 읽혔다. */}
+        <ProjectFormRow label="통화">
+          <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
+            <SelectTrigger className={cn(FIELD_W_SM, FORM_CONTROL_CLASS)} aria-label="통화"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
+                <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ProjectFormRow>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse text-left">
             <thead>
@@ -2237,10 +2256,6 @@ export function ProjectEditorWizard({
                 {columns.map(([field, label]) => (
                   <Fragment key={field}>
                     <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>{label}</th>
-                    {/* 통화는 계약금액 바로 옆에서 고른다. 금액과 떨어지면 무슨 단위인지 멀어진다. */}
-                    {field === 'contractAmount' ? (
-                      <th scope="col" className={cn('px-3 py-2 text-left', FORM_LABEL_CLASS)}>통화</th>
-                    ) : null}
                   </Fragment>
                 ))}
                 <th scope="col" className={cn('px-3 py-2 text-right', FORM_LABEL_CLASS)}>수익률</th>
@@ -2273,8 +2288,6 @@ export function ProjectEditorWizard({
                         />
                       )}
                     </td>
-                    {/* 통화는 사업 단위로 하나다. 합계 행에서 한 번만 고른다. */}
-                    {field === 'contractAmount' ? <td className="px-3 py-2" /> : null}
                     </Fragment>
                   ))}
                   <td className={cn('px-3 py-2 text-right text-slate-600', FORM_NUMERIC_VALUE_CLASS)}>
@@ -2289,18 +2302,6 @@ export function ProjectEditorWizard({
                     <td className={cn('px-3 py-2.5 text-right font-semibold text-[#0176D3]', FORM_NUMERIC_VALUE_CLASS)}>
                       {fmtKRW(annualTotal(field))}
                     </td>
-                    {field === 'contractAmount' ? (
-                      <td className="px-3 py-2.5">
-                        <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
-                          <SelectTrigger className={cn('h-8 min-w-[92px]', FORM_CONTROL_CLASS)} aria-label="통화"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
-                              <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                    ) : null}
                   </Fragment>
                 ))}
                 <td className={cn('px-3 py-2.5 text-right font-semibold text-slate-900', FORM_NUMERIC_VALUE_CLASS)}>
@@ -2409,39 +2410,33 @@ export function ProjectEditorWizard({
         기간 / 통화 / 금액으로 나눠 말할 뿐이라 제목을 세 번 끊으면 관계가 보이지 않았다.
       */}
       <ProjectFormSection title="계약 정보">
-        <ProjectFormFieldPair>
-          <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
-            <Input type="date" value={draft.contractStart} onChange={(event) => updateContractPeriod('contractStart', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
-          </ProjectFormRow>
-          <ProjectFormRow
-            label="계약 종료일"
-            required
-            issueLabel="계약 종료일"
-            errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
-          >
-            <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
-          </ProjectFormRow>
-        </ProjectFormFieldPair>
+        <ProjectFormRow label="계약 시작일" required issueLabel="계약 시작일" errors={fieldIssues('계약 시작일')}>
+          <Input type="date" value={draft.contractStart} onChange={(event) => updateContractPeriod('contractStart', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+        </ProjectFormRow>
+        <ProjectFormRow
+          label="계약 종료일"
+          required
+          issueLabel="계약 종료일"
+          errors={fieldIssues('계약 종료일', '계약 종료일은 시작일 이후여야 합니다.')}
+        >
+          <Input type="date" value={draft.contractEnd} onChange={(event) => updateContractPeriod('contractEnd', event.target.value)} className={cn(FIELD_W_XS, FORM_NUMERIC_CONTROL_CLASS, 'text-left')} />
+        </ProjectFormRow>
 
-        <ProjectFormFieldPair>
-        {canEditProjectStatus(mode) && isAdminMode(mode) ? (
-          <ProjectFormRow label="프로젝트 구분">
-            <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
-              <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
-                  <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        ) : null}
-        </ProjectFormFieldPair>
+      {canEditProjectStatus(mode) && isAdminMode(mode) ? (
+        <ProjectFormRow label="프로젝트 구분">
+          <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
+            <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
+                <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ProjectFormRow>
+      ) : null}
         {/* 계약서 유형은 관리자 화면에서만 상태·구분과 나란히 있었고, 포털에서는 단독으로
             보였다. 행 컴포넌트를 쓰면서 두 경우 모두 같은 자리에 한 번만 놓는다. */}
-        <ProjectFormFieldPair>
-        {!canEditProjectStatus(mode) || isAdminMode(mode) ? renderContractTypeSelect() : null}
-        </ProjectFormFieldPair>
+      {!canEditProjectStatus(mode) || isAdminMode(mode) ? renderContractTypeSelect() : null}
 
         {annualTotalsOwnAmounts ? (
           <p className={FORM_HINT_CLASS}>
@@ -2579,53 +2574,51 @@ export function ProjectEditorWizard({
       */}
       <ProjectFormSection title="정산">
         {/* 사업유형이 정산 기준을 결정한다. 둘을 세로로 쌓으면 그 관계가 보이지 않아 나란히 둔다. */}
-        <ProjectFormFieldPair>
-        <ProjectFormRow
-          label={usesRegistrationV2 ? '사업유형' : '정산 유형'}
-          required={usesRegistrationV2}
-          issueLabel="사업유형"
-          errors={fieldIssues('사업유형')}
+      <ProjectFormRow
+        label={usesRegistrationV2 ? '사업유형' : '정산 유형'}
+        required={usesRegistrationV2}
+        issueLabel="사업유형"
+        errors={fieldIssues('사업유형')}
+      >
+        <Select
+          value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
+          onValueChange={(value) => update('settlementType', value as SettlementType)}
         >
-          <Select
-            value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
-            onValueChange={(value) => update('settlementType', value as SettlementType)}
-          >
-            <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
+          <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
+          <SelectContent>
+            {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
+              <SelectItem key={key} value={key}>{value}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </ProjectFormRow>
+      {usesRegistrationV2 ? (
+        <ProjectFormRow label="정산 기준">
+          <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
+            <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
             <SelectContent>
-              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
+              {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
+                <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ProjectFormRow>
+      ) : draft.settlementType === 'NONE' ? (
+        <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
+          정산 없음은 정산 기준·통장·정산 시스템 입력이 필요하지 않습니다.
+        </p>
+      ) : (
+        <ProjectFormRow label="정산 기준">
+          <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
+            <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </ProjectFormRow>
-        {usesRegistrationV2 ? (
-          <ProjectFormRow label="정산 기준">
-            <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
-                  <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        ) : draft.settlementType === 'NONE' ? (
-          <p className={cn('rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3', FORM_HINT_CLASS)}>
-            정산 없음은 정산 기준·통장·정산 시스템 입력이 필요하지 않습니다.
-          </p>
-        ) : (
-          <ProjectFormRow label="정산 기준">
-            <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-              <SelectTrigger className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
-              <SelectContent>
-                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
-                  <SelectItem key={key} value={key}>{value}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </ProjectFormRow>
-        )}
-        </ProjectFormFieldPair>
+      )}
         {settlementDetailsEnabled ? (
           <>
             <ProjectFormRow label="통장 유형">
