@@ -515,7 +515,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'executiveApproverName', label: '최종 결재자 지정 (사업총괄)', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
   { key: 'staffing', label: '실제 투입인력', before: (project) => formatProjectStaffingSummary(project.staffing), after: (draft) => formatProjectStaffingSummary(draft.staffing) },
-  { key: 'teamMembersDetailed', label: '참여인력 (서류상·실제)', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
+  { key: 'teamMembersDetailed', label: '서류상 참여인력', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
   { key: 'paymentExpectedMonths', label: '입금 예상월', before: (project) => formatPaymentExpectedMonthsForChange(project.paymentExpectedMonths), after: (draft) => formatPaymentExpectedMonthsForChange(draft.paymentExpectedMonths) },
   { key: 'advanceInterimBelow70Reason', label: '선금·중도금 70% 미만 사유', before: (project) => normalizeChangeValue(project.advanceInterimBelow70Reason), after: (draft) => normalizeChangeValue(draft.advanceInterimBelow70Reason) },

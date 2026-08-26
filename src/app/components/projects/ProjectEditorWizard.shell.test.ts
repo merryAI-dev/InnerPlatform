@@ -205,7 +205,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('uses project operations terminology and exposes currency selection', () => {
-    expect(source).toContain('참여인력 (서류상·실제)');
+    expect(source).toContain('서류상 참여인력');
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
     expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
     // 라벨은 이제 ProjectFormRow 의 라벨 열이 그린다. 개별 <Label className="text-xs"> 는 사라졌다.
@@ -753,7 +753,7 @@ describe('ProjectEditorWizard safe exit contract', () => {
 // 사람이 그 칸을 영영 만나지 못한다(보람: "거기 넣으면 아무도 모른다").
 describe('참여율 시트 링크 자리', () => {
   it('참여인력 섹션 안에 있고 연동 결과 표보다 먼저 나온다', () => {
-    const sectionAt = source.indexOf('title="참여인력 (서류상·실제)"');
+    const sectionAt = source.indexOf('title="서류상 참여인력"');
     const linkAt = source.indexOf('label="참여율 시트 링크"');
     const teamListAt = source.indexOf('시트 링크를 넣고 연동하기를 누르면');
     expect(sectionAt).toBeGreaterThan(-1);
