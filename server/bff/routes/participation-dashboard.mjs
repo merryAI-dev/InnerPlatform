@@ -348,6 +348,7 @@ export function mountParticipationDashboardRoutes(app, {
       project: {
         contractStart: readOptionalText(req.query?.contractStart),
         contractEnd: readOptionalText(req.query?.contractEnd),
+        contractEndUndecided: readOptionalText(req.query?.contractEndUndecided) === '1',
       },
       people: peopleSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
       tenantId,

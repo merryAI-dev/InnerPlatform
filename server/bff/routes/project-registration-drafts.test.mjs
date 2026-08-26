@@ -1091,6 +1091,78 @@ describe('project registration draft service', () => {
       .toEqual(documents.map(([documentKind]) => documentKind));
   });
 
+  it('submits an open-ended contract (contractEndUndecided) with financial years up to the current year', async () => {
+    const { db, service, base } = createHarness();
+    const currentYear = new Date().getFullYear();
+    const years = Array.from({ length: currentYear - 2026 + 1 }, (_, offset) => ({
+      year: 2026 + offset,
+      contractAmount: offset === 0 ? 100_000 : 0,
+      salesVatAmount: offset === 0 ? 10_000 : 0,
+      totalRevenueAmount: offset === 0 ? 40_000 : 0,
+      totalActualCost: offset === 0 ? 25_000 : 0,
+      supportAmount: 0,
+      profitRate: offset === 0 ? 0.4 : 0,
+      confirmed: false,
+    }));
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-open-ended-create',
+      payload: validRegistrationV2Payload({
+        contractEnd: '',
+        contractEndUndecided: true,
+        financialYears: years,
+        contractAmount: 100_000,
+      }),
+    });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+    const submitted = await service.submit({
+      ...base,
+      idempotencyKey: 'idem-open-ended-submit',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    });
+    expect(submitted.status).toBe(201);
+    const request = db.documents.get('orgs/tenant-a/project_requests/project-request-1');
+    expect(request.payload).toMatchObject({ contractEnd: '', contractEndUndecided: true });
+    const project = [...db.documents.entries()].find(([path]) => path.includes('/projects/'))[1];
+    expect(project).toMatchObject({ contractEnd: '', contractEndUndecided: true });
+  });
+
+  it('still rejects a missing contract end without the open-ended flag, and both together', async () => {
+    const { db, service, base } = createHarness();
+    const missingEnd = await service.create({
+      ...base,
+      idempotencyKey: 'idem-missing-end-create',
+      payload: validRegistrationV2Payload({ contractEnd: '' }),
+    });
+    addRequiredRegistrationAttachments(db, missingEnd.body.draft.draftId);
+    await expect(service.submit({
+      ...base,
+      idempotencyKey: 'idem-missing-end-submit',
+      draftId: missingEnd.body.draft.draftId,
+      leaseId: missingEnd.body.lease.leaseId,
+      fence: missingEnd.body.lease.fence,
+      expectedDraftRevision: 0,
+    })).rejects.toMatchObject({ code: 'project_registration_invalid' });
+
+    const contradictory = await service.create({
+      ...base,
+      idempotencyKey: 'idem-contradictory-create',
+      payload: validRegistrationV2Payload({ contractEndUndecided: true }),
+    });
+    addRequiredRegistrationAttachments(db, contradictory.body.draft.draftId);
+    await expect(service.submit({
+      ...base,
+      idempotencyKey: 'idem-contradictory-submit',
+      draftId: contradictory.body.draft.draftId,
+      leaseId: contradictory.body.lease.leaseId,
+      fence: contradictory.body.lease.fence,
+      expectedDraftRevision: 0,
+    })).rejects.toMatchObject({ code: 'project_registration_invalid' });
+  });
+
   it('allows optional RFP to be omitted when a legacy proposal exists', async () => {
     const { db, service, base } = createHarness();
     const created = await service.create({

@@ -96,6 +96,8 @@ export interface ProjectEditorDraft {
   contractType: string;
   contractStart: string;
   contractEnd: string;
+  /** 종료 기간 없음(무기한 계약). 미입력(빈 종료일)과 구분하는 명시 플래그. */
+  contractEndUndecided: boolean;
   currency: ProjectCurrency;
   contractAmount: number;
   salesVatAmount: number;
@@ -184,6 +186,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   contractType: '계약서(날인)',
   contractStart: '',
   contractEnd: '',
+  contractEndUndecided: false,
   currency: 'KRW',
   contractAmount: 0,
   salesVatAmount: 0,
@@ -499,7 +502,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'participationSheetLink', label: '참여율 시트 링크', before: (project) => normalizeChangeValue(project.participationSheetLink), after: (draft) => normalizeChangeValue(draft.participationSheetLink) },
   { key: 'department', label: '담당조직(CIC)', before: (project) => normalizeChangeValue(project.department), after: (draft) => normalizeChangeValue(draft.department) },
   { key: 'type', label: '프로젝트 유형', before: (project) => PROJECT_TYPE_LABELS[normalizeProjectType(project.type)] || '-', after: (draft) => PROJECT_TYPE_LABELS[normalizeProjectType(draft.type)] || '-' },
-  { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEnd) },
+  { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEndUndecided === true ? '종료 기간 없음' : project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEndUndecided ? '종료 기간 없음' : draft.contractEnd) },
   { key: 'currency', label: '통화', before: (project) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(project.currency)] || '-', after: (draft) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(draft.currency)] || '-' },
   { key: 'contractAmount', label: '계약금액', before: (project) => formatAmountForChange(project.contractAmount), after: (draft) => formatAmountForChange(draft.contractAmount) },
   { key: 'totalRevenueAmount', label: '총수익', before: (project) => formatAmountForChange(project.totalRevenueAmount), after: (draft) => formatAmountForChange(draft.totalRevenueAmount) },
@@ -611,10 +614,14 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     teamMembersDetailed: normalizeProjectTeamMembers(overrides.teamMembersDetailed),
     staffing: normalizeProjectStaffing(overrides.staffing ?? DEFAULT_DRAFT.staffing),
     registrationRequirementsVersion: version,
+    contractEndUndecided: overrides.contractEndUndecided === true && !text(overrides.contractEnd),
     financialYears: projectFinancialYears(
       overrides.financialYears,
       overrides.contractStart ?? DEFAULT_DRAFT.contractStart,
-      overrides.contractEnd ?? DEFAULT_DRAFT.contractEnd,
+      // 종료 기간 없음이면 재무 계획은 시작연도~현재 연도까지 편다.
+      overrides.contractEndUndecided === true && !text(overrides.contractEnd)
+        ? `${new Date().getFullYear()}-12-31`
+        : (overrides.contractEnd ?? DEFAULT_DRAFT.contractEnd),
       totals,
       version,
     ),
@@ -686,6 +693,7 @@ export function buildProjectEditorDraftFromProject(
     contractType: normalizeProjectContractType(normalizedProject.contractType || payload?.contractType),
     contractStart: text(normalizedProject.contractStart || payload?.contractStart),
     contractEnd: text(normalizedProject.contractEnd || payload?.contractEnd),
+    contractEndUndecided: (normalizedProject.contractEndUndecided ?? payload?.contractEndUndecided) === true,
     currency: normalizeProjectCurrency(normalizedProject.currency || payload?.currency),
     contractAmount: nonNegativeAmount(normalizedProject.contractAmount ?? payload?.contractAmount),
     salesVatAmount: nonNegativeAmount(normalizedProject.salesVatAmount ?? payload?.salesVatAmount),
@@ -847,6 +855,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     checkout: draft.checkout,
     contractStart: text(draft.contractStart),
     contractEnd: text(draft.contractEnd),
+    contractEndUndecided: draft.contractEndUndecided === true && !text(draft.contractEnd),
     contractType: normalizeProjectContractType(draft.contractType),
     settlementType: normalizeSettlementType(draft.settlementType),
     basis: normalizeBasis(draft.basis),
@@ -960,6 +969,7 @@ export function buildProjectEditorProjectPatch(
     contractAmount: nonNegativeAmount(draft.contractAmount),
     contractStart: text(draft.contractStart),
     contractEnd: text(draft.contractEnd),
+    contractEndUndecided: draft.contractEndUndecided === true && !text(draft.contractEnd),
     settlementType: normalizeSettlementType(draft.settlementType),
     basis: normalizeBasis(draft.basis),
     accountType: normalizeAccountType(draft.accountType),
