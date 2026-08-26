@@ -1102,11 +1102,14 @@ describe('JVM weekly API BFF proxy', () => {
         { yearMonth: '2026-09', weekNo: 1, amount: 1 },
       ];
     }],
+    ['missing mirror', (_mirror, source) => {
+      source.documents.delete('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    }],
   ])('does not invent a Projection-Actual value for a %s', async (_label, mutateMirror) => {
     const source = fullMonthCloseSource();
     const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     mirror.capturedAt = '2026-08-25T07:48:00.000Z';
-    mutateMirror(mirror);
+    mutateMirror(mirror, source);
     const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
     const canonical = {
       version: '1', yearMonth: '2026-08',
