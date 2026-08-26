@@ -713,7 +713,7 @@ describe('project registration draft service', () => {
       ...overrides,
     });
     h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-old', row({
-      resourceId: 'draft-old', payload: { name: '지난주 초안' }, updatedAt: '2026-08-20T09:00:00.000Z',
+      resourceId: 'draft-old', alias: '이어가던 것', payload: { name: '지난주 초안' }, updatedAt: '2026-08-20T09:00:00.000Z',
     }));
     h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-new', row({
       resourceId: 'draft-new', payload: { name: '' }, updatedAt: '2026-08-25T09:00:00.000Z',
@@ -729,9 +729,40 @@ describe('project registration draft service', () => {
       tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-list',
     });
     expect(listed.drafts).toEqual([
-      { draftId: 'draft-new', name: '', updatedAt: '2026-08-25T09:00:00.000Z', stepIndex: 2 },
-      { draftId: 'draft-old', name: '지난주 초안', updatedAt: '2026-08-20T09:00:00.000Z', stepIndex: 2 },
+      { draftId: 'draft-new', alias: '', name: '', updatedAt: '2026-08-25T09:00:00.000Z', stepIndex: 2 },
+      { draftId: 'draft-old', alias: '이어가던 것', name: '지난주 초안', updatedAt: '2026-08-20T09:00:00.000Z', stepIndex: 2 },
     ]);
+  });
+
+  it('soft-discards my draft, hides it from the list, and refuses submitted drafts', async () => {
+    const h = createHarness();
+    const row = (overrides) => ({
+      ownerUid: 'actor-a', ownerId: 'actor-a', tenantId: 'tenant-a',
+      resourceType: 'project-registration', draftRevision: 1, status: 'ACTIVE',
+      payload: { name: '' }, stepIndex: 0,
+      attachmentRefs: [{ documentKind: 'contract', path: 'orgs/tenant-a/project-registration-drafts/draft-x/a-contract.pdf', name: 'a.pdf', size: 3, contentType: 'application/pdf' }],
+      createdAt: '2026-08-20T00:00:00.000Z', updatedAt: '2026-08-20T00:00:00.000Z',
+      ...overrides,
+    });
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-x', row({ resourceId: 'draft-x' }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-done', row({ resourceId: 'draft-done', status: 'SUBMITTED' }));
+
+    const discarded = await h.service.discard({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-discard', draftId: 'draft-x',
+    });
+    expect(discarded.body).toEqual({ draftId: 'draft-x', status: 'DISCARDED' });
+    expect(h.db.documents.get('orgs/tenant-a/projectRequestDrafts/draft-x')).toMatchObject({ status: 'DISCARDED' });
+    const cleanup = [...h.db.documents.entries()].find(([path]) => path.startsWith('outbox/'));
+    expect(cleanup?.[1]?.payload?.paths).toEqual(['orgs/tenant-a/project-registration-drafts/draft-x/a-contract.pdf']);
+
+    const listed = await h.service.listMine({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-list-2',
+    });
+    expect(listed.drafts.some((draft) => draft.draftId === 'draft-x')).toBe(false);
+
+    await expect(h.service.discard({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-discard-2', draftId: 'draft-done',
+    })).rejects.toMatchObject({ code: 'draft_already_submitted' });
   });
 
   it('atomically submits only the stored private draft and replays after releasing the lease', async () => {

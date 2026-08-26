@@ -868,6 +868,9 @@ export function createBffApp(options = {}) {
     eventHandlers: outboxEventHandlers,
     maxAttempts: outboxMaxAttempts,
   });
+  // 등록/수정 최종 제출의 첨부 공개 이관도 같은 이유로 인라인 처리한다. 크론(새벽 1회)만
+  // 기다리면 결재 문서의 서류 7종이 하루 종일 '미제출'로 보이고 승인도 막힌다.
+  const processSubmitOutboxInline = processRosterEventInline;
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -1568,11 +1571,13 @@ export function createBffApp(options = {}) {
     enabled: editLeasesEnabled,
     projectRegistrationDraftService,
     piiProtector,
+    processOutboxEventInline: processSubmitOutboxInline,
   });
   mountProjectInfoDraftRoutes(app, {
     enabled: editLeasesEnabled,
     projectInfoDraftService,
     piiProtector,
+    processOutboxEventInline: processSubmitOutboxInline,
   });
   mountCashflowEditDraftRoutes(app, {
     enabled: editLeasesEnabled,

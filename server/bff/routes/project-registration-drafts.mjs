@@ -21,6 +21,7 @@ import {
   projectRegistrationDraftAttachmentSchema,
   projectRegistrationDraftAttachmentUploadUrlSchema,
   projectRegistrationDraftCreateSchema,
+  projectRegistrationDraftAliasSchema,
   projectRegistrationDraftPatchSchema,
   projectRegistrationDraftSubmitSchema,
 } from '../schemas.mjs';
@@ -180,6 +181,7 @@ function draftContract(draft = {}) {
       : {},
     attachmentRefs: attachmentRefs(draft),
     stepIndex: Number.isInteger(draft.stepIndex) && draft.stepIndex >= 0 ? draft.stepIndex : 0,
+    ...(readOptionalText(draft.alias) ? { alias: readOptionalText(draft.alias) } : {}),
     status: readOptionalText(draft.status) || 'ACTIVE',
     createdAt: draft.createdAt,
     updatedAt: draft.updatedAt,
@@ -666,6 +668,7 @@ export function createProjectRegistrationDraftService({
         .filter((draft) => draft.status === 'ACTIVE' && readOptionalText(draft.resourceType) === RESOURCE_TYPE)
         .map((draft) => ({
           draftId: readOptionalText(draft.resourceId),
+          alias: readOptionalText(draft.alias),
           name: readOptionalText(draft.payload?.name),
           updatedAt: readOptionalText(draft.updatedAt),
           stepIndex: Number.isInteger(draft.stepIndex) && draft.stepIndex >= 0 ? draft.stepIndex : 0,
@@ -673,6 +676,67 @@ export function createProjectRegistrationDraftService({
         .filter((draft) => draft.draftId)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       return { drafts };
+    },
+
+    /** 임시저장 이름(별칭). 제출 payload 와 분리된 표시용 필드라 리비전을 올리지 않는다. */
+    async setAlias(input) {
+      const current = context(input, { idempotencyRequired: false });
+      const leaseId = documentId(input?.leaseId, 'leaseId');
+      const fence = positiveFence(input?.fence);
+      const alias = String(input?.alias ?? '').trim().slice(0, 60);
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const { ref, draft } = await ownedDraft(tx, current);
+        assertActive(draft);
+        await assertOwnedInTransaction({
+          tx,
+          leaseRef: leaseRef(current),
+          tenantId: current.tenantId,
+          resourceType: RESOURCE_TYPE,
+          resourceId: current.draftId,
+          actorId: current.actorId,
+          sessionId: current.sessionId,
+          leaseId,
+          fence,
+          serverNow: nowDate,
+        });
+        const next = { ...draft, alias, updatedAt: nowDate.toISOString() };
+        tx.set(ref, next);
+        return { status: 200, body: { draft: draftContract(next) }, replayed: false };
+      });
+    },
+
+    /** 임시저장 소프트 삭제. 목록에서 사라지고 첨부는 outbox 로 정리한다. 제출본은 지울 수 없다. */
+    async discard(input) {
+      const current = context(input, { sessionRequired: false, idempotencyRequired: false });
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { ref, draft } = await ownedDraft(tx, current);
+        if (readOptionalText(draft.status) === 'SUBMITTED') {
+          throw createHttpError(409, '제출 완료된 임시저장은 삭제할 수 없습니다.', 'draft_already_submitted');
+        }
+        if (readOptionalText(draft.status) === 'DISCARDED') {
+          return { status: 200, body: { draftId: current.draftId, status: 'DISCARDED' }, replayed: false, outboxId: null };
+        }
+        const next = { ...draft, status: 'DISCARDED', discardedAt: timestamp, updatedAt: timestamp };
+        tx.set(ref, next);
+        const cleanupEvent = attachmentCleanupEvent(
+          createAttachmentCleanupOutboxEvent,
+          current,
+          attachmentRefs(draft).map((attachment) => attachment?.path),
+          timestamp,
+        );
+        if (cleanupEvent) {
+          tx.create(db.doc(`outbox/${documentId(cleanupEvent.id, 'outboxEvent.id')}`), cleanupEvent);
+        }
+        return {
+          status: 200,
+          body: { draftId: current.draftId, status: 'DISCARDED' },
+          replayed: false,
+          outboxId: cleanupEvent?.id || null,
+        };
+      });
     },
 
     async readAttachment(input) {
@@ -1409,6 +1473,7 @@ export function mountProjectRegistrationDraftRoutes(app, {
   enabled = false,
   projectRegistrationDraftService,
   piiProtector,
+  processOutboxEventInline,
 } = {}) {
   if (!enabled) return;
   if (!projectRegistrationDraftService) throw new Error('Project registration draft routes require a service');
@@ -1428,6 +1493,30 @@ export function mountProjectRegistrationDraftRoutes(app, {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'list project registration drafts');
     const current = await routeContext(req, piiProtector);
     res.status(200).json(await projectRegistrationDraftService.listMine(current));
+  }));
+
+  app.patch('/api/v1/project-registration-drafts/:draftId/alias', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'rename a project registration draft');
+    const parsed = parseWithSchema(projectRegistrationDraftAliasSchema, req.body);
+    sendOutcome(res, await projectRegistrationDraftService.setAlias({
+      ...await routeContext(req, piiProtector),
+      ...routeOwnership(req),
+      draftId: routeDraftId(req),
+      ...parsed,
+    }));
+  }));
+
+  app.delete('/api/v1/project-registration-drafts/:draftId', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'discard a project registration draft');
+    const outcome = await projectRegistrationDraftService.discard({
+      ...await routeContext(req, piiProtector),
+      draftId: routeDraftId(req),
+    });
+    // 첨부 정리도 같은 요청에서 처리한다. 실패해도 크론이 안전망.
+    if (outcome.outboxId && processOutboxEventInline) {
+      await processOutboxEventInline(outcome.outboxId).catch(() => {});
+    }
+    sendOutcome(res, outcome);
   }));
 
   app.get('/api/v1/project-registration-drafts/:draftId', asyncHandler(async (req, res) => {
@@ -1502,11 +1591,21 @@ export function mountProjectRegistrationDraftRoutes(app, {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'submit a project registration draft');
     const parsed = parseWithSchema(projectRegistrationDraftSubmitSchema, req.body);
     const current = await routeContext(req, piiProtector);
-    sendOutcome(res, await projectRegistrationDraftService.submit({
+    const outcome = await projectRegistrationDraftService.submit({
       ...current,
       ...routeOwnership(req),
       draftId: routeDraftId(req),
       ...parsed,
-    }));
+    });
+    // 첨부 공개 이관을 같은 요청 안에서 처리한다. 실패해도 크론이 안전망이라 응답은 성공 그대로.
+    const outboxId = !outcome.replayed ? outcome.body?.outbox?.id : null;
+    if (outboxId && processOutboxEventInline) {
+      await processOutboxEventInline(outboxId).catch((error) => {
+        console.warn('[bff] inline registration submit outbox processing failed', {
+          outboxId, errorCode: 'submit_outbox_inline_failed', message: error?.message,
+        });
+      });
+    }
+    sendOutcome(res, outcome);
   }));
 }

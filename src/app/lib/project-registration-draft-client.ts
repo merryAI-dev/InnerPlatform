@@ -39,6 +39,7 @@ export interface ProjectRegistrationDraft {
   payload: Record<string, unknown>;
   attachmentRefs: ProjectRegistrationAttachment[];
   stepIndex: number;
+  alias?: string;
   status: 'ACTIVE' | 'SUBMITTED' | 'DISCARDED';
   createdAt?: string;
   updatedAt?: string;
@@ -199,6 +200,25 @@ export function createProjectRegistrationDraftClient(options: {
       return parseDraftBody(response.data);
     },
 
+    /** 임시저장 이름(별칭) 저장. 편집 세션(리스)을 쥔 상태에서만 쓴다. */
+    async setAlias(draftId: string, ownership: { leaseId: string; fence: number }, alias: string) {
+      const response = await client.patch<unknown>(`${pathFor(draftId)}/alias`, {
+        ...request,
+        headers: ownershipHeaders(sessionId, ownership),
+        body: { alias },
+      });
+      return parseDraftBody(response.data);
+    },
+
+    /** 임시저장 삭제(소프트). 목록에서 사라지고 첨부는 서버가 정리한다. */
+    async discard(draftId: string) {
+      await client.request<unknown>(pathFor(draftId), {
+        ...request,
+        method: 'DELETE',
+        headers: sessionHeaders,
+      });
+    },
+
     /** 내가 임시저장한 진행 중 등록 초안 요약 목록. 이어서 작성할 초안을 고르는 용도. */
     async list() {
       const response = await client.get<unknown>('/api/v1/project-registration-drafts', {
@@ -215,6 +235,7 @@ export function createProjectRegistrationDraftClient(options: {
           if (!draftId) return [];
           return [{
             draftId,
+            alias: typeof entry.alias === 'string' ? entry.alias : '',
             name: typeof entry.name === 'string' ? entry.name : '',
             updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : '',
             stepIndex: typeof entry.stepIndex === 'number' && Number.isInteger(entry.stepIndex) ? entry.stepIndex : 0,
