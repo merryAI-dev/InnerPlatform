@@ -279,12 +279,15 @@ describe('platform-bff-client', () => {
   it('posts all visible projects once to the weekly overview without rejecting per-project unavailable data', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `p${index + 1}`);
     const data = {
-      version: '1',
+      version: '4',
       yearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07',
+      monthCloseTargetLabel: '7월',
       items: projectIds.map((projectId) => ({
         projectId,
-        settlementStatuses: null,
+        settlementStatuses: { projectId, yearMonth: '2026-08', items: [] },
         projectionActualSummary: null,
+        sheetCapturedAt: null,
       })),
       errors: projectIds.flatMap((projectId) => [
         { projectId, code: 'STATUS_UNAVAILABLE' as const },
@@ -300,6 +303,46 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weekly-overview', expect.objectContaining({
       body: { projectIds, yearMonth: '2026-08' }, retries: 0, timeoutMs: 12000,
     }));
+  });
+
+  it.each([
+    ['wrong response version', (data: any) => { data.version = '3'; }],
+    ['foreign settlement project', (data: any) => { data.items[0].settlementStatuses.projectId = 'foreign'; }],
+    ['foreign settlement month', (data: any) => { data.items[0].settlementStatuses.yearMonth = '2026-07'; }],
+    ['foreign summary project', (data: any) => {
+      data.items[0].projectionActualSummary = {
+        projectId: 'foreign', source: 'SHEET_FORMULA', sourceRevision: 'source-1', fromMonth: '2026-01',
+        comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 }, differenceAmount: 1,
+        settlementDifferenceAmount: 1, settlementMatches: false, periods: [],
+      };
+    }],
+    ['malformed capture timestamp', (data: any) => { data.items[0].sheetCapturedAt = 'not-an-instant'; }],
+    ['duplicate settlement period', (data: any) => {
+      const status = {
+        period: 'WEEK_5', status: 'COMPLETED', submittedAt: '', submittedBy: '',
+        approvedAt: '', approvedBy: '', revision: 1,
+      };
+      data.items[0].settlementStatuses.items = [status, { ...status }];
+    }],
+  ])('fails closed for a weekly overview with %s', async (_label, mutate) => {
+    const data: any = {
+      version: '4', yearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
+      items: [{
+        projectId: 'p001',
+        settlementStatuses: { projectId: 'p001', yearMonth: '2026-08', items: [] },
+        projectionActualSummary: null,
+        sheetCapturedAt: '2026-08-25T07:48:00.000Z',
+      }],
+      errors: [],
+    };
+    mutate(data);
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' },
+      projectIds: ['p001'], yearMonth: '2026-08', client,
+    })).rejects.toThrow('현금흐름 현황 응답이 올바르지 않습니다.');
   });
 
   it.each([
