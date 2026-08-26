@@ -315,7 +315,9 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   ]);
   await expect(page.getByText('BFF 서버의 최신 현금흐름 데이터')).toHaveCount(0);
   await expect(page.getByText('확인 불가')).toHaveCount(0);
-  await expect(page.getByText('정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.')).toBeVisible();
+  await expect(page.getByText('정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.')).toHaveCount(1);
+  await expect(page.getByText('워크북의 사업 순서를 사업명 또는 소속 기준으로 정합니다.')).toHaveCount(0);
+  await expect(page.getByText('담당 조직을 기준으로 다운로드 대상을 좁힙니다.')).toHaveCount(0);
   expect(requests.getWeeklyOverviewCalls()).toBe(1);
   expect(requests.getWeeklyOverviewBodies()).toEqual([{
     projectIds: ['cashflow-e2e-a', 'cashflow-e2e-b', 'cashflow-e2e-c'], yearMonth: '2026-09',
@@ -343,7 +345,9 @@ test('split view opens a project beside the export page and keeps both recent we
   });
   page.on('pageerror', (error) => runtimeErrors.push(error.stack || error.message));
   await page.setViewportSize({ width: 1440, height: 900 });
-  const requests = await openCashflowExportWithPlatformApi(page);
+  const requests = await openCashflowExportWithPlatformApi(page, 'admin', {
+    path: '/cashflow/export?foo=keep',
+  });
   expect(requests.getDetailRequestCalls()).toBe(0);
 
   await page.getByTestId('cashflow-export-sort').click();
@@ -370,6 +374,7 @@ test('split view opens a project beside the export page and keeps both recent we
   await openButton.click();
   await expect(page.getByText('예기치 못한 오류가 발생했습니다'), runtimeErrors.join('\n')).toHaveCount(0);
   await expect(page).toHaveURL(/\/cashflow\/export\?.*project=cashflow-e2e-a/);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
   const primaryPane = page.getByTestId('cashflow-export-primary-pane');
   const projectPane = page.getByTestId('cashflow-export-project-pane');
   await expect(projectPane).toBeVisible();
@@ -450,6 +455,7 @@ test('split view opens a project beside the export page and keeps both recent we
 
   await page.goBack();
   await expect(projectPane).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
   await expect(page.getByTestId('cashflow-export-step-sort')).toContainText('소속(CIC/센터)');
   expect(await table.evaluate((element) => element.scrollLeft)).toBe(await table.evaluate((element, savedScrollLeft) => (
     Math.min(savedScrollLeft, Math.max(0, element.scrollWidth - element.clientWidth))
@@ -461,8 +467,10 @@ test('split view opens a project beside the export page and keeps both recent we
   await page.goForward();
   await expect(projectPane).toBeVisible();
   await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBe(leftScrollBeforeClose);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
   await page.getByRole('button', { name: '가 사업 상세 닫기' }).click();
   await expect(projectPane).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get('foo')).toBe('keep');
   await page.goBack();
   await expect(projectPane).toHaveCount(0);
 
@@ -477,6 +485,21 @@ test('split view opens a project beside the export page and keeps both recent we
   await row.getByRole('button', { name: '가 사업 보기' }).evaluate((element) => (element as HTMLElement).focus());
   await page.keyboard.press('Tab');
   await expect.poll(() => projectPane.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  const paneFocusTargets = projectPane.locator([
+    'a[href]:visible',
+    'button:not([disabled]):visible',
+    'input:not([disabled]):visible',
+    'select:not([disabled]):visible',
+    'textarea:not([disabled]):visible',
+    '[tabindex]:not([tabindex="-1"]):visible',
+  ].join(','));
+  await expect.poll(() => paneFocusTargets.count()).toBeGreaterThan(1);
+  await paneFocusTargets.last().focus();
+  await page.keyboard.press('Tab');
+  await expect(paneFocusTargets.first()).toBeFocused();
+  await paneFocusTargets.first().focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(paneFocusTargets.last()).toBeFocused();
   await page.evaluate(() => {
     const overlay = document.createElement('div');
     overlay.dataset.testid = 'cashflow-export-nested-dialog-probe';
