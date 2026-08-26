@@ -2079,7 +2079,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   registeredByName: '사업 담당자',
   executiveApproverName: '최종 결재자 지정 (사업총괄)',
   teamName: '사내기업팀',
-  teamMembersDetailed: '참여인력 (서류상·실제)',
+  teamMembersDetailed: '서류상 참여인력',
   staffing: '실제 투입인력',
   participantCondition: '참여 조건',
   paymentPlan: '입금 분할',

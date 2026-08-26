@@ -2812,7 +2812,7 @@ export function ProjectEditorWizard({
       </ProjectFormSection>
 
       <ProjectFormSection
-        title="참여인력 (서류상·실제)"
+        title="서류상 참여인력"
         description="계약·협약서에 남길 참여인력과 역할을 저장합니다."
         action={(
           <Button type="button" onClick={syncTeamFromSheet} disabled={teamSyncing} className="gap-2">
@@ -3304,7 +3304,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
             <ReviewRow label="최종 결재자 지정 (사업총괄)" value={draft.executiveApproverName} />
             <ReviewRow label="실제 투입인력" value={formatProjectStaffingSummary(draft.staffing)} />
-            <ReviewRow label="참여인력 (서류상·실제)" value={teamMembersSummary} />
+            <ReviewRow label="서류상 참여인력" value={teamMembersSummary} />
             <ReviewRow label="참여율 시트 링크" value={draft.participationSheetLink} />
           </CardContent>
         </Card>
