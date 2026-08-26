@@ -2,12 +2,381 @@ import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
 import { parseWithSchema, cashflowExportSchema, cashflowWeekAmountsSchema } from './schemas.mjs';
 import {
+  buildCashflowExportSourceFromMirror,
   buildCashflowExportFileName,
   buildCashflowExportWorkbookBuffer,
   expandCashflowYearMonthRange,
 } from './cashflow-export.mjs';
+import { CashflowTemplateMismatchError } from './cashflow-coordinates.mjs';
+import { CASHFLOW_ALL_LINES } from './cashflow-policy.mjs';
+
+function completeMirror(projectId, overrides = {}) {
+  const sourceRevision = `sha256:${'a'.repeat(64)}`;
+  const cells = [];
+  for (const mode of ['projection', 'actual']) {
+    for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+      for (const lineId of CASHFLOW_ALL_LINES) {
+        cells.push({
+          mode,
+          yearMonth: '2026-01',
+          weekNo,
+          lineId,
+          direction: lineId.endsWith('_IN') ? 'IN' : 'OUT',
+          state: 'EMPTY',
+        });
+      }
+    }
+  }
+  const replaceCell = (mode, weekNo, lineId, value) => {
+    const index = cells.findIndex((cell) => (
+      cell.mode === mode && cell.weekNo === weekNo && cell.lineId === lineId
+    ));
+    cells[index] = { ...cells[index], ...value };
+  };
+  replaceCell('projection', 1, 'SALES_IN', { state: 'VALUE', amount: 900 });
+  replaceCell('actual', 1, 'SALES_IN', { state: 'ZERO', amount: 0 });
+  const weeklyCalculationChecks = [];
+  for (const mode of ['projection', 'actual']) {
+    for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+      const projection = mode === 'projection';
+      weeklyCalculationChecks.push({
+        mode,
+        yearMonth: '2026-01',
+        weekNo,
+        reported: {
+          openingBalance: projection ? 5_000 : 4_000,
+          depositTotal: projection && weekNo === 1 ? 900 : 0,
+          withdrawalTotal: 0,
+          balance: projection ? 5_900 : 4_000,
+        },
+      });
+    }
+  }
+  const annualMode = (salesAmount, balance) => ({
+    source: 'ANNUAL',
+    lineAmounts: { SALES_IN: salesAmount },
+    lineStates: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+      lineId,
+      lineId === 'SALES_IN' ? (salesAmount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+    ])),
+    totalIn: salesAmount,
+    totalOut: 0,
+    net: balance,
+  });
+  const annualCells = [];
+  const annualDerivedCells = [];
+  for (const mode of ['projection', 'actual']) {
+    const salesAmount = mode === 'projection' ? 1_200 : 0;
+    const balance = mode === 'projection' ? 7_200 : 4_000;
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      const selected = lineId === 'SALES_IN';
+      annualCells.push({
+        mode,
+        year: 2024,
+        periodKind: 'ANNUAL',
+        lineId,
+        direction: lineId.endsWith('_IN') ? 'IN' : 'OUT',
+        state: selected ? (salesAmount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+        ...(selected ? { amount: salesAmount } : {}),
+      });
+    }
+    annualDerivedCells.push(
+      { mode, year: 2024, periodKind: 'ANNUAL', derivedKind: 'deposit_total', state: salesAmount === 0 ? 'ZERO' : 'VALUE', amount: salesAmount },
+      { mode, year: 2024, periodKind: 'ANNUAL', derivedKind: 'withdrawal_total', state: 'ZERO', amount: 0 },
+      { mode, year: 2024, periodKind: 'ANNUAL', derivedKind: 'balance', state: 'VALUE', amount: balance },
+    );
+  }
+  return {
+    projectId,
+    weeklyYear: 2026,
+    status: 'FRESH',
+    sourceRevision,
+    appliedSourceRevision: sourceRevision,
+    cells,
+    annualCells,
+    annualDerivedCells,
+    sheetFacts: {
+      weeklyCalculationChecks,
+      annualCashflowTotals: [{
+        year: 2024,
+        projection: annualMode(9_999, 9_999),
+        actual: annualMode(9_999, 9_999),
+      }],
+    },
+    ...overrides,
+  };
+}
+
+function completeWorkbookWeeks(projectId, yearMonths, values = []) {
+  const valuesByKey = new Map(values.map((value) => [
+    `${value.yearMonth}|${value.weekNo}|${value.mode}|${value.lineId}`,
+    value.amount,
+  ]));
+  const weeks = [];
+  for (const yearMonth of yearMonths) {
+    for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+      const week = {
+        id: `${projectId}-${yearMonth}-w${weekNo}-exact`,
+        projectId,
+        yearMonth,
+        weekNo,
+        projection: {},
+        actual: {},
+        projectionStates: {},
+        actualStates: {},
+        projectionTotals: { totalIn: 0, totalOut: 0, balance: 0 },
+        actualTotals: { totalIn: 0, totalOut: 0, balance: 0 },
+      };
+      for (const mode of ['projection', 'actual']) {
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          const key = `${yearMonth}|${weekNo}|${mode}|${lineId}`;
+          if (!valuesByKey.has(key)) {
+            week[`${mode}States`][lineId] = 'EMPTY';
+            continue;
+          }
+          const amount = valuesByKey.get(key);
+          week[mode][lineId] = amount;
+          week[`${mode}States`][lineId] = amount === 0 ? 'ZERO' : 'VALUE';
+        }
+      }
+      weeks.push(week);
+    }
+  }
+  return weeks;
+}
 
 describe('cashflow export bff helper', () => {
+  it('maps the complete applied sheet mirror without collapsing EMPTY and ZERO', () => {
+    const { weeks } = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a',
+      mirror: completeMirror('proj-a'),
+      yearMonths: ['2026-01'],
+    });
+
+    expect(weeks).toHaveLength(5);
+    expect(weeks[0]).toMatchObject({
+      projectId: 'proj-a',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      projection: { SALES_IN: 900 },
+      actual: { SALES_IN: 0 },
+      projectionStates: { SALES_IN: 'VALUE', TEAM_SUPPORT_IN: 'EMPTY' },
+      actualStates: { SALES_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY' },
+      projectionTotals: { totalIn: 900, totalOut: 0, balance: 5900 },
+      actualTotals: { totalIn: 0, totalOut: 0, balance: 4000 },
+    });
+  });
+
+  it('copies declared weekly totals even when they differ from the line amounts', async () => {
+    const mirror = completeMirror('proj-a');
+    const declared = mirror.sheetFacts.weeklyCalculationChecks.find((check) => (
+      check.mode === 'projection' && check.yearMonth === '2026-01' && check.weekNo === 1
+    ));
+    declared.reported.depositTotal = 901;
+    declared.reported.withdrawalTotal = 7;
+    const source = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror, yearMonths: ['2026-01'],
+    });
+    expect(source.weeks[0].projectionTotals).toEqual({ totalIn: 901, totalOut: 7, balance: 5900 });
+
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'single-project',
+      yearMonths: ['2026-01'],
+      projects: [{ id: 'proj-a', name: '선언 합계 사업', ...source }],
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('Projection');
+    const rowFor = (label) => worksheet.getSheetValues()
+      .findIndex((row) => Array.isArray(row) && row[1] === label);
+    expect(worksheet.getCell(rowFor('입금 합계'), 2).value).toBe(901);
+    expect(worksheet.getCell(rowFor('출금 합계'), 2).value).toBe(7);
+    expect(worksheet.getCell(rowFor('잔액'), 2).value).toBe(5900);
+  });
+
+  it('maps a whole annual coordinate to one stored annual column without monthly synthesis', () => {
+    const { annual, weeks } = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a',
+      mirror: completeMirror('proj-a'),
+      yearMonths: Array.from({ length: 12 }, (_, index) => `2024-${String(index + 1).padStart(2, '0')}`),
+    });
+
+    expect(weeks).toBeUndefined();
+    expect(annual).toMatchObject({
+      year: 2024,
+      projection: { SALES_IN: 1_200 },
+      actual: { SALES_IN: 0 },
+      projectionStates: { SALES_IN: 'VALUE', TEAM_SUPPORT_IN: 'EMPTY' },
+      actualStates: { SALES_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY' },
+      projectionTotals: { totalIn: 1_200, totalOut: 0, balance: 7_200 },
+      actualTotals: { totalIn: 0, totalOut: 0, balance: 4_000 },
+    });
+  });
+
+  it('writes an annual source as one exact XLSX column', async () => {
+    const yearMonths = Array.from({ length: 12 }, (_, index) => `2024-${String(index + 1).padStart(2, '0')}`);
+    const source = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a',
+      mirror: completeMirror('proj-a'),
+      yearMonths,
+    });
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'single-project',
+      yearMonths,
+      projects: [{ id: 'proj-a', name: '연간 사업', ...source }],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const projection = workbook.getWorksheet('Projection');
+    const rows = projection.getSheetValues().filter(Boolean)
+      .map((row) => Array.isArray(row) ? row.slice(1) : []);
+    expect(rows.find((row) => row[0] === '항목')).toEqual(['항목', '2024']);
+    expect(rows.find((row) => row[0] === '매출액(입금)')).toEqual(['매출액(입금)', 1_200]);
+    expect(rows.find((row) => row[0] === '입금 합계')).toEqual(['입금 합계', 1_200]);
+    expect(rows.find((row) => row[0] === '잔액')).toEqual(['잔액', 7_200]);
+    expect(projection.columnCount).toBe(6);
+  });
+
+  it('keeps annual derived ZERO, EMPTY, and VALUE independently', async () => {
+    const yearMonths = Array.from({ length: 12 }, (_, index) => `2024-${String(index + 1).padStart(2, '0')}`);
+    const mirror = completeMirror('proj-a');
+    mirror.annualDerivedCells = mirror.annualDerivedCells.map((cell) => {
+      if (cell.mode !== 'projection') return cell;
+      if (cell.derivedKind === 'deposit_total') return { ...cell, state: 'ZERO', amount: 0 };
+      if (cell.derivedKind === 'withdrawal_total') return { ...cell, state: 'EMPTY', amount: undefined };
+      return { ...cell, state: 'VALUE', amount: 777 };
+    });
+    const source = buildCashflowExportSourceFromMirror({ projectId: 'proj-a', mirror, yearMonths });
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'single-project', yearMonths, projects: [{ id: 'proj-a', name: '연간 사업', ...source }],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('Projection');
+    const rowFor = (label) => worksheet.getSheetValues()
+      .findIndex((row) => Array.isArray(row) && row[1] === label);
+    expect(worksheet.getCell(rowFor('입금 합계'), 2).value).toBe(0);
+    expect(worksheet.getCell(rowFor('출금 합계'), 2).value).toBeNull();
+    expect(worksheet.getCell(rowFor('잔액'), 2).value).toBe(777);
+  });
+
+  it('rejects renderer input that would require a missing-state or ZERO fallback', async () => {
+    const exactSource = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a',
+      mirror: completeMirror('proj-a'),
+      yearMonths: ['2026-01'],
+    });
+    const missingStateSource = structuredClone(exactSource);
+    delete missingStateSource.weeks[0].projectionStates.SALES_IN;
+    const invalidZeroSource = structuredClone(exactSource);
+    invalidZeroSource.weeks[0].projectionStates.SALES_IN = 'ZERO';
+    invalidZeroSource.weeks[0].projection.SALES_IN = 900;
+
+    for (const source of [missingStateSource, invalidZeroSource]) {
+      await expect(buildCashflowExportWorkbookBuffer({
+        variant: 'single-project',
+        yearMonths: ['2026-01'],
+        projects: [{ id: 'proj-a', name: '엄격 사업', ...source }],
+      })).rejects.toThrow(CashflowTemplateMismatchError);
+    }
+  });
+
+  it('rejects incomplete, duplicate, or invalid raw annual cells', () => {
+    const yearMonths = Array.from({ length: 12 }, (_, index) => `2024-${String(index + 1).padStart(2, '0')}`);
+    const mirrors = [];
+    const missingLine = completeMirror('proj-a');
+    missingLine.annualCells.pop();
+    mirrors.push(missingLine);
+    const duplicateLine = completeMirror('proj-a');
+    duplicateLine.annualCells.push({ ...duplicateLine.annualCells[0] });
+    mirrors.push(duplicateLine);
+    const invalidDirection = completeMirror('proj-a');
+    invalidDirection.annualCells[0] = { ...invalidDirection.annualCells[0], direction: 'OUT' };
+    mirrors.push(invalidDirection);
+    const invalidDerived = completeMirror('proj-a');
+    invalidDerived.annualDerivedCells[0] = { ...invalidDerived.annualDerivedCells[0], state: 'INVALID' };
+    mirrors.push(invalidDerived);
+
+    for (const mirror of mirrors) {
+      expect(() => buildCashflowExportSourceFromMirror({ projectId: 'proj-a', mirror, yearMonths }))
+        .toThrow(CashflowTemplateMismatchError);
+    }
+  });
+
+  it.each([2027, 2032])('maps annual coordinate boundary %i without inference', (year) => {
+    const mirror = completeMirror('proj-a');
+    mirror.annualCells = mirror.annualCells.map((cell) => ({ ...cell, year }));
+    mirror.annualDerivedCells = mirror.annualDerivedCells.map((cell) => ({ ...cell, year }));
+    const yearMonths = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
+    expect(buildCashflowExportSourceFromMirror({ projectId: 'proj-a', mirror, yearMonths }).annual)
+      .toMatchObject({ year, projection: { SALES_IN: 1_200 } });
+  });
+
+  it('maps the BL boundary at December week 5 from the exact weekly cell', () => {
+    const mirror = completeMirror('proj-a');
+    mirror.cells = mirror.cells.map((cell) => ({ ...cell, yearMonth: '2026-12' }));
+    mirror.sheetFacts.weeklyCalculationChecks = mirror.sheetFacts.weeklyCalculationChecks
+      .map((check) => ({ ...check, yearMonth: '2026-12' }));
+    const boundary = mirror.cells.find((cell) => (
+      cell.mode === 'projection' && cell.weekNo === 5 && cell.lineId === 'SALES_IN'
+    ));
+    Object.assign(boundary, { state: 'VALUE', amount: 8_765 });
+
+    const { weeks } = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror, yearMonths: ['2026-12'],
+    });
+    expect(weeks[4].projection.SALES_IN).toBe(8_765);
+  });
+
+  it.each([
+    ['missing mirror', null],
+    ['wrong project', completeMirror('other-project')],
+    ['stale mirror', completeMirror('proj-a', { status: 'STALE' })],
+    ['unapplied mirror', completeMirror('proj-a', { appliedSourceRevision: `sha256:${'b'.repeat(64)}` })],
+    ['non-canonical weekly year', completeMirror('proj-a', { weeklyYear: '2026' })],
+    ['partial annual coordinate', completeMirror('proj-a')],
+  ])('fails closed for %s instead of falling back to another store', (_label, mirror) => {
+    const yearMonths = _label === 'partial annual coordinate' ? ['2024-03', '2024-04'] : ['2026-01'];
+    const operation = () => buildCashflowExportSourceFromMirror({ projectId: 'proj-a', mirror, yearMonths });
+    if (_label === 'non-canonical weekly year') {
+      expect(operation).toThrow(CashflowTemplateMismatchError);
+    } else {
+      expect(operation).toThrow(/연결된 시트/);
+    }
+  });
+
+  it.each([
+    [['2024-01', '2024-12']],
+    [['2026-12', '2027-01']],
+    [Array.from({ length: 12 }, (_, index) => `2033-${String(index + 1).padStart(2, '0')}`)],
+  ])('rejects mixed, partial, or out-of-coordinate periods', (yearMonths) => {
+    expect(() => buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror: completeMirror('proj-a'), yearMonths,
+    })).toThrow(/연결된 시트/);
+  });
+
+  it('rejects an incomplete or duplicated mirror matrix instead of filling it with zero', () => {
+    const incomplete = completeMirror('proj-a');
+    incomplete.cells.pop();
+    expect(() => buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror: incomplete, yearMonths: ['2026-01'],
+    })).toThrow(CashflowTemplateMismatchError);
+
+    const duplicated = completeMirror('proj-a');
+    duplicated.cells.push({ ...duplicated.cells[0] });
+    expect(() => buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror: duplicated, yearMonths: ['2026-01'],
+    })).toThrow(CashflowTemplateMismatchError);
+
+    const missingDeclaredBalance = completeMirror('proj-a');
+    missingDeclaredBalance.sheetFacts.weeklyCalculationChecks.pop();
+    expect(() => buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a', mirror: missingDeclaredBalance, yearMonths: ['2026-01'],
+    })).toThrow(CashflowTemplateMismatchError);
+  });
+
   it('expands year-month range in ascending order', () => {
     expect(expandCashflowYearMonthRange('2026-01', '2026-03')).toEqual(['2026-01', '2026-02', '2026-03']);
     expect(expandCashflowYearMonthRange('2026-03', '2026-01')).toEqual(['2026-01', '2026-02', '2026-03']);
@@ -134,22 +503,10 @@ describe('cashflow export bff helper', () => {
           id: 'proj-a',
           name: '알파 프로젝트',
           shortName: '알파',
-          weeks: [
-            {
-              id: 'proj-a-2026-01-w1',
-              projectId: 'proj-a',
-              yearMonth: '2026-01',
-              weekNo: 1,
-              weekStart: '2026-01-01',
-              weekEnd: '2026-01-04',
-              projection: { SALES_IN: 1000 },
-              actual: { SALES_IN: 900 },
-              pmSubmitted: true,
-              adminClosed: false,
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-01-01T00:00:00.000Z',
-            },
-          ],
+          weeks: completeWorkbookWeeks('proj-a', ['2026-01'], [
+            { yearMonth: '2026-01', weekNo: 1, mode: 'projection', lineId: 'SALES_IN', amount: 1000 },
+            { yearMonth: '2026-01', weekNo: 1, mode: 'actual', lineId: 'SALES_IN', amount: 900 },
+          ]),
         },
       ],
     });
@@ -168,7 +525,7 @@ describe('cashflow export bff helper', () => {
           name: '알파 프로젝트',
           shortName: '알파',
           transactions: [],
-          weeks: [],
+          weeks: completeWorkbookWeeks('proj-a', ['2026-01']),
         },
       ],
     });
@@ -189,7 +546,7 @@ describe('cashflow export bff helper', () => {
         {
           id: 'proj-a',
           name: '알파 프로젝트',
-          weeks: [],
+          weeks: completeWorkbookWeeks('proj-a', ['2026-01']),
         },
       ],
     });
@@ -210,36 +567,12 @@ describe('cashflow export bff helper', () => {
         {
           id: 'proj-wide',
           name: '가로형 프로젝트',
-          weeks: [
-            {
-              id: 'proj-wide-2026-01-w1',
-              projectId: 'proj-wide',
-              yearMonth: '2026-01',
-              weekNo: 1,
-              weekStart: '2025-12-31',
-              weekEnd: '2026-01-06',
-              projection: { SALES_IN: 100, DIRECT_COST_OUT: 25 },
-              actual: {},
-              pmSubmitted: true,
-              adminClosed: false,
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-01-01T00:00:00.000Z',
-            },
-            {
-              id: 'proj-wide-2026-02-w1',
-              projectId: 'proj-wide',
-              yearMonth: '2026-02',
-              weekNo: 1,
-              weekStart: '2026-02-04',
-              weekEnd: '2026-02-10',
-              projection: { SALES_IN: 200, DIRECT_COST_OUT: 50 },
-              actual: {},
-              pmSubmitted: true,
-              adminClosed: false,
-              createdAt: '2026-02-01T00:00:00.000Z',
-              updatedAt: '2026-02-01T00:00:00.000Z',
-            },
-          ],
+          weeks: completeWorkbookWeeks('proj-wide', ['2026-01', '2026-02'], [
+            { yearMonth: '2026-01', weekNo: 1, mode: 'projection', lineId: 'SALES_IN', amount: 100 },
+            { yearMonth: '2026-01', weekNo: 1, mode: 'projection', lineId: 'DIRECT_COST_OUT', amount: 25 },
+            { yearMonth: '2026-02', weekNo: 1, mode: 'projection', lineId: 'SALES_IN', amount: 200 },
+            { yearMonth: '2026-02', weekNo: 1, mode: 'projection', lineId: 'DIRECT_COST_OUT', amount: 50 },
+          ]),
         },
       ],
     });
@@ -264,11 +597,14 @@ describe('cashflow export bff helper', () => {
     expect(rows.some((row) => row[0] === 'Actual')).toBe(false);
     expect(salesRow).toEqual([
       '매출액(입금)',
-      100, 0, 0, 0, 0,
-      100,
-      200, 0, 0, 0, 0,
+      100, undefined, undefined, undefined, undefined,
+      undefined,
       200,
     ]);
+    const salesRowNumber = worksheet.getSheetValues()
+      .findIndex((row) => Array.isArray(row) && row[1] === '매출액(입금)');
+    expect(worksheet.getCell(salesRowNumber, 7).value).toBeNull();
+    expect(worksheet.getCell(salesRowNumber, 13).value).toBeNull();
   });
 
   it('applies the MYSCube cashflow worksheet format and monthly Total column', async () => {
@@ -278,10 +614,10 @@ describe('cashflow export bff helper', () => {
       projects: [{
         id: 'proj-format',
         name: '서식 프로젝트',
-        weeks: [{
-          id: 'proj-format-2026-01-w1', projectId: 'proj-format', yearMonth: '2026-01', weekNo: 1,
-          projection: { SALES_IN: 1000, DIRECT_COST_OUT: 250 }, actual: {},
-        }],
+        weeks: completeWorkbookWeeks('proj-format', ['2026-01'], [
+          { yearMonth: '2026-01', weekNo: 1, mode: 'projection', lineId: 'SALES_IN', amount: 1000 },
+          { yearMonth: '2026-01', weekNo: 1, mode: 'projection', lineId: 'DIRECT_COST_OUT', amount: 250 },
+        ]),
       }],
     });
     const workbook = new ExcelJS.Workbook();
@@ -293,7 +629,11 @@ describe('cashflow export bff helper', () => {
     );
 
     expect(header.values.slice(1)).toEqual(['항목', '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5', '26-1-Total']);
-    expect(sales.values.slice(1)).toEqual(['매출액(입금)', 1000, 0, 0, 0, 0, 1000]);
+    expect(sales.values.slice(1)).toEqual(['매출액(입금)', 1000]);
+    for (let column = 3; column <= 7; column += 1) {
+      expect(sales.getCell(column).value).toBeNull();
+    }
+    expect(sales.getCell(7).value).toBeNull();
     expect(worksheet.views[0]).toMatchObject({ state: 'frozen', xSplit: 1, ySplit: 2 });
     expect(worksheet.getColumn(1).width).toBeGreaterThanOrEqual(22);
     expect(header.getCell(1).font.bold).toBe(true);
@@ -304,12 +644,12 @@ describe('cashflow export bff helper', () => {
     const buffer = await buildCashflowExportWorkbookBuffer({
       variant: 'multi-sheet',
       sortBy: 'DEPARTMENT',
-      yearMonths: ['2024-01'],
+      yearMonths: ['2026-01'],
       projects: [
-        { id: 'p3', name: '가 사업', shortName: 'A-B-가', department: '센터B', weeks: [] },
-        { id: 'p2', name: '나 사업', shortName: 'B-A-나', department: '센터A', weeks: [] },
-        { id: 'p1', name: '가 사업', shortName: 'D-A-가-2', department: '센터A', weeks: [] },
-        { id: 'p0', name: '가 사업', shortName: 'C-A-가-1', department: '센터A', weeks: [] },
+        { id: 'p3', name: '가 사업', shortName: 'A-B-가', department: '센터B', weeks: completeWorkbookWeeks('p3', ['2026-01']) },
+        { id: 'p2', name: '나 사업', shortName: 'B-A-나', department: '센터A', weeks: completeWorkbookWeeks('p2', ['2026-01']) },
+        { id: 'p1', name: '가 사업', shortName: 'D-A-가-2', department: '센터A', weeks: completeWorkbookWeeks('p1', ['2026-01']) },
+        { id: 'p0', name: '가 사업', shortName: 'C-A-가-1', department: '센터A', weeks: completeWorkbookWeeks('p0', ['2026-01']) },
       ],
     });
 
@@ -324,11 +664,11 @@ describe('cashflow export bff helper', () => {
       variant: 'combined',
       sortBy: 'DEPARTMENT',
       scope: 'selected',
-      yearMonths: ['2024-01'],
+      yearMonths: ['2026-01'],
       projects: [
-        { id: 'p-b', name: '가 사업', department: '센터B', weeks: [] },
-        { id: 'p-a2', name: '나 사업', department: '센터A', weeks: [] },
-        { id: 'p-a1', name: '가 사업', department: '센터A', weeks: [] },
+        { id: 'p-b', name: '가 사업', department: '센터B', weeks: completeWorkbookWeeks('p-b', ['2026-01']) },
+        { id: 'p-a2', name: '나 사업', department: '센터A', weeks: completeWorkbookWeeks('p-a2', ['2026-01']) },
+        { id: 'p-a1', name: '가 사업', department: '센터A', weeks: completeWorkbookWeeks('p-a1', ['2026-01']) },
       ],
     });
 

@@ -6,6 +6,45 @@ import {
   CASHFLOW_OUT_LINES,
   getCashflowLineLabel,
 } from './cashflow-policy.mjs';
+import {
+  annualColumnFor,
+  CashflowTemplateMismatchError,
+  requireWeeklyYear,
+  weekOrdinal,
+} from './cashflow-coordinates.mjs';
+
+export class CashflowExportSourceUnavailableError extends Error {
+  constructor(detail) {
+    super('연결된 시트의 최신 반영값을 확인할 수 없습니다. 시트 값을 다시 불러온 뒤 내려받아 주세요.');
+    this.name = 'CashflowExportSourceUnavailableError';
+    this.code = 'cashflow_export_source_unavailable';
+    this.detail = detail;
+  }
+}
+
+function cashflowExportSourceUnavailable(detail) {
+  throw new CashflowExportSourceUnavailableError(detail);
+}
+
+function cashflowTemplateMismatch(detail) {
+  throw new CashflowTemplateMismatchError(detail);
+}
+
+const CASHFLOW_EXPORT_MODES = Object.freeze(['projection', 'actual']);
+const CASHFLOW_EXPORT_STATES = Object.freeze(['EMPTY', 'ZERO', 'VALUE']);
+const CASHFLOW_EXPORT_DERIVED_KINDS = Object.freeze(['deposit_total', 'withdrawal_total', 'balance']);
+const CASHFLOW_EXPORT_LINE_IDS = new Set(CASHFLOW_ALL_LINES);
+const CASHFLOW_EXPORT_DIRECTIONS = new Map([
+  ...CASHFLOW_IN_LINES.map((lineId) => [lineId, 'IN']),
+  ...CASHFLOW_OUT_LINES.map((lineId) => [lineId, 'OUT']),
+]);
+
+function isCashflowExportCellValid(cell) {
+  return CASHFLOW_EXPORT_STATES.includes(cell?.state)
+    && (cell.state !== 'EMPTY' || cell.amount === undefined)
+    && (cell.state !== 'ZERO' || cell.amount === 0)
+    && (cell.state !== 'VALUE' || Number.isSafeInteger(cell.amount));
+}
 
 function normalizeSpace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -45,12 +84,215 @@ function formatMonthTotalLabel(yearMonth) {
   return `${String(parsed.year % 100).padStart(2, '0')}-${parsed.month}-Total`;
 }
 
-function sum(values) {
-  return values.reduce((total, value) => total + (Number(value) || 0), 0);
-}
-
 function getMonthWeeks(yearMonth) {
   return getMonthFinanceWeeks(yearMonth);
+}
+
+function requireAppliedCashflowMirror({ projectId, mirror, yearMonths }) {
+  const sourceRevision = typeof mirror?.sourceRevision === 'string' ? mirror.sourceRevision.trim() : '';
+  const appliedSourceRevision = typeof mirror?.appliedSourceRevision === 'string'
+    ? mirror.appliedSourceRevision.trim()
+    : '';
+  if (!mirror
+    || mirror.projectId !== projectId
+    || mirror.status !== 'FRESH'
+    || !sourceRevision
+    || appliedSourceRevision !== sourceRevision
+    || !Array.isArray(yearMonths)
+    || yearMonths.length === 0) {
+    cashflowExportSourceUnavailable(`mirror identity or revision is unavailable for ${projectId}`);
+  }
+  if (!Number.isSafeInteger(mirror.weeklyYear)) {
+    cashflowTemplateMismatch(`weekly year is invalid for ${projectId}`);
+  }
+  return requireWeeklyYear(mirror.weeklyYear);
+}
+
+function buildCashflowExportWeeksFromAppliedMirror({ projectId, mirror, yearMonths, weeklyYear }) {
+  if (!Array.isArray(mirror.cells)) {
+    cashflowTemplateMismatch(`weekly cells are unavailable for ${projectId}`);
+  }
+  for (const yearMonth of yearMonths) {
+    try {
+      if (weekOrdinal(weeklyYear, yearMonth, 1) === -1) {
+        cashflowExportSourceUnavailable(`${yearMonth} is outside the weekly coordinate block`);
+      }
+    } catch {
+      cashflowExportSourceUnavailable(`${yearMonth} is outside the weekly coordinate block`);
+    }
+  }
+
+  const selectedMonths = new Set(yearMonths);
+  const cellsByKey = new Map();
+  for (const cell of mirror.cells) {
+    if (!selectedMonths.has(cell?.yearMonth)) continue;
+    const mode = cell?.mode;
+    const weekNo = Number(cell?.weekNo);
+    const lineId = cell?.lineId;
+    if (!CASHFLOW_EXPORT_MODES.includes(mode)
+      || weekOrdinal(weeklyYear, cell.yearMonth, weekNo) === -1
+      || !CASHFLOW_EXPORT_LINE_IDS.has(lineId)
+      || cell.direction !== CASHFLOW_EXPORT_DIRECTIONS.get(lineId)
+      || !isCashflowExportCellValid(cell)) {
+      cashflowTemplateMismatch(`mirror cell is invalid for ${projectId}`);
+    }
+    const key = `${cell.yearMonth}|${weekNo}|${mode}|${lineId}`;
+    if (cellsByKey.has(key)) {
+      cashflowTemplateMismatch(`mirror cell is duplicated for ${projectId}`);
+    }
+    cellsByKey.set(key, cell);
+  }
+
+  const checksByKey = new Map();
+  const weeklyCalculationChecks = mirror?.sheetFacts?.weeklyCalculationChecks;
+  if (!Array.isArray(weeklyCalculationChecks)) {
+    cashflowTemplateMismatch(`declared weekly totals are unavailable for ${projectId}`);
+  }
+  for (const check of weeklyCalculationChecks) {
+    if (!selectedMonths.has(check?.yearMonth)) continue;
+    const mode = check?.mode;
+    const weekNo = Number(check?.weekNo);
+    const reported = check?.reported;
+    if (!CASHFLOW_EXPORT_MODES.includes(mode)
+      || weekOrdinal(weeklyYear, check.yearMonth, weekNo) === -1
+      || !reported
+      || !Number.isSafeInteger(reported.depositTotal)
+      || !Number.isSafeInteger(reported.withdrawalTotal)
+      || !Number.isSafeInteger(reported.balance)) {
+      cashflowTemplateMismatch(`declared weekly totals are invalid for ${projectId}`);
+    }
+    const key = `${check.yearMonth}|${weekNo}|${mode}`;
+    if (checksByKey.has(key)) {
+      cashflowTemplateMismatch(`declared weekly totals are duplicated for ${projectId}`);
+    }
+    checksByKey.set(key, reported);
+  }
+
+  const weeks = [];
+  for (const yearMonth of yearMonths) {
+    for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+      const week = {
+        id: `${projectId}-${yearMonth}-w${weekNo}-sheet-mirror`,
+        projectId,
+        yearMonth,
+        weekNo,
+        projection: {},
+        actual: {},
+        projectionStates: {},
+        actualStates: {},
+      };
+      for (const mode of CASHFLOW_EXPORT_MODES) {
+        const amounts = week[mode];
+        const states = week[`${mode}States`];
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          const cell = cellsByKey.get(`${yearMonth}|${weekNo}|${mode}|${lineId}`);
+          if (!cell) {
+            cashflowTemplateMismatch(`mirror cell is missing for ${projectId}`);
+          }
+          states[lineId] = cell.state;
+          if (cell.state === 'VALUE' || cell.state === 'ZERO') amounts[lineId] = cell.amount;
+        }
+        const reported = checksByKey.get(`${yearMonth}|${weekNo}|${mode}`);
+        if (!reported) {
+          cashflowTemplateMismatch(`declared weekly totals are missing for ${projectId}`);
+        }
+        week[`${mode}Totals`] = {
+          totalIn: reported.depositTotal,
+          totalOut: reported.withdrawalTotal,
+          balance: reported.balance,
+        };
+      }
+      weeks.push(week);
+    }
+  }
+  return weeks;
+}
+
+function isWholeCalendarYear(yearMonths, year) {
+  return yearMonths.length === 12 && yearMonths.every((yearMonth, index) => (
+    yearMonth === `${year}-${String(index + 1).padStart(2, '0')}`
+  ));
+}
+
+function buildCashflowExportAnnualFromAppliedMirror({ projectId, mirror, year }) {
+  if (!Array.isArray(mirror.annualCells) || !Array.isArray(mirror.annualDerivedCells)) {
+    cashflowTemplateMismatch(`annual cells are unavailable for ${projectId}`);
+  }
+
+  const cellsByKey = new Map();
+  for (const cell of mirror.annualCells) {
+    if (cell?.year !== year) continue;
+    if (!CASHFLOW_EXPORT_MODES.includes(cell?.mode)
+      || cell.periodKind !== 'ANNUAL'
+      || !CASHFLOW_EXPORT_LINE_IDS.has(cell?.lineId)
+      || cell.direction !== CASHFLOW_EXPORT_DIRECTIONS.get(cell.lineId)
+      || !isCashflowExportCellValid(cell)) {
+      cashflowTemplateMismatch(`annual line is invalid for ${projectId}`);
+    }
+    const key = `${cell.mode}|${cell.lineId}`;
+    if (cellsByKey.has(key)) {
+      cashflowTemplateMismatch(`annual line is duplicated for ${projectId}`);
+    }
+    cellsByKey.set(key, cell);
+  }
+
+  const derivedByKey = new Map();
+  for (const cell of mirror.annualDerivedCells) {
+    if (cell?.year !== year) continue;
+    if (!CASHFLOW_EXPORT_MODES.includes(cell?.mode)
+      || cell.periodKind !== 'ANNUAL'
+      || !CASHFLOW_EXPORT_DERIVED_KINDS.includes(cell?.derivedKind)
+      || !isCashflowExportCellValid(cell)) {
+      cashflowTemplateMismatch(`annual derived cell is invalid for ${projectId}`);
+    }
+    const key = `${cell.mode}|${cell.derivedKind}`;
+    if (derivedByKey.has(key)) {
+      cashflowTemplateMismatch(`annual derived cell is duplicated for ${projectId}`);
+    }
+    derivedByKey.set(key, cell);
+  }
+
+  const annual = { year };
+  for (const mode of CASHFLOW_EXPORT_MODES) {
+    const amounts = {};
+    const states = {};
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      const cell = cellsByKey.get(`${mode}|${lineId}`);
+      if (!cell) cashflowTemplateMismatch(`annual line is missing for ${projectId}`);
+      states[lineId] = cell.state;
+      if (cell.state === 'ZERO' || cell.state === 'VALUE') amounts[lineId] = cell.amount;
+    }
+    const derivedAmount = (kind) => {
+      const cell = derivedByKey.get(`${mode}|${kind}`);
+      if (!cell) cashflowTemplateMismatch(`annual derived cell is missing for ${projectId}`);
+      return cell.state === 'EMPTY' ? null : cell.amount;
+    };
+    const totalIn = derivedAmount('deposit_total');
+    const totalOut = derivedAmount('withdrawal_total');
+    const balance = derivedAmount('balance');
+    if (![totalIn, totalOut, balance].every((value) => value === null || Number.isSafeInteger(value))) {
+      cashflowTemplateMismatch(`annual derived amount is invalid for ${projectId}`);
+    }
+    annual[mode] = amounts;
+    annual[`${mode}States`] = states;
+    annual[`${mode}Totals`] = { totalIn, totalOut, balance };
+  }
+  return annual;
+}
+
+export function buildCashflowExportSourceFromMirror({ projectId, mirror, yearMonths }) {
+  const weeklyYear = requireAppliedCashflowMirror({ projectId, mirror, yearMonths });
+  if (yearMonths.every((yearMonth) => weekOrdinal(weeklyYear, yearMonth, 1) !== -1)) {
+    return { weeks: buildCashflowExportWeeksFromAppliedMirror({ projectId, mirror, yearMonths, weeklyYear }) };
+  }
+
+  const year = Number(String(yearMonths[0] || '').slice(0, 4));
+  if (!Number.isSafeInteger(year)
+    || annualColumnFor(weeklyYear, year) === -1
+    || !isWholeCalendarYear(yearMonths, year)) {
+    cashflowExportSourceUnavailable(`requested period is not one complete cashflow coordinate for ${projectId}`);
+  }
+  return { annual: buildCashflowExportAnnualFromAppliedMirror({ projectId, mirror, year }) };
 }
 
 export function expandCashflowYearMonthRange(startYearMonth, endYearMonth) {
@@ -96,10 +338,17 @@ function buildCashflowWeekSlots(yearMonth) {
   return slots;
 }
 
-function computeCashflowTotals(sheet = {}) {
-  const totalIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + (Number(sheet[id]) || 0), 0);
-  const totalOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + (Number(sheet[id]) || 0), 0);
-  return { totalIn, totalOut, net: totalIn - totalOut };
+function getCashflowWeekTotals(week, mode) {
+  const declared = mode === 'projection' ? week?.projectionTotals : week?.actualTotals;
+  const exactAmount = (value) => {
+    if (value === null || Number.isSafeInteger(value)) return value;
+    cashflowTemplateMismatch('declared export amount is invalid');
+  };
+  return {
+    totalIn: exactAmount(declared?.totalIn),
+    totalOut: exactAmount(declared?.totalOut),
+    net: exactAmount(declared?.balance),
+  };
 }
 
 function normalizeProjectLabel(project) {
@@ -132,9 +381,20 @@ function indexProjectWeeks(project) {
 
 function getWeekAmounts(week, mode) {
   const source = mode === 'projection' ? week?.projection : week?.actual;
+  const states = mode === 'projection' ? week?.projectionStates : week?.actualStates;
   const amounts = {};
   for (const lineId of CASHFLOW_ALL_LINES) {
-    amounts[lineId] = Number(source?.[lineId] || 0);
+    const state = states?.[lineId];
+    const hasAmount = Boolean(source) && Object.prototype.hasOwnProperty.call(source, lineId);
+    if (state === 'EMPTY' && !hasAmount) {
+      amounts[lineId] = null;
+    } else if (state === 'ZERO' && hasAmount && source[lineId] === 0) {
+      amounts[lineId] = 0;
+    } else if (state === 'VALUE' && hasAmount && Number.isSafeInteger(source[lineId])) {
+      amounts[lineId] = source[lineId];
+    } else {
+      cashflowTemplateMismatch(`render source is invalid for ${lineId}`);
+    }
   }
   return amounts;
 }
@@ -142,25 +402,25 @@ function getWeekAmounts(week, mode) {
 function buildModeSectionRows({ yearMonth, mode, slots, weeksByWeekNo }) {
   const modeLabel = mode === 'projection' ? 'Projection' : 'Actual';
   const slotAmounts = slots.map((slot) => getWeekAmounts(weeksByWeekNo.get(slot.weekNo), mode));
-  const weekTotals = slotAmounts.map((amounts) => computeCashflowTotals(amounts));
+  const weekTotals = slots.map((slot) => getCashflowWeekTotals(weeksByWeekNo.get(slot.weekNo), mode));
   const rows = [];
   rows.push(['항목', ...slots.map((slot) => slot.label), formatMonthTotalLabel(yearMonth)]);
   rows.push([`입금 (${modeLabel})`, ...Array(slots.length + 1).fill('')]);
   for (const lineId of CASHFLOW_IN_LINES) {
-    const values = slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-    rows.push([getCashflowLineLabel(lineId), ...values, sum(values)]);
+    const values = slotAmounts.map((amounts) => amounts[lineId]);
+    rows.push([getCashflowLineLabel(lineId), ...values, null]);
   }
   const inTotals = weekTotals.map((week) => week.totalIn);
-  rows.push(['입금 합계', ...inTotals, sum(inTotals)]);
+  rows.push(['입금 합계', ...inTotals, null]);
   rows.push([`출금 (${modeLabel})`, ...Array(slots.length + 1).fill('')]);
   for (const lineId of CASHFLOW_OUT_LINES) {
-    const values = slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-    rows.push([getCashflowLineLabel(lineId), ...values, sum(values)]);
+    const values = slotAmounts.map((amounts) => amounts[lineId]);
+    rows.push([getCashflowLineLabel(lineId), ...values, null]);
   }
   const outTotals = weekTotals.map((week) => week.totalOut);
   const netTotals = weekTotals.map((week) => week.net);
-  rows.push(['출금 합계', ...outTotals, sum(outTotals)]);
-  rows.push(['잔액', ...netTotals, sum(netTotals)]);
+  rows.push(['출금 합계', ...outTotals, null]);
+  rows.push(['잔액', ...netTotals, null]);
   return rows;
 }
 
@@ -170,7 +430,7 @@ function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
     const slots = buildCashflowWeekSlots(yearMonth);
     const weeksByWeekNo = weekIndex.get(yearMonth) || new Map();
     const slotAmounts = slots.map((slot) => getWeekAmounts(weeksByWeekNo.get(slot.weekNo), mode));
-    const weekTotals = slotAmounts.map((amounts) => computeCashflowTotals(amounts));
+    const weekTotals = slots.map((slot) => getCashflowWeekTotals(weeksByWeekNo.get(slot.weekNo), mode));
     return {
       yearMonth,
       slots,
@@ -193,39 +453,55 @@ function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
   for (const lineId of CASHFLOW_IN_LINES) {
     const row = [getCashflowLineLabel(lineId)];
     for (const month of monthColumns) {
-      const values = month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-      row.push(...values, sum(values));
+      const values = month.slotAmounts.map((amounts) => amounts[lineId]);
+      row.push(...values, null);
     }
     rows.push(row);
   }
   const inTotalRow = ['입금 합계'];
   for (const month of monthColumns) {
     const values = month.weekTotals.map((week) => week.totalIn);
-    inTotalRow.push(...values, sum(values));
+    inTotalRow.push(...values, null);
   }
   rows.push(inTotalRow);
   rows.push([`출금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
   for (const lineId of CASHFLOW_OUT_LINES) {
     const row = [getCashflowLineLabel(lineId)];
     for (const month of monthColumns) {
-      const values = month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-      row.push(...values, sum(values));
+      const values = month.slotAmounts.map((amounts) => amounts[lineId]);
+      row.push(...values, null);
     }
     rows.push(row);
   }
   const outTotalRow = ['출금 합계'];
   for (const month of monthColumns) {
     const values = month.weekTotals.map((week) => week.totalOut);
-    outTotalRow.push(...values, sum(values));
+    outTotalRow.push(...values, null);
   }
   rows.push(outTotalRow);
   const netRow = ['잔액'];
   for (const month of monthColumns) {
     const values = month.weekTotals.map((week) => week.net);
-    netRow.push(...values, sum(values));
+    netRow.push(...values, null);
   }
   rows.push(netRow);
   return rows;
+}
+
+function buildAnnualModeSectionRows({ annual, mode }) {
+  const modeLabel = mode === 'projection' ? 'Projection' : 'Actual';
+  const amounts = getWeekAmounts(annual, mode);
+  const totals = getCashflowWeekTotals(annual, mode);
+  return [
+    ['항목', String(annual.year)],
+    [`입금 (${modeLabel})`, ''],
+    ...CASHFLOW_IN_LINES.map((lineId) => [getCashflowLineLabel(lineId), amounts[lineId]]),
+    ['입금 합계', totals.totalIn],
+    [`출금 (${modeLabel})`, ''],
+    ...CASHFLOW_OUT_LINES.map((lineId) => [getCashflowLineLabel(lineId), amounts[lineId]]),
+    ['출금 합계', totals.totalOut],
+    ['잔액', totals.net],
+  ];
 }
 
 function buildProjectWorkbookRows({ project, yearMonths, includeBothModes, mode }) {
@@ -237,6 +513,17 @@ function buildProjectWorkbookRows({ project, yearMonths, includeBothModes, mode 
   rows.push(['사업', projectTitle, '사업 ID', project.id, '거래 수', transactionCount]);
   if (projectLabel !== projectTitle) {
     rows.push(['표시명', projectLabel]);
+  }
+  if (project.annual) {
+    rows.push(...buildAnnualModeSectionRows({
+      annual: project.annual,
+      mode: includeBothModes ? 'projection' : (mode || 'projection'),
+    }));
+    if (includeBothModes) {
+      rows.push([]);
+      rows.push(...buildAnnualModeSectionRows({ annual: project.annual, mode: 'actual' }));
+    }
+    return rows;
   }
   if (yearMonths.length > 1) {
     rows.push(...buildWideModeSectionRows({
