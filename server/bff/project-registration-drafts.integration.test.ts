@@ -535,7 +535,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     expect(stored?.attachmentRefs).toEqual([expect.objectContaining({ path: firstPath })]);
   });
 
-  it('atomically submits canonical records, replays after release, then runs external work only in the worker', async () => {
+  it('atomically submits canonical records, replays after release, and publishes attachments inline in the same request', async () => {
     const created = await createDraft({
       key: 'idem-submit-create',
       body: { payload: validPayload(), stepIndex: 4 },
@@ -561,9 +561,12 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
     expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
     expect(await count('outbox')).toBe(1);
-    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(0);
-    expect(driveService.ensureProjectRootFolder).not.toHaveBeenCalled();
-    expect(projectRegistrationSlackService.notifyMessage).not.toHaveBeenCalled();
+    // 첨부 공개 이관은 제출과 같은 요청 안에서 인라인 처리된다. 크론(하루 1회)만 기다리면
+    // 결재 문서의 서류가 하루 종일 '미제출'로 보이고 승인이 막히기 때문이다.
+    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(2);
+    expect(driveService.ensureProjectRootFolder).toHaveBeenCalledTimes(1);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
+    expect(relocatedPaths).toHaveLength(7);
 
     const project = (await db.doc(`orgs/${tenantId}/projects/${first.body.projectId}`).get()).data();
     expect(project).toMatchObject({
@@ -571,14 +574,15 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       registrationSource: 'pm_portal',
       executiveReviewStatus: 'PENDING',
       version: 1,
-      contractDocument: null,
     });
     expect(project).not.toHaveProperty('arbitraryBrowserField');
-    expect(project?.contractDocument).toBeNull();
+    expect(project?.contractDocument)
+      .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
     const requestDoc = (await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data();
     expect(requestDoc).toMatchObject({ sourceDraftId: created.body.draft.draftId });
     expect(requestDoc?.payload).not.toHaveProperty('arbitraryBrowserField');
-    expect(requestDoc?.payload?.contractDocument).toBeNull();
+    expect(requestDoc?.payload?.contractDocument)
+      .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
     const draft = (await db.doc(`orgs/${tenantId}/projectRequestDrafts/${created.body.draft.draftId}`).get()).data();
     expect(draft).toMatchObject({
       status: 'SUBMITTED',
@@ -611,20 +615,15 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     expect(otherKey.status).toBe(409);
     expect(otherKey.body.error).toBe('draft_not_active');
 
+    // 크론 워커는 안전망이다. 인라인으로 이미 끝났으므로 처리할 이벤트가 없어야 한다.
     const worker = await api
       .post('/api/internal/workers/outbox/run')
       .set('x-worker-secret', 'draft-worker-secret')
       .send({ limit: 10, maxAttempts: 3 });
     expect(worker.status).toBe(200);
-    expect(worker.body).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
+    expect(worker.body).toMatchObject({ processed: 0 });
     expect(driveService.ensureProjectRootFolder).toHaveBeenCalledTimes(1);
     expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
-    expect(relocatedPaths).toHaveLength(7);
-    expect((await db.doc(`orgs/${tenantId}/projects/${first.body.projectId}`).get()).data()?.contractDocument)
-      .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
-    expect((await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data()?.payload?.contractDocument)
-      .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
-    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(2);
     expect((await db.doc(`outbox/${first.body.outbox.id}`).get()).data()?.status).toBe('DONE');
     expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${first.body.outbox.id}`).get()).exists).toBe(true);
   }, 60_000);
@@ -662,24 +661,28 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     expect(await count('outbox')).toBe(1);
   }, 60_000);
 
-  it('keeps canonical submit committed when a retryable Drive worker step fails', async () => {
+  it('keeps canonical submit committed when the inline attachment publication fails on a Drive outage', async () => {
     driveHook = async () => { throw new Error('temporary Drive outage'); };
     const created = await createDraft({
       key: 'idem-worker-failure-create',
       body: { payload: validPayload({ name: 'Worker failure project' }) },
     });
     await uploadRequiredAttachments(created, 'idem-worker-failure-upload');
+    // 인라인 이관이 실패해도 제출 응답은 성공 그대로다 - 커밋된 정본을 실패로 되돌리지 않는다.
     const submitted = await submitDraft(created, 'idem-worker-failure', 7);
     expect(submitted.status).toBe(201);
+    expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
+    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
+    const eventAfterSubmit = (await db.doc(`outbox/${submitted.body.outbox.id}`).get()).data();
+    expect(eventAfterSubmit?.status).toBe('FAILED');
+    expect(eventAfterSubmit?.attempts).toBe(1);
+    expect(projectRegistrationSlackService.notifyMessage).not.toHaveBeenCalled();
 
+    // 재시도 백오프(nextAttemptAt 미래) 때문에 바로 도는 워커는 집지 않는다 - 크론이 안전망.
     const worker = await api
       .post('/api/internal/workers/outbox/run')
       .set('x-worker-secret', 'draft-worker-secret')
       .send({ limit: 10, maxAttempts: 3 });
-    expect(worker.body).toMatchObject({ processed: 1, succeeded: 0, failed: 1 });
-    expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
-    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
-    expect((await db.doc(`outbox/${submitted.body.outbox.id}`).get()).data()?.status).toBe('FAILED');
-    expect(projectRegistrationSlackService.notifyMessage).not.toHaveBeenCalled();
+    expect(worker.body).toMatchObject({ processed: 0 });
   }, 60_000);
 });
