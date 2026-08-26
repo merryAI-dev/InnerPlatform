@@ -2875,6 +2875,88 @@ function sheetFormulaProjectionActualSummary({ projectId, mirror, comparisonBoun
   };
 }
 
+function storedSheetFormulaProjectionActualSummary({ projectId, mirror, comparisonBoundary, yearMonth = '' }) {
+  if (mirror?.projectId !== projectId) return null;
+  const rawRows = mirror?.sheetFacts?.projectionActualDifferences;
+  if (!Array.isArray(rawRows) || rawRows.length === 0) return null;
+  const rows = rawRows.map((row) => {
+    const rowYearMonth = row?.yearMonth;
+    const rowWeekNo = row?.weekNo;
+    const rowAmount = row?.amount;
+    if (typeof rowYearMonth !== 'string'
+      || rowYearMonth.trim() !== rowYearMonth
+      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(rowYearMonth)
+      || typeof rowWeekNo !== 'number'
+      || !Number.isInteger(rowWeekNo)
+      || rowWeekNo < 1
+      || rowWeekNo > 5
+      || typeof rowAmount !== 'number'
+      || !Number.isSafeInteger(rowAmount)) return null;
+    return { yearMonth: rowYearMonth, weekNo: rowWeekNo, amount: rowAmount };
+  });
+  if (rows.some((row) => !row)) return null;
+  const keys = rows.map((row) => `${row.yearMonth}:${row.weekNo}`);
+  if (new Set(keys).size !== keys.length) return null;
+
+  const asOf = comparisonBoundary?.asOfWeek;
+  const latest = rows
+    .filter((row) => row.yearMonth < asOf?.yearMonth
+      || (row.yearMonth === asOf?.yearMonth && row.weekNo <= asOf?.weekNo))
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
+    .at(-1);
+  if (!latest) return null;
+  const requestedMonth = yearMonth || latest.yearMonth;
+  const periods = ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].map((period) => {
+    if (period === 'MONTH') return { period, differenceAmount: latest.amount };
+    const weekNo = Number(period.slice(-1));
+    const value = rows.find((row) => row.yearMonth === requestedMonth && row.weekNo === weekNo);
+    return { period, differenceAmount: value?.amount ?? null };
+  });
+  const fromMonth = `${readWeeklyYear(mirror.weeklyYear) ?? Number(latest.yearMonth.slice(0, 4))}-01`;
+  const settlementMatches = latest.amount === 0;
+  return {
+    projectId,
+    source: 'SHEET_FORMULA',
+    sourceRevision: readOptionalText(mirror.sourceRevision),
+    fromMonth,
+    comparisonAsOfWeek: { yearMonth: latest.yearMonth, weekNo: latest.weekNo },
+    differenceAmount: latest.amount,
+    settlementDifferenceAmount: latest.amount,
+    settlementMatches,
+    display: {
+      periodLabel: `누적 ${fromMonth}~${latest.yearMonth} ${latest.weekNo}주차`,
+      statusLabel: settlementMatches ? '일치 · 100%' : '불일치',
+      statusTone: settlementMatches ? 'success' : 'danger',
+      differenceLabel: `차액 ${latest.amount.toLocaleString('ko-KR')}원`,
+    },
+    periods,
+  };
+}
+
+function storedMirrorCapturedAt(projectId, mirror) {
+  if (mirror?.projectId !== projectId) return null;
+  return validJvmInstant(mirror?.capturedAt) ? mirror.capturedAt : null;
+}
+
+async function readWeeklyOverviewMirrors({ db, tenantId, projectIds, comparisonBoundary, yearMonth }) {
+  if (!db?.doc || typeof db.getAll !== 'function') throw new Error('cashflow mirror batch store unavailable');
+  const refs = projectIds.map((projectId) => db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`));
+  const snapshots = await db.getAll(...refs);
+  if (!Array.isArray(snapshots) || snapshots.length !== projectIds.length) {
+    throw new Error('cashflow mirror batch response invalid');
+  }
+  return new Map(projectIds.map((projectId, index) => {
+    const snapshot = snapshots[index];
+    const mirror = snapshot?.exists ? snapshot.data() || {} : null;
+    return [projectId, {
+      projectionActualSummary: storedSheetFormulaProjectionActualSummary({
+        projectId, mirror, comparisonBoundary, yearMonth,
+      }),
+      sheetCapturedAt: storedMirrorCapturedAt(projectId, mirror),
+    }];
+  }));
+}
+
 async function readSheetFormulaProjectionActualSummaries({ db, req, projectIds, comparisonBoundary, yearMonth, authMode, workspaceEmailDomain }) {
   const tenantId = readOptionalText(req.context?.tenantId);
   const results = await Promise.all(projectIds.map(async (projectId) => {
@@ -4573,18 +4655,40 @@ export function mountJvmWeeklyApiRoutes(app, {
       mutation: false,
     }), { projectCount: projectIds.length });
     const alignedWeeklyResult = await alignMonthSettlementStatus(db, req.context.tenantId, weeklyResult);
+    let mirrorsByProjectId = new Map();
+    let mirrorReadFailed = false;
+    try {
+      mirrorsByProjectId = await trace.measure('mirror_overview', () => readWeeklyOverviewMirrors({
+        db,
+        tenantId: req.context.tenantId,
+        projectIds,
+        comparisonBoundary: resolveCashflowComparisonAsOf('', now()),
+        yearMonth,
+      }), { projectCount: projectIds.length });
+    } catch {
+      mirrorReadFailed = true;
+    }
     const combined = {
       ...alignedWeeklyResult,
-      version: '3',
+      version: '4',
       yearMonth,
       monthCloseTargetYearMonth,
       monthCloseTargetLabel: `${Number(monthCloseTargetYearMonth.slice(5, 7))}월`,
-      items: (Array.isArray(alignedWeeklyResult?.items) ? alignedWeeklyResult.items : []).map((item) => ({
-        ...item,
-        projectionActualSummary: null,
-      })),
+      items: (Array.isArray(alignedWeeklyResult?.items) ? alignedWeeklyResult.items : []).map((item) => {
+        const mirror = mirrorsByProjectId.get(readOptionalText(item?.projectId));
+        return {
+          ...item,
+          projectionActualSummary: mirror?.projectionActualSummary || null,
+          sheetCapturedAt: mirror?.sheetCapturedAt || null,
+        };
+      }),
       errors: [
-        ...(Array.isArray(alignedWeeklyResult?.errors) ? alignedWeeklyResult.errors : []),
+        ...(Array.isArray(alignedWeeklyResult?.errors)
+          ? alignedWeeklyResult.errors.filter((error) => readOptionalText(error?.code) !== 'SUMMARY_UNAVAILABLE')
+          : []),
+        ...(mirrorReadFailed
+          ? projectIds.map((projectId) => ({ projectId, code: 'SUMMARY_UNAVAILABLE' }))
+          : []),
       ],
     };
     trace.emit('response', {

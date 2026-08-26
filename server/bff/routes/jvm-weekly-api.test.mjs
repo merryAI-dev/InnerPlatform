@@ -985,14 +985,17 @@ describe('JVM weekly API BFF proxy', () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv, db: { ...source.db, getAll },
+    });
 
     const response = await request(app)
       .post('/api/v1/cashflow/weekly-overview')
       .send({ projectIds, yearMonth: '2026-08' })
       .expect(200);
 
-    expect(response.body).toMatchObject({ version: '3', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월' });
+    expect(response.body).toMatchObject({ version: '4', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월' });
     expect(response.body.items[0].settlementStatuses.items).toEqual([
       {
         period: 'MONTH',
@@ -1008,12 +1011,202 @@ describe('JVM weekly API BFF proxy', () => {
       },
     ]);
     expect(response.body.errors).toEqual([]);
+    expect(getAll).toHaveBeenCalledTimes(1);
+    expect(getAll.mock.calls[0]).toHaveLength(61);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://jvm-weekly.local/api/v1/cashflow/weekly-overview',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
     );
+  });
+
+  it('maps the stored mirror snapshot into weekly overview without the strict freshness gate', async () => {
+    const source = fullMonthCloseSource({ mirrorStatus: 'STALE' });
+    const mirrorPath = 'orgs/tenant-a/cashflow_sheet_mirrors/project-a';
+    const mirror = source.documents.get(mirrorPath);
+    mirror.appliedSourceRevision = `sha256:${'f'.repeat(64)}`;
+    mirror.capturedAt = '2026-08-25T07:48:00.000Z';
+    mirror.sheetFacts.projectionActualDifferences = [
+      { yearMonth: '2026-08', weekNo: 4, amount: -12_345, sourceCell: 'A14' },
+    ];
+    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const canonical = {
+      version: '1',
+      yearMonth: '2026-08',
+      items: [{
+        projectId: 'project-a',
+        settlementStatuses: { projectId: 'project-a', yearMonth: '2026-08', items: [] },
+        projectionActualSummary: null,
+      }],
+      errors: [
+        { projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' },
+        { projectId: 'project-a', code: 'STATUS_UNAVAILABLE' },
+      ],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'finance' }, {
+      env: runtimeEnv,
+      db: { ...source.db, getAll },
+      now: () => new Date('2026-08-26T03:00:00.000Z'),
+    });
+
+    const overview = await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200);
+
+    expect(overview.body).toMatchObject({
+      version: '4',
+      items: [{
+        projectId: 'project-a',
+        sheetCapturedAt: '2026-08-25T07:48:00.000Z',
+        projectionActualSummary: {
+          projectId: 'project-a',
+          source: 'SHEET_FORMULA',
+          differenceAmount: -12_345,
+          comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
+        },
+      }],
+      errors: [{ projectId: 'project-a', code: 'STATUS_UNAVAILABLE' }],
+    });
+    expect(getAll).toHaveBeenCalledTimes(1);
+
+    const strict = await request(app)
+      .post('/api/v1/cashflow/projection-actual-summary/batch')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200);
+    expect(strict.body).toMatchObject({
+      items: [], errors: [{ projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' }],
+    });
+  });
+
+  it.each([
+    ['foreign mirror', (mirror) => { mirror.projectId = 'project-b'; }],
+    ['padded mirror identity', (mirror) => { mirror.projectId = ' project-a '; }],
+    ['duplicate projection rows', (mirror) => {
+      mirror.sheetFacts.projectionActualDifferences = [
+        { yearMonth: '2026-08', weekNo: 4, amount: 1 },
+        { yearMonth: '2026-08', weekNo: 4, amount: 2 },
+      ];
+    }],
+    ['malformed projection row', (mirror) => {
+      mirror.sheetFacts.projectionActualDifferences = [
+        { yearMonth: '2026-08', weekNo: '4', amount: 1 },
+      ];
+    }],
+    ['future-only projection rows', (mirror) => {
+      mirror.sheetFacts.projectionActualDifferences = [
+        { yearMonth: '2026-09', weekNo: 1, amount: 1 },
+      ];
+    }],
+  ])('does not invent a Projection-Actual value for a %s', async (_label, mutateMirror) => {
+    const source = fullMonthCloseSource();
+    const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    mirror.capturedAt = '2026-08-25T07:48:00.000Z';
+    mutateMirror(mirror);
+    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const canonical = {
+      version: '1', yearMonth: '2026-08',
+      items: [{
+        projectId: 'project-a',
+        settlementStatuses: { projectId: 'project-a', yearMonth: '2026-08', items: [] },
+        projectionActualSummary: null,
+      }],
+      errors: [],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'finance' }, {
+      env: runtimeEnv,
+      db: { ...source.db, getAll },
+      now: () => new Date('2026-08-26T03:00:00.000Z'),
+    });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200);
+
+    expect(response.body.items[0].projectionActualSummary).toBeNull();
+    expect(response.body.items[0].projectionActualSummary).not.toBe(0);
+    expect(response.body.errors).toEqual([]);
+  });
+
+  it('keeps weekly statuses when the mirror batch read fails', async () => {
+    const source = fullMonthCloseSource();
+    const getAll = vi.fn(async () => { throw new Error('mirror read unavailable'); });
+    const canonical = {
+      version: '1', yearMonth: '2026-08',
+      items: [{
+        projectId: 'project-a',
+        settlementStatuses: {
+          projectId: 'project-a', yearMonth: '2026-08',
+          items: [{ period: 'WEEK_4', status: 'COMPLETED' }],
+        },
+        projectionActualSummary: null,
+      }],
+      errors: [],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'finance' }, {
+      env: runtimeEnv, db: { ...source.db, getAll },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200);
+
+    expect(response.body.items[0]).toMatchObject({
+      projectId: 'project-a',
+      settlementStatuses: { items: [{ period: 'WEEK_4', status: 'COMPLETED' }] },
+      projectionActualSummary: null,
+      sheetCapturedAt: null,
+    });
+    expect(response.body.errors).toEqual([{ projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' }]);
+  });
+
+  it('keeps a valid mirror summary when its capture timestamp is malformed', async () => {
+    const source = fullMonthCloseSource();
+    const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    mirror.capturedAt = 'not-an-instant';
+    mirror.sheetFacts.projectionActualDifferences = [
+      { yearMonth: '2026-08', weekNo: 4, amount: 77 },
+    ];
+    const getAll = vi.fn(async (...refs) => Promise.all(refs.map((ref) => ref.get())));
+    const canonical = {
+      version: '1', yearMonth: '2026-08',
+      items: [{
+        projectId: 'project-a',
+        settlementStatuses: { projectId: 'project-a', yearMonth: '2026-08', items: [] },
+        projectionActualSummary: null,
+      }], errors: [],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'finance' }, {
+      env: runtimeEnv,
+      db: { ...source.db, getAll },
+      now: () => new Date('2026-08-26T03:00:00.000Z'),
+    });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200);
+
+    expect(response.body.items[0]).toMatchObject({
+      projectionActualSummary: { differenceAmount: 77 },
+      sheetCapturedAt: null,
+    });
+    expect(response.body.errors).toEqual([]);
   });
 
   it('rejects invalid weekly overview scopes before JVM transport', async () => {
