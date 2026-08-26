@@ -2056,6 +2056,10 @@ const PROJECT_INFO_CHANGE_LABELS = {
   participationSheetLink: '참여율 시트 링크',
   department: '담당조직(CIC)',
   type: '프로젝트 유형',
+  status: '프로젝트 진행 상태',
+  phase: '프로젝트 구분',
+  groupwareName: '그룹웨어명',
+  contractType: '계약서 유형',
   contractStart: '계약 시작일',
   contractEnd: '계약 종료일',
   currency: '통화',
@@ -2068,6 +2072,8 @@ const PROJECT_INFO_CHANGE_LABELS = {
   basis: '정산 기준',
   accountType: '통장 유형',
   settlementSystem: '정산 시스템',
+  settlementSystemOther: '기타 정산 시스템',
+  settlementGuide: '정산 가이드',
   laborSettlementBasis: '인건비 정산 기준',
   laborTransferPlan: 'MYSC 인건비 이관 계획',
   fundInputMode: '자금 입력 방식',
@@ -2076,6 +2082,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   teamName: '사내기업팀',
   teamMembersDetailed: '참여인력 (서류상·실제)',
   staffing: '실제 투입인력',
+  participantCondition: '참여 조건',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
   finalPaymentExpectedWeek: '최종 입금 예상 주차',
@@ -2110,14 +2117,14 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
   'totalRevenueAmount', 'totalActualCost', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
-  'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
+  'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem', 'settlementSystemOther',
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
   'paymentExpectedMonths', 'finalPaymentExpectedWeek', 'interestRefundPolicy', 'quoteSubmissionDeferred',
   'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'executiveApproverId', 'executiveApproverName', 'executiveApproverEmail',
   'managerId', 'managerName', 'teamName', 'teamMembers',
-  'teamMembersDetailed', 'participantCondition', 'note', 'contractDocument',
+  'teamMembersDetailed', 'staffing', 'participantCondition', 'note', 'contractDocument',
   'customerBusinessRegistrationDocument', 'quoteDocument', 'proposalDocument',
   'proposalWordOriginalDocument', 'proposalPptOriginalDocument',
   'presentationPptOriginalDocument', 'rfpRequestEvidenceDocument',
@@ -2134,10 +2141,22 @@ function projectInfoChangeValue(value) {
   return String(value);
 }
 
+function projectStaffingChangeValue(value) {
+  const staffing = normalizeProjectStaffingForWrite(value);
+  const slotLabel = (slot) => (slot ? (slot.nickname || slot.name || slot.personId) : '미정');
+  return [
+    `총괄 ${slotLabel(staffing.lead)}`,
+    `실무 ${slotLabel(staffing.pm)}`,
+    `운영 ${staffing.operators.length ? staffing.operators.map((slot) => slot.nickname || slot.name || slot.personId).join('·') : '미정'}`,
+    `정산지원 ${staffing.settlementSupport || '해당 없음'}`,
+  ].join(' / ');
+}
+
 function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
   return Object.entries(PROJECT_INFO_CHANGE_LABELS).flatMap(([key, label]) => {
-    const before = projectInfoChangeValue(beforeSnapshot[key]);
-    const after = projectInfoChangeValue(proposedSnapshot[key]);
+    const format = key === 'staffing' ? projectStaffingChangeValue : projectInfoChangeValue;
+    const before = format(beforeSnapshot[key]);
+    const after = format(proposedSnapshot[key]);
     return before === after ? [] : [{ key, label, before, after }];
   });
 }

@@ -23,6 +23,7 @@ import {
 } from './project-team-members';
 import { getMigrationAuditStatusLabel } from './project-migration-console';
 import { resolveProjectRequestKind, resolveProjectRequestPayload } from './project-change-request';
+import { formatProjectStaffingSummary } from './project-editor';
 
 export interface MigrationReviewDossier {
   headerTitle: string;
@@ -114,7 +115,8 @@ export interface MigrationReviewDossier {
 
 const REQUEST_FIELD_LABELS: Record<string, string> = {
   name: '프로젝트명', officialContractName: '공식 계약명', type: '프로젝트 유형', status: '프로젝트 상태', phase: '프로젝트 단계',
-  description: '상세 설명', clientOrg: '계약 대상', businessManagementGoogleFolderLink: '사업관리 구글 드라이브', department: '담당조직',
+  description: '상세 설명', clientOrg: '계약 대상', businessManagementGoogleFolderLink: '사업관리 구글 드라이브',
+  participationSheetLink: '참여율 시트 링크', staffing: '실제 투입인력', department: '담당조직',
   groupwareName: '그룹웨어명', currency: '통화', contractAmount: '계약금액', salesVatAmount: '매출부가세', totalRevenueAmount: '총수익',
   totalActualCost: '총실비(원가)', supportAmount: '총지원금', financialInputFlags: '재무 입력 상태', registrationRequirementsVersion: '등록 양식 버전',
   financialYears: '연도별 계약·재무', registrationConfirmations: '등록 확인 사항', registrationOptionalDocumentNotes: '선택 증빙 메모', checkout: '종료 확인 사항',
@@ -152,7 +154,7 @@ function buildSubmittedFields(request: ProjectRequest | null) {
   const keys = [...Object.keys(REQUEST_FIELD_LABELS), ...Object.keys(payload).filter((key) => !(key in REQUEST_FIELD_LABELS))];
   return keys.map((key) => {
     const value = (payload as unknown as Record<string, unknown>)[key];
-    const formatted = formatSubmittedValue(value);
+    const formatted = key === 'staffing' ? formatProjectStaffingSummary(value) : formatSubmittedValue(value);
     return {
       key,
       label: REQUEST_FIELD_LABELS[key] || key,

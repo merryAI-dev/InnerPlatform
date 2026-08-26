@@ -905,6 +905,39 @@ describe('project information private drafts', () => {
     expect(replay).toEqual({ ...submitted, replayed: true });
   });
 
+  it('carries staffing and settlementSystemOther changes into the change request snapshot and review diff', async () => {
+    const h = harness();
+    await openedDraft(h, 'open-staffing');
+    await h.service.update({
+      ...h.base, idempotencyKey: 'save-staffing', expectedDraftRevision: 0,
+      payload: validV2Payload({
+        settlementSystem: 'OTHER',
+        settlementSystemOther: '자체 정산 시트',
+        staffing: {
+          lead: { personId: 'person-lead', name: '김총괄', nickname: '리드' },
+          pm: { personId: 'person-pm', name: '박실무', nickname: '' },
+          operators: [{ personId: 'person-op', name: '이운영', nickname: '오퍼' }],
+          settlementSupport: '도담',
+        },
+      }),
+    });
+    await h.service.submit({
+      ...h.base, idempotencyKey: 'submit-staffing', expectedDraftRevision: 1, expectedVersion: 3,
+    });
+
+    const request = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a');
+    expect(request.proposedSnapshot.staffing).toMatchObject({
+      lead: { personId: 'person-lead' },
+      pm: { personId: 'person-pm' },
+      operators: [{ personId: 'person-op' }],
+      settlementSupport: '도담',
+    });
+    expect(request.proposedSnapshot.settlementSystemOther).toBe('자체 정산 시트');
+    const staffingChange = (request.changedFields || []).find((change) => change.key === 'staffing');
+    expect(staffingChange).toMatchObject({ label: '실제 투입인력' });
+    expect(staffingChange.after).toBe('총괄 리드 / 실무 박실무 / 운영 오퍼 / 정산지원 도담');
+  });
+
   it('does not reopen organization-head review while management planning is still pending', async () => {
     const h = harness();
     h.db.documents.set('orgs/tenant-a/projects/project-a', {
