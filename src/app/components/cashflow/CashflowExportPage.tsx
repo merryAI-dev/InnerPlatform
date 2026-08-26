@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import {
   BarChart3,
@@ -23,7 +23,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../ui/command';
 import { useAppStore } from '../../data/store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { triggerDownload } from '../../platform/csv-utils';
@@ -35,8 +34,15 @@ import {
   type CashflowExportAccountTypeFilter,
   type CashflowExportSortBy,
 } from '../../platform/cashflow-export-filters';
-import { buildCashflowExportProjectRows } from '../../platform/cashflow-export-surface';
-import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
+import {
+  exportCashflowWorkbookViaBff,
+  fetchCashflowSettlementStatusesBatchViaBff,
+  fetchCashflowWeeklyOverviewViaBff,
+  isPlatformApiEnabled,
+  type CashflowSettlementStatusItem,
+  type CashflowSettlementStatusesResult,
+  type CashflowWeeklyOverviewResult,
+} from '../../lib/platform-bff-client';
 import {
   expandCashflowYearMonthRange,
   summarizeCashflowYearMonths,
@@ -46,19 +52,113 @@ import { hasPermission } from '../../platform/rbac';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { ACCOUNT_TYPE_LABELS, type AccountType } from '../../data/types';
 import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
-import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
+import {
+  chunkCashflowExportProjectIds,
+  findCashflowExportSettlementStatus,
+  resolveCashflowExportRecentWeeks,
+  type CashflowExportRecentWeek,
+} from '../../platform/cashflow-export-dashboard';
+import { formatCashflowExecutiveApprover, formatCashflowManager } from './CashflowWeeklyPage';
 
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
 const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
 const monochromeSurfaceClass = 'border-stone-200 bg-stone-50';
 
-function formatDateTime(value?: string): string {
+function formatDateTime(value?: string | null): string {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   }).format(date);
+}
+
+function formatSettlementAt(value: string | null | undefined, emptyLabel: string): string {
+  if (!value) return emptyLabel;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return emptyLabel;
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('month')}/${part('day')}(${part('weekday')}) ${part('hour')}:${part('minute')}`;
+}
+
+function settlementStatusPresentation(status: CashflowSettlementStatusItem['status']) {
+  if (status === 'COMPLETED') {
+    return { label: '승인 완료', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
+  }
+  if (status === 'PENDING_APPROVAL') {
+    return { label: '조직장 승인 필요', className: 'border-amber-200 bg-amber-50 text-amber-800' };
+  }
+  if (status === 'WAITING_FOR_UPDATE') {
+    return { label: '주정산 이전', className: 'border-red-200 bg-red-50 text-red-700' };
+  }
+  return { label: '주정산 이전', className: 'border-red-200 bg-red-50 text-red-700' };
+}
+
+function SettlementWeekStrip({
+  week,
+  item,
+  loading,
+  error,
+}: {
+  week: CashflowExportRecentWeek;
+  item: CashflowSettlementStatusItem | null;
+  loading: boolean;
+  error: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
+        <p className="font-semibold text-stone-700">{week.displayLabel}</p>
+        <p role="status" className="mt-1 text-[10px] text-stone-500">불러오는 중…</p>
+      </div>
+    );
+  }
+  if (error || !item) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
+        <p className="font-semibold text-stone-800">{week.displayLabel}</p>
+        <p role="alert" className="mt-1 text-[10px] font-medium text-amber-800">주정산 정보를 불러오지 못함</p>
+      </div>
+    );
+  }
+  const presentation = settlementStatusPresentation(item.status);
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white px-2.5 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold text-zinc-950">{week.displayLabel}</p>
+        <Badge variant="outline" className={`shrink-0 text-[9px] ${presentation.className}`}>{presentation.label}</Badge>
+      </div>
+      <dl className="mt-1.5 grid gap-0.5 text-[9px] leading-4 text-stone-600">
+        <div className="flex items-center justify-between gap-3">
+          <dt>실무자 제출 완료</dt>
+          <dd className="tabular-nums text-stone-800">{formatSettlementAt(item.submittedAt, '제출 전')}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt>조직장 승인 완료</dt>
+          <dd className="tabular-nums text-stone-800">{formatSettlementAt(item.approvedAt, '승인 전')}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+type CashflowWeeklyOverviewItem = CashflowWeeklyOverviewResult['items'][number];
+
+interface CashflowExportOperationsState {
+  key: string;
+  loading: boolean;
+  overviewItems: Record<string, CashflowWeeklyOverviewItem>;
+  settlementResults: CashflowSettlementStatusesResult[];
+  statusErrors: Record<string, boolean>;
+  summaryErrors: Record<string, boolean>;
+}
+
+function settlementErrorKey(projectId: string, yearMonth: string) {
+  return `${projectId}:${yearMonth}`;
 }
 
 function SelectionField(props: {
@@ -87,10 +187,11 @@ function SelectionField(props: {
 
 export function CashflowExportPage() {
   const navigate = useNavigate();
-  const { projects } = useAppStore();
-  const { yearMonth, weeks, isLoading: weeksLoading, loadError: weeksLoadError } = useCashflowWeeks();
+  const { projects, persons } = useAppStore();
   const { user } = useAuth();
   const { orgId } = useFirebase();
+  const todayIso = getSeoulTodayIso();
+  const currentYearMonth = todayIso.slice(0, 7);
   const [scope, setScope] = useState<'all' | 'selected'>('all');
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
@@ -99,11 +200,14 @@ export function CashflowExportPage() {
   const [accountTypePickerOpen, setAccountTypePickerOpen] = useState(false);
   const [sortBy, setSortBy] = useState<CashflowExportSortBy>('PROJECT_NAME');
   const [rangeMode, setRangeMode] = useState<'year' | 'custom'>('year');
-  const [selectedYear, setSelectedYear] = useState<string>(yearMonth.slice(0, 4));
-  const [startYearMonth, setStartYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-01`);
-  const [endYearMonth, setEndYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-12`);
+  const [selectedYear, setSelectedYear] = useState<string>(currentYearMonth.slice(0, 4));
+  const [startYearMonth, setStartYearMonth] = useState<string>(`${currentYearMonth.slice(0, 4)}-01`);
+  const [endYearMonth, setEndYearMonth] = useState<string>(`${currentYearMonth.slice(0, 4)}-12`);
   const [multiProjectVariant, setMultiProjectVariant] = useState<'combined' | 'multi-sheet'>('multi-sheet');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
+  const [operationsState, setOperationsState] = useState<CashflowExportOperationsState>({
+    key: '', loading: false, overviewItems: {}, settlementResults: [], statusErrors: {}, summaryErrors: {},
+  });
 
   const canExport = hasPermission((user?.role || 'viewer') as any, 'cashflow:export');
   const bffEnabled = isPlatformApiEnabled();
@@ -118,8 +222,8 @@ export function CashflowExportPage() {
   )).sort((left, right) => left.localeCompare(right, 'ko')), [sortedProjects]);
 
   const availableYears = useMemo(
-    () => buildCashflowExportAvailableYears(sortedProjects, yearMonth.slice(0, 4)),
-    [sortedProjects, yearMonth],
+    () => buildCashflowExportAvailableYears(sortedProjects, currentYearMonth.slice(0, 4)),
+    [currentYearMonth, sortedProjects],
   );
   const accountTypeCounts = useMemo(
     () => countCashflowExportProjectsByAccountType(sortedProjects, departmentFilter),
@@ -143,7 +247,22 @@ export function CashflowExportPage() {
     });
   }, [accountTypeFilter, departmentFilter, scope, selectedProjectIds, sortBy, sortedProjects]);
   const targetProjectIds = useMemo(() => targetProjects.map((project) => project.id), [targetProjects]);
-  const canonicalSummaries = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds: targetProjectIds });
+  const targetProjectIdsKey = JSON.stringify(targetProjectIds);
+  const recentWeeks = useMemo(() => resolveCashflowExportRecentWeeks(todayIso), [todayIso]);
+  const previousWeek = recentWeeks[0];
+  const currentWeek = recentWeeks[1];
+  const operationsActor = useMemo(() => user ? {
+    uid: user.uid, email: user.email, role: user.role, idToken: user.idToken,
+  } : null, [user?.email, user?.idToken, user?.role, user?.uid]);
+  const operationsKey = JSON.stringify([
+    orgId, operationsActor?.uid || '', operationsActor?.role || '', targetProjectIdsKey,
+    previousWeek?.yearMonth || '', previousWeek?.period || '', currentWeek?.yearMonth || '', currentWeek?.period || '',
+  ]);
+  const scopedOperations = operationsState.key === operationsKey ? operationsState : {
+    key: operationsKey,
+    loading: Boolean(canExport && bffEnabled && operationsActor?.idToken && targetProjectIds.length > 0 && currentWeek && previousWeek),
+    overviewItems: {}, settlementResults: [], statusErrors: {}, summaryErrors: {},
+  };
 
   const workbookVariant: CashflowExportWorkbookVariant = multiProjectVariant;
   const periodSummary = summarizeCashflowYearMonths(yearMonths);
@@ -159,11 +278,101 @@ export function CashflowExportPage() {
     ? `${targetProjects.length}개 사업 선택`
     : '전체 사업';
   const workbookVariantLabel = workbookVariant === 'combined' ? '대상 사업 통합 시트' : '대상 사업 개별 시트';
-  const exportRows = useMemo(() => buildCashflowExportProjectRows({
-    projects: targetProjects,
-    weeks,
-    todayIso: getSeoulTodayIso(),
-  }), [targetProjects, weeks]);
+
+  useEffect(() => {
+    const projectIds = JSON.parse(targetProjectIdsKey) as string[];
+    if (!canExport || !bffEnabled || !operationsActor?.idToken || projectIds.length === 0 || !currentWeek || !previousWeek) {
+      setOperationsState({
+        key: operationsKey, loading: false, overviewItems: {}, settlementResults: [], statusErrors: {}, summaryErrors: {},
+      });
+      return;
+    }
+
+    let active = true;
+    const chunks = chunkCashflowExportProjectIds(projectIds);
+    setOperationsState({
+      key: operationsKey, loading: true, overviewItems: {}, settlementResults: [], statusErrors: {}, summaryErrors: {},
+    });
+    const currentRequests = chunks.map((projectIdsChunk) => fetchCashflowWeeklyOverviewViaBff({
+      tenantId: orgId,
+      actor: operationsActor,
+      projectIds: projectIdsChunk,
+      yearMonth: currentWeek.yearMonth,
+    }));
+    const previousRequests = previousWeek.yearMonth === currentWeek.yearMonth
+      ? []
+      : chunks.map((projectIdsChunk) => fetchCashflowSettlementStatusesBatchViaBff({
+        tenantId: orgId,
+        actor: operationsActor,
+        projectIds: projectIdsChunk,
+        yearMonth: previousWeek.yearMonth,
+      }));
+
+    void Promise.all([
+      Promise.allSettled(currentRequests),
+      Promise.allSettled(previousRequests),
+    ]).then(([currentResults, previousResults]) => {
+      if (!active) return;
+      const requestedIds = new Set(projectIds);
+      const overviewItems: Record<string, CashflowWeeklyOverviewItem> = {};
+      const settlementResults: CashflowSettlementStatusesResult[] = [];
+      const statusErrors: Record<string, boolean> = {};
+      const summaryErrors: Record<string, boolean> = {};
+
+      currentResults.forEach((result, index) => {
+        const chunk = chunks[index];
+        if (result.status === 'rejected') {
+          chunk.forEach((projectId) => {
+            statusErrors[settlementErrorKey(projectId, currentWeek.yearMonth)] = true;
+            summaryErrors[projectId] = true;
+          });
+          return;
+        }
+        result.value.items.forEach((item) => {
+          overviewItems[item.projectId] = item;
+          if (item.settlementStatuses) settlementResults.push(item.settlementStatuses);
+        });
+        result.value.errors.forEach((error) => {
+          if (error.code === 'STATUS_UNAVAILABLE') {
+            statusErrors[settlementErrorKey(error.projectId, currentWeek.yearMonth)] = true;
+          } else if (error.code === 'SUMMARY_UNAVAILABLE') {
+            summaryErrors[error.projectId] = true;
+          }
+        });
+      });
+
+      previousResults.forEach((result, index) => {
+        const chunk = chunks[index];
+        if (result.status === 'rejected') {
+          chunk.forEach((projectId) => {
+            statusErrors[settlementErrorKey(projectId, previousWeek.yearMonth)] = true;
+          });
+          return;
+        }
+        result.value.items.forEach((item) => {
+          if (requestedIds.has(item.projectId) && item.yearMonth === previousWeek.yearMonth) {
+            settlementResults.push(item);
+          }
+        });
+        result.value.errors.forEach((error) => {
+          if (requestedIds.has(error.projectId) && error.code === 'STATUS_UNAVAILABLE') {
+            statusErrors[settlementErrorKey(error.projectId, previousWeek.yearMonth)] = true;
+          }
+        });
+      });
+
+      setOperationsState({
+        key: operationsKey,
+        loading: false,
+        overviewItems,
+        settlementResults,
+        statusErrors,
+        summaryErrors,
+      });
+    });
+
+    return () => { active = false; };
+  }, [bffEnabled, canExport, currentWeek, operationsActor, operationsKey, orgId, previousWeek, targetProjectIdsKey]);
 
   function toggleProject(projectId: string) {
     setSelectedProjectIds((current) => current.includes(projectId)
@@ -564,7 +773,7 @@ export function CashflowExportPage() {
       </Card>
 
       <Card className="border-stone-200 bg-stone-50 shadow-none">
-        <CardContent className="grid gap-3 p-4 text-[12px] text-stone-600 sm:grid-cols-3">
+        <CardContent className="grid gap-3 p-4 text-[12px] text-stone-600 sm:grid-cols-2">
           <div>
             <p className="text-[11px] text-stone-500">대상 사업</p>
             <p className="mt-1 font-semibold text-zinc-950">{targetProjects.length}건</p>
@@ -573,11 +782,7 @@ export function CashflowExportPage() {
             <p className="text-[11px] text-stone-500">기간</p>
             <p className="mt-1 font-semibold text-zinc-950">{periodSummary || '기간 미선택'}</p>
           </div>
-          <div>
-            <p className="text-[11px] text-stone-500">생성 기준</p>
-            <p className="mt-1 font-semibold text-zinc-950">BFF 서버의 최신 현금흐름 데이터</p>
-          </div>
-          {!bffEnabled ? <p className="sm:col-span-3 text-red-700">내보내기 서버 연결을 확인해 주세요.</p> : null}
+          {!bffEnabled ? <p className="sm:col-span-2 text-red-700">내보내기 서버 연결을 확인해 주세요.</p> : null}
         </CardContent>
       </Card>
 
@@ -585,66 +790,87 @@ export function CashflowExportPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-[14px] font-semibold text-zinc-950">다운로드 대상 사업</CardTitle>
           <p className="text-[11px] text-stone-600">
-            상태는 지난 목요일 자정 이후 해당 사업의 현금흐름이 한 번이라도 수정되었는지 보여줍니다.
+            최근 두 주의 주정산 상태와 시트에서 마지막으로 불러온 저장값을 함께 확인합니다.
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="max-h-[520px] overflow-auto">
-            <table className="w-full min-w-[900px] text-[11px]">
+          <div
+            data-testid="cashflow-export-operations-table"
+            role="region"
+            aria-label="다운로드 대상 사업 운영 현황"
+            tabIndex={0}
+            className="max-h-[620px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-300"
+          >
+            <table className="w-full min-w-[1320px] text-[11px]">
               <thead className="sticky top-0 z-10 bg-stone-50">
                 <tr className="border-y border-stone-200">
                   <th className="px-4 py-2 text-left font-semibold">사업명</th>
+                  <th className="px-3 py-2 text-left font-semibold">조직장</th>
                   <th className="px-3 py-2 text-left font-semibold">담당자</th>
-                  <th className="px-3 py-2 text-center font-semibold">상태</th>
+                  <th className="px-3 py-2 text-left font-semibold">주정산 최근 2주</th>
                   <th className="px-3 py-2 text-center font-semibold">누적 Projection-Actual</th>
-                  <th className="px-3 py-2 text-left font-semibold">최근 업데이트</th>
+                  <th className="px-3 py-2 text-left font-semibold">시트 불러온 시각</th>
                   <th className="px-4 py-2 text-right font-semibold">이동</th>
                 </tr>
               </thead>
               <tbody>
-                {weeksLoading ? (
+                {scopedOperations.loading ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-stone-500">
-                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> 현금흐름 상태를 불러오는 중입니다.
+                    <td colSpan={7} className="px-4 py-10 text-center text-stone-500">
+                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> 주정산과 시트 저장값을 불러오는 중입니다.
                     </td>
                   </tr>
-                ) : weeksLoadError ? (
-                  <tr>
-                    <td colSpan={6} className="bg-red-50 px-4 py-10 text-center font-medium text-red-700">{weeksLoadError}</td>
-                  </tr>
-                ) : exportRows.map((row) => (
-                  <tr key={row.id} className="border-b border-stone-100 hover:bg-stone-50/70">
-                    <td className="px-4 py-3 font-semibold text-zinc-950">{row.name}</td>
-                    <td className="px-3 py-3 text-stone-700">{row.managerName || '-'}</td>
-                    <td className="px-3 py-3 text-center">
-                      <Badge variant="outline" className={row.updated ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-stone-200 bg-stone-50 text-stone-600'}>
-                        {row.updated ? '업데이트됨' : '미업데이트'}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-3 text-center">
-                      <CashflowCanonicalSummary
-                        summary={canonicalSummaries.summaries[row.id]}
-                        loading={canonicalSummaries.loading[row.id]}
-                        error={canonicalSummaries.errors[row.id]}
-                        onRetry={() => void canonicalSummaries.retry(row.id)}
-                      />
-                    </td>
-                    <td className="px-3 py-3 text-stone-600">{formatDateTime(row.latestUpdatedAt)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 gap-1 text-[11px]"
-                        onClick={() => navigate(`/cashflow/projects/${row.id}?ym=${encodeURIComponent(yearMonth)}&view=compare#projection-actual-comparison`)}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" /> 사업 보기
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {!weeksLoading && !weeksLoadError && exportRows.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-stone-500">조건에 맞는 사업이 없습니다.</td></tr>
+                ) : targetProjects.map((project) => {
+                  const overviewItem = scopedOperations.overviewItems[project.id];
+                  const summaryError = Boolean(scopedOperations.summaryErrors[project.id]);
+                  return (
+                    <tr key={project.id} className="border-b border-stone-100 align-top hover:bg-stone-50/70">
+                      <td className="px-4 py-3 font-semibold text-zinc-950">{project.name}</td>
+                      <td className="px-3 py-3 text-stone-700">{formatCashflowExecutiveApprover(project, persons)}</td>
+                      <td className="px-3 py-3 text-stone-700">{formatCashflowManager(project, persons)}</td>
+                      <td className="min-w-[340px] space-y-2 px-3 py-3">
+                        {recentWeeks.map((week) => (
+                          <SettlementWeekStrip
+                            key={`${project.id}:${week.yearMonth}:${week.period}`}
+                            week={week}
+                            item={findCashflowExportSettlementStatus(scopedOperations.settlementResults, project.id, week)}
+                            loading={false}
+                            error={Boolean(scopedOperations.statusErrors[settlementErrorKey(project.id, week.yearMonth)])}
+                          />
+                        ))}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        {summaryError ? (
+                          <span role="alert" className="text-amber-800">시트 현황을 불러오지 못함</span>
+                        ) : overviewItem?.projectionActualSummary ? (
+                          <CashflowCanonicalSummary summary={overviewItem.projectionActualSummary} />
+                        ) : (
+                          <span className="text-stone-500">시트 저장값 없음</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-stone-600">
+                        {summaryError
+                          ? <span role="alert" className="text-amber-800">시트 현황을 불러오지 못함</span>
+                          : overviewItem?.sheetCapturedAt
+                            ? formatDateTime(overviewItem.sheetCapturedAt)
+                            : '불러온 기록 없음'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-[11px]"
+                          onClick={() => navigate(`/cashflow/projects/${project.id}?ym=${encodeURIComponent(currentYearMonth)}&view=compare#projection-actual-comparison`)}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" /> 사업 보기
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!scopedOperations.loading && targetProjects.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-stone-500">조건에 맞는 사업이 없습니다.</td></tr>
                 ) : null}
               </tbody>
             </table>

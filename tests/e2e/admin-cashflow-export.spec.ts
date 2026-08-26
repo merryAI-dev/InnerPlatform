@@ -32,8 +32,12 @@ test('admin can access cashflow export page and sees the disabled-server fallbac
   await expect(page.getByRole('heading', { name: '경영기획실 통합 관리' })).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-range')).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-period')).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: '상태' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '조직장' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '담당자' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '주정산 최근 2주' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '누적 Projection-Actual' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '시트 불러온 시각' })).toBeVisible();
+  await expect(page.getByText('BFF 서버의 최신 현금흐름 데이터')).toHaveCount(0);
   await expect(page.locator('tbody tr').first()).toBeVisible();
 
   await expect(page.getByText('내보내기 서버 연결을 확인해 주세요.')).toBeVisible();

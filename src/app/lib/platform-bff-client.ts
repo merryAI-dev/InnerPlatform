@@ -1744,7 +1744,7 @@ export interface CashflowProjectionActualSummaryBatch {
 }
 
 export interface CashflowWeeklyOverviewResult {
-  version: string;
+  version: '4';
   yearMonth: string;
   monthCloseTargetYearMonth: string;
   monthCloseTargetLabel: string;
@@ -1752,6 +1752,7 @@ export interface CashflowWeeklyOverviewResult {
     projectId: string;
     settlementStatuses: CashflowSettlementStatusesResult | null;
     projectionActualSummary: CashflowProjectionActualSummary | null;
+    sheetCapturedAt: string | null;
   }>;
   errors: Array<{
     projectId: string;
@@ -3715,15 +3716,71 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
   const result = response.data;
   const requestedIds = new Set(params.projectIds);
   const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
-  if (typeof result?.version !== 'string'
+  const periods = new Set(['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5']);
+  const statuses = new Set(['WAITING_FOR_UPDATE', 'PENDING_APPROVAL', 'COMPLETED']);
+  const validInstant = (value: unknown) => typeof value === 'string'
+    && value.trim() === value
+    && /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value));
+  const validSummary = (summary: CashflowProjectionActualSummary | null, projectId: string) => {
+    if (summary === null) return true;
+    const periodKeys = Array.isArray(summary?.periods) ? summary.periods.map((period) => period?.period) : [];
+    return summary?.projectId === projectId
+      && summary.source === 'SHEET_FORMULA'
+      && typeof summary.sourceRevision === 'string'
+      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(summary.fromMonth)
+      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(summary.comparisonAsOfWeek?.yearMonth)
+      && Number.isInteger(summary.comparisonAsOfWeek?.weekNo)
+      && summary.comparisonAsOfWeek.weekNo >= 1
+      && summary.comparisonAsOfWeek.weekNo <= 5
+      && Number.isSafeInteger(summary.differenceAmount)
+      && Number.isSafeInteger(summary.settlementDifferenceAmount)
+      && typeof summary.settlementMatches === 'boolean'
+      && typeof summary.display?.periodLabel === 'string'
+      && typeof summary.display.statusLabel === 'string'
+      && ['success', 'danger'].includes(summary.display.statusTone)
+      && typeof summary.display.differenceLabel === 'string'
+      && Array.isArray(summary.periods)
+      && summary.periods.every((period) => periods.has(period?.period)
+        && (period?.differenceAmount === null || Number.isSafeInteger(period?.differenceAmount)))
+      && new Set(periodKeys).size === periodKeys.length;
+  };
+  const validSettlement = (settlement: CashflowSettlementStatusesResult | null, projectId: string) => {
+    if (settlement === null) return true;
+    const periodKeys = Array.isArray(settlement?.items) ? settlement.items.map((item) => item?.period) : [];
+    return settlement?.projectId === projectId
+      && settlement.yearMonth === params.yearMonth
+      && Array.isArray(settlement.items)
+      && settlement.items.every((item) => periods.has(item?.period)
+        && statuses.has(item?.status)
+        && typeof item?.submittedAt === 'string'
+        && typeof item?.submittedBy === 'string'
+        && typeof item?.approvedAt === 'string'
+        && typeof item?.approvedBy === 'string'
+        && Number.isSafeInteger(item?.revision)
+        && item.revision >= 0
+        && (item?.deadlineAt == null || typeof item.deadlineAt === 'string')
+        && (item?.approverDeadlineAt == null || typeof item.approverDeadlineAt === 'string'))
+      && new Set(periodKeys).size === periodKeys.length;
+  };
+  const errorKeys = Array.isArray(result?.errors)
+    ? result.errors.map((error) => `${error?.projectId}:${error?.code}`)
+    : [];
+  if (result?.version !== '4'
     || result?.yearMonth !== params.yearMonth
+    || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(result?.monthCloseTargetYearMonth || '')
+    || typeof result?.monthCloseTargetLabel !== 'string'
     || !Array.isArray(result?.items)
     || itemIds.length !== params.projectIds.length
     || itemIds.some((projectId) => !requestedIds.has(projectId))
     || new Set(itemIds).size !== itemIds.length
+    || result.items.some((item) => !validSettlement(item?.settlementStatuses, item?.projectId)
+      || !validSummary(item?.projectionActualSummary, item?.projectId)
+      || (item?.sheetCapturedAt !== null && !validInstant(item?.sheetCapturedAt)))
     || !Array.isArray(result?.errors)
     || result.errors.some((error) => !requestedIds.has(error?.projectId)
-      || !['STATUS_UNAVAILABLE', 'SUMMARY_UNAVAILABLE'].includes(error?.code))) {
+      || !['STATUS_UNAVAILABLE', 'SUMMARY_UNAVAILABLE'].includes(error?.code))
+    || new Set(errorKeys).size !== errorKeys.length) {
     throw new Error('현금흐름 현황 응답이 올바르지 않습니다.');
   }
   return result;

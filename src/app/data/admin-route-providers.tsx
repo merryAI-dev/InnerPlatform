@@ -13,7 +13,7 @@ export function resolveAdminProviderScope(pathname: string) {
   return {
     hrAnnouncements: isDashboard || path.startsWith('/hr-announcements'),
     payroll: isDashboard || path.startsWith('/payroll'),
-    cashflowWeeks: isDashboard || path.startsWith('/cashflow') || path.startsWith('/payroll'),
+    cashflowWeeks: isDashboard || path.startsWith('/payroll') || (path.startsWith('/cashflow') && path !== '/cashflow/export'),
     board: path.startsWith('/board'),
     training: path.startsWith('/training'),
   };
