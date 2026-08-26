@@ -30,8 +30,19 @@ import type { ProjectRequestDocumentKind } from '../../platform/project-contract
 import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
 import { useEditLease } from '../editing/useEditLease';
 import { ProjectEditorWizard } from '../projects/ProjectEditorWizard';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
+import { Input } from '../ui/input';
 import { usePrivateDraftDocumentPreviews } from './usePrivateDraftDocumentPreviews';
 
 type DraftClient = ReturnType<typeof createProjectRegistrationDraftClient>;
@@ -85,6 +96,7 @@ function RegistrationEditor({
   const [record, setRecord] = useState(initialRecord);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [aliasInput, setAliasInput] = useState(String(initialRecord.alias || ''));
   const revisionRef = useRef(record.draftRevision);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const leaseClient = useMemo(() => createEditLeaseClient({
@@ -226,7 +238,7 @@ function RegistrationEditor({
         expectedDraftRevision: revisionRef.current,
       })));
       setSubmitted(true);
-      toast.success('프로젝트 등록 요청이 최종 저장되었습니다.');
+      toast.success('프로젝트 등록 요청이 최종 제출되었습니다.');
     } finally {
       setBusyActionId(null);
     }
@@ -241,7 +253,7 @@ function RegistrationEditor({
               <CheckCircle2 className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-slate-950">프로젝트 등록 요청이 최종 저장되었습니다</h1>
+              <h1 className="text-xl font-semibold text-slate-950">프로젝트 등록 요청이 최종 제출되었습니다</h1>
               <p className="mt-2 text-sm text-slate-600">이제 최종 결재자 (사업총괄)의 조직장 검토 화면에 표시됩니다.</p>
             </div>
             <Button onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 돌아가기</Button>
@@ -254,9 +266,28 @@ function RegistrationEditor({
   const minutesLeft = Math.max(0, Math.ceil(lease.remainingMs / 60_000));
   const topSlot = (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-      <div className="flex items-center gap-2 text-slate-700">
+      <div className="flex flex-wrap items-center gap-3 text-slate-700">
         {lease.canEdit ? <Pencil className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
         <span>{lease.error || (lease.canEdit ? `수정 세션 사용 중 · ${minutesLeft}분 남음` : '읽기 모드')}</span>
+        {/* 임시저장 이름. 목록에서 초안을 구분하는 표시용이라 제출 payload 와 분리해 저장한다. */}
+        <label className="flex items-center gap-1.5 text-xs text-slate-500">
+          임시저장 이름
+          <Input
+            value={aliasInput}
+            onChange={(event) => setAliasInput(event.target.value.slice(0, 60))}
+            onBlur={() => {
+              const nextAlias = aliasInput.trim();
+              if (nextAlias === String(record.alias || '')) return;
+              void enqueueMutation(() => withOwnership(async (ownership) => {
+                const saved = await draftClient.setAlias(record.draftId, ownership, nextAlias);
+                setRecord(saved.draft);
+              })).catch(() => toast.error('임시저장 이름을 저장하지 못했습니다.'));
+            }}
+            placeholder="예: 관광벤처 멘토링"
+            disabled={!lease.canEdit}
+            className="h-8 w-52 text-[13px]"
+          />
+        </label>
       </div>
       <div className="flex gap-2">
         {lease.canEdit ? (
@@ -334,8 +365,11 @@ export function PortalProjectRegister() {
   } | null>(null);
   const [error, setError] = useState('');
   const [resumeChoices, setResumeChoices] = useState<
-    Array<{ draftId: string; name: string; updatedAt: string; stepIndex: number }> | null
+    Array<{ draftId: string; alias: string; name: string; updatedAt: string; stepIndex: number }> | null
   >(null);
+  const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null);
+  const [confirmDeleteDraftId, setConfirmDeleteDraftId] = useState<string | null>(null);
+  const listClientRef = useRef<DraftClient | null>(null);
   const [forceNewDraft, setForceNewDraft] = useState(false);
   const createDraftPromiseRef = useRef<{
     ownerKey: string;
@@ -367,7 +401,8 @@ export function PortalProjectRegister() {
           // 임시저장한 초안이 있으면 새로 만들기 전에 사람이 고른다. 조용히 최신 초안에
           // 떨어뜨리면 새로 등록하려던 사람이 남의 문맥에서 시작하게 된다.
           if (!forceNewDraft) {
-            let existing: Array<{ draftId: string; name: string; updatedAt: string; stepIndex: number }> = [];
+            listClientRef.current = client;
+            let existing: Array<{ draftId: string; alias: string; name: string; updatedAt: string; stepIndex: number }> = [];
             try {
               ({ drafts: existing } = await client.list());
             } catch {
@@ -458,24 +493,73 @@ export function PortalProjectRegister() {
               <li key={choice.draftId} className="flex items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-slate-900">
-                    {choice.name || '이름 없는 임시저장'}
+                    {choice.alias || choice.name || '이름 없는 임시저장'}
                   </p>
                   <p className="text-xs text-slate-500">
                     마지막 저장 {choice.updatedAt ? new Date(choice.updatedAt).toLocaleString('ko-KR') : '시각 정보 없음'}
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0 gap-1.5"
-                  onClick={() => navigate(`/portal/register-project/${choice.draftId}`)}
-                >
-                  <Pencil className="h-4 w-4" />
-                  이어서 작성
-                </Button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => navigate(`/portal/register-project/${choice.draftId}`)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    이어서 작성
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                    disabled={deletingDraftId === choice.draftId}
+                    onClick={() => setConfirmDeleteDraftId(choice.draftId)}
+                  >
+                    {deletingDraftId === choice.draftId ? '삭제 중...' : '삭제'}
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
+          <AlertDialog
+            open={confirmDeleteDraftId !== null}
+            onOpenChange={(nextOpen) => { if (!nextOpen) setConfirmDeleteDraftId(null); }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>이 임시저장을 삭제할까요?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  첨부파일까지 정리되며 목록에서 사라집니다. 이 작업은 되돌릴 수 없습니다.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>취소</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-rose-600 hover:bg-rose-700"
+                  onClick={() => {
+                    const targetDraftId = confirmDeleteDraftId;
+                    setConfirmDeleteDraftId(null);
+                    if (!targetDraftId || !listClientRef.current) return;
+                    setDeletingDraftId(targetDraftId);
+                    void listClientRef.current.discard(targetDraftId)
+                      .then(() => {
+                        setResumeChoices((current) => {
+                          const remaining = (current || []).filter((item) => item.draftId !== targetDraftId);
+                          if (remaining.length === 0) setForceNewDraft(true);
+                          return remaining.length > 0 ? remaining : null;
+                        });
+                        toast.success('임시저장을 삭제했습니다.');
+                      })
+                      .catch(() => toast.error('임시저장 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.'))
+                      .finally(() => setDeletingDraftId(null));
+                  }}
+                >
+                  삭제
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <Button
             type="button"
             className="gap-1.5"

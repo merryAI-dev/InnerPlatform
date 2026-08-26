@@ -9,6 +9,7 @@ const controlBarSource = readFileSync(resolve(import.meta.dirname, 'migration-au
 const documentSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditDocumentDialog.tsx'), 'utf8');
 const recordListSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditRecordList.tsx'), 'utf8');
 const previewSource = readFileSync(resolve(import.meta.dirname, 'ContractDocumentPreview.tsx'), 'utf8');
+const financialYearsTableSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/FinancialYearsTable.tsx'), 'utf8');
 const compositeSource = [pageSource, controlBarSource, documentSource, recordListSource, previewSource].join('\n');
 
 describe('ProjectMigrationAuditPage review flow', () => {
@@ -196,8 +197,10 @@ describe('ProjectMigrationAuditPage review flow', () => {
     expect(documentSource).toContain('이자 반납 여부');
     expect(documentSource).not.toContain('최종 입금 재무주차');
     expect(documentSource).not.toContain('row.finalPaymentExpectedWeek');
-    expect(documentSource).toContain("row.isSettled ? '완료' : '미완료'");
-    expect(documentSource).toContain('row.advanceInterimBelow70Reason');
+    // 연도별 계약/재무는 한 줄 문자열 대신 표 안의 표(FinancialYearsTable)로 그린다.
+    expect(documentSource).toContain('<FinancialYearsTable years={financialYears} />');
+    expect(financialYearsTableSource).toContain("row.isSettled ? '완료' : '미완료'");
+    expect(financialYearsTableSource).toContain('advanceInterimBelow70Reason');
     expect(documentSource).toContain('label="등록 메모"');
     expect(documentSource).toContain('산출내역서(견적서)');
     expect(documentSource).toContain('이후 제출 예정');
@@ -210,7 +213,10 @@ describe('ProjectMigrationAuditPage review flow', () => {
     expect(documentSource).toContain('모두싸인으로 진행');
     expect(documentSource).toContain('인건비 4대보험 포함');
     // 팀/인력은 dossier 가 늘 담고 있었으나 문서에 그리지 않았다.
-    expect(documentSource).toContain('label="참여인력"');
+    // 서류상 명단의 원천은 참여율 시트다. 문서에는 실제 투입인력과 시트 안내만 남긴다.
+    expect(documentSource).toContain('label="실제 투입인력"');
+    expect(documentSource).toContain('서류상 참여인력');
+    expect(documentSource).toContain('참여율 시트에서 확인해 주세요');
     // 금액 5종이 모두 보여야 합계가 맞아 보인다.
     expect(documentSource).toContain('label="총매출부가세"');
     expect(documentSource).toContain('label="총지원금"');

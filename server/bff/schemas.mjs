@@ -15,6 +15,10 @@ export const projectRegistrationDraftCreateSchema = z.object({
   stepIndex: z.number().int().nonnegative().optional().default(0),
 }).strict();
 
+export const projectRegistrationDraftAliasSchema = z.object({
+  alias: z.string().max(60),
+}).strict();
+
 export const projectRegistrationDraftPatchSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
   payload: z.unknown(),

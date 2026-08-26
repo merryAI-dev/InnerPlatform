@@ -176,7 +176,8 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.contract.contractType).toBe('전자계약 시스템');
     expect(dossier.contract.accountTypeLabel).toBe('일반사업(MYSC법인통장)');
     expect(dossier.people.members[0]).toContain('변민욱');
-    expect(dossier.audit.requestedByName).toBe('-');
+    // 요청 문서가 없어도 기안자는 프로젝트 등록자에서 이어받는다 - 결재 문서에 빈 기안자를 남기지 않는다.
+    expect(dossier.audit.requestedByName).toBe('변민욱');
     expect(dossier.audit.reviewedByName).toBe('-');
     expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
   });
