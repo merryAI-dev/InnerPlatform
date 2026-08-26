@@ -338,7 +338,16 @@ export function createProjectInfoDraftClient(options: {
         body: {},
       });
       const body = object(response.data, 'project information withdraw');
+      // 신규 등록 검토 대기 건을 회수하면 등록 임시저장으로 복원된다 - 수정 드래프트가 아니라
+      // 등록 위저드로 돌아가야 하므로 별도 모양으로 돌려준다.
+      if (body.kind === 'REGISTRATION') {
+        return {
+          kind: 'REGISTRATION' as const,
+          registrationDraftId: String(body.registrationDraftId || ''),
+        };
+      }
       return {
+        kind: 'CHANGE' as const,
         draft: parseDraft(body.draft, projectId),
         canonicalVersion: Number(body.canonicalVersion) || 0,
         executiveReviewStatus: String(body.executiveReviewStatus ?? ''),
