@@ -333,6 +333,10 @@ export function PortalProjectRegister() {
     session: EditSession;
   } | null>(null);
   const [error, setError] = useState('');
+  const [resumeChoices, setResumeChoices] = useState<
+    Array<{ draftId: string; name: string; updatedAt: string; stepIndex: number }> | null
+  >(null);
+  const [forceNewDraft, setForceNewDraft] = useState(false);
   const createDraftPromiseRef = useRef<{
     ownerKey: string;
     promise: Promise<{ draft: ProjectRegistrationDraft }>;
@@ -360,6 +364,23 @@ export function PortalProjectRegister() {
         const actor: ActorLike = { uid: user.uid, email: user.email, role: user.role, idToken };
         const client = createProjectRegistrationDraftClient({ tenantId: orgId, actor, sessionId: session.sessionId });
         if (!draftId) {
+          // 임시저장한 초안이 있으면 새로 만들기 전에 사람이 고른다. 조용히 최신 초안에
+          // 떨어뜨리면 새로 등록하려던 사람이 남의 문맥에서 시작하게 된다.
+          if (!forceNewDraft) {
+            let existing: Array<{ draftId: string; name: string; updatedAt: string; stepIndex: number }> = [];
+            try {
+              ({ drafts: existing } = await client.list());
+            } catch {
+              // 목록 조회 실패가 등록 자체를 막으면 안 된다. 새 초안 생성으로 폴백한다.
+            }
+            if (cancelled) return;
+            if (existing.length > 0) {
+              setResumeChoices(existing);
+              session.dispose();
+              session = null;
+              return;
+            }
+          }
           const ownerKey = `${orgId}:${user.uid}`;
           const initial = createProjectEditorDraft({
             registrationRequirementsVersion: 2,
@@ -401,7 +422,7 @@ export function PortalProjectRegister() {
       session?.dispose();
     };
   // Token refresh must not unmount the editor; identity changes must.
-  }, [draftId, identityKey, navigate, orgId]);
+  }, [draftId, forceNewDraft, identityKey, navigate, orgId]);
 
   useEffect(() => {
     const idToken = user?.idToken;
@@ -423,6 +444,51 @@ export function PortalProjectRegister() {
 
   if (error) {
     return <div className="rounded-lg border border-red-200 bg-white p-5 text-sm text-red-700">{error}</div>;
+  }
+  if (!draftId && resumeChoices && resumeChoices.length > 0) {
+    return (
+      <Card>
+        <CardContent className="space-y-4 p-5">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">작성 중인 등록 임시저장이 있습니다</h2>
+            <p className="text-sm text-slate-600">이어서 작성하거나, 새로 등록을 시작할 수 있어요.</p>
+          </div>
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {resumeChoices.map((choice) => (
+              <li key={choice.draftId} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900">
+                    {choice.name || '이름 없는 임시저장'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    마지막 저장 {choice.updatedAt ? new Date(choice.updatedAt).toLocaleString('ko-KR') : '시각 정보 없음'}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 gap-1.5"
+                  onClick={() => navigate(`/portal/register-project/${choice.draftId}`)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  이어서 작성
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <Button
+            type="button"
+            className="gap-1.5"
+            onClick={() => {
+              setResumeChoices(null);
+              setForceNewDraft(true);
+            }}
+          >
+            새로 등록 시작
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
   if (!bootstrap) {
     return <div className="p-6 text-sm text-muted-foreground">등록 임시저장을 준비하는 중...</div>;

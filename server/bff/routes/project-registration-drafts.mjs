@@ -654,6 +654,27 @@ export function createProjectRegistrationDraftService({
       });
     },
 
+    /** 내가 임시저장한 진행 중 등록 초안 목록. 이어서 작성할 초안을 고르는 용도라 요약만 준다. */
+    async listMine(input) {
+      const current = context(input, { draftRequired: false, sessionRequired: false, idempotencyRequired: false });
+      const snapshot = await db.collection(`orgs/${current.tenantId}/projectRequestDrafts`)
+        .where('ownerUid', '==', current.actorId)
+        .limit(100)
+        .get();
+      const drafts = snapshot.docs
+        .map((doc) => doc.data() || {})
+        .filter((draft) => draft.status === 'ACTIVE' && readOptionalText(draft.resourceType) === RESOURCE_TYPE)
+        .map((draft) => ({
+          draftId: readOptionalText(draft.resourceId),
+          name: readOptionalText(draft.payload?.name),
+          updatedAt: readOptionalText(draft.updatedAt),
+          stepIndex: Number.isInteger(draft.stepIndex) && draft.stepIndex >= 0 ? draft.stepIndex : 0,
+        }))
+        .filter((draft) => draft.draftId)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      return { drafts };
+    },
+
     async readAttachment(input) {
       if (!draftStorageService?.downloadDraftAttachment) {
         throw new Error('Draft attachment storage service is required');
@@ -1401,6 +1422,12 @@ export function mountProjectRegistrationDraftRoutes(app, {
       sessionId: routeSession(req),
       ...parsed,
     }));
+  }));
+
+  app.get('/api/v1/project-registration-drafts', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'list project registration drafts');
+    const current = await routeContext(req, piiProtector);
+    res.status(200).json(await projectRegistrationDraftService.listMine(current));
   }));
 
   app.get('/api/v1/project-registration-drafts/:draftId', asyncHandler(async (req, res) => {
