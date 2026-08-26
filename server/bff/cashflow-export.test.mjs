@@ -331,10 +331,26 @@ describe('cashflow export bff helper', () => {
   });
 
   it.each([
+    ['stale status', { status: 'STALE' }],
+    ['different applied revision', { appliedSourceRevision: `sha256:${'b'.repeat(64)}` }],
+    ['missing revision metadata', { sourceRevision: undefined, appliedSourceRevision: undefined }],
+  ])('maps the stored mirror for %s without re-validating upstream state', (_label, overrides) => {
+    const { weeks } = buildCashflowExportSourceFromMirror({
+      projectId: 'proj-a',
+      mirror: completeMirror('proj-a', overrides),
+      yearMonths: ['2026-01'],
+    });
+
+    expect(weeks[0]).toMatchObject({
+      projection: { SALES_IN: 900 },
+      actual: { SALES_IN: 0 },
+      projectionTotals: { totalIn: 900, totalOut: 0, balance: 5_900 },
+    });
+  });
+
+  it.each([
     ['missing mirror', null],
     ['wrong project', completeMirror('other-project')],
-    ['stale mirror', completeMirror('proj-a', { status: 'STALE' })],
-    ['unapplied mirror', completeMirror('proj-a', { appliedSourceRevision: `sha256:${'b'.repeat(64)}` })],
     ['non-canonical weekly year', completeMirror('proj-a', { weeklyYear: '2026' })],
     ['partial annual coordinate', completeMirror('proj-a')],
   ])('fails closed for %s instead of falling back to another store', (_label, mirror) => {

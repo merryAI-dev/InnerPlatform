@@ -86,22 +86,31 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
       const mirrorSnapshots = await Promise.all(projects.map((project) => (
         db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${project.id}`).get()
       )));
+      const mirrorBackedProjects = [];
       for (let index = 0; index < projects.length; index += 1) {
         const project = projects[index];
         const mirrorSnapshot = mirrorSnapshots[index];
-        const mirror = mirrorSnapshot.exists ? mirrorSnapshot.data() : null;
+        if (!mirrorSnapshot.exists) continue;
+        const mirror = mirrorSnapshot.data();
+        if (!Number.isSafeInteger(mirror?.weeklyYear)) continue;
         sourceByProject.set(project.id, buildCashflowExportSourceFromMirror({
           projectId: project.id,
           mirror,
           yearMonths,
         }));
+        mirrorBackedProjects.push(project);
       }
+      projects = mirrorBackedProjects;
     } catch (error) {
       if (error instanceof CashflowExportSourceUnavailableError
         || error instanceof CashflowTemplateMismatchError) {
         throw createHttpError(409, error.message, error.code);
       }
       throw error;
+    }
+
+    if (projects.length === 0) {
+      throw createHttpError(404, '내려받을 연결 시트 값이 없습니다.', 'cashflow_export_source_not_found');
     }
 
     const transactionProjectIds = new Set(projects.map((project) => project.id));

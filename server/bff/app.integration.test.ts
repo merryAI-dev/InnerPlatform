@@ -2375,7 +2375,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(ledgerSnap.data()?.name).toBe('전용통장 원장');
   });
 
-  it('exports non-zero cashflow values from the applied sheet mirror instead of stale cashflow_weeks', async () => {
+  it('exports non-zero cashflow values from the stored sheet mirror without re-validating its status or revision', async () => {
     await api
       .post('/api/v1/projects')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-cashflow-project-001' })
@@ -2413,6 +2413,10 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       projectionBalance: 6250,
       actualBalance: 4900,
     });
+    await db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/p-cashflow-001`).set({
+      status: 'STALE',
+      appliedSourceRevision: `sha256:${'f'.repeat(64)}`,
+    }, { merge: true });
 
     const response = await downloadCashflowExport({
       scope: 'single',
