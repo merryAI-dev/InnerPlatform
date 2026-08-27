@@ -28,7 +28,7 @@ export function DataGrid({ children, className, minWidth }: {
   minWidth?: number;
 }) {
   return (
-    <div className={cn('overflow-x-auto rounded-md border border-slate-300 bg-white', className)}>
+    <div className={cn('overflow-x-auto rounded-md border border-slate-300 bg-white scroll-pt-20', className)}>
       <table className="w-full border-collapse" style={minWidth ? { minWidth } : undefined}>
         {children}
       </table>
@@ -36,16 +36,48 @@ export function DataGrid({ children, className, minWidth }: {
   );
 }
 
-export function DataGridHead({ children }: { children: ReactNode }) {
+export function DataGridHead({ children, groups }: {
+  children: ReactNode;
+  /** 열이 많을 때 위에 한 줄 더 얹어 열을 묶는다. 없으면 한 줄짜리 머리 그대로다. */
+  groups?: ReactNode;
+}) {
   return (
-    <thead className="sticky top-0 z-10">
+    <thead className="sticky top-0 z-20">
+      {groups ? <tr className="border-b border-slate-300 bg-slate-100">{groups}</tr> : null}
       <tr className="border-b-2 border-slate-300 bg-slate-100">{children}</tr>
     </thead>
   );
 }
 
+/**
+ * 그룹 머리 칸. 열 여럿을 하나로 묶어 무엇끼리 한 덩어리인지 보여 준다.
+ * 첫 열처럼 두 줄에 걸치는 칸은 rowSpan 2 로 둔다.
+ */
+export function DataGridGroupCell({ children, span, rowSpan, sticky, last }: {
+  children?: ReactNode;
+  span?: number;
+  rowSpan?: number;
+  sticky?: boolean;
+  last?: boolean;
+}) {
+  return (
+    <th
+      scope="colgroup"
+      colSpan={span}
+      rowSpan={rowSpan}
+      className={cn(
+        'whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-600',
+        !last && 'border-r border-slate-300',
+        sticky && 'sticky left-0 z-30 bg-slate-100',
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+
 export function DataGridHeadCell({
-  children, align = 'left', className, width, last,
+  children, align = 'left', className, width, last, sticky,
 }: {
   children: ReactNode;
   align?: Align;
@@ -53,6 +85,8 @@ export function DataGridHeadCell({
   width?: string;
   /** 마지막 열은 오른쪽 세로선을 긋지 않는다. */
   last?: boolean;
+  /** 왼쪽에 붙여 둔다 — 가로로 밀어도 어느 행인지 잃지 않게. */
+  sticky?: boolean;
 }) {
   return (
     <th
@@ -60,6 +94,7 @@ export function DataGridHeadCell({
       className={cn(
         'whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold text-slate-700',
         !last && 'border-r border-slate-300',
+        sticky && 'sticky left-0 z-30 bg-slate-100',
         ALIGN_CLASS[align],
         width,
         className,
@@ -82,7 +117,7 @@ export function DataGridRow({ children, onClick, className }: {
   return (
     <tr
       className={cn(
-        'border-b border-slate-200 last:border-b-0',
+        'group border-b border-slate-200 last:border-b-0',
         onClick && 'cursor-pointer transition-colors duration-150 hover:bg-slate-50',
         className,
       )}
@@ -94,7 +129,7 @@ export function DataGridRow({ children, onClick, className }: {
 }
 
 export function DataGridCell({
-  children, align = 'left', className, last, muted, title,
+  children, align = 'left', className, last, muted, title, sticky,
 }: {
   children: ReactNode;
   align?: Align;
@@ -103,6 +138,8 @@ export function DataGridCell({
   muted?: boolean;
   /** 잘린 값의 전체 내용을 마우스로 확인할 수 있게 한다. */
   title?: string;
+  /** 왼쪽 고정. 행 배경이 따라오도록 행에 걸린 group hover 를 같이 쓴다. */
+  sticky?: boolean;
 }) {
   return (
     <td
@@ -110,6 +147,7 @@ export function DataGridCell({
       className={cn(
         'px-3 py-2.5 text-sm align-middle',
         !last && 'border-r border-slate-200',
+        sticky && 'sticky left-0 z-10 bg-white group-hover:bg-slate-50',
         muted ? 'text-slate-500' : 'text-slate-900',
         ALIGN_CLASS[align],
         className,

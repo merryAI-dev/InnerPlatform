@@ -11,6 +11,7 @@ import {
   changePersonEmploymentViaBff,
   createPersonViaBff,
   fetchPersonsViaBff,
+  updatePersonProfileViaBff,
   type PersonRecord,
 } from '../../lib/platform-bff-client';
 import {
@@ -26,6 +27,7 @@ import {
   deriveAge,
   deriveYearsSinceDegree,
 } from '../../platform/person-employment';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { normalizeProjectTeamMembers } from '../../platform/project-team-members';
 import {
   ANY,
@@ -49,7 +51,8 @@ import {
 } from '../ui/select';
 import { Separator } from '../ui/separator';
 import {
-  DataGrid, DataGridBody, DataGridCell, DataGridEmpty, DataGridHead, DataGridHeadCell, DataGridRow,
+  DataGrid, DataGridBody, DataGridCell, DataGridEmpty, DataGridGroupCell, DataGridHead,
+  DataGridHeadCell, DataGridRow,
 } from '../ui/data-grid';
 import { PersonHrConsole } from './PersonHrConsole';
 import {
@@ -108,6 +111,12 @@ function findUnregisteredAssignees(
 
   return [...found.values()].sort((a, b) => b.totalRate - a.totalRate);
 }
+
+const BULK_FIELD_LABELS: Record<'departmentTop' | 'departmentMid' | 'grade', string> = {
+  departmentTop: '대분류',
+  departmentMid: '중분류',
+  grade: '직급',
+};
 
 interface EmploymentDraft {
   mode: 'change' | 'add';
@@ -189,6 +198,11 @@ function EmploymentForm({
   );
 }
 
+/** 소속·직위 묶음의 열 개수. 열을 더할 때 여기만 고치면 그룹 머리가 따라온다. */
+function countCompanyColumns(): number {
+  return 8;
+}
+
 interface PersonRow {
   person: PersonRecord;
   current: ReturnType<typeof resolveCurrentEmployment>;
@@ -241,22 +255,44 @@ function FilterNumber({ label, placeholder, value, onChange }: {
   );
 }
 
-function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
+function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf, selected, onToggle, onToggleAll }: {
   rows: PersonRow[];
   loading: boolean;
   onOpen: (person: PersonRecord) => void;
   canReadProfile: boolean;
   asOf: string;
+  selected: Set<string>;
+  onToggle: (personId: string) => void;
+  onToggleAll: (personIds: string[], checked: boolean) => void;
 }) {
-  const columnCount = canReadProfile ? 17 : 13;
+  // 열 수를 손으로 세면 틀린다 - 빈 상태가 한 칸 모자라게 걸쳐지는 식으로.
+  const columnCount = (canReadProfile ? 18 : 14) + 1;
+  const pageIds = rows.map((row) => row.person.personId);
+  const allChecked = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+
   return (
-    <DataGrid minWidth={canReadProfile ? 2450 : 1650}>
-      <DataGridHead>
-        {/* 개인 정보를 앞에 모으고 회사 정보를 뒤로 몬다. 재직상태는 관리 뒤 맨 끝. */}
+    <DataGrid minWidth={canReadProfile ? 2500 : 1700}>
+      <DataGridHead
+        groups={<>
+          <DataGridGroupCell rowSpan={2} sticky>
+            <input
+              type="checkbox" aria-label="이 표의 인력 모두 선택" className="h-4 w-4 cursor-pointer align-middle"
+              checked={allChecked}
+              onChange={(event) => onToggleAll(pageIds, event.target.checked)}
+            />
+          </DataGridGroupCell>
+          <DataGridGroupCell rowSpan={2} sticky>이름</DataGridGroupCell>
+          <DataGridGroupCell span={3}>개인 정보</DataGridGroupCell>
+          <DataGridGroupCell span={countCompanyColumns()}>소속 · 직위</DataGridGroupCell>
+          {canReadProfile ? <DataGridGroupCell span={4}>학력 · 자격</DataGridGroupCell> : null}
+          <DataGridGroupCell span={2} last>관리</DataGridGroupCell>
+        </>}
+      >
+        {/* 개인 정보 */}
         <DataGridHeadCell align="center" width="w-14">No</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[120px]">이름</DataGridHeadCell>
         <DataGridHeadCell width="min-w-[110px]">별명</DataGridHeadCell>
         <DataGridHeadCell align="center" width="min-w-[160px]">생년월일</DataGridHeadCell>
+        {/* 소속 · 직위 */}
         <DataGridHeadCell align="center" width="min-w-[110px]">입사일</DataGridHeadCell>
         <DataGridHeadCell align="center" width="min-w-[150px]">휴직·퇴사일</DataGridHeadCell>
         <DataGridHeadCell align="center" width="min-w-[100px]">근속</DataGridHeadCell>
@@ -271,7 +307,7 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
           <DataGridHeadCell width="min-w-[200px]">어학능력</DataGridHeadCell>
           <DataGridHeadCell width="min-w-[200px]">자격증</DataGridHeadCell>
         </> : null}
-        <DataGridHeadCell align="center" width="w-32">관리</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="w-32">인사정보</DataGridHeadCell>
         <DataGridHeadCell align="center" width="min-w-[110px]" last>재직상태</DataGridHeadCell>
       </DataGridHead>
       <DataGridBody>
@@ -283,8 +319,19 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
           />
         ) : rows.map(({ person, current, separatedAt, tenure, leave }, index) => (
           <DataGridRow key={person.personId} onClick={() => onOpen(person)}>
+            <DataGridCell align="center" sticky>
+              <input
+                type="checkbox" className="h-4 w-4 cursor-pointer align-middle"
+                aria-label={`${person.name} 선택`}
+                checked={selected.has(person.personId)}
+                onClick={(event) => event.stopPropagation()}
+                onChange={() => onToggle(person.personId)}
+              />
+            </DataGridCell>
+            <DataGridCell sticky className="left-[52px]">
+              <span className="font-semibold">{person.name}</span>
+            </DataGridCell>
             <DataGridCell align="center" muted>{index + 1}</DataGridCell>
-            <DataGridCell><span className="font-semibold">{person.name}</span></DataGridCell>
             <DataGridCell muted>{person.nickname || '-'}</DataGridCell>
             {/* 만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다. */}
             <DataGridCell align="center" muted>
@@ -370,6 +417,11 @@ export function PeopleDirectoryPage() {
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | EmploymentType | 'SEPARATED'>('ALL');
   const [filter, setFilter] = useState<PeopleFilterState>(emptyPeopleFilter);
+  // 조직 개편처럼 여러 명을 한꺼번에 옮기는 일이 있다. 한 명씩 열어 고치게 두지 않는다.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkField, setBulkField] = useState<'departmentTop' | 'departmentMid' | 'grade'>('departmentTop');
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [selected, setSelected] = useState<PersonRecord | null>(null);
   const [profilePerson, setProfilePerson] = useState<PersonRecord | null>(null);
   const [hrPerson, setHrPerson] = useState<PersonRecord | null>(null);
@@ -399,6 +451,49 @@ export function PeopleDirectoryPage() {
   const scopedProfileCapabilities = directoryScopeLoaded
     ? profileCapabilities
     : { read: false, write: false };
+
+  const toggleSelected = (personId: string) => setSelectedIds((current) => {
+    const next = new Set(current);
+    if (next.has(personId)) next.delete(personId); else next.add(personId);
+    return next;
+  });
+  const toggleSelectedAll = (personIds: string[], checked: boolean) => setSelectedIds((current) => {
+    const next = new Set(current);
+    personIds.forEach((id) => (checked ? next.add(id) : next.delete(id)));
+    return next;
+  });
+
+  /**
+   * 선택한 사람들의 소속 또는 직급을 한 번에 바꾼다.
+   *
+   * 한 명씩 순서대로 보낸다 - 서버에 일괄 API 가 없고, 중간에 실패해도 어디까지 갔는지
+   * 알려 줄 수 있어야 하기 때문이다. 실패한 사람은 선택에 남겨 다시 시도할 수 있게 둔다.
+   */
+  const applyBulkField = async () => {
+    const targets = [...selectedIds];
+    const value = bulkValue.trim();
+    if (!value || targets.length === 0 || bulkRunning || !authUser) return;
+    setBulkRunning(true);
+    const failed: string[] = [];
+    for (const personId of targets) {
+      try {
+        await updatePersonProfileViaBff({
+          tenantId: orgId, actor: authUser, personId, profile: { [bulkField]: value },
+        });
+      } catch {
+        failed.push(personId);
+      }
+    }
+    setBulkRunning(false);
+    setSelectedIds(new Set(failed));
+    setBulkValue('');
+    if (failed.length === 0) {
+      toast.success(`${targets.length}명의 ${BULK_FIELD_LABELS[bulkField]}을(를) '${value}'(으)로 바꿨습니다.`);
+    } else {
+      toast.error(`${targets.length - failed.length}명 반영, ${failed.length}명 실패했습니다. 실패한 사람만 선택에 남겨 두었습니다.`);
+    }
+    void load();
+  };
 
   const load = async () => {
     if (directoryScopeRef.current !== directoryScopeKey) return;
@@ -795,9 +890,51 @@ export function PeopleDirectoryPage() {
         </Card>
       ) : null}
 
+      {/* ── 선택 막대: 고른 사람이 있을 때만 나타난다 ── */}
+      {selectedIds.size > 0 && canWritePersonProfile ? (
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-white">
+          <p className="mr-1 text-[14px] font-medium">{selectedIds.size}명 선택됨</p>
+          <label className="grid gap-1 text-[12px] text-slate-300">
+            <span>바꿀 항목</span>
+            <select
+              aria-label="일괄 변경 항목" value={bulkField} disabled={bulkRunning}
+              onChange={(event) => setBulkField(event.target.value as typeof bulkField)}
+              className="h-9 rounded-md border border-slate-600 bg-slate-800 px-2 text-[14px] text-white"
+            >
+              <option value="departmentTop">대분류</option>
+              <option value="departmentMid">중분류</option>
+              <option value="grade">직급</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-[12px] text-slate-300">
+            <span>바꿀 값</span>
+            <input
+              aria-label="일괄 변경 값" value={bulkValue} disabled={bulkRunning}
+              onChange={(event) => setBulkValue(event.target.value)}
+              placeholder={bulkField === 'grade' ? '예: 선임연구원' : '예: 리더십·전략 총괄그룹'}
+              className="h-9 w-64 rounded-md border border-slate-600 bg-slate-800 px-2 text-[14px] text-white placeholder:text-slate-500"
+            />
+          </label>
+          <Button
+            size="sm" className="h-9" onClick={() => void applyBulkField()}
+            disabled={bulkRunning || !bulkValue.trim()}
+          >
+            {bulkRunning ? <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+            {bulkRunning ? `${selectedIds.size}명 반영 중…` : `${selectedIds.size}명 바꾸기`}
+          </Button>
+          <Button
+            size="sm" variant="ghost" className="h-9 text-slate-300 hover:text-white"
+            onClick={() => setSelectedIds(new Set())} disabled={bulkRunning}
+          >
+            선택 해제
+          </Button>
+        </div>
+      ) : null}
+
       <PeopleTable
         rows={mainRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
         canReadProfile={scopedProfileCapabilities.read} asOf={asOf}
+        selected={selectedIds} onToggle={toggleSelected} onToggleAll={toggleSelectedAll}
       />
 
       {internRows.length > 0 || counts.INTERN > 0 ? (
@@ -809,6 +946,7 @@ export function PeopleDirectoryPage() {
           <PeopleTable
             rows={internRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
             canReadProfile={scopedProfileCapabilities.read} asOf={asOf}
+            selected={selectedIds} onToggle={toggleSelected} onToggleAll={toggleSelectedAll}
           />
         </section>
       ) : null}
