@@ -40,6 +40,10 @@ export interface ProfessionalProfileEducationRecordInput {
   institutionName?: string | null;
   countryCode?: string | null;
   major?: string | null;
+  /** 입학년도 (YYYY) */
+  admissionYear?: string | null;
+  /** 학위취득년도 (YYYY) */
+  degreeYear?: string | null;
 }
 
 export interface ProfessionalProfileEnglishEvidenceInput {
@@ -53,12 +57,13 @@ export interface ProfessionalProfileEnglishEvidenceInput {
 export interface ProfessionalProfileInput {
   educationRecords: ProfessionalProfileEducationRecordInput[];
   englishEvidence: ProfessionalProfileEnglishEvidenceInput[];
-  certifications: Array<{ label: string }>;
+  /** acquiredAt: 취득일 (YYYY-MM) */
+  certifications: Array<{ label: string; acquiredAt?: string | null }>;
 }
 
 export interface StoredProfessionalProfile extends Omit<ProfessionalProfileInput, 'certifications'> {
   schemaVersion: number;
-  certifications: Array<{ key: string; label: string }>;
+  certifications: Array<{ key: string; label: string; acquiredAt: string | null }>;
   provenance: {
     source: 'PEOPLE_MANUAL';
     revision: number;

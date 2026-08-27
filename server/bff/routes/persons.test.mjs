@@ -327,6 +327,7 @@ describe('라우트 — 인력 명부', () => {
     expect(response.body.items[0]).toEqual({
       personId: 'person-a',
       name: '김정태',
+      birthDate: '',
       nickname: '정태',
       email: 'jt@example.com',
       departmentTop: '임팩트사업부',

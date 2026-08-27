@@ -3,6 +3,7 @@ import {
   PROJECT_INFO_DOCUMENT_KINDS,
   PROJECT_REGISTRATION_DOCUMENT_KINDS,
 } from './project-document-validation.mjs';
+import { isKnownPersonGrade } from './person-grades.mjs';
 
 const NON_EMPTY_STRING = z.string().trim().min(1);
 const RECORD_UNKNOWN = z.record(z.string(), z.unknown());
@@ -471,6 +472,8 @@ const professionalProfileEducationRecordSchema = z.object({
   institutionName: PROFESSIONAL_PROFILE_TEXT.nullish(),
   countryCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
   major: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  admissionYear: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  degreeYear: PROFESSIONAL_PROFILE_TEXT.nullish(),
 }).strict();
 
 const professionalProfileEnglishEvidenceSchema = z.object({
@@ -483,6 +486,7 @@ const professionalProfileEnglishEvidenceSchema = z.object({
 
 const professionalProfileCertificationSchema = z.object({
   label: PROFESSIONAL_PROFILE_TEXT,
+  acquiredAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
 }).strict();
 
 export const professionalProfileInputSchema = z.object({
@@ -505,8 +509,12 @@ export const personCreateSchema = z.object({
   departmentMid: z.string().trim().max(100).optional(),
   departmentSub: z.string().trim().max(100).optional(),
   title: z.string().trim().max(100).optional(),
-  grade: z.string().trim().max(100).optional(),
+  grade: z.string().trim().max(100).refine(
+    (value) => value === '' || isKnownPersonGrade(value),
+    { message: '직급은 오피스핸드북 목록에서 고른 값이어야 합니다.' },
+  ).optional(),
   workLocation: z.string().trim().max(100).optional(),
+  birthDate: ISO_DATE_STRING.nullish(),
   note: z.string().trim().max(500).optional(),
   employment: z.object({
     type: EMPLOYMENT_TYPE,
@@ -525,8 +533,12 @@ export const personProfileSchema = z.object({
   departmentMid: z.string().trim().max(100).optional(),
   departmentSub: z.string().trim().max(100).optional(),
   title: z.string().trim().max(100).optional(),
-  grade: z.string().trim().max(100).optional(),
+  grade: z.string().trim().max(100).refine(
+    (value) => value === '' || isKnownPersonGrade(value),
+    { message: '직급은 오피스핸드북 목록에서 고른 값이어야 합니다.' },
+  ).optional(),
   workLocation: z.string().trim().max(100).optional(),
+  birthDate: ISO_DATE_STRING.nullish(),
   note: z.string().trim().max(500).optional(),
 }).strict();
 
