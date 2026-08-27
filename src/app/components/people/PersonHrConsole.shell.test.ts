@@ -67,4 +67,21 @@ describe('인사정보 콘솔', () => {
     expect(source).toContain('직접 입력 (별도 직급체계)');
     expect(source).toContain('aria-label="직급 직접 입력"');
   });
+
+  /**
+   * 실제로 터졌던 사고다. `educationLabelOf` 는 const 화살표 함수라 호이스팅되지 않는데
+   * 위쪽 useMemo 가 먼저 불러서 "Cannot access ... before initialization" 이 났다.
+   * 학력 기록이 1건이라도 있는 사람을 열 때만 터져서 오래 숨어 있었다.
+   */
+  it('라벨 조회 함수를 그것을 쓰는 useMemo 보다 먼저 선언한다', () => {
+    const declaredAt = source.indexOf('const educationLabelOf');
+    const usedAt = source.indexOf('educationLabelOf(top.attainmentCode)');
+    expect(declaredAt).toBeGreaterThan(-1);
+    expect(usedAt).toBeGreaterThan(-1);
+    expect(declaredAt).toBeLessThan(usedAt);
+
+    const englishDeclaredAt = source.indexOf('const englishLabelOf');
+    expect(englishDeclaredAt).toBeGreaterThan(-1);
+    expect(englishDeclaredAt).toBeLessThan(source.indexOf('const highestEducation'));
+  });
 });
