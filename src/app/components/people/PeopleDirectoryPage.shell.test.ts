@@ -45,9 +45,9 @@ describe('PeopleDirectoryPage 근로형태 노출 계약', () => {
   it('열 순서를 개인 → 회사 → 관리 → 재직상태로 지킨다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
     const order = [
-      'No', '별명', '생년월일',
-      '입사일', '휴직·퇴사일', '근속', '대분류', '중분류', '직책', '직급', '이메일 주소',
-      '최종학력', '학위취득', '어학능력', '자격증', '인사정보', '재직상태',
+      '별명', '생년월일',
+      '입사일', '휴직·퇴사', '대분류', '중분류', '직책', '직급',
+      '최종학력', '학위취득', '어학능력', '자격증', '인사', '재직상태',
     ];
     const positions = order.map((column) => {
       const at = table.indexOf(`>${column}</DataGridHeadCell>`);
@@ -173,24 +173,36 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
    */
   it('열을 개인·소속·학력 묶음으로 얹고 이름을 왼쪽에 고정한다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
-    expect(table).toContain('<DataGridGroupCell span={3}>개인 정보</DataGridGroupCell>');
+    expect(table).toContain('<DataGridGroupCell span={2}>개인</DataGridGroupCell>');
     expect(table).toContain('소속 · 직위</DataGridGroupCell>');
     expect(table).toContain('<DataGridGroupCell span={4}>학력 · 자격</DataGridGroupCell>');
     expect(table).toContain('<DataGridGroupCell rowSpan={2} sticky>이름</DataGridGroupCell>');
-    expect(table).toContain('<DataGridCell sticky className="left-[52px]">');
+    expect(table).toContain('<DataGridCell sticky>');
   });
 
   it('빈 표가 걸치는 칸 수를 손으로 세지 않는다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
     // 열을 더하고 숫자 고치는 걸 잊으면 빈 상태가 한 칸 모자라게 걸쳐진다.
-    expect(table).toContain('const columnCount = (canReadProfile ? 18 : 14) + 1;');
+    expect(table).toContain('const columnCount = canReadProfile ? 15 : 11;');
   });
 
-  it('여러 명을 골라 소속·직급을 한 번에 바꾼다', () => {
-    expect(source).toContain('applyBulkField');
-    expect(source).toContain('명 선택됨');
-    // 중간에 실패해도 어디까지 갔는지 알려 주고, 실패한 사람만 선택에 남긴다.
-    expect(source).toContain('setSelectedIds(new Set(failed))');
-    expect(source).toContain('명 실패했습니다');
+  /**
+   * 연번과 체크칸은 걷어냈다. 열이 많아 가로 스크롤이 나던 표에서, 읽을 값이 아닌 칸이
+   * 자리를 먼저 먹고 있었다. 다중선택도 함께 걷어 죽은 코드를 남기지 않는다.
+   */
+  it('연번·체크칸·다중선택을 두지 않는다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    expect(table).not.toContain('>No</DataGridHeadCell>');
+    expect(table).not.toContain('type="checkbox"');
+    expect(source).not.toContain('selectedIds');
+    expect(source).not.toContain('applyBulkField');
+  });
+
+  it('계산된 값은 옆이 아니라 아래 줄로 내린다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    // 만 나이·근속·학위 후 경력을 같은 줄에 붙이면 칸이 넓어지고 표가 가로로 밀린다.
+    expect(table).toContain('<SubLine>만 {deriveAge(person.birthDate, asOf) ?? \'-\'}세</SubLine>');
+    expect(table).toContain('<SubLine>{tenure.label}</SubLine>');
+    expect(table).toContain('년차</SubLine>');
   });
 });
