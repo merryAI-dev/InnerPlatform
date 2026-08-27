@@ -18,6 +18,7 @@ import {
   EMPLOYMENT_STATE_LABELS,
   EMPLOYMENT_TYPE_LABELS,
   resolveCurrentEmployment,
+  resolveLeaveOrSeparation,
   resolveSeparationDate,
   type EmploymentState,
   type EmploymentType,
@@ -193,6 +194,7 @@ interface PersonRow {
   current: ReturnType<typeof resolveCurrentEmployment>;
   separatedAt: string | null;
   tenure: ReturnType<typeof deriveTenure>;
+  leave: ReturnType<typeof resolveLeaveOrSeparation>;
 }
 
 /**
@@ -246,23 +248,29 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
   canReadProfile: boolean;
   asOf: string;
 }) {
-  const columnCount = canReadProfile ? 11 : 9;
+  const columnCount = canReadProfile ? 15 : 13;
   return (
-    <DataGrid minWidth={canReadProfile ? 1560 : 1180}>
+    <DataGrid minWidth={canReadProfile ? 2030 : 1650}>
       <DataGridHead>
-        <DataGridHeadCell width="min-w-[150px]">이름</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[100px]">재직상태</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[190px]">소속 · 팀</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[120px]">직급</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[110px]">직책</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[150px]">생년월일</DataGridHeadCell>
+        {/* 개인 정보를 앞에 모으고 회사 정보를 뒤로 몬다. 재직상태는 관리 뒤 맨 끝. */}
+        <DataGridHeadCell align="center" width="w-14">No</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[120px]">이름</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[110px]">별명</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[160px]">생년월일</DataGridHeadCell>
         <DataGridHeadCell align="center" width="min-w-[110px]">입사일</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[110px]">근속</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[150px]">휴직·퇴사일</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[100px]">근속</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[160px]">대분류</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[140px]">중분류</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[110px]">직책</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[120px]">직급</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[200px]">이메일 주소</DataGridHeadCell>
         {canReadProfile ? <>
           <DataGridHeadCell width="min-w-[230px]">최종학력</DataGridHeadCell>
           <DataGridHeadCell align="center" width="min-w-[140px]">학위취득</DataGridHeadCell>
         </> : null}
-        <DataGridHeadCell align="center" width="w-32" last>관리</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="w-32">관리</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[110px]" last>재직상태</DataGridHeadCell>
       </DataGridHead>
       <DataGridBody>
         {rows.length === 0 ? (
@@ -271,28 +279,11 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
             loading={loading}
             message="조건에 맞는 인력이 없습니다"
           />
-        ) : rows.map(({ person, current, separatedAt, tenure }) => (
+        ) : rows.map(({ person, current, separatedAt, tenure, leave }, index) => (
           <DataGridRow key={person.personId} onClick={() => onOpen(person)}>
-            <DataGridCell>
-              <span className="font-semibold">{person.name}</span>
-              {person.nickname ? <span className="ml-1 text-xs text-slate-500">({person.nickname})</span> : null}
-            </DataGridCell>
-            <DataGridCell align="center">
-              {current ? (
-                <Badge variant="outline" className={`text-xs ${STATE_TONE[current.state as EmploymentState]}`}>
-                  {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
-                </Badge>
-              ) : (
-                <span className="text-xs text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
-              )}
-            </DataGridCell>
-            <DataGridCell muted>
-              {person.departmentTop || '-'}
-              {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
-            </DataGridCell>
-            {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
-            <DataGridCell>{person.grade || '-'}</DataGridCell>
-            <DataGridCell muted>{person.title || '-'}</DataGridCell>
+            <DataGridCell align="center" muted>{index + 1}</DataGridCell>
+            <DataGridCell><span className="font-semibold">{person.name}</span></DataGridCell>
+            <DataGridCell muted>{person.nickname || '-'}</DataGridCell>
             {/* 만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다. */}
             <DataGridCell align="center" muted>
               {person.birthDate
@@ -300,7 +291,21 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
                 : '-'}
             </DataGridCell>
             <DataGridCell align="center" muted>{formatDate(person.joinedAt)}</DataGridCell>
+            {/* 휴직인지 퇴사인지 라벨 없이 날짜만 두면 읽는 사람이 구분할 수 없다. */}
+            <DataGridCell align="center" muted>
+              {leave
+                ? <>{formatDate(leave.date)} <span className="text-slate-400">({leave.kind === 'LEAVE' ? '휴직' : '퇴사'})</span></>
+                : '-'}
+            </DataGridCell>
             <DataGridCell align="center">{tenure?.label || '-'}</DataGridCell>
+            <DataGridCell muted>{person.departmentTop || '-'}</DataGridCell>
+            <DataGridCell muted>{person.departmentMid || '-'}</DataGridCell>
+            {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
+            <DataGridCell muted>{person.title || '-'}</DataGridCell>
+            <DataGridCell>{person.grade || '-'}</DataGridCell>
+            <DataGridCell className="max-w-[240px]" muted title={person.email || ''}>
+              <span className="block truncate">{person.email || '-'}</span>
+            </DataGridCell>
             {canReadProfile ? <>
               <DataGridCell className="max-w-[300px]" title={[person.hrSummary?.highestEducationMajor, person.hrSummary?.highestEducationInstitution].filter(Boolean).join(' · ')}>
                 {/* 학과를 앞세우고 학교는 아래 작은 줄로 - 전공이 먼저 읽혀야 한다. */}
@@ -315,7 +320,7 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
                   : '-'}
               </DataGridCell>
             </> : null}
-            <DataGridCell align="center" last>
+            <DataGridCell align="center">
               <Button
                 variant="outline" size="sm" className="h-8 gap-1 px-2.5 text-xs"
                 aria-label={`${person.name} 인사정보`}
@@ -326,6 +331,15 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
               >
                 <IdCard className="h-3.5 w-3.5" /> 인사정보
               </Button>
+            </DataGridCell>
+            <DataGridCell align="center" last>
+              {current ? (
+                <Badge variant="outline" className={`text-xs ${STATE_TONE[current.state as EmploymentState]}`}>
+                  {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
+                </Badge>
+              ) : (
+                <span className="text-xs text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
+              )}
             </DataGridCell>
           </DataGridRow>
         ))}
@@ -454,6 +468,7 @@ export function PeopleDirectoryPage() {
         current,
         separatedAt: current ? null : resolveSeparationDate(person as unknown as Person),
         tenure: deriveTenure(person.joinedAt, asOf),
+        leave: resolveLeaveOrSeparation(person as unknown as Person, asOf),
       };
     });
     // 검색·계약 종료 버튼과 칸별 필터를 한 곳에서 건다. 나이·근속·학위 후 경력은
@@ -643,7 +658,7 @@ export function PeopleDirectoryPage() {
         <div className="relative max-w-xs flex-1">
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
-            className="h-8 pl-9 text-sm" placeholder="이름·별명·소속 검색…"
+            className="h-8 pl-9 text-sm" placeholder="이름·별명·대분류 검색…"
             value={directoryScopeLoaded ? searchText : ''}
             onChange={(event) => setSearchText(event.target.value)}
           />
@@ -678,11 +693,11 @@ export function PeopleDirectoryPage() {
           options={[['WORKING', '재직'], ['ON_LEAVE', '휴직'], ['PARENTAL_LEAVE', '육아휴직'], ['SEPARATED', '계약 종료']]}
         />
         <FilterSelect
-          label="소속" value={filter.departmentTop} onChange={(value) => setFilter({ ...filter, departmentTop: value })}
+          label="대분류" value={filter.departmentTop} onChange={(value) => setFilter({ ...filter, departmentTop: value })}
           options={filterOptions.departmentTop.map((option) => [option, option])}
         />
         <FilterSelect
-          label="팀" value={filter.departmentMid} onChange={(value) => setFilter({ ...filter, departmentMid: value })}
+          label="중분류" value={filter.departmentMid} onChange={(value) => setFilter({ ...filter, departmentMid: value })}
           options={filterOptions.departmentMid.map((option) => [option, option])}
         />
         <FilterSelect
@@ -806,7 +821,7 @@ export function PeopleDirectoryPage() {
               {selected?.name}{selected?.nickname ? `(${selected.nickname})` : ''} — 계약 관리
             </DialogTitle>
             <DialogDescription>
-              {selected?.departmentTop || '소속 미지정'}
+              {selected?.departmentTop || '대분류 미지정'}
               {selected?.grade ? ` · ${selected.grade}` : ''}
               {selected?.joinedAt ? ` · 입사 ${formatDate(selected.joinedAt)}` : ''}
             </DialogDescription>
@@ -936,7 +951,7 @@ export function PeopleDirectoryPage() {
               />
             </div>
             <div>
-              <Label className="text-[13px]">소속 <span className="text-slate-400">(선택)</span></Label>
+              <Label className="text-[13px]">대분류 <span className="text-slate-400">(선택)</span></Label>
               <Input
                 className="mt-1.5 h-10 text-[14px]" value={newPerson.departmentTop} disabled={saving}
                 onChange={(event) => setNewPerson({ ...newPerson, departmentTop: event.target.value })}

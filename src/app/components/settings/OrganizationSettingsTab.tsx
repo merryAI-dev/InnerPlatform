@@ -43,8 +43,8 @@ import {
 type RosterField = 'departmentTop' | 'departmentMid' | 'grade';
 
 const FIELD_LABELS: Record<RosterField, string> = {
-  departmentTop: '소속',
-  departmentMid: '팀',
+  departmentTop: '대분류',
+  departmentMid: '중분류',
   grade: '직급',
 };
 
@@ -108,7 +108,7 @@ export function OrganizationSettingsTab() {
   };
   const addTeam = (groupIndex: number) => {
     update(rows.map((group, index) => (index === groupIndex
-      ? { ...group, teams: [...group.teams, { id: `team-${Date.now()}`, label: '새 팀', sortOrder: group.teams.length, active: true }] }
+      ? { ...group, teams: [...group.teams, { id: `team-${Date.now()}`, label: '새 중분류', sortOrder: group.teams.length, active: true }] }
       : group)));
     setExpanded((current) => new Set(current).add(rows[groupIndex].id));
   };
@@ -195,7 +195,7 @@ export function OrganizationSettingsTab() {
         <div>
           <h3 className="text-sm font-semibold text-slate-900">조직 목록</h3>
           <p className="mt-0.5 text-xs text-slate-600">
-            인력 명부의 소속·팀 선택지입니다. 지우는 대신 숨기면 그 조직을 쓰던 사람의 소속이 그대로 남습니다.
+            인력 명부의 대분류·중분류(센터·실·CIC) 선택지입니다. 지우는 대신 숨기면 그 조직을 쓰던 사람의 소속이 그대로 남습니다.
           </p>
         </div>
         <div className="flex gap-2">
@@ -221,7 +221,7 @@ export function OrganizationSettingsTab() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button" className="text-slate-400 hover:text-slate-700"
-                  aria-label={`${group.label} 팀 ${open ? '접기' : '펼치기'}`} aria-expanded={open}
+                  aria-label={`${group.label} 중분류 ${open ? '접기' : '펼치기'}`} aria-expanded={open}
                   onClick={() => setExpanded((current) => {
                     const next = new Set(current);
                     if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
@@ -249,19 +249,19 @@ export function OrganizationSettingsTab() {
                   variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]"
                   disabled={saving} onClick={() => addTeam(groupIndex)}
                 >
-                  <Plus className="h-3 w-3" /> 팀 추가
+                  <Plus className="h-3 w-3" /> 중분류 추가
                 </Button>
               </div>
 
               {open ? (
                 <div className="mt-2 space-y-1.5 pl-8">
                   {group.teams.length === 0 ? (
-                    <p className="text-[11px] text-slate-400">등록된 팀이 없습니다.</p>
+                    <p className="text-[11px] text-slate-400">등록된 중분류가 없습니다.</p>
                   ) : group.teams.map((team, teamIndex) => (
                     <div key={team.id} className="flex flex-wrap items-center gap-2">
                       <Input
                         className="h-8 w-56 text-[13px]" value={team.label} disabled={saving}
-                        aria-label={`${group.label} 팀 ${teamIndex + 1} 이름`}
+                        aria-label={`${group.label} 중분류 ${teamIndex + 1} 이름`}
                         onChange={(event) => renameTeam(groupIndex, teamIndex, event.target.value)}
                       />
                       <Badge variant="outline" className="gap-1 text-[10px]">
@@ -367,7 +367,7 @@ export function OrganizationSettingsTab() {
           </div>
         </section>
       ) : (
-        <p className="text-[11px] text-slate-500">모든 인력의 소속·팀·직급이 지금 목록과 맞습니다.</p>
+        <p className="text-[11px] text-slate-500">모든 인력의 대분류·중분류·직급이 지금 목록과 맞습니다.</p>
       )}
 
       <AlertDialog open={renamePlan !== null} onOpenChange={(open) => { if (!open && !renaming) setRenamePlan(null); }}>

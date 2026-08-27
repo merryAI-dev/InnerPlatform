@@ -38,11 +38,29 @@ describe('PeopleDirectoryPage 근로형태 노출 계약', () => {
     expect(dialog).toContain('EMPLOYMENT_TYPE_LABELS');
   });
 
-  it('목록에는 이름·재직상태·소속·직급·입사일·근속만 둔다', () => {
+  /**
+   * 개인 정보를 앞에 모으고 회사 정보를 뒤로 몬다. 재직상태는 관리 뒤 맨 끝이다 —
+   * 사람을 찾을 때 먼저 읽는 것과 상태를 확인할 때 읽는 것이 다르기 때문이다.
+   */
+  it('열 순서를 개인 → 회사 → 관리 → 재직상태로 지킨다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
-    ['이름', '재직상태', '소속 · 팀', '직급', '입사일', '근속'].forEach((column) => {
-      expect(table).toContain(`>${column}</DataGridHeadCell>`);
+    const order = [
+      'No', '이름', '별명', '생년월일',
+      '입사일', '휴직·퇴사일', '근속', '대분류', '중분류', '직책', '직급', '이메일 주소',
+      '최종학력', '학위취득', '관리', '재직상태',
+    ];
+    const positions = order.map((column) => {
+      const at = table.indexOf(`>${column}</DataGridHeadCell>`);
+      expect(at, `${column} 열이 없습니다`).toBeGreaterThan(-1);
+      return at;
     });
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+  });
+
+  it('소속 표기는 조직 설정과 같은 말을 쓴다 — 대분류·중분류', () => {
+    expect(source).not.toContain('>소속 · 팀</DataGridHeadCell>');
+    expect(source).toContain('label="대분류"');
+    expect(source).toContain('label="중분류"');
   });
 });
 

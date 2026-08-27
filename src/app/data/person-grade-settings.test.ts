@@ -11,7 +11,7 @@ describe('직급 목록 설정', () => {
   it('설정 문서가 없으면 코드 카탈로그로 시작한다', () => {
     const grades = resolvePersonGradeOptions(null);
     expect(grades.map((grade) => grade.label)).toEqual([
-      '인턴연구원', '연구원', '선임연구원', '책임연구원',
+      '인턴', '연구원', '선임연구원', '책임연구원',
       '컨설턴트', '선임컨설턴트', '책임컨설턴트', '수석컨설턴트',
       '이사', '부대표', '대표이사',
     ]);
@@ -30,9 +30,9 @@ describe('직급 목록 설정', () => {
 
   it('숨긴 직급은 새로 고를 수 없지만 목록에서 사라지지는 않는다', () => {
     const grades = buildDefaultPersonGradeOptions()
-      .map((grade) => (grade.label === '인턴연구원' ? { ...grade, active: false } : grade));
-    expect(activeGradeLabels(grades)).not.toContain('인턴연구원');
-    expect(grades.map((grade) => grade.label)).toContain('인턴연구원');
+      .map((grade) => (grade.label === '인턴' ? { ...grade, active: false } : grade));
+    expect(activeGradeLabels(grades)).not.toContain('인턴');
+    expect(grades.map((grade) => grade.label)).toContain('인턴');
   });
 
   it('대응 일반직급은 화면 힌트로만 붙고 임원에는 붙지 않는다', () => {

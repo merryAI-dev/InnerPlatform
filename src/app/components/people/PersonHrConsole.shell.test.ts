@@ -84,4 +84,17 @@ describe('인사정보 콘솔', () => {
     expect(englishDeclaredAt).toBeGreaterThan(-1);
     expect(englishDeclaredAt).toBeLessThan(source.indexOf('const highestEducation'));
   });
+
+  /**
+   * 휴직·퇴사는 인사정보를 보다가 그 자리에서 적는 일이다. 계약 관리 화면으로 튕겨 보내면
+   * 보던 맥락이 끊긴다. 다만 퇴사는 재직상태가 아니라 계약을 닫는 일이라 종료일로 처리한다.
+   */
+  it('휴직·퇴사를 인사정보 안에서 바로 기입한다', () => {
+    expect(source).toContain('휴직 · 퇴사');
+    expect(source).toContain('changePersonEmploymentViaBff');
+    expect(source).toContain('id="hr-leave-date"');
+    expect(source).toContain('id="hr-leave-state"');
+    // 퇴사는 state 가 아니라 endDate 로 닫는다.
+    expect(source).toContain("...(leaveState === 'SEPARATED' ? { endDate: leaveDate } : {})");
+  });
 });

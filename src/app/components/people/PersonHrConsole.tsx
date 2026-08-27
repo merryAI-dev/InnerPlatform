@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  changePersonEmploymentViaBff,
   updatePersonProfileViaBff,
   type ActorLike,
   type PersonRecord,
@@ -31,10 +32,12 @@ import {
   deriveAge,
   deriveTenure,
   deriveYearsSinceDegree,
+  resolveLeaveOrSeparation,
   resolveSeparationDate,
   type EmploymentState,
   type EmploymentType,
 } from '../../platform/person-employment';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { optionsWithCurrentValue } from '../../data/organization-settings';
 import { useOrganizationSettings } from '../../data/use-organization-settings';
 import { usePersonGradeSettings } from '../../data/use-person-grade-settings';
@@ -240,7 +243,7 @@ export function PersonHrConsole({
   const gradeOptions = useMemo(() => gradeSettings.filter((grade) => grade.active), [gradeSettings]);
   const knownGradeLabels = useMemo(() => gradeOptions.map((grade) => grade.label), [gradeOptions]);
 
-  // 소속·팀 선택지는 조직 목록에서 뻗어 나온다. 소속을 고르면 그 아래 팀만 보인다.
+  // 대분류·중분류 선택지는 조직 목록에서 뻗어 나온다. 대분류를 고르면 그 아래 중분류만 보인다.
   const groupOptions = useMemo(
     () => organizationGroups.filter((group) => group.active).map((group) => group.label),
     [organizationGroups],
@@ -253,6 +256,7 @@ export function PersonHrConsole({
 
   const current = useMemo(() => resolveCurrentEmployment(person, asOf), [person, asOf]);
   const separated = useMemo(() => resolveSeparationDate(person), [person]);
+  const leaveOrSeparation = useMemo(() => resolveLeaveOrSeparation(person, asOf), [person, asOf]);
   const tenure = useMemo(() => deriveTenure(person.joinedAt, asOf), [person.joinedAt, asOf]);
   const age = useMemo(() => deriveAge(person.birthDate, asOf), [person.birthDate, asOf]);
 
@@ -298,6 +302,44 @@ export function PersonHrConsole({
       : '계약 없음';
 
   const dirty = Object.keys(changedPersonProfileFields(baselineRef.current, form)).length > 0;
+
+  /**
+   * 휴직·퇴사 기입.
+   *
+   * 계약 관리 화면을 따로 열지 않고 여기서 바로 적는다 — 인사담당자가 인사정보를 보다가
+   * "이 사람 이 날부터 휴직" 을 적는 자리가 여기이기 때문이다.
+   * 근로형태는 지금 계약의 것을 그대로 이어간다. 형태를 바꾸는 일은 계약 관리의 몫이다.
+   */
+  // 퇴사는 재직상태가 아니다 - 계약을 닫는 일이라 이 칸에서만 쓰는 별도 선택지로 둔다.
+  type LeaveChoice = EmploymentState | 'SEPARATED';
+  const [leaveState, setLeaveState] = useState<LeaveChoice>('ON_LEAVE');
+  const [leaveDate, setLeaveDate] = useState('');
+  const [leaveSaving, setLeaveSaving] = useState(false);
+
+  const applyLeave = async () => {
+    if (!current || !leaveDate || leaveSaving) return;
+    setLeaveSaving(true);
+    try {
+      await changePersonEmploymentViaBff({
+        tenantId,
+        actor,
+        personId: person.personId,
+        mode: 'change',
+        type: current.type,
+        state: leaveState === 'SEPARATED' ? 'WORKING' : leaveState,
+        effectiveFrom: leaveDate,
+        // 퇴사는 상태가 아니라 계약을 닫는 일이다 - 종료일을 주는 것으로 끝난다.
+        ...(leaveState === 'SEPARATED' ? { endDate: leaveDate } : {}),
+      });
+      toast.success(leaveState === 'SEPARATED' ? '퇴사일을 기록했습니다.' : '휴직을 기록했습니다.');
+      setLeaveDate('');
+      onPersonUpdated();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '휴직·퇴사 기록에 실패했습니다.'));
+    } finally {
+      setLeaveSaving(false);
+    }
+  };
 
   const saveProfileFields = async () => {
     const changed = changedPersonProfileFields(baselineRef.current, form);
@@ -351,7 +393,7 @@ export function PersonHrConsole({
                   {person.nickname ? <span className="text-[14px] text-slate-500">({person.nickname})</span> : null}
                 </p>
                 <p className="mt-1 text-[14px] text-slate-600">
-                  {[person.departmentTop, person.departmentMid, person.title].filter(Boolean).join(' · ') || '소속 미지정'}
+                  {[person.departmentTop, person.departmentMid, person.title].filter(Boolean).join(' · ') || '대분류 미지정'}
                 </p>
                 <p className="mt-1 text-[14px] text-slate-600">
                   {person.joinedAt ? `${formatDate(person.joinedAt)} 입사` : '입사일 미등록'}
@@ -478,7 +520,7 @@ export function PersonHrConsole({
                   />
                 </div>
                 <div>
-                  <Label className="text-[14px]" htmlFor="hr-dept-top">소속</Label>
+                  <Label className="text-[14px]" htmlFor="hr-dept-top">대분류</Label>
                   {/* 선택지는 설정 > 조직에서 온다. 지금 저장된 값이 목록에 없어도 지우지 않고 남긴다. */}
                   <select
                     id="hr-dept-top"
@@ -493,7 +535,7 @@ export function PersonHrConsole({
                   </select>
                 </div>
                 <div>
-                  <Label className="text-[14px]" htmlFor="hr-dept-mid">팀</Label>
+                  <Label className="text-[14px]" htmlFor="hr-dept-mid">중분류</Label>
                   <select
                     id="hr-dept-mid"
                     className="mt-1.5 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[14px] disabled:opacity-50"
@@ -514,6 +556,62 @@ export function PersonHrConsole({
                   />
                 </div>
               </div>
+
+              {/* ── 휴직·퇴사 ── 입사일 옆 칸에 그대로 나타난다. */}
+              <div className="rounded-md border border-slate-300 bg-white">
+                <header className="flex items-center gap-1.5 border-b-2 border-slate-300 bg-slate-100 px-3 py-2.5">
+                  <CalendarClock className="h-4 w-4 text-slate-500" aria-hidden />
+                  <h4 className="text-[14px] font-semibold text-slate-700">휴직 · 퇴사</h4>
+                </header>
+                <div className="px-3 py-3">
+                  <p className="text-[14px] text-slate-600">
+                    현재 <span className="font-medium text-slate-900">{statusText}</span>
+                    {leaveOrSeparation
+                      ? ` · ${formatDate(leaveOrSeparation.date)} ${leaveOrSeparation.kind === 'LEAVE' ? '휴직 시작' : '퇴사'}`
+                      : ''}
+                  </p>
+                  {canWritePerson && current ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[220px_200px_auto] sm:items-end">
+                      <div>
+                        <Label className="text-[14px]" htmlFor="hr-leave-state">구분</Label>
+                        <select
+                          id="hr-leave-state" value={leaveState} disabled={leaveSaving}
+                          onChange={(event) => setLeaveState(event.target.value as LeaveChoice)}
+                          className="mt-1.5 h-10 w-full rounded-md border border-slate-300 bg-white px-2 text-[14px] text-slate-800"
+                        >
+                          <option value="ON_LEAVE">휴직</option>
+                          <option value="PARENTAL_LEAVE">육아휴직</option>
+                          <option value="WORKING">복직</option>
+                          <option value="SEPARATED">퇴사</option>
+                        </select>
+                      </div>
+                      <div>
+                        <Label className="text-[14px]" htmlFor="hr-leave-date">
+                          {leaveState === 'SEPARATED' ? '퇴사일' : leaveState === 'WORKING' ? '복직일' : '휴직 시작일'}
+                        </Label>
+                        <Input
+                          id="hr-leave-date" type="date" className="mt-1.5 h-10" value={leaveDate}
+                          disabled={leaveSaving}
+                          onChange={(event) => setLeaveDate(event.target.value)}
+                        />
+                      </div>
+                      <Button
+                        size="sm" variant="outline" className="h-10"
+                        onClick={() => void applyLeave()} disabled={leaveSaving || !leaveDate}
+                      >
+                        {leaveSaving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                        {leaveSaving ? '기록 중…' : '기록'}
+                      </Button>
+                    </div>
+                  ) : null}
+                  {canWritePerson && !current ? (
+                    <p className="mt-2 text-[14px] text-slate-500">
+                      진행 중인 계약이 없습니다. 계약 이력에서 계약을 먼저 등록해 주세요.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
               {canWritePerson ? (
                 <div className="flex justify-end">
                   <Button size="sm" onClick={() => void saveProfileFields()} disabled={saving || !dirty}>
