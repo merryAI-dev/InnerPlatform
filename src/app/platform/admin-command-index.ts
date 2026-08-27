@@ -387,6 +387,18 @@ const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
     priority: 94,
     keywords: ['프로젝트 등록', '사업 등록', '등록 요청', '신규 등록', '계약서', 'PDF', '첨부', '발주기관', '담당조직', 'CIC', '통화', 'USD', 'KRW'],
   },
+  {
+    id: 'pm:my-page',
+    label: 'PM 마이페이지',
+    description: '내 인사정보를 확인하고 학력·어학·자격을 증빙과 함께 등록합니다.',
+    category: 'PM',
+    scope: 'pm',
+    to: '/portal/career-profile',
+    icon: 'users',
+    kind: 'page',
+    priority: 92,
+    keywords: ['마이페이지', '내 정보', '인사정보', '프로필', '학력', '어학', '토익', '자격증', '증빙', '닉네임', '생년월일', '근무지'],
+  },
 ];
 
 function normalizeSearchText(value: string): string {
