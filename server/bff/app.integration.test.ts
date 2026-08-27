@@ -1573,7 +1573,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
   });
 
-  it('persists a People professional profile and exposes only its server-derived dashboard summary and filters', async () => {
+  it('persists a People professional profile and keeps it out of the participation dashboard', async () => {
     const personId = 'person-profile-filter';
     const projectIdForProfile = 'p-profile-filter';
     const idempotencyKey = 'idem-professional-profile-integration-001';
@@ -1708,52 +1708,34 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       }),
     ));
     const beforeDashboardRead = await snapshotProtectedCollections();
+    // 2026-08-27 보람: 학력·어학·자격은 인력 명부(People)가 본다. 참여율 응답에는
+    // 권한과 무관하게 인사정보가 실리지 않는다 - 가려야 할 데이터를 아예 안 보낸다.
     const dashboard = await api
-      .get('/api/v1/participation-dashboard?year=2026&ruleId=all&education=MASTER_GRADUATED&englishEvidence=TOEIC&certification=pmp')
+      .get('/api/v1/participation-dashboard?year=2026&ruleId=all')
       .set(defaultHeaders);
 
     expect(dashboard.status).toBe(200);
     expect(dashboard.headers['cache-control']).toContain('no-store');
-    expect(dashboard.body.professionalProfileAccess).toBe(true);
-    expect(dashboard.body.selectedProfileFilters).toEqual({
-      education: 'MASTER_GRADUATED',
-      englishEvidence: 'TOEIC',
-      certifications: ['pmp'],
-    });
+    expect(dashboard.body).not.toHaveProperty('professionalProfileAccess');
+    expect(dashboard.body).not.toHaveProperty('profileFilterOptions');
+    expect(dashboard.body).not.toHaveProperty('selectedProfileFilters');
     expect(dashboard.body.members).toEqual([
       expect.objectContaining({
         memberId: personId,
         memberName: '김프로필',
         projectCount: 1,
-        profileSummary: {
-          highestEducationDisplayText: '석사 졸업 · University of Sussex',
-          englishEvidenceDisplayText: 'TOEIC 920 · 해외 대학',
-          certificationsDisplayText: 'PMP · ODA 전문가',
-        },
         months: expect.arrayContaining([
           expect.objectContaining({ yearMonth: '2026-01', rate: 30, isConfirmed: true }),
         ]),
       }),
     ]);
-    expect(dashboard.body.profileFilterOptions.education).toContainEqual({
-      value: 'MASTER_GRADUATED', label: '석사 졸업', memberCount: 1,
-    });
-    expect(dashboard.body.profileFilterOptions.englishEvidence).toEqual(expect.arrayContaining([
-      { value: 'TOEIC', label: 'TOEIC', memberCount: 1 },
-      { value: 'OVERSEAS_EDUCATION', label: '해외 대학', memberCount: 1 },
-    ]));
-    expect(dashboard.body.profileFilterOptions.certifications).toEqual(expect.arrayContaining([
-      { value: 'pmp', label: 'PMP', memberCount: 1 },
-      { value: 'oda 전문가', label: 'ODA 전문가', memberCount: 1 },
-    ]));
+    expect(dashboard.body.members.every((member: Record<string, unknown>) => !('profileSummary' in member))).toBe(true);
     expect(JSON.stringify(dashboard.body)).not.toContain('profile-secret@example.com');
     expect(JSON.stringify(dashboard.body)).not.toContain('private-person-note');
     expect(JSON.stringify(dashboard.body)).not.toContain('private-major-secret');
-    expect(JSON.stringify(dashboard.body.members)).not.toContain('"testedAt"');
-    expect(JSON.stringify(dashboard.body.members)).not.toContain('"major"');
-    expect(JSON.stringify(dashboard.body.members)).not.toContain('"countryCode"');
-    expect(JSON.stringify(dashboard.body.members)).not.toContain('"resultValue"');
-    expect(JSON.stringify(dashboard.body.members)).not.toContain('"professionalProfile"');
+    for (const forbidden of ['"testedAt"', '"major"', '"countryCode"', '"resultValue"', '"professionalProfile"', 'PMP', 'University of Sussex']) {
+      expect(JSON.stringify(dashboard.body)).not.toContain(forbidden);
+    }
     expect(await snapshotProtectedCollections()).toEqual(beforeDashboardRead);
 
     const auditAndIdempotency = JSON.stringify({
@@ -1769,17 +1751,6 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       expect(auditAndIdempotency).not.toContain(rawProfileValue);
     }
 
-    const noMatch = await api
-      .get('/api/v1/participation-dashboard?year=2026&ruleId=all&education=DOCTOR_GRADUATED')
-      .set(defaultHeaders);
-    expect(noMatch.status).toBe(200);
-    expect(noMatch.body.members).toEqual([]);
-    expect(noMatch.body.profileFilterOptions.education).toContainEqual({
-      value: 'MASTER_GRADUATED', label: '석사 졸업', memberCount: 1,
-    });
-    expect(noMatch.body.profileFilterOptions.education).toContainEqual({
-      value: 'DOCTOR_GRADUATED', label: '박사 졸업', memberCount: 0,
-    });
   });
 
   it('normalizes project revenue fields through project upsert', async () => {
