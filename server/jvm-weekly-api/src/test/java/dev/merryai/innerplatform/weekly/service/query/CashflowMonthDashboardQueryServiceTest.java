@@ -28,6 +28,32 @@ class CashflowMonthDashboardQueryServiceTest {
     );
 
     @Test
+    void januaryCycleReadsThePreviousDecemberLedgerAndOpeningBalance() {
+        CashflowReadPort port = mock(CashflowReadPort.class);
+        when(port.findCashflowMonthClose("tenant-a", "project-a", "2027-01"))
+            .thenReturn(monthClose("project-a", "OPEN", 0, null, null));
+        when(port.findCashflowDeclaredWeeklyYear("tenant-a", "project-a")).thenReturn(2026);
+        when(port.findCashflowLedgerSource("tenant-a", "project-a", 2026))
+            .thenReturn(new CashflowLedgerSource(List.of(), List.of()));
+        when(port.findCashflowLedgerSource(
+            "tenant-a", "project-a", 2026, "2023-01", "2026-12"
+        )).thenReturn(new CashflowLedgerSource(List.of(), List.of()));
+        when(port.findCashflowOpeningBalance("tenant-a", "project-a", 2026))
+            .thenReturn(openingBalance());
+
+        CashflowMonthDashboardQueryService.Result result = service(port).readSettlementCycle(
+            "tenant-a", "project-a", "2027-01", "request-a"
+        );
+
+        assertThat(result.openingBalances().live()).isEqualTo(openingBalance());
+        verify(port).findCashflowOpeningBalance("tenant-a", "project-a", 2026);
+        verify(port, never()).findCashflowOpeningBalance("tenant-a", "project-a", 2027);
+        verify(port).findCashflowLedgerSource(
+            "tenant-a", "project-a", 2026, "2023-01", "2026-12"
+        );
+    }
+
+    @Test
     void missingAuthorityAllowsOnlyAGenuinelyPristineFirstClose() {
         CashflowReadPort port = mock(CashflowReadPort.class);
         when(port.findCashflowMonthClose("tenant-a", "project-a", "2026-08"))

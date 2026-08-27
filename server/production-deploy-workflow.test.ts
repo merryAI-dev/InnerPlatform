@@ -1,5 +1,14 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '..');
@@ -25,6 +34,70 @@ function extractRunBlocks(text: string) {
   }
 
   return blocks;
+}
+
+function extractNamedStep(text: string, name: string) {
+  const marker = `      - name: ${name}\n`;
+  const start = text.indexOf(marker);
+  if (start < 0) throw new Error(`Missing workflow step: ${name}`);
+  const next = text.indexOf('\n      - ', start + marker.length);
+  return text.slice(start, next < 0 ? text.length : next);
+}
+
+function extractStepIf(step: string) {
+  return step.match(/^        if:\s*(.+)$/m)?.[1] ?? null;
+}
+
+function extractReleaseModeProgram(text: string) {
+  const step = extractNamedStep(text, 'Classify Production release mode');
+  const match = step.match(
+    /release_mode="\$\(node --input-type=module - "\$\{BFF_DEPLOY_BASE_SHA\}" "\$\{DEPLOY_SHA\}" <<'NODE'\n([\s\S]*?)\n\s+NODE\n\s+\)"/,
+  );
+  if (!match) throw new Error('Missing release-mode inline program');
+  const lines = match[1].split('\n');
+  const indent = Math.min(
+    ...lines.filter((line) => line.trim()).map((line) => line.match(/^\s*/)?.[0].length ?? 0),
+  );
+  return lines.map((line) => line.slice(indent)).join('\n');
+}
+
+function classifyReleaseModeInTempRepo(changes: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), 'myscube-production-release-mode-'));
+  const write = (path: string, contents: string) => {
+    const target = join(dir, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, contents);
+  };
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    copyFileSync(
+      resolve(repoRoot, 'scripts/verify-cashflow-settlement-release-boundary.mjs'),
+      join(dir, 'scripts/verify-cashflow-settlement-release-boundary.mjs'),
+    );
+    write('server/bff/routes/jvm-weekly-api.mjs', 'export const route = true;\n');
+    write('README.md', 'base\n');
+    git('init', '-q');
+    git('config', 'user.email', 'release-mode-test@example.com');
+    git('config', 'user.name', 'Release Mode Test');
+    git('add', '.');
+    git('commit', '-qm', 'base');
+    const base = git('rev-parse', 'HEAD');
+
+    for (const [path, contents] of Object.entries(changes)) write(path, contents);
+    git('add', '.');
+    git('commit', '-qm', 'candidate');
+    const head = git('rev-parse', 'HEAD');
+
+    return execFileSync(process.execPath, ['--input-type=module', '-', base, head], {
+      cwd: dir,
+      encoding: 'utf8',
+      input: extractReleaseModeProgram(workflowText),
+    }).trim();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe('production deployment workflow safety', () => {
@@ -58,9 +131,9 @@ describe('production deployment workflow safety', () => {
 
     expect(runBlocks.some((block) => block.includes('${{ inputs.'))).toBe(false);
     expect(runBlocks.some((block) => block.includes('${{ needs.'))).toBe(false);
-    expect(workflowText).toContain('DISPATCH_NOTE: ${{ inputs.note }}');
-    expect(workflowText).toContain('DEPLOY_NOTE: ${{ needs.preflight.outputs.note }}');
-    expect(workflowText).toContain('printf \'%s\\n\' "- Note: ${DEPLOY_NOTE}"');
+    expect(workflowText).not.toContain('DISPATCH_NOTE');
+    expect(workflowText).not.toContain('DEPLOY_NOTE');
+    expect(workflowText).not.toContain('echo "note=${note}" >> "${GITHUB_OUTPUT}"');
   });
 
   it('does not interpolate deployment outputs directly inside shell run blocks', () => {
@@ -75,14 +148,20 @@ describe('production deployment workflow safety', () => {
   it('promotes the canonical production alias before verifying it', () => {
     expect(workflowText).toContain('promote_alias:');
     expect(workflowText).toContain('default: true');
-    expect(workflowText.match(/if: needs\.preflight\.outputs\.promote == 'true'/g)).toHaveLength(2);
+    for (const name of [
+      'Capture current canonical alias',
+      'Promote canonical production alias',
+      'Verify canonical alias target',
+    ]) {
+      expect(extractNamedStep(workflowText, name)).toContain("needs.preflight.outputs.promote == 'true'");
+    }
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
     expect(workflowText).toContain('Promote canonical production alias');
     expect(workflowText).toContain('"${VERCEL_CANONICAL_PRODUCTION_HOST}"');
     expect(workflowText).toContain('--scope merryai-devs-projects');
     expect(workflowText.indexOf('Promote canonical production alias')).toBeLessThan(
-      workflowText.indexOf('Verify canonical production alias'),
+      workflowText.indexOf('Verify canonical alias target'),
     );
   });
 
@@ -132,6 +211,220 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).not.toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
     expect(workflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_PRODUCTION');
     expect(workflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');
+  });
+
+  it('blocks a mixed JVM and settlement BFF/frontend release before either deploy can race', () => {
+    expect(workflowText).toContain('fetch-depth: 0');
+    expect(workflowText).toContain('Verify cashflow settlement split-release boundary');
+    expect(workflowText).toContain('verify-cashflow-settlement-release-boundary.mjs');
+    expect(workflowText).toContain('--jvm-base "${JVM_DEPLOY_BASE_SHA}"');
+    expect(workflowText).toContain('--bff-base "${BFF_DEPLOY_BASE_SHA}"');
+    expect(workflowText).toContain('Deploy production from main');
+    expect(workflowText.indexOf('Verify cashflow settlement split-release boundary'))
+      .toBeLessThan(workflowText.indexOf('Deploy to Vercel production'));
+  });
+
+  it('classifies JVM-only work from the canonical alias before requiring the JVM verifier', () => {
+    const releaseModeStep = extractNamedStep(
+      workflowText,
+      'Classify Production release mode',
+    );
+    expect(releaseModeStep).toContain('const [aliasBase, head] = process.argv.slice(2);');
+    expect(releaseModeStep).toContain('changedPathsBetween(aliasBase, head)');
+    expect(releaseModeStep).toContain('const unexpectedPaths = changedPaths.filter');
+    expect(releaseModeStep).toContain('&& unexpectedPaths.length === 0');
+    expect(releaseModeStep).toContain('echo "release_mode=${release_mode}"');
+    expect(workflowText.indexOf('Classify Production release mode'))
+      .toBeLessThan(workflowText.indexOf('Authenticate JVM release verifier'));
+
+    const verifierAuth = extractNamedStep(workflowText, 'Authenticate JVM release verifier');
+    const gcloudSetup = extractNamedStep(workflowText, 'Set up gcloud for release verification');
+    const boundaryStep = extractNamedStep(workflowText, 'Verify cashflow settlement split-release boundary');
+    for (const step of [verifierAuth, gcloudSetup, boundaryStep]) {
+      expect(extractStepIf(step)).toContain("steps.release_mode.outputs.release_mode != 'jvm_only'");
+    }
+    expect(boundaryStep).toContain('boundary_json="$(node scripts/verify-cashflow-settlement-release-boundary.mjs');
+    expect(boundaryStep).not.toContain('release_mode="$(node --input-type=module -');
+
+    const skipStep = extractNamedStep(workflowText, 'Skip Production for JVM-only release');
+    expect(skipStep).toContain("if: steps.release_mode.outputs.release_mode == 'jvm_only'");
+    expect(skipStep).toContain('JVM-only release; Vercel production intentionally skipped.');
+  });
+
+  it('never treats a JVM change mixed with ordinary web runtime code as JVM-only', () => {
+    expect(classifyReleaseModeInTempRepo({
+      'server/jvm-weekly-api/src/main/java/example/NewCapability.java': 'final class NewCapability {}\n',
+    })).toBe('jvm_only');
+    expect(classifyReleaseModeInTempRepo({
+      'src/app/components/people/PeoplePage.tsx': 'export const PeoplePage = () => null;\n',
+    })).toBe('web');
+    expect(classifyReleaseModeInTempRepo({
+      'server/jvm-weekly-api/src/main/java/example/NewCapability.java': 'final class NewCapability {}\n',
+      'src/app/components/people/PeoplePage.tsx': 'export const PeoplePage = () => null;\n',
+    })).toBe('web');
+    expect(classifyReleaseModeInTempRepo({
+      'server/jvm-weekly-api/src/main/java/example/NewCapability.java': 'final class NewCapability {}\n',
+      'README.md': 'unrelated root change\n',
+    })).toBe('web');
+    expect(classifyReleaseModeInTempRepo({
+      'server/jvm-weekly-api/src/main/java/example/NewCapability.java': 'final class NewCapability {}\n',
+      '.github/workflows/jvm-production-deploy.yml': 'name: hardened JVM workflow\n',
+      '.github/workflows/production-deploy.yml': 'name: hardened production workflow\n',
+      'deploy-prod-align.mjs': 'export {};\n',
+      'scripts/verify-cashflow-settlement-candidate.mjs': 'export {};\n',
+      'scripts/verify-cashflow-settlement-release-boundary.mjs': `${readFileSync(
+        resolve(repoRoot, 'scripts/verify-cashflow-settlement-release-boundary.mjs'),
+        'utf8',
+      )}\n`,
+      'scripts/audit-cashflow-settlement-cycle-rollout.mjs': 'export {};\n',
+      'server/bff/cashflow-settlement-cycle-rollout.mjs': 'export {};\n',
+      'server/bff/cashflow-settlement-cycle-rollout.test.mjs': 'export {};\n',
+      'server/bff/cashflow-settlement-cycle-rollout.integration.test.ts': 'export {};\n',
+      'server/bff/cashflow/settlement-cycle/contract.mjs': 'export {};\n',
+      'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs': 'export {};\n',
+      'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.test.mjs': 'export {};\n',
+      'server/cashflow-settlement-candidate-canary.test.mjs': 'export {};\n',
+      'server/cashflow-settlement-release-boundary.test.mjs': 'export {};\n',
+      'server/deploy-prod-align.test.ts': 'export {};\n',
+      'server/production-deploy-workflow.test.ts': 'export {};\n',
+    })).toBe('jvm_only');
+  });
+
+  it('skips every Vercel and live-JVM action for JVM-only work', () => {
+    const gatedSteps = [
+      'Verify Vercel deploy author policy',
+      'Verify Vercel credentials are configured',
+      'Verify deployed JVM settlement capability and version',
+      'Deploy to Vercel production',
+      'Verify Vercel candidate identity',
+      'Verify production surface before alias',
+      'Verify authenticated settlement reads before alias',
+      'Capture current canonical alias',
+      'Promote canonical production alias',
+      'Verify canonical alias target',
+      'Reconcile canonical alias or roll back',
+      'Release summary',
+    ];
+
+    for (const name of gatedSteps) {
+      const step = extractNamedStep(workflowText, name);
+      const condition = extractStepIf(step);
+      expect({ name, gated: condition?.includes("steps.release_mode.outputs.release_mode != 'jvm_only'") })
+        .toEqual({ name, gated: true });
+    }
+    expect(extractStepIf(extractNamedStep(workflowText, 'Reconcile canonical alias or roll back')))
+      .toContain('always()');
+  });
+
+  it('uses a dedicated least-privilege Firebase canary only in the two canary steps', () => {
+    expect(workflowText).toContain('FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE');
+    expect(workflowText).toContain('FIREBASE_WEB_API_KEY_LIVE');
+    expect(workflowText).toContain('SETTLEMENT_READ_CANARY_ACTOR_UID_LIVE');
+    expect(workflowText).not.toContain('SETTLEMENT_CANARY_ACTOR_UID: ${{ vars.JVM_SETTLEMENT_CANARY_ACTOR_UID_LIVE }}');
+    expect(workflowText).toContain('JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE');
+    expect(workflowText).toContain('JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE');
+    expect(workflowText.match(/FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE/g)).toHaveLength(2);
+    expect(workflowText).toContain('Verify authenticated settlement reads before alias');
+    expect(workflowText).toContain('node scripts/verify-cashflow-settlement-candidate.mjs');
+    expect(workflowText).not.toContain('npm run cashflow:settlement-cycle:canary');
+    expect(workflowText.indexOf('Verify authenticated settlement reads before alias'))
+      .toBeLessThan(workflowText.indexOf('Promote canonical production alias'));
+    expect(workflowText.lastIndexOf('Reconcile canonical alias or roll back'))
+      .toBeGreaterThan(workflowText.indexOf('Promote canonical production alias'));
+  });
+
+  it('binds both canaries to one approved settlement fixture', () => {
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_REQUEST_ID');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_STATUS');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_ACTIONS');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_REQUEST_ID_LIVE');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_STATUS_LIVE');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION_LIVE');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION_LIVE');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH_LIVE');
+    expect(workflowText).toContain('SETTLEMENT_CANARY_EXPECTED_ACTIONS_LIVE');
+  });
+
+  it('requires persistent proof that the live JVM version and capability cover the cutover', () => {
+    expect(workflowText).toContain('Verify deployed JVM settlement capability and version');
+    expect(workflowText).toContain('JVM_DEPLOYED_SHA');
+    expect(workflowText).toContain('git diff --quiet "${JVM_DEPLOYED_SHA}" "${DEPLOY_SHA}" -- ${JVM_SOURCE_PATHS}');
+    expect(workflowText).toContain('google-auth-library');
+    expect(workflowText).toContain('settlement-cycle-v1');
+    expect(workflowText).toContain('id-token: write');
+    expect(workflowText).toContain('live_revision=');
+    expect(workflowText).toContain('select(.name == "JVM_WEEKLY_COMMIT_SHA")');
+    expect(workflowText).toContain('test "${live_sha}" = "${JVM_DEPLOYED_SHA}"');
+    expect(workflowText).toContain('baseUrl.origin !== audience.origin');
+    expect(workflowText.indexOf('Verify deployed JVM settlement capability and version'))
+      .toBeLessThan(workflowText.indexOf('Deploy to Vercel production'));
+  });
+
+  it('accepts only release bases whose canonical reconciliation step succeeded', () => {
+    expect(workflowText).toContain('gcloud run services describe "${JVM_SERVICE}"');
+    expect(workflowText).toContain('node deploy-prod-align.mjs --print-current-target');
+    expect(workflowText).toContain('inspect "${bff_deployment_host}" --json');
+    expect(workflowText).toContain('.meta.githubCommitSha');
+    expect(workflowText).toContain('JVM_SPLIT_RELEASE_BASE_SHA_LIVE');
+    expect(workflowText).toContain('status.imageDigest');
+    expect(workflowText).not.toContain('git hash-object -t tree /dev/null');
+    expect(workflowText).toContain('git merge-base --is-ancestor "${bff_deployed_sha}" "${DEPLOY_SHA}"');
+    expect(workflowText).toContain('git merge-base --is-ancestor "${jvm_deployed_sha}" "${DEPLOY_SHA}"');
+  });
+
+  it('binds the parsed Vercel candidate to this project and commit before authenticated reads', () => {
+    expect(workflowText).toContain('Verify Vercel candidate identity');
+    expect(workflowText).toContain('inspect "${DEPLOYMENT_HOST}" --json');
+    expect(workflowText).toContain('.projectId == $project');
+    expect(workflowText).toContain('.meta.githubCommitSha == $sha');
+    expect(workflowText).toContain('.meta.githubActionsInvocation == $invocation');
+    expect(workflowText).toContain('--meta githubActionsInvocation="${DEPLOY_INVOCATION_ID}"');
+    expect(workflowText).toContain('.target == "production"');
+    expect(workflowText.indexOf('Verify Vercel candidate identity'))
+      .toBeLessThan(workflowText.indexOf('Verify authenticated settlement reads before alias'));
+  });
+
+  it('captures the prior alias and restores it on any promotion or post-alias canary failure', () => {
+    expect(workflowText).toContain('id: previous_alias');
+    expect(workflowText).toContain('--print-current-target');
+    expect(workflowText).toContain('id: alias_promotion');
+    expect(workflowText).toContain('id: canonical_alias');
+    expect(workflowText).toContain(
+      "if: always() && steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'",
+    );
+    expect(workflowText).toContain('ALIAS_OUTCOME: ${{ steps.alias_promotion.outcome }}');
+    expect(workflowText).toContain('ALIAS_CHECK_OUTCOME: ${{ steps.canonical_alias.outcome }}');
+    expect(workflowText).toContain('PREVIOUS_DEPLOYMENT_HOST: ${{ steps.previous_alias.outputs.deployment_host }}');
+    expect(workflowText).toContain('PREVIOUS_DEPLOYMENT_ID: ${{ steps.previous_alias.outputs.deployment_id }}');
+    expect(workflowText).toContain('PREVIOUS_DEPLOYMENT_SHA: ${{ steps.previous_alias.outputs.commit_sha }}');
+    expect(workflowText).toContain('"${PREVIOUS_DEPLOYMENT_HOST}"');
+    expect(workflowText).toContain('actual_target="$(node deploy-prod-align.mjs --print-current-target 2>/dev/null)"');
+    expect(workflowText).toContain('if [ "${actual_target_status}" = "0" ]');
+    expect(workflowText).not.toContain('if [ "${ALIAS_OUTCOME}" = "success" ]');
+    expect(workflowText).toContain('rollback_alias_status=0');
+    expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"');
+    const reconcileStart = workflowText.lastIndexOf('Reconcile canonical alias or roll back');
+    const rollbackVerify = workflowText.indexOf('node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"', reconcileStart);
+    const rollbackCanary = workflowText.indexOf('node scripts/verify-cashflow-settlement-candidate.mjs', rollbackVerify);
+    expect(rollbackVerify).toBeGreaterThan(reconcileStart);
+    expect(rollbackCanary).toBeGreaterThan(rollbackVerify);
+  });
+
+  it('scopes production deploy secrets away from checkout and dependency installation', () => {
+    const deployJob = workflowText.slice(workflowText.indexOf('  deploy:'), workflowText.indexOf('    steps:'));
+    expect(deployJob).not.toContain('${{ secrets.');
+    const installBlock = extractNamedStep(workflowText, 'Install deployment verification dependencies');
+    expect(installBlock).not.toContain('${{ secrets.');
+    expect(workflowText.indexOf('Install deployment verification dependencies'))
+      .toBeLessThan(workflowText.indexOf('google-github-actions/auth@v3'));
+    expect(workflowText).toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}');
+    expect(workflowText).toContain('token_format: access_token');
+    expect(workflowText).toContain('create_credentials_file: false');
+    expect(workflowText).toContain('CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.jvm_release_verifier_auth.outputs.access_token }}');
+    expect(workflowText).not.toContain('steps.jvm_release_verifier_auth.outputs.credentials_file_path');
   });
 });
 

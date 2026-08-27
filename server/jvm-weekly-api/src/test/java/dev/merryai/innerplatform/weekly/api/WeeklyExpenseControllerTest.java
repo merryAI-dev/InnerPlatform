@@ -5,6 +5,7 @@ import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
+import dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
@@ -17,6 +18,7 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionReposi
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
 import dev.merryai.innerplatform.weekly.service.CashflowReadService;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
+import dev.merryai.innerplatform.weekly.service.WeeklyExpenseAuthorizationService;
 import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import dev.merryai.innerplatform.weekly.service.query.CashflowDashboardSectionQueryService;
@@ -133,6 +135,101 @@ class WeeklyExpenseControllerTest {
         doNothing().when(weeklyExpensePersistence).bindCashflowMonthReopenDecisionAuthority(any());
         doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
         doNothing().when(weeklyExpensePersistence).requireCashflowWeeksOpen(any(), any(), any());
+    }
+
+    @Test
+    void healthPublishesTheSettlementCycleCapabilityForRollingDeploymentFences() throws Exception {
+        mockMvc.perform(get("/api/v1/health"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.ok").value(true))
+            .andExpect(jsonPath("$.capabilities[0]").value("settlement-cycle-v1"));
+    }
+
+    @Test
+    void adminRecoveryCanCancelAnActiveSettlementCycle() throws Exception {
+        doReturn(new WeeklyExpensePersistence.CashflowSettlementCycleCommandState(
+            "project-a",
+            "2026-08",
+            "2026-07",
+            "project-a-2026-08",
+            "WITHDRAWN",
+            2,
+            1,
+            "sha256:" + "a".repeat(64),
+            "2026-08-20T02:51:00Z",
+            "pm-1",
+            "head-1",
+            "2026-08-27T03:00:00Z",
+            "admin-recovery",
+            "퇴사자 요청 정리"
+        )).when(weeklyExpensePersistence).cancelCashflowSettlementCycle(
+            any(), eq("project-a"), any()
+        );
+        doAnswer(invocation -> invocation.getArgument(0))
+            .when(weeklyExpensePersistence).saveAuditEvent(any());
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-a/settlement-cycle/cancel-active")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {
+                          "idempotencyKey": "cancel-active-cycle-001",
+                          "cycleYearMonth": "2026-08",
+                          "monthCloseTargetYearMonth": "2026-07",
+                          "requestId": "project-a-2026-08",
+                          "expectedWorkflowRevision": 1,
+                          "reason": "퇴사자 요청 정리"
+                        }
+                        """),
+                "tenant-a",
+                "admin-recovery",
+                "admin"
+            ))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.businessState").value("WITHDRAWN"))
+            .andExpect(jsonPath("$.workflowRevision").value(2));
+    }
+
+    @Test
+    void settlementCycleCancellationIsRestrictedToActiveAdmins() throws Exception {
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-a/settlement-cycle/cancel-active")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {
+                          "idempotencyKey": "cancel-active-cycle-forbidden",
+                          "cycleYearMonth": "2026-08",
+                          "monthCloseTargetYearMonth": "2026-07",
+                          "requestId": "project-a-2026-08",
+                          "expectedWorkflowRevision": 1,
+                          "reason": "권한 검증"
+                        }
+                        """),
+                "tenant-a",
+                "finance-1",
+                "finance"
+            ))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void settlementCycleHeadMigrationRequiresANonBlankBoundedReason() throws Exception {
+        for (String reason : List.of("", "x".repeat(1_001))) {
+            mockMvc.perform(asActor(
+                    post("/api/v1/cashflow/project-a/settlement-cycle/migrate-head-v2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                            "idempotencyKey", "migration-reason-validation",
+                            "expectedHeadRevision", 4,
+                            "expectedHeadRootHash", "sha256:" + "a".repeat(64),
+                            "reason", reason
+                        ))),
+                    "tenant-a",
+                    "admin-1",
+                    "admin"
+                ))
+                .andExpect(status().isBadRequest());
+        }
     }
 
     private static MockHttpServletRequestBuilder asActor(
@@ -1724,6 +1821,82 @@ class WeeklyExpenseControllerTest {
             .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026);
         verify(dashboardPersistence).findCashflowLedgerSource(
             "tenant-month-dashboard", "project-month-dashboard", 2026, "2023-01", "2026-08"
+        );
+    }
+
+    @Test
+    void settlementCycleDashboardPublishesTheCanonicalCycleProjection() {
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService dashboardCommandService = new WeeklyExpenseCommandService(
+            dashboardPersistence, authorization, objectMapper, false, "live"
+        );
+        when(dashboardPersistence.findCashflowMonthClose(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", "2026-08"
+        )).thenReturn(monthCloseState(new CashflowMonthCloseResponse(
+            true, "cashflowMonth.read", "project-cycle-dashboard", "2026-08", "OPEN",
+            0, 0, 0, 0, 0, null, null, null, null, null, false,
+            Map.of(), null, null, Map.of(), Map.of(), false,
+            "2026-08-27", "2026-08-10", true,
+            null, null, null, null, null, null, null, null, null, null, null
+        )));
+        when(dashboardPersistence.findCashflowDeclaredWeeklyYear(
+            "tenant-cycle-dashboard", "project-cycle-dashboard"
+        )).thenReturn(2026);
+        CashflowLedgerSource source = new CashflowLedgerSource(List.of(), List.of());
+        when(dashboardPersistence.findCashflowLedgerSource(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", 2026
+        )).thenReturn(source);
+        when(dashboardPersistence.findCashflowLedgerSource(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", 2026, "2023-01", "2026-08"
+        )).thenReturn(source);
+        when(dashboardPersistence.findCashflowOpeningBalance(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", 2026
+        )).thenReturn(new CashflowOpeningBalance(
+            2026,
+            new CashflowOpeningBalance.Mode(java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()),
+            new CashflowOpeningBalance.Mode(java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
+        ));
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord completed =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "MONTH", "COMPLETED", "2026-08-20T02:51:00Z", "pm-1",
+                "2026-08-25T06:45:00Z", "head-1", 2
+            );
+        when(dashboardPersistence.findCashflowSettlementStatuses(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", "2026-07"
+        )).thenReturn(List.of(completed));
+        when(dashboardPersistence.findCashflowSettlementCyclesBatch(
+            any(TrustedActorContext.class), eq(List.of("project-cycle-dashboard")), eq("2026-08"), eq("2026-07")
+        )).thenReturn(Map.of(
+            "project-cycle-dashboard", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
+                "project-cycle-dashboard", "2026-08", "2026-07", List.of(), completed,
+                new CashflowSettlementCyclePolicy.Projection(
+                    CashflowSettlementCyclePolicy.BusinessState.APPROVED,
+                    CashflowSettlementCyclePolicy.Health.OK,
+                    2,
+                    new CashflowSettlementCyclePolicy.ApprovalProvenance(
+                        "2023-01", "2026-07", "2026-08", "project-cycle-dashboard-2026-08-r1",
+                        "project-cycle-dashboard-2026-08", 1, "sha256:" + "a".repeat(64)
+                    ),
+                    ""
+                )
+            )
+        ));
+
+        CashflowMonthDashboardSourceResponse response = testController(
+            dashboardCommandService, new CashflowReadService(dashboardPersistence), false
+        ).readCashflowMonthDashboardSource(
+            "project-cycle-dashboard", "2026-08", true,
+            "tenant-cycle-dashboard", "viewer-cycle-dashboard", "viewer", "viewer@example.com"
+        );
+
+        JsonNode json = objectMapper.valueToTree(response);
+        assertThat(json.path("settlementCycle").path("businessState").asText())
+            .isEqualTo("APPROVED");
+        assertThat(json.path("settlementCycle").path("provenance").path("requestId").asText())
+            .isEqualTo("project-cycle-dashboard-2026-08");
+        verify(dashboardPersistence).findCashflowSettlementCyclesBatch(
+            any(TrustedActorContext.class), eq(List.of("project-cycle-dashboard")), eq("2026-08"), eq("2026-07")
         );
     }
 

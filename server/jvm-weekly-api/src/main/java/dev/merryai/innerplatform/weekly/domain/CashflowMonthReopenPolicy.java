@@ -78,14 +78,15 @@ public final class CashflowMonthReopenPolicy {
         }
 
         boolean approved = decision == Decision.APPROVE;
-        String dataYearMonth = facts.cumulative() && !facts.closedThrough().isBlank()
-            ? facts.closedThrough()
-            : yearMonth;
+        String dataYearMonth = facts.cumulative() && !facts.affectedThroughMonth().isBlank()
+            ? facts.affectedThroughMonth()
+            : facts.cumulative() && !facts.closedThrough().isBlank() ? facts.closedThrough() : yearMonth;
         String nextClosedThrough = "";
         String nextSettlementMonth = "";
         if (approved && facts.cumulative()) {
-            nextClosedThrough = YearMonth.parse(dataYearMonth).minusMonths(1).toString();
-            nextSettlementMonth = YearMonth.parse(nextClosedThrough).plusMonths(1).toString();
+            requireRestorationEvidence(facts);
+            nextClosedThrough = facts.previousAuthorityExists() ? facts.previousClosedThrough() : "";
+            nextSettlementMonth = facts.previousAuthorityExists() ? facts.previousSettlementMonth() : "";
         }
 
         return new DecisionTransition(
@@ -97,13 +98,54 @@ public final class CashflowMonthReopenPolicy {
             approved ? increment(facts.monthReopenCount()) : facts.monthReopenCount(),
             approved ? increment(facts.projectWarningCount()) : facts.projectWarningCount(),
             facts.cumulative(),
-            facts.cumulative() ? State.CLOSED : State.UNKNOWN,
+            facts.cumulative() && facts.previousAuthorityExists() ? State.CLOSED
+                : facts.cumulative() ? State.OPEN : State.UNKNOWN,
             approved && facts.cumulative() ? increment(facts.headRevision()) : facts.headRevision(),
             nextClosedThrough,
             nextSettlementMonth,
             dataYearMonth,
-            facts.requestedByUid().isBlank()
+            facts.requestedByUid().isBlank(),
+            facts.previousAuthorityExists(),
+            facts.affectedFromMonth(),
+            facts.affectedThroughMonth(),
+            facts.approvalVersionId()
         );
+    }
+
+    private static void requireRestorationEvidence(Facts facts) {
+        if (facts.approvalVersionId().isBlank()
+            || facts.affectedFromMonth().isBlank()
+            || facts.affectedThroughMonth().isBlank()) {
+            throw violation(ViolationReason.REQUEST_MISSING);
+        }
+        YearMonth affectedFrom;
+        YearMonth affectedThrough;
+        try {
+            affectedFrom = YearMonth.parse(facts.affectedFromMonth());
+            affectedThrough = YearMonth.parse(facts.affectedThroughMonth());
+        } catch (RuntimeException error) {
+            throw violation(ViolationReason.REQUEST_MISSING);
+        }
+        if (affectedFrom.isAfter(affectedThrough)) {
+            throw violation(ViolationReason.REQUEST_MISSING);
+        }
+        if (!facts.previousAuthorityExists()) {
+            if (!facts.previousSettlementMonth().isBlank() || !facts.previousClosedThrough().isBlank()) {
+                throw violation(ViolationReason.REQUEST_MISSING);
+            }
+            return;
+        }
+        try {
+            YearMonth settlement = YearMonth.parse(facts.previousSettlementMonth());
+            YearMonth closedThrough = YearMonth.parse(facts.previousClosedThrough());
+            if (!settlement.minusMonths(1).equals(closedThrough)) {
+                throw violation(ViolationReason.REQUEST_MISSING);
+            }
+        } catch (Violation error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw violation(ViolationReason.REQUEST_MISSING);
+        }
     }
 
     private static String latestSettlementMonth(Facts facts) {
@@ -140,13 +182,43 @@ public final class CashflowMonthReopenPolicy {
         long monthRevision,
         long monthReopenCount,
         long projectWarningCount,
-        String requestedByUid
+        String requestedByUid,
+        boolean previousAuthorityExists,
+        String previousSettlementMonth,
+        String previousClosedThrough,
+        String affectedFromMonth,
+        String affectedThroughMonth,
+        String approvalVersionId
     ) {
         public Facts {
             settlementMonth = settlementMonth == null ? "" : settlementMonth.trim();
             closedThrough = closedThrough == null ? "" : closedThrough.trim();
             monthState = monthState == null ? State.UNKNOWN : monthState;
             requestedByUid = requestedByUid == null ? "" : requestedByUid.trim();
+            previousSettlementMonth = normalized(previousSettlementMonth);
+            previousClosedThrough = normalized(previousClosedThrough);
+            affectedFromMonth = normalized(affectedFromMonth);
+            affectedThroughMonth = normalized(affectedThroughMonth);
+            approvalVersionId = normalized(approvalVersionId);
+        }
+
+        public Facts(
+            boolean cumulative,
+            String settlementMonth,
+            String closedThrough,
+            long headRevision,
+            boolean monthExists,
+            State monthState,
+            long monthRevision,
+            long monthReopenCount,
+            long projectWarningCount,
+            String requestedByUid
+        ) {
+            this(
+                cumulative, settlementMonth, closedThrough, headRevision, monthExists, monthState,
+                monthRevision, monthReopenCount, projectWarningCount, requestedByUid,
+                false, "", "", "", "", ""
+            );
         }
     }
 
@@ -208,7 +280,11 @@ public final class CashflowMonthReopenPolicy {
         String nextClosedThrough,
         String nextSettlementMonth,
         String dataYearMonth,
-        boolean legacyRequesterMissing
+        boolean legacyRequesterMissing,
+        boolean previousAuthorityExists,
+        String affectedFromMonth,
+        String affectedThroughMonth,
+        String approvalVersionId
     ) {
         public boolean approved() {
             return decision == Decision.APPROVE;

@@ -87,6 +87,69 @@ exit 1`,
     expect(readFileSync(logPath, 'utf8')).not.toContain('deploy --prod');
   });
 
+  it('prints the unique deployment currently behind the canonical alias for rollback capture', () => {
+    const tempDir = makeTempDir();
+    const { binDir } = makeVercelStub(
+      tempDir,
+      `if [ "$1" = "inspect" ] && [ "$2" = "myscube.myscguard.app" ]; then
+  printf '> Fetched deployment "https://inner-platform-previous.vercel.app" in merryai-devs-projects\\n'
+  exit 0
+fi
+exit 1`,
+    );
+
+    const result = runDeployAlign(['--print-current-target'], {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      VERCEL_CLI_PACKAGE: '',
+      VERCEL_TOKEN: '',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('inner-platform-previous.vercel.app\n');
+  });
+
+  it('rejects a canonical alias target outside the Vercel deployment-host allowlist', () => {
+    const tempDir = makeTempDir();
+    const { binDir } = makeVercelStub(
+      tempDir,
+      `if [ "$1" = "inspect" ] && [ "$2" = "myscube.myscguard.app" ]; then
+  printf '> Fetched deployment "https://attacker.example.com" in merryai-devs-projects\\n'
+  exit 0
+fi
+exit 1`,
+    );
+
+    const result = runDeployAlign(['--print-current-target'], {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      VERCEL_CLI_PACKAGE: '',
+      VERCEL_TOKEN: '',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('allowed .vercel.app deployment host');
+  });
+
+  it('rejects verify-only values that are not exact HTTPS Vercel deployment origins', () => {
+    const tempDir = makeTempDir();
+    const { binDir, logPath } = makeVercelStub(tempDir, 'exit 99');
+
+    const result = runDeployAlign([
+      '--verify-only',
+      'https://inner-platform-live.vercel.app.evil.example',
+    ], {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      VERCEL_CLI_PACKAGE: '',
+      VERCEL_TOKEN: '',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('could not parse deployment');
+    expect(existsSync(logPath)).toBe(false);
+  });
+
   it('can run vercel inspect through npx with a redacted token for CI', () => {
     const tempDir = makeTempDir();
     const binDir = path.join(tempDir, 'bin');
