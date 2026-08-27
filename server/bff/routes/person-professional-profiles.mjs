@@ -5,12 +5,13 @@ import {
   encryptAuditEmail,
 } from '../bff-utils.mjs';
 import {
+  collectProfileEvidencePaths,
   getProfessionalProfileCatalog,
   normalizeProfessionalProfileInput,
   normalizeStoredProfessionalProfile,
   serializeProfessionalProfile,
 } from '../professional-profile.mjs';
-import { parseWithSchema, personProfessionalProfilePutSchema } from '../schemas.mjs';
+import { parseWithSchema, personHrEvidenceUploadUrlSchema, personProfessionalProfilePutSchema } from '../schemas.mjs';
 import { buildRequestFingerprint } from '../utils.mjs';
 
 const PROFILE_READ_PERMISSION = 'person:professional_profile:read';
@@ -90,6 +91,7 @@ export function mountPersonProfessionalProfileRoutes(app, {
   auditChainService,
   piiProtector,
   rbacPolicy,
+  evidenceStorageService,
   catalog = getProfessionalProfileCatalog(),
 }) {
   app.get(
@@ -245,11 +247,79 @@ export function mountPersonProfessionalProfileRoutes(app, {
           updatedAt: timestamp,
           updatedBy: actorId,
         }, { merge: true });
-        return complete(nextProfile, true);
+        // 이번 저장에서 떨어져 나간 증빙 파일. 커밋된 뒤에만 지운다.
+        const keptPaths = new Set(collectProfileEvidencePaths(nextProfile));
+        const orphanPaths = collectProfileEvidencePaths(currentProfile)
+          .filter((path) => !keptPaths.has(path));
+        return { ...complete(nextProfile, true), orphanPaths };
       });
+
+      // 참조가 끊긴 증빙은 남겨둘 이유가 없다. 실패해도 저장은 이미 끝났으므로 응답을 막지 않는다.
+      if (!result.replayed && result.orphanPaths?.length && evidenceStorageService?.deleteEvidence) {
+        await Promise.all(result.orphanPaths.map((path) => (
+          evidenceStorageService.deleteEvidence({ tenantId, personId, path }).catch(() => undefined)
+        )));
+      }
 
       if (result.replayed) res.setHeader('x-idempotency-replayed', '1');
       res.status(result.status).json(result.body);
+    }),
+  );
+
+  /**
+   * 증빙 업로드 자리 발급. 파일은 브라우저가 서명 URL 로 스토리지에 직접 넣고, 프로필에는
+   * 저장 버튼을 누를 때 참조만 붙는다 - 큰 스캔본이 요청 본문 한도에 막히지 않게 한다.
+   */
+  app.post(
+    '/api/v1/persons/:personId/hr-evidence/upload-url',
+    preventProfileCaching,
+    requireProfileWrite(rbacPolicy),
+    asyncHandler(async (req, res) => {
+      if (!evidenceStorageService?.createUploadUrl) {
+        throw createHttpError(503, '증빙 업로드가 아직 켜져 있지 않습니다.', 'hr_evidence_unavailable');
+      }
+      const parsed = parseWithSchema(personHrEvidenceUploadUrlSchema, req.body, 'Invalid evidence upload payload');
+      const { tenantId } = req.context;
+      const { personId } = req.params;
+      const snapshot = await db.doc(`orgs/${tenantId}/persons/${personId}`).get();
+      if (!snapshot.exists) throw personNotFound();
+      const session = await evidenceStorageService.createUploadUrl({
+        tenantId,
+        personId,
+        fileName: parsed.fileName,
+        mimeType: parsed.mimeType,
+      });
+      res.status(200).json({
+        evidenceId: session.evidenceId,
+        fileName: session.fileName,
+        path: session.path,
+        uploadUrl: session.uploadUrl,
+        expiresAt: session.expiresAt,
+      });
+    }),
+  );
+
+  /** 증빙 원문. 권한 확인과 경로 검증을 서버가 하고, 브라우저에는 파일만 내려보낸다. */
+  app.get(
+    '/api/v1/persons/:personId/hr-evidence',
+    preventProfileCaching,
+    asyncHandler(async (req, res) => {
+      assertActorPermissionAllowed(rbacPolicy, req, PROFILE_READ_PERMISSION, 'read professional profile evidence');
+      if (!evidenceStorageService?.downloadEvidence) {
+        throw createHttpError(503, '증빙 조회가 아직 켜져 있지 않습니다.', 'hr_evidence_unavailable');
+      }
+      const { tenantId } = req.context;
+      const { personId } = req.params;
+      const path = String(req.query?.path || '');
+      let file;
+      try {
+        file = await evidenceStorageService.downloadEvidence({ tenantId, personId, path });
+      } catch {
+        throw createHttpError(404, '증빙 파일을 찾지 못했습니다.', 'hr_evidence_not_found');
+      }
+      res.setHeader('content-type', file.contentType);
+      res.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+      res.status(200).send(file.buffer);
     }),
   );
 }

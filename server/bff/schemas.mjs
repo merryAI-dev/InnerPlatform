@@ -467,6 +467,15 @@ export const personEmploymentSchema = z.object({
 
 const PROFESSIONAL_PROFILE_TEXT = z.string().max(80);
 
+const professionalProfileEvidenceSchema = z.object({
+  evidenceId: PROFESSIONAL_PROFILE_TEXT,
+  path: z.string().trim().min(1).max(500),
+  name: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  size: z.number().int().nonnegative().optional(),
+  contentType: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  uploadedAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+}).strict();
+
 const professionalProfileEducationRecordSchema = z.object({
   attainmentCode: PROFESSIONAL_PROFILE_TEXT,
   institutionName: PROFESSIONAL_PROFILE_TEXT.nullish(),
@@ -474,6 +483,7 @@ const professionalProfileEducationRecordSchema = z.object({
   major: PROFESSIONAL_PROFILE_TEXT.nullish(),
   admissionYear: PROFESSIONAL_PROFILE_TEXT.nullish(),
   degreeYear: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  evidence: professionalProfileEvidenceSchema.nullish(),
 }).strict();
 
 const professionalProfileEnglishEvidenceSchema = z.object({
@@ -482,17 +492,25 @@ const professionalProfileEnglishEvidenceSchema = z.object({
   resultValue: PROFESSIONAL_PROFILE_TEXT,
   otherTestName: PROFESSIONAL_PROFILE_TEXT.nullish(),
   testedAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  evidence: professionalProfileEvidenceSchema.nullish(),
 }).strict();
 
 const professionalProfileCertificationSchema = z.object({
   label: PROFESSIONAL_PROFILE_TEXT,
   acquiredAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  evidence: professionalProfileEvidenceSchema.nullish(),
 }).strict();
 
 export const professionalProfileInputSchema = z.object({
   educationRecords: z.array(professionalProfileEducationRecordSchema).max(10).optional(),
   englishEvidence: z.array(professionalProfileEnglishEvidenceSchema).max(10).optional(),
   certifications: z.array(professionalProfileCertificationSchema).max(20).optional(),
+}).strict();
+
+export const personHrEvidenceUploadUrlSchema = z.object({
+  fileName: z.string().trim().min(1).max(200),
+  mimeType: z.string().trim().min(1).max(150),
+  fileSize: z.number().int().positive().max(20 * 1024 * 1024),
 }).strict();
 
 export const personProfessionalProfilePutSchema = z.object({

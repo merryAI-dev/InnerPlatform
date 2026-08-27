@@ -82,6 +82,48 @@ function normalizeMonth(value, field) {
   return normalized;
 }
 
+
+/**
+ * 증빙 참조. 파일 자체는 스토리지에 있고 프로필에는 가리키는 표만 남는다.
+ * 경로(path)는 서버가 evidenceId 로 만든 값만 저장한다 - 브라우저가 준 경로는 쓰지 않는다.
+ */
+function normalizeEvidenceRef(value, field) {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) invalid(field, 'must be an object');
+  const evidenceId = optionalText(value.evidenceId, `${field}.evidenceId`);
+  const path = optionalText(value.path, `${field}.path`);
+  if (!evidenceId || !path) invalid(field, 'requires evidenceId and path');
+  const size = Number(value.size);
+  return {
+    evidenceId,
+    path,
+    name: optionalText(value.name, `${field}.name`) || evidenceId,
+    size: Number.isSafeInteger(size) && size >= 0 ? size : 0,
+    contentType: optionalText(value.contentType, `${field}.contentType`) || 'application/octet-stream',
+    uploadedAt: optionalText(value.uploadedAt, `${field}.uploadedAt`),
+  };
+}
+
+/** 프로필 어디에든 붙어 있는 증빙 경로를 모은다. 저장할 때 사라진 파일을 지우는 데 쓴다. */
+export function collectProfileEvidencePaths(profile) {
+  if (!isRecord(profile)) return [];
+  const paths = [];
+  const push = (evidence) => {
+    const path = readEvidencePath(evidence);
+    if (path) paths.push(path);
+  };
+  (Array.isArray(profile.educationRecords) ? profile.educationRecords : []).forEach((record) => push(record?.evidence));
+  (Array.isArray(profile.englishEvidence) ? profile.englishEvidence : []).forEach((record) => push(record?.evidence));
+  (Array.isArray(profile.certifications) ? profile.certifications : []).forEach((record) => push(record?.evidence));
+  return [...new Set(paths)];
+}
+
+function readEvidencePath(evidence) {
+  return isRecord(evidence) && typeof evidence.path === 'string' && evidence.path.trim()
+    ? evidence.path.trim()
+    : '';
+}
+
 function normalizeEducationRecord(value, index) {
   const field = `educationRecords[${index}]`;
   if (!isRecord(value)) invalid(field, 'must be an object');
@@ -99,6 +141,7 @@ function normalizeEducationRecord(value, index) {
     major: optionalText(value.major, `${field}.major`),
     admissionYear,
     degreeYear,
+    evidence: normalizeEvidenceRef(value.evidence, `${field}.evidence`),
   };
 }
 
@@ -165,6 +208,7 @@ function normalizeEnglishEvidence(value, index) {
     resultValue: normalizeEnglishResult(value.resultValue, scale, `${field}.resultValue`),
     otherTestName,
     testedAt: normalizeTestedAt(value.testedAt, `${field}.testedAt`),
+    evidence: normalizeEvidenceRef(value.evidence, `${field}.evidence`),
   };
 }
 
@@ -181,6 +225,7 @@ function normalizeCertification(value, index) {
     key: label.toLocaleLowerCase('ko-KR'),
     label,
     acquiredAt: normalizeMonth(value.acquiredAt, `${field}.acquiredAt`),
+    evidence: normalizeEvidenceRef(value.evidence, `${field}.evidence`),
   };
 }
 
@@ -287,6 +332,7 @@ export function serializeProfessionalProfile(value) {
       major: record.major,
       admissionYear: record.admissionYear,
       degreeYear: record.degreeYear,
+      evidence: record.evidence,
     })),
     englishEvidence: profile.englishEvidence.map((evidence) => ({
       testCode: evidence.testCode,
@@ -294,11 +340,13 @@ export function serializeProfessionalProfile(value) {
       resultValue: evidence.resultValue,
       otherTestName: evidence.otherTestName,
       testedAt: evidence.testedAt,
+      evidence: evidence.evidence,
     })),
     certifications: profile.certifications.map((certification) => ({
       key: certification.key,
       label: certification.label,
       acquiredAt: certification.acquiredAt,
+      evidence: certification.evidence,
     })),
     provenance: {
       source: profile.provenance.source,
