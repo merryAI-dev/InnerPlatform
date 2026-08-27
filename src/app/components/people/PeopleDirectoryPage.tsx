@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle, Briefcase, CalendarClock, IdCard, Plus, RefreshCw, Search, UserPlus, Users,
 } from 'lucide-react';
@@ -11,7 +11,6 @@ import {
   changePersonEmploymentViaBff,
   createPersonViaBff,
   fetchPersonsViaBff,
-  updatePersonProfileViaBff,
   type PersonRecord,
 } from '../../lib/platform-bff-client';
 import {
@@ -27,7 +26,6 @@ import {
   deriveAge,
   deriveYearsSinceDegree,
 } from '../../platform/person-employment';
-import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { normalizeProjectTeamMembers } from '../../platform/project-team-members';
 import {
   ANY,
@@ -111,12 +109,6 @@ function findUnregisteredAssignees(
 
   return [...found.values()].sort((a, b) => b.totalRate - a.totalRate);
 }
-
-const BULK_FIELD_LABELS: Record<'departmentTop' | 'departmentMid' | 'grade', string> = {
-  departmentTop: '대분류',
-  departmentMid: '중분류',
-  grade: '직급',
-};
 
 interface EmploymentDraft {
   mode: 'change' | 'add';
@@ -222,10 +214,10 @@ function FilterSelect({ label, value, onChange, options }: {
   options: Array<[string, string]>;
 }) {
   return (
-    <label className="grid gap-1 text-xs font-medium text-slate-500">
+    <label className="grid gap-0.5 text-[10px] font-medium text-slate-500">
       <span>{label}</span>
       <select
-        className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-800"
+        className="h-8 rounded-md border border-slate-300 bg-white px-1.5 text-[12px] text-slate-800"
         value={value} onChange={(event) => onChange(event.target.value)} aria-label={label}
       >
         <option value={ANY}>전체</option>
@@ -244,10 +236,10 @@ function FilterNumber({ label, placeholder, value, onChange }: {
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="grid gap-1 text-xs font-medium text-slate-500">
+    <label className="grid gap-0.5 text-[10px] font-medium text-slate-500">
       <span>{label}</span>
       <Input
-        className="h-9 w-24 text-sm tabular-nums" inputMode="numeric" placeholder={placeholder}
+        className="h-8 w-16 text-[12px] tabular-nums" inputMode="numeric" placeholder={placeholder}
         value={value} aria-label={label}
         onChange={(event) => onChange(event.target.value.replace(/\D/g, '').slice(0, 3))}
       />
@@ -255,60 +247,48 @@ function FilterNumber({ label, placeholder, value, onChange }: {
   );
 }
 
-function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf, selected, onToggle, onToggleAll }: {
+/** 값 아래에 붙는 파생 줄. 근속·만 나이처럼 계산된 값은 옆이 아니라 아래로 내린다. */
+function SubLine({ children }: { children: ReactNode }) {
+  return <span className="block text-[10px] leading-tight text-slate-400">{children}</span>;
+}
+
+function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
   rows: PersonRow[];
   loading: boolean;
   onOpen: (person: PersonRecord) => void;
   canReadProfile: boolean;
   asOf: string;
-  selected: Set<string>;
-  onToggle: (personId: string) => void;
-  onToggleAll: (personIds: string[], checked: boolean) => void;
 }) {
   // 열 수를 손으로 세면 틀린다 - 빈 상태가 한 칸 모자라게 걸쳐지는 식으로.
-  const columnCount = (canReadProfile ? 18 : 14) + 1;
-  const pageIds = rows.map((row) => row.person.personId);
-  const allChecked = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const columnCount = canReadProfile ? 15 : 11;
 
   return (
-    <DataGrid minWidth={canReadProfile ? 2500 : 1700}>
+    <DataGrid minWidth={canReadProfile ? 1480 : 1000}>
       <DataGridHead
         groups={<>
-          <DataGridGroupCell rowSpan={2} sticky>
-            <input
-              type="checkbox" aria-label="이 표의 인력 모두 선택" className="h-4 w-4 cursor-pointer align-middle"
-              checked={allChecked}
-              onChange={(event) => onToggleAll(pageIds, event.target.checked)}
-            />
-          </DataGridGroupCell>
           <DataGridGroupCell rowSpan={2} sticky>이름</DataGridGroupCell>
-          <DataGridGroupCell span={3}>개인 정보</DataGridGroupCell>
-          <DataGridGroupCell span={countCompanyColumns()}>소속 · 직위</DataGridGroupCell>
+          <DataGridGroupCell span={2}>개인</DataGridGroupCell>
+          <DataGridGroupCell span={6}>소속 · 직위</DataGridGroupCell>
           {canReadProfile ? <DataGridGroupCell span={4}>학력 · 자격</DataGridGroupCell> : null}
           <DataGridGroupCell span={2} last>관리</DataGridGroupCell>
         </>}
       >
-        {/* 개인 정보 */}
-        <DataGridHeadCell align="center" width="w-14">No</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[110px]">별명</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[160px]">생년월일</DataGridHeadCell>
-        {/* 소속 · 직위 */}
-        <DataGridHeadCell align="center" width="min-w-[110px]">입사일</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[150px]">휴직·퇴사일</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[100px]">근속</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[160px]">대분류</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[140px]">중분류</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[110px]">직책</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[120px]">직급</DataGridHeadCell>
-        <DataGridHeadCell width="min-w-[200px]">이메일 주소</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[64px]">별명</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[86px]">생년월일</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[86px]">입사일</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[86px]">휴직·퇴사</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[92px]">대분류</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[80px]">중분류</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[64px]">직책</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[76px]">직급</DataGridHeadCell>
         {canReadProfile ? <>
-          <DataGridHeadCell width="min-w-[230px]">최종학력</DataGridHeadCell>
-          <DataGridHeadCell align="center" width="min-w-[140px]">학위취득</DataGridHeadCell>
-          <DataGridHeadCell width="min-w-[200px]">어학능력</DataGridHeadCell>
-          <DataGridHeadCell width="min-w-[200px]">자격증</DataGridHeadCell>
+          <DataGridHeadCell width="min-w-[124px]">최종학력</DataGridHeadCell>
+          <DataGridHeadCell align="center" width="min-w-[62px]">학위취득</DataGridHeadCell>
+          <DataGridHeadCell width="min-w-[86px]">어학능력</DataGridHeadCell>
+          <DataGridHeadCell width="min-w-[86px]">자격증</DataGridHeadCell>
         </> : null}
-        <DataGridHeadCell align="center" width="w-32">인사정보</DataGridHeadCell>
-        <DataGridHeadCell align="center" width="min-w-[110px]" last>재직상태</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="w-12">인사</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[70px]" last>재직상태</DataGridHeadCell>
       </DataGridHead>
       <DataGridBody>
         {rows.length === 0 ? (
@@ -317,84 +297,80 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf, selected, on
             loading={loading}
             message="조건에 맞는 인력이 없습니다"
           />
-        ) : rows.map(({ person, current, separatedAt, tenure, leave }, index) => (
+        ) : rows.map(({ person, current, separatedAt, tenure, leave }) => (
           <DataGridRow key={person.personId} onClick={() => onOpen(person)}>
-            <DataGridCell align="center" sticky>
-              <input
-                type="checkbox" className="h-4 w-4 cursor-pointer align-middle"
-                aria-label={`${person.name} 선택`}
-                checked={selected.has(person.personId)}
-                onClick={(event) => event.stopPropagation()}
-                onChange={() => onToggle(person.personId)}
-              />
-            </DataGridCell>
-            <DataGridCell sticky className="left-[52px]">
+            <DataGridCell sticky>
               <span className="font-semibold">{person.name}</span>
+              {/* 이메일은 열을 따로 두지 않고 이름 아래로 - 값이 길어 가로를 제일 많이 먹는다. */}
+              {person.email ? <SubLine>{person.email.split('@')[0]}</SubLine> : null}
             </DataGridCell>
-            <DataGridCell align="center" muted>{index + 1}</DataGridCell>
             <DataGridCell muted>{person.nickname || '-'}</DataGridCell>
             {/* 만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다. */}
             <DataGridCell align="center" muted>
-              {person.birthDate
-                ? <>{formatDate(person.birthDate)} <span className="text-slate-400">(만 {deriveAge(person.birthDate, asOf) ?? '-'}세)</span></>
-                : '-'}
+              {person.birthDate ? <>
+                {formatDate(person.birthDate)}
+                <SubLine>만 {deriveAge(person.birthDate, asOf) ?? '-'}세</SubLine>
+              </> : '-'}
             </DataGridCell>
-            <DataGridCell align="center" muted>{formatDate(person.joinedAt)}</DataGridCell>
+            <DataGridCell align="center" muted>
+              {formatDate(person.joinedAt)}
+              {tenure ? <SubLine>{tenure.label}</SubLine> : null}
+            </DataGridCell>
             {/* 휴직인지 퇴사인지 라벨 없이 날짜만 두면 읽는 사람이 구분할 수 없다. */}
             <DataGridCell align="center" muted>
-              {leave
-                ? <>{formatDate(leave.date)} <span className="text-slate-400">({leave.kind === 'LEAVE' ? '휴직' : '퇴사'})</span></>
-                : '-'}
+              {leave ? <>
+                {formatDate(leave.date)}
+                <SubLine>{leave.kind === 'LEAVE' ? '휴직' : '퇴사'}</SubLine>
+              </> : '-'}
             </DataGridCell>
-            <DataGridCell align="center">{tenure?.label || '-'}</DataGridCell>
             <DataGridCell muted>{person.departmentTop || '-'}</DataGridCell>
             <DataGridCell muted>{person.departmentMid || '-'}</DataGridCell>
             {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
             <DataGridCell muted>{person.title || '-'}</DataGridCell>
             <DataGridCell>{person.grade || '-'}</DataGridCell>
-            <DataGridCell className="max-w-[240px]" muted title={person.email || ''}>
-              <span className="block truncate">{person.email || '-'}</span>
-            </DataGridCell>
             {canReadProfile ? <>
-              <DataGridCell className="max-w-[300px]" title={[person.hrSummary?.highestEducationMajor, person.hrSummary?.highestEducationInstitution].filter(Boolean).join(' · ')}>
+              <DataGridCell className="max-w-[160px]" title={[person.hrSummary?.highestEducationMajor, person.hrSummary?.highestEducationInstitution].filter(Boolean).join(' · ')}>
                 {/* 학과를 앞세우고 학교는 아래 작은 줄로 - 전공이 먼저 읽혀야 한다. */}
                 <span className="block truncate">{person.hrSummary?.highestEducationDisplayText || '-'}</span>
                 {person.hrSummary?.highestEducationInstitution && person.hrSummary?.highestEducationMajor ? (
-                  <span className="block truncate text-xs text-slate-500">{person.hrSummary.highestEducationInstitution}</span>
+                  <SubLine>
+                    <span className="block truncate">{person.hrSummary.highestEducationInstitution}</span>
+                  </SubLine>
                 ) : null}
               </DataGridCell>
               <DataGridCell align="center" muted>
-                {person.hrSummary?.highestDegreeYear
-                  ? <>{person.hrSummary.highestDegreeYear}년 <span className="text-slate-400">({deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)}년차)</span></>
-                  : '-'}
+                {person.hrSummary?.highestDegreeYear ? <>
+                  {person.hrSummary.highestDegreeYear}
+                  <SubLine>{deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)}년차</SubLine>
+                </> : '-'}
               </DataGridCell>
               {/* 증빙이 제출된 건만 요약에 들어간다 - 서버가 그렇게 만들어 보낸다. */}
-              <DataGridCell className="max-w-[240px]" muted title={person.hrSummary?.englishEvidenceDisplayText || ''}>
+              <DataGridCell className="max-w-[120px]" muted title={person.hrSummary?.englishEvidenceDisplayText || ''}>
                 <span className="block truncate">{person.hrSummary?.englishEvidenceDisplayText || '-'}</span>
               </DataGridCell>
-              <DataGridCell className="max-w-[240px]" muted title={person.hrSummary?.certificationsDisplayText || ''}>
+              <DataGridCell className="max-w-[120px]" muted title={person.hrSummary?.certificationsDisplayText || ''}>
                 <span className="block truncate">{person.hrSummary?.certificationsDisplayText || '-'}</span>
               </DataGridCell>
             </> : null}
             <DataGridCell align="center">
               <Button
-                variant="outline" size="sm" className="h-8 gap-1 px-2.5 text-xs"
+                variant="ghost" size="sm" className="h-6 w-6 p-0"
                 aria-label={`${person.name} 인사정보`}
                 onClick={(event) => {
                   event.stopPropagation();
                   onOpen(person);
                 }}
               >
-                <IdCard className="h-3.5 w-3.5" /> 인사정보
+                <IdCard className="h-3.5 w-3.5" />
               </Button>
             </DataGridCell>
             <DataGridCell align="center" last>
               {current ? (
-                <Badge variant="outline" className={`text-xs ${STATE_TONE[current.state as EmploymentState]}`}>
+                <Badge variant="outline" className={`px-1.5 py-0 text-[10px] ${STATE_TONE[current.state as EmploymentState]}`}>
                   {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
                 </Badge>
               ) : (
-                <span className="text-xs text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
+                <span className="text-[10px] text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
               )}
             </DataGridCell>
           </DataGridRow>
@@ -417,11 +393,6 @@ export function PeopleDirectoryPage() {
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | EmploymentType | 'SEPARATED'>('ALL');
   const [filter, setFilter] = useState<PeopleFilterState>(emptyPeopleFilter);
-  // 조직 개편처럼 여러 명을 한꺼번에 옮기는 일이 있다. 한 명씩 열어 고치게 두지 않는다.
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [bulkField, setBulkField] = useState<'departmentTop' | 'departmentMid' | 'grade'>('departmentTop');
-  const [bulkValue, setBulkValue] = useState('');
-  const [bulkRunning, setBulkRunning] = useState(false);
   const [selected, setSelected] = useState<PersonRecord | null>(null);
   const [profilePerson, setProfilePerson] = useState<PersonRecord | null>(null);
   const [hrPerson, setHrPerson] = useState<PersonRecord | null>(null);
@@ -451,49 +422,6 @@ export function PeopleDirectoryPage() {
   const scopedProfileCapabilities = directoryScopeLoaded
     ? profileCapabilities
     : { read: false, write: false };
-
-  const toggleSelected = (personId: string) => setSelectedIds((current) => {
-    const next = new Set(current);
-    if (next.has(personId)) next.delete(personId); else next.add(personId);
-    return next;
-  });
-  const toggleSelectedAll = (personIds: string[], checked: boolean) => setSelectedIds((current) => {
-    const next = new Set(current);
-    personIds.forEach((id) => (checked ? next.add(id) : next.delete(id)));
-    return next;
-  });
-
-  /**
-   * 선택한 사람들의 소속 또는 직급을 한 번에 바꾼다.
-   *
-   * 한 명씩 순서대로 보낸다 - 서버에 일괄 API 가 없고, 중간에 실패해도 어디까지 갔는지
-   * 알려 줄 수 있어야 하기 때문이다. 실패한 사람은 선택에 남겨 다시 시도할 수 있게 둔다.
-   */
-  const applyBulkField = async () => {
-    const targets = [...selectedIds];
-    const value = bulkValue.trim();
-    if (!value || targets.length === 0 || bulkRunning || !authUser) return;
-    setBulkRunning(true);
-    const failed: string[] = [];
-    for (const personId of targets) {
-      try {
-        await updatePersonProfileViaBff({
-          tenantId: orgId, actor: authUser, personId, profile: { [bulkField]: value },
-        });
-      } catch {
-        failed.push(personId);
-      }
-    }
-    setBulkRunning(false);
-    setSelectedIds(new Set(failed));
-    setBulkValue('');
-    if (failed.length === 0) {
-      toast.success(`${targets.length}명의 ${BULK_FIELD_LABELS[bulkField]}을(를) '${value}'(으)로 바꿨습니다.`);
-    } else {
-      toast.error(`${targets.length - failed.length}명 반영, ${failed.length}명 실패했습니다. 실패한 사람만 선택에 남겨 두었습니다.`);
-    }
-    void load();
-  };
 
   const load = async () => {
     if (directoryScopeRef.current !== directoryScopeKey) return;
@@ -762,7 +690,7 @@ export function PeopleDirectoryPage() {
         <div className="relative max-w-xs flex-1">
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
-            className="h-8 pl-9 text-sm" placeholder="이름·별명·대분류 검색…"
+            className="h-8 pl-9 text-[13px]" placeholder="이름·별명·대분류 검색…"
             value={directoryScopeLoaded ? searchText : ''}
             onChange={(event) => setSearchText(event.target.value)}
           />
@@ -791,7 +719,7 @@ export function PeopleDirectoryPage() {
       </div>
 
       {/* ── 칸별 필터: 적정 대상을 빠르게 좁힌다 ── */}
-      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+      <div className="flex flex-wrap items-end gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2">
         <FilterSelect
           label="재직상태" value={filter.status} onChange={(value) => setFilter({ ...filter, status: value })}
           options={[['WORKING', '재직'], ['ON_LEAVE', '휴직'], ['PARENTAL_LEAVE', '육아휴직'], ['SEPARATED', '계약 종료']]}
@@ -890,63 +818,20 @@ export function PeopleDirectoryPage() {
         </Card>
       ) : null}
 
-      {/* ── 선택 막대: 고른 사람이 있을 때만 나타난다 ── */}
-      {selectedIds.size > 0 && canWritePersonProfile ? (
-        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-white">
-          <p className="mr-1 text-[14px] font-medium">{selectedIds.size}명 선택됨</p>
-          <label className="grid gap-1 text-[12px] text-slate-300">
-            <span>바꿀 항목</span>
-            <select
-              aria-label="일괄 변경 항목" value={bulkField} disabled={bulkRunning}
-              onChange={(event) => setBulkField(event.target.value as typeof bulkField)}
-              className="h-9 rounded-md border border-slate-600 bg-slate-800 px-2 text-[14px] text-white"
-            >
-              <option value="departmentTop">대분류</option>
-              <option value="departmentMid">중분류</option>
-              <option value="grade">직급</option>
-            </select>
-          </label>
-          <label className="grid gap-1 text-[12px] text-slate-300">
-            <span>바꿀 값</span>
-            <input
-              aria-label="일괄 변경 값" value={bulkValue} disabled={bulkRunning}
-              onChange={(event) => setBulkValue(event.target.value)}
-              placeholder={bulkField === 'grade' ? '예: 선임연구원' : '예: 리더십·전략 총괄그룹'}
-              className="h-9 w-64 rounded-md border border-slate-600 bg-slate-800 px-2 text-[14px] text-white placeholder:text-slate-500"
-            />
-          </label>
-          <Button
-            size="sm" className="h-9" onClick={() => void applyBulkField()}
-            disabled={bulkRunning || !bulkValue.trim()}
-          >
-            {bulkRunning ? <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            {bulkRunning ? `${selectedIds.size}명 반영 중…` : `${selectedIds.size}명 바꾸기`}
-          </Button>
-          <Button
-            size="sm" variant="ghost" className="h-9 text-slate-300 hover:text-white"
-            onClick={() => setSelectedIds(new Set())} disabled={bulkRunning}
-          >
-            선택 해제
-          </Button>
-        </div>
-      ) : null}
-
       <PeopleTable
         rows={mainRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
         canReadProfile={scopedProfileCapabilities.read} asOf={asOf}
-        selected={selectedIds} onToggle={toggleSelected} onToggleAll={toggleSelectedAll}
       />
 
       {internRows.length > 0 || counts.INTERN > 0 ? (
         <section className="space-y-2">
           <div className="flex items-baseline gap-2">
-            <h2 className="text-sm font-semibold text-slate-900">인턴</h2>
+            <h2 className="text-[13px] font-semibold text-slate-900">인턴</h2>
             <span className="text-[11px] tabular-nums text-slate-500">{counts.INTERN}명</span>
           </div>
           <PeopleTable
             rows={internRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
             canReadProfile={scopedProfileCapabilities.read} asOf={asOf}
-            selected={selectedIds} onToggle={toggleSelected} onToggleAll={toggleSelectedAll}
           />
         </section>
       ) : null}

@@ -66,7 +66,7 @@ export function DataGridGroupCell({ children, span, rowSpan, sticky, last }: {
       colSpan={span}
       rowSpan={rowSpan}
       className={cn(
-        'whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-600',
+        'whitespace-nowrap px-2 py-1.5 text-center text-[11px] font-semibold text-slate-600',
         !last && 'border-r border-slate-300',
         sticky && 'sticky left-0 z-30 bg-slate-100',
       )}
@@ -92,7 +92,7 @@ export function DataGridHeadCell({
     <th
       scope="col"
       className={cn(
-        'whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold text-slate-700',
+        'whitespace-nowrap px-2 py-1.5 text-[11px] font-semibold text-slate-700',
         !last && 'border-r border-slate-300',
         sticky && 'sticky left-0 z-30 bg-slate-100',
         ALIGN_CLASS[align],
@@ -145,7 +145,7 @@ export function DataGridCell({
     <td
       title={title}
       className={cn(
-        'px-3 py-2.5 text-sm align-middle',
+        'px-2 py-1.5 text-[12px] align-middle leading-tight',
         !last && 'border-r border-slate-200',
         sticky && 'sticky left-0 z-10 bg-white group-hover:bg-slate-50',
         muted ? 'text-slate-500' : 'text-slate-900',
@@ -166,13 +166,13 @@ export function DataGridEmpty({ colSpan, message = '데이터가 존재하지 �
 }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="px-3 py-16 text-center">
+      <td colSpan={colSpan} className="px-2 py-12 text-center">
         {loading ? (
-          <p className="text-sm text-slate-500" role="status">불러오는 중…</p>
+          <p className="text-[12px] text-slate-500" role="status">불러오는 중…</p>
         ) : (
           <div className="flex flex-col items-center gap-2 text-slate-400">
-            <FileX2 className="h-8 w-8" aria-hidden />
-            <p className="text-sm">{message}</p>
+            <FileX2 className="h-7 w-7" aria-hidden />
+            <p className="text-[12px]">{message}</p>
           </div>
         )}
       </td>
