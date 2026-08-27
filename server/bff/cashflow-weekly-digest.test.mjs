@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCashflowWeeklyDigestMessage,
+  decodeStoredName,
   formatDigestEntry,
   kstDayWindow,
   kstTimeLabel,
@@ -60,6 +61,20 @@ describe('selectCompletedInWindow', () => {
       { status: 'SUBMITTED', completedAt: '2026-08-27T02:27:00Z', projectId: 'today' },
     ], window);
     expect(selected.map((item) => item.projectId)).toEqual(['today']);
+  });
+});
+
+describe('decodeStoredName', () => {
+  it('라이브에 저장된 URL 인코딩 이름을 되돌린다', () => {
+    expect(decodeStoredName('%EC%9E%A5%EC%9D%80%ED%9D%AC(%EB%82%98%EB%AC%B4)')).toBe('장은희(나무)');
+  });
+
+  it('이미 한글이면 그대로 둔다', () => {
+    expect(decodeStoredName('조이수(수)')).toBe('조이수(수)');
+  });
+
+  it('깨진 인코딩은 원문을 그대로 돌려준다', () => {
+    expect(decodeStoredName('100% 완료')).toBe('100% 완료');
   });
 });
 

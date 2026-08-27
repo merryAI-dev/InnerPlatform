@@ -36,6 +36,17 @@ export function selectCompletedInWindow(documents, window) {
     .sort((left, right) => readText(left.completedAt).localeCompare(readText(right.completedAt)));
 }
 
+/** 완료 기록의 completedByName 은 URL 인코딩된 채로 저장된다. members 에서 이름을 못 찾을 때만 쓴다. */
+export function decodeStoredName(value) {
+  const text = readText(value);
+  if (!text.includes('%')) return text;
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /** 사업(@담당자) 한 덩어리. 슬랙 아이디가 없으면 이름으로 떨어뜨린다. */
 export function formatDigestEntry({ projectName, completedByName, slackUserId }) {
   const owner = SLACK_USER_ID.test(readText(slackUserId))
