@@ -14,12 +14,16 @@ const catalog: ProfessionalProfileCatalog = {
     code: 'TOEIC', label: 'TOEIC', displayLabel: 'TOEIC',
     scales: [{ code: 'TOEIC_990', resultType: 'NUMBER', min: 0, max: 990, step: 1 }],
   }],
-  countryCodes: ['GB', 'KR'],
+  educationRegions: [
+    { code: 'DOMESTIC', label: '국내', rank: 10 },
+    { code: 'OVERSEAS_ENGLISH', label: '해외(영미권)', rank: 20 },
+    { code: 'OVERSEAS_OTHER', label: '해외(기타)', rank: 30 },
+  ],
 };
 const profile: ProfessionalProfileInput = {
   educationRecords: [{
     attainmentCode: 'MASTER_GRADUATED', institutionName: 'University of Sussex',
-    countryCode: 'GB', major: 'Development Studies',
+    regionCode: 'OVERSEAS_ENGLISH', major: 'Development Studies',
   }],
   englishEvidence: [{
     testCode: 'TOEIC', scaleCode: 'TOEIC_990', resultValue: '920',

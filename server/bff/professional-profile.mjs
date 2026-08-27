@@ -19,7 +19,9 @@ const ARRAY_LIMITS = Object.freeze({
 const catalog = getProfessionalProfileCatalog();
 const educationByCode = new Map(catalog.educationAttainments.map((entry) => [entry.code, entry]));
 const englishTestByCode = new Map(catalog.englishTests.map((entry) => [entry.code, entry]));
-const countryCodes = new Set(catalog.countryCodes);
+const educationRegionByCode = new Map(catalog.educationRegions.map((entry) => [entry.code, entry]));
+// 249개 ISO 국가 코드로 저장하던 시절의 값. 국내/해외 둘만 가리면 되므로 옮겨 읽는다.
+const ENGLISH_SPEAKING_COUNTRY_CODES = new Set(['US', 'GB', 'AU', 'CA', 'NZ', 'IE']);
 
 function invalid(field, message) {
   const error = new Error(`${field}: ${message}`);
@@ -78,12 +80,23 @@ function boundedArray(value, field) {
   return value;
 }
 
-function normalizeCountryCode(value, field) {
+/**
+ * 학교가 국내인지 해외인지. 영미권을 따로 가리는 것은 어학 능력을 함께 읽기 때문이다.
+ *
+ * 예전에는 249개 ISO 국가 코드로 저장했다. 그때 값이 들어오면 옮겨 읽는다 —
+ * 이미 적어 둔 학력이 저장 한 번에 사라지지 않게.
+ */
+function normalizeEducationRegion(value, field) {
   const normalized = optionalText(value, field);
   if (normalized === null) return null;
   const code = normalized.toUpperCase();
-  if (!countryCodes.has(code)) invalid(field, 'must be an ISO 3166-1 alpha-2 country code');
-  return code;
+  if (educationRegionByCode.has(code)) return code;
+  if (/^[A-Z]{2}$/.test(code)) {
+    if (code === 'KR') return 'DOMESTIC';
+    return ENGLISH_SPEAKING_COUNTRY_CODES.has(code) ? 'OVERSEAS_ENGLISH' : 'OVERSEAS_OTHER';
+  }
+  invalid(field, 'must be one of DOMESTIC, OVERSEAS_ENGLISH, OVERSEAS_OTHER');
+  return null;
 }
 
 
@@ -160,7 +173,7 @@ function normalizeEducationRecord(value, index) {
   return {
     attainmentCode,
     institutionName: optionalText(value.institutionName, `${field}.institutionName`),
-    countryCode: normalizeCountryCode(value.countryCode, `${field}.countryCode`),
+    regionCode: normalizeEducationRegion(value.regionCode ?? value.countryCode, `${field}.regionCode`),
     major: optionalText(value.major, `${field}.major`),
     admissionYear,
     degreeYear,
@@ -351,7 +364,7 @@ export function serializeProfessionalProfile(value) {
     educationRecords: profile.educationRecords.map((record) => ({
       attainmentCode: record.attainmentCode,
       institutionName: record.institutionName,
-      countryCode: record.countryCode,
+      regionCode: record.regionCode,
       major: record.major,
       admissionYear: record.admissionYear,
       degreeYear: record.degreeYear,
@@ -417,7 +430,7 @@ export function deriveProfessionalProfileFacts(value) {
     englishFacets.push(testCode);
   });
   const hasOverseasEducation = profile.educationRecords.some(
-    ({ countryCode }) => countryCode !== null && countryCode !== 'KR',
+    ({ regionCode }) => regionCode === 'OVERSEAS_ENGLISH' || regionCode === 'OVERSEAS_OTHER',
   );
   if (hasOverseasEducation) englishFacets.push('OVERSEAS_EDUCATION');
   if (englishFacets.length === 0) englishFacets.push('__MISSING__');

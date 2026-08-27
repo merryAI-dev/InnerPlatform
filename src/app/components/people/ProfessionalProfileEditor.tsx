@@ -63,7 +63,7 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
     educationRecords: draft.educationRecords.map((record) => ({
       attainmentCode: record.attainmentCode,
       institutionName: record.institutionName?.trim() || null,
-      countryCode: record.countryCode?.trim() || null,
+      regionCode: record.regionCode?.trim() || null,
       major: record.major?.trim() || null,
       admissionYear: record.admissionYear?.trim() || null,
       degreeYear: record.degreeYear?.trim() || null,
@@ -176,10 +176,6 @@ function ProfileSectionHeader({
   );
 }
 
-export function formatEnglishScaleLabel(scale: ProfessionalProfileCatalog['englishTests'][number]['scales'][number]): string {
-  return scale.label ?? scale.code;
-}
-
 function ProfessionalProfileFields({
   catalog, draft, onChange, disabled, readOnly, tenantId, actor, personId,
 }: {
@@ -201,7 +197,7 @@ function ProfessionalProfileFields({
       educationRecords: [...draft.educationRecords, {
         attainmentCode: attainment.code,
         institutionName: null,
-        countryCode: null,
+        regionCode: null,
         major: null,
       }],
     });
@@ -282,17 +278,17 @@ function ProfessionalProfileFields({
                 />
               </div>
               <div>
-                <Label className="text-[13px]" htmlFor={`education-country-${index}`}>국가</Label>
+                <Label className="text-[13px]" htmlFor={`education-region-${index}`}>구분</Label>
                 <Select
-                  value={record.countryCode || EMPTY_OPTION}
-                  onValueChange={(value) => updateEducation(index, { countryCode: value === EMPTY_OPTION ? null : value })}
+                  value={record.regionCode || EMPTY_OPTION}
+                  onValueChange={(value) => updateEducation(index, { regionCode: value === EMPTY_OPTION ? null : value })}
                   disabled={disabled || readOnly}
                 >
-                  <SelectTrigger id={`education-country-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue placeholder="국가 선택" /></SelectTrigger>
-                  <SelectContent className="max-h-72">
+                  <SelectTrigger id={`education-region-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue placeholder="국내·해외 선택" /></SelectTrigger>
+                  <SelectContent>
                     <SelectItem value={EMPTY_OPTION}>미입력</SelectItem>
-                    {catalog.countryCodes.map((countryCode) => (
-                      <SelectItem key={countryCode} value={countryCode}>{countryCode}</SelectItem>
+                    {catalog.educationRegions.map((region) => (
+                      <SelectItem key={region.code} value={region.code}>{region.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -390,21 +386,6 @@ function ProfessionalProfileFields({
                     <SelectContent>
                       {catalog.englishTests.map((test) => (
                         <SelectItem key={test.code} value={test.code}>{test.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-[13px]" htmlFor={`english-scale-${index}`}>점수 체계</Label>
-                  <Select
-                    value={evidence.scaleCode}
-                    disabled={disabled || readOnly}
-                    onValueChange={(value) => updateEnglish(index, { scaleCode: value, resultValue: '' })}
-                  >
-                    <SelectTrigger id={`english-scale-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {selectedTest.scales.map((scale) => (
-                        <SelectItem key={scale.code} value={scale.code}>{formatEnglishScaleLabel(scale)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

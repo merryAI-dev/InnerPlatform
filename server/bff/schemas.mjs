@@ -478,6 +478,8 @@ const professionalProfileEvidenceSchema = z.object({
 const professionalProfileEducationRecordSchema = z.object({
   attainmentCode: PROFESSIONAL_PROFILE_TEXT,
   institutionName: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  regionCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  // 249개 ISO 국가 코드로 저장하던 시절의 값. 받아서 국내/해외로 옮겨 읽는다.
   countryCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
   major: PROFESSIONAL_PROFILE_TEXT.nullish(),
   admissionYear: PROFESSIONAL_PROFILE_TEXT.nullish(),

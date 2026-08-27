@@ -32,7 +32,14 @@ export interface ProfessionalProfileCatalog {
   catalogVersion: number;
   educationAttainments: ProfessionalProfileEducationAttainment[];
   englishTests: ProfessionalProfileEnglishTest[];
-  countryCodes: string[];
+  educationRegions: ProfessionalProfileEducationRegion[];
+}
+
+/** 학교가 국내인지 해외인지. 249개 국가를 고르게 하던 자리를 대신한다. */
+export interface ProfessionalProfileEducationRegion {
+  code: string;
+  label: string;
+  rank: number;
 }
 
 /** 증빙 참조. 파일은 스토리지에 있고 프로필에는 가리키는 표만 남는다. */
@@ -48,7 +55,7 @@ export interface ProfessionalProfileEvidenceRef {
 export interface ProfessionalProfileEducationRecordInput {
   attainmentCode: string;
   institutionName?: string | null;
-  countryCode?: string | null;
+  regionCode?: string | null;
   major?: string | null;
   /** 입학년도 (YYYY) */
   admissionYear?: string | null;

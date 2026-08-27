@@ -113,15 +113,15 @@ describe('ProfessionalProfileEditor draft contract', () => {
   it('renders every code list from the server catalog and enforces row limits', () => {
     expect(source).toContain('catalog.educationAttainments.map');
     expect(source).toContain('catalog.englishTests.map');
-    expect(source).toContain('catalog.countryCodes.map');
-    expect(source).toContain('selectedTest.scales.map');
+    expect(source).toContain('catalog.educationRegions.map');
+    // 점수 체계는 시험을 고르면 하나로 정해진다 - 고르게 하지 않는다.
+    expect(source).not.toContain('selectedTest.scales.map');
+    expect(source).toContain('scales[0]?.code');
     expect(source).toContain('MAX_EDUCATION_RECORDS = 10');
     expect(source).toContain('MAX_ENGLISH_EVIDENCE = 10');
     expect(source).toContain('MAX_CERTIFICATIONS = 20');
     expect(source).not.toContain('BACHELOR_GRADUATED');
     expect(source).not.toContain("testCode: 'TOEIC'");
-    expect(source).toContain('formatEnglishScaleLabel(scale)');
-    expect(source).toContain('return scale.label ?? scale.code');
     expect(source).toContain('aria-label={`${title} 추가`}');
     // 자격증은 취득일을 항목마다 받아야 해서 자유 텍스트가 아니라 행 목록이다.
     expect(source).toContain('htmlFor={`certification-label-${index}`}');
@@ -141,5 +141,33 @@ describe('ProfessionalProfileEditor draft contract', () => {
     expect(source).toContain('학력·어학·자격을 인력 명부에 저장합니다. 인사정보조회가 이 값을 그대로 읽습니다.');
     expect(source).not.toContain('People 원장');
     expect(source).toContain('인사정보 <span className="font-normal text-slate-500">(선택)</span>');
+  });
+});
+
+describe('학력 구분과 점수 체계', () => {
+  const source = readFileSync(new URL('./ProfessionalProfileEditor.tsx', import.meta.url), 'utf8');
+
+  /**
+   * 국가를 249개 중에서 고르게 하던 자리다. 실제로 쓰이는 구분은 국내인지 해외인지,
+   * 해외라면 영미권인지 셋뿐이라 목록을 그만큼으로 줄였다.
+   */
+  it('국가 대신 국내·해외 구분을 고른다', () => {
+    expect(source).toContain('catalog.educationRegions.map');
+    expect(source).toContain('국내·해외 선택');
+    expect(source).not.toContain('countryCode');
+    expect(source).not.toContain('ISO');
+  });
+
+  /**
+   * 점수 체계는 시험마다 하나뿐이다(TOEIC 990, IELTS 9, TEPS 600, OPIc 등급).
+   * TOEFL 만 셋이었는데 PBT 는 없어졌고 iBT 6 은 쓰지 않아 iBT 120 으로 고정했다.
+   * 고르게 할 것이 없는 칸은 두지 않는다 - 다만 점수 범위 검증은 그대로 산다.
+   */
+  it('점수 체계를 고르게 하지 않고 시험에서 정한다', () => {
+    expect(source).not.toContain('점수 체계');
+    expect(source).not.toContain('english-scale-');
+    expect(source).toContain('scales[0]?.code');
+    // 쓰이지 않게 된 라벨 함수를 남겨 두지 않는다.
+    expect(source).not.toContain('formatEnglishScaleLabel');
   });
 });
