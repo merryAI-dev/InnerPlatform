@@ -6,7 +6,8 @@ const source = readFileSync(resolve(import.meta.dirname, 'SettingsPage.tsx'), 'u
 
 describe('SettingsPage member directory contract', () => {
   it('keeps the admin DB surface limited to member and org databases', () => {
-    expect(source).toContain("const PRIMARY_SETTINGS_TABS = ['members', 'tenants'] as const;");
+    // 탭 목록에 없는 값은 members 로 떨어진다. 새 탭을 넣을 때 여기 안 넣으면 딥링크가 죽는다.
+    expect(source).toContain("const PRIMARY_SETTINGS_TABS = ['members', 'tenants', 'organizations'] as const;");
     expect(source).toContain('관리자에게 필요한 멤버DB와 조직DB만 관리합니다');
     expect(source).toContain('구성원 원장 추가/수정');
     expect(source).toContain('조직DB');

@@ -26,7 +26,7 @@ import { MyscWordmark } from '../brand/MyscWordmark';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
-const PRIMARY_SETTINGS_TABS = ['members', 'tenants'] as const;
+const PRIMARY_SETTINGS_TABS = ['members', 'tenants', 'organizations'] as const;
 const PRIMARY_SETTINGS_TAB_SET = new Set<string>(PRIMARY_SETTINGS_TABS);
 
 export function SettingsPage() {
