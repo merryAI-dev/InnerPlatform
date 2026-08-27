@@ -4,7 +4,7 @@ import {
   ROUTE_ROLES, createHttpError, encryptAuditEmail,
 } from '../bff-utils.mjs';
 import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema } from '../schemas.mjs';
-import { normalizeProfessionalProfileInput } from '../professional-profile.mjs';
+import { normalizeProfessionalProfileInput, serializeProfessionalProfile } from '../professional-profile.mjs';
 import { buildRequestFingerprint } from '../utils.mjs';
 
 /**
@@ -240,6 +240,29 @@ function buildPersonCreateDocument({ parsed, normalizedProfile, includesProfile 
 export function mountPersonRoutes(app, {
   db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy,
 }) {
+  /**
+   * 내 인사정보. 남의 것은 못 보고 자기 것만 본다 - 본인 데이터라 별도 권한을 요구하지 않는다.
+   * 인사 담당자가 남의 것을 보는 경로(person:professional_profile:read)와는 다른 문이다.
+   */
+  app.get('/api/v1/persons/me/hr-profile', preventPersonCaching, asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    if (!actorId) throw createHttpError(400, 'actorId is required', 'actor_required');
+    const snap = await db.collection(`orgs/${tenantId}/persons`).where('uid', '==', actorId).limit(2).get();
+    const doc = snap.docs[0];
+    if (!doc) {
+      // 명부에 아직 연결되지 않은 계정이다. 빈 화면 대신 왜 비어 있는지 알려야 한다.
+      res.status(200).json({ linked: false, person: null, profile: null });
+      return;
+    }
+    const person = readPerson(doc);
+    const stored = doc.data()?.professionalProfile;
+    res.status(200).json({
+      linked: true,
+      person: serializePersonDirectoryItem(person),
+      profile: serializeProfessionalProfile(stored),
+    });
+  }));
+
   app.get('/api/v1/persons', preventPersonCaching, asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read the people directory');
     const { tenantId } = req.context;

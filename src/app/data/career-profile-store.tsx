@@ -35,14 +35,9 @@ interface CareerProfileState {
 
 interface CareerProfileActions {
   saveMyProfile: (updates: Partial<CareerProfile>) => Promise<boolean>;
-  addEducation: (entry: Omit<EducationEntry, 'id'>) => Promise<boolean>;
-  updateEducation: (id: string, entry: Partial<EducationEntry>) => Promise<boolean>;
-  removeEducation: (id: string) => Promise<boolean>;
   addWorkHistory: (entry: Omit<WorkHistoryEntry, 'id'>) => Promise<boolean>;
   updateWorkHistory: (id: string, entry: Partial<WorkHistoryEntry>) => Promise<boolean>;
   removeWorkHistory: (id: string) => Promise<boolean>;
-  addCertification: (entry: Omit<CertificationEntry, 'id'>) => Promise<boolean>;
-  removeCertification: (id: string) => Promise<boolean>;
 }
 
 const _g = globalThis as any;
@@ -130,22 +125,8 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
 
   // ── 학력 CRUD ──
 
-  const addEducation = useCallback(async (entry: Omit<EducationEntry, 'id'>): Promise<boolean> => {
-    if (!myProfile) return false;
-    const newEntry: EducationEntry = { ...entry, id: generateId('edu') };
-    return saveMyProfile({ education: [...myProfile.education, newEntry] });
-  }, [myProfile, saveMyProfile]);
 
-  const updateEducation = useCallback(async (id: string, entry: Partial<EducationEntry>): Promise<boolean> => {
-    if (!myProfile) return false;
-    const updated = myProfile.education.map((e) => e.id === id ? { ...e, ...entry } : e);
-    return saveMyProfile({ education: updated });
-  }, [myProfile, saveMyProfile]);
 
-  const removeEducation = useCallback(async (id: string): Promise<boolean> => {
-    if (!myProfile) return false;
-    return saveMyProfile({ education: myProfile.education.filter((e) => e.id !== id) });
-  }, [myProfile, saveMyProfile]);
 
   // ── 직장경력 CRUD ──
 
@@ -168,29 +149,15 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
 
   // ── 자격증 CRUD ──
 
-  const addCertification = useCallback(async (entry: Omit<CertificationEntry, 'id'>): Promise<boolean> => {
-    if (!myProfile) return false;
-    const newEntry: CertificationEntry = { ...entry, id: generateId('cert') };
-    return saveMyProfile({ certifications: [...myProfile.certifications, newEntry] });
-  }, [myProfile, saveMyProfile]);
 
-  const removeCertification = useCallback(async (id: string): Promise<boolean> => {
-    if (!myProfile) return false;
-    return saveMyProfile({ certifications: myProfile.certifications.filter((e) => e.id !== id) });
-  }, [myProfile, saveMyProfile]);
 
   const value = {
     myProfile,
     isLoading,
     saveMyProfile,
-    addEducation,
-    updateEducation,
-    removeEducation,
     addWorkHistory,
     updateWorkHistory,
     removeWorkHistory,
-    addCertification,
-    removeCertification,
   };
 
   return <CareerProfileContext.Provider value={value}>{children}</CareerProfileContext.Provider>;

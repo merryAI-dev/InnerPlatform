@@ -2707,6 +2707,35 @@ export async function fetchPersonsViaBff(params: {
   return response.data;
 }
 
+export interface MyHrProfileResponse {
+  linked: boolean;
+  person: PersonRecord | null;
+  profile: {
+    educationRecords: Array<Record<string, unknown>>;
+    englishEvidence: Array<Record<string, unknown>>;
+    certifications: Array<{ key: string; label: string; acquiredAt: string | null }>;
+  } | null;
+}
+
+/** 내 인사정보. 남의 것은 못 보고 자기 것만 본다 - 인사 담당자 조회 경로와 다른 문이다. */
+export async function fetchMyHrProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  signal?: AbortSignal;
+  client?: PlatformApiClientLike;
+}): Promise<MyHrProfileResponse> {
+  const response = await resolveClient(params.client).get<MyHrProfileResponse>(
+    '/api/v1/persons/me/hr-profile',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      signal: params.signal,
+      timeoutMs: 10000,
+    },
+  );
+  return response.data;
+}
+
 /** 인적사항 수정. 계약 이력과 달리 사람이 적는 값이라 부분 갱신(merge)으로 보낸다. */
 export async function updatePersonProfileViaBff(params: {
   tenantId: string;
