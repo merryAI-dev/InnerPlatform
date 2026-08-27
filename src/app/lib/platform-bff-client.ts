@@ -2731,6 +2731,38 @@ export async function fetchPersonsViaBff(params: {
   return response.data;
 }
 
+/** 인적사항 수정. 계약 이력과 달리 사람이 적는 값이라 부분 갱신(merge)으로 보낸다. */
+export async function updatePersonProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  personId: string;
+  profile: {
+    nickname?: string;
+    email?: string;
+    departmentTop?: string;
+    departmentMid?: string;
+    departmentSub?: string;
+    title?: string;
+    grade?: string;
+    workLocation?: string;
+    birthDate?: string | null;
+    note?: string;
+  };
+  client?: PlatformApiClientLike;
+}): Promise<{ personId: string; updatedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.patch<{ personId: string; updatedAt: string }>(
+    `/api/v1/persons/${encodeURIComponent(params.personId)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.profile,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
 export async function changePersonEmploymentViaBff(params: {
   tenantId: string;
   actor: ActorLike;

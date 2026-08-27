@@ -1,0 +1,54 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import {
+  changedPersonProfileFields,
+  personProfileFormFromRecord,
+  type PersonProfileFormValue,
+} from './PersonHrConsole';
+import type { PersonRecord } from '../../lib/platform-bff-client';
+
+const source = readFileSync(resolve(import.meta.dirname, 'PersonHrConsole.tsx'), 'utf8');
+
+const PERSON: PersonRecord = {
+  personId: 'psn-a', name: '변민욱', nickname: '보람', email: 'mw@mysc.co.kr',
+  departmentTop: '대표이사실', departmentMid: 'AXR팀', departmentSub: '',
+  title: '팀장', grade: '책임연구원', birthDate: '1996-12-20', workLocation: '서울',
+  joinedAt: '2025-04-02', employments: [], uid: null,
+};
+
+describe('인사정보 콘솔', () => {
+  it('바뀐 칸만 저장 대상으로 추린다 — 부분 갱신이라 안 바뀐 값까지 보내면 감사 기록이 뜻을 잃는다', () => {
+    const before = personProfileFormFromRecord(PERSON);
+    expect(changedPersonProfileFields(before, before)).toEqual({});
+
+    const after: PersonProfileFormValue = { ...before, grade: '수석컨설턴트', title: '센터장' };
+    expect(changedPersonProfileFields(before, after)).toEqual({ grade: '수석컨설턴트', title: '센터장' });
+  });
+
+  it('생년월일은 날짜 부분만 폼에 담는다', () => {
+    expect(personProfileFormFromRecord({ ...PERSON, birthDate: '1996-12-20T00:00:00.000Z' }).birthDate)
+      .toBe('1996-12-20');
+    expect(personProfileFormFromRecord({ ...PERSON, birthDate: '' }).birthDate).toBe('');
+  });
+
+  it('그룹웨어 인사기록카드 구조를 지킨다 — 기본정보·인사정보조회·상세정보', () => {
+    expect(source).toContain('<TabsTrigger value="basic"');
+    expect(source).toContain('<TabsTrigger value="records"');
+    expect(source).toContain('<TabsTrigger value="detail"');
+    expect(source).toContain('데이터가 존재하지 않습니다.');
+    expect(source).toContain('{count}건');
+  });
+
+  it('만 나이와 근속은 저장값이 아니라 오늘 기준 계산이다', () => {
+    expect(source).toContain('deriveAge(person.birthDate, asOf)');
+    expect(source).toContain('deriveTenure(person.joinedAt, asOf)');
+    expect(source).not.toContain('person.age');
+  });
+
+  it('직급은 카탈로그에서만 고르고 직책과 섞지 않는다', () => {
+    expect(source).toContain('PERSON_GRADES.map');
+    expect(source).toContain('formatPersonGradeOption(grade)');
+    expect(source).toContain('직급과 다른 축입니다');
+  });
+});

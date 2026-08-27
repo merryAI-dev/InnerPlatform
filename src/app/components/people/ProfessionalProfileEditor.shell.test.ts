@@ -6,24 +6,23 @@ import {
   hasProfessionalProfileFacts,
   professionalProfileDraftToInput,
   resolveProfessionalProfileSaveAttempt,
-  splitCertificationLabels,
 } from './ProfessionalProfileEditor';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProfessionalProfileEditor.tsx'), 'utf8');
 
 describe('ProfessionalProfileEditor draft contract', () => {
-  it('maps comma/newline certificate input without putting it in the global person model', () => {
-    expect(splitCertificationLabels(' PMP,\n ODA 전문가 \n\n')).toEqual([
-      { label: 'PMP' },
-      { label: 'ODA 전문가' },
-    ]);
-
+  it('keeps each certificate with its own acquisition month and drops blank rows', () => {
     const draft = createEmptyProfessionalProfileDraft();
-    draft.certificationText = 'PMP, ODA 전문가';
+    // 취득일을 항목마다 받아야 해서 자유 텍스트가 아니라 행으로 관리한다.
+    draft.certifications = [
+      { label: ' PMP ', acquiredAt: '2019-05' },
+      { label: 'ODA 전문가', acquiredAt: '' },
+      { label: '   ', acquiredAt: '2020-01' },
+    ];
     expect(hasProfessionalProfileFacts(draft)).toBe(true);
     expect(professionalProfileDraftToInput(draft).certifications).toEqual([
-      { label: 'PMP' },
-      { label: 'ODA 전문가' },
+      { label: 'PMP', acquiredAt: '2019-05' },
+      { label: 'ODA 전문가', acquiredAt: null },
     ]);
   });
 
@@ -124,14 +123,20 @@ describe('ProfessionalProfileEditor draft contract', () => {
     expect(source).toContain('formatEnglishScaleLabel(scale)');
     expect(source).toContain('return scale.label ?? scale.code');
     expect(source).toContain('aria-label={`${title} 추가`}');
-    expect(source).toContain('htmlFor="professional-profile-certifications"');
+    // 자격증은 취득일을 항목마다 받아야 해서 자유 텍스트가 아니라 행 목록이다.
+    expect(source).toContain('htmlFor={`certification-label-${index}`}');
+    expect(source).toContain('htmlFor={`certification-acquired-${index}`}');
+    expect(source).not.toContain('draft.certificationText');
+    // 학력은 언제 다녔는지까지 남긴다.
+    expect(source).toContain('htmlFor={`education-admission-${index}`}');
+    expect(source).toContain('htmlFor={`education-degree-year-${index}`}');
     expect(source).not.toContain('Revision {expectedRevision}');
   });
 
   it('새 인력 catalog 실패를 보조기기에 알리고 인력 명부 용어를 일관되게 쓴다', () => {
     expect(source).toContain('role="alert"');
-    expect(source).toContain('학력·영어 증빙·자격증을 인력 명부에 저장합니다.');
+    expect(source).toContain('학력·어학·자격을 인력 명부에 저장합니다. 인사정보조회가 이 값을 그대로 읽습니다.');
     expect(source).not.toContain('People 원장');
-    expect(source).toContain('전문 프로필 <span className="font-normal text-slate-500">(선택)</span>');
+    expect(source).toContain('인사정보 <span className="font-normal text-slate-500">(선택)</span>');
   });
 });
