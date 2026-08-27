@@ -1,10 +1,5 @@
 import { readOptionalText } from './bff-utils.mjs';
 import {
-  deriveProfessionalProfileFacts,
-  getProfessionalProfileCatalog,
-  normalizeProfessionalProfileInput,
-} from './professional-profile.mjs';
-import {
   PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
   PARTICIPATION_SETTLEMENT_SYSTEM_LABELS,
   resolveParticipationSettlementSystem,
@@ -12,17 +7,6 @@ import {
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_RULE_FILTER_VALUES = 4;
-const PROFILE_MISSING = '__MISSING__';
-const EMPTY_PROFILE_FACTS = deriveProfessionalProfileFacts({});
-
-function professionalProfileFacts(person) {
-  const normalized = normalizeProfessionalProfileInput(person?.professionalProfile);
-  return {
-    ...deriveProfessionalProfileFacts(normalized),
-    certifications: normalized.certifications.map(({ key, label }) => ({ key, label })),
-  };
-}
-
 function buildSettlementSystemOptions(projects) {
   const counts = new Map();
   for (const project of projects) {
@@ -98,9 +82,6 @@ function matchesRule(project, rule) {
 export function buildParticipationDashboardSnapshot({ projects = [], entries = [], people = [], rules: savedRules = [], generatedAt = '' } = {}) {
   const projectById = new Map(projects.map((project) => [readOptionalText(project?.id), project]));
   const peopleById = new Map(people.map((person) => [readOptionalText(person?.personId) || readOptionalText(person?.id), person]));
-  const profileFactsByPersonId = new Map(
-    [...peopleById.entries()].map(([personId, person]) => [personId, professionalProfileFacts(person)]),
-  );
   let unlinkedEntryCount = 0;
   const rules = savedRules
     .filter((rule) => readOptionalText(rule?.kind) === 'USER_DEFINED' && readOptionalText(rule?.id) && readOptionalText(rule?.alias)
@@ -148,7 +129,6 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         joinedAt: readOptionalText(person?.joinedAt),
         projectNames: new Set(),
         projectIds: new Set(),
-        professionalProfileFacts: profileFactsByPersonId.get(personId) || EMPTY_PROFILE_FACTS,
         values: new Map(),
         confirmedMonths: new Set(),
         missingMonths: new Set(),
@@ -208,7 +188,6 @@ export function buildParticipationDashboardSnapshot({ projects = [], entries = [
         joinedAt: row.joinedAt,
         projectNames: [...row.projectNames].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko')),
         projectCount: row.projectIds.size,
-        professionalProfileFacts: row.professionalProfileFacts,
         monthlyRates,
         confirmedMonths: [...row.confirmedMonths].sort(),
         missingMonths: [...row.missingMonths].sort(),
@@ -319,89 +298,7 @@ function memberOwnsSelectedYear(member, monthKeys) {
   ));
 }
 
-function buildProfessionalProfileFilterOptions({ snapshot, baseRows, catalog, selectedCertifications }) {
-  const educationCounts = new Map();
-  const englishCounts = new Map();
-  const certificationCounts = new Map();
-  const certificationLabels = new Map();
 
-  for (const rule of snapshot.rules || []) {
-    for (const member of rule.members || []) {
-      for (const { key, label } of member.professionalProfileFacts?.certifications || []) {
-        if (!certificationLabels.has(key)) certificationLabels.set(key, label);
-      }
-    }
-  }
-
-  for (const { profileFacts } of baseRows) {
-    const education = profileFacts.highestEducationCode || PROFILE_MISSING;
-    educationCounts.set(education, (educationCounts.get(education) || 0) + 1);
-    for (const value of profileFacts.englishFacets || [PROFILE_MISSING]) {
-      englishCounts.set(value, (englishCounts.get(value) || 0) + 1);
-    }
-    if ((profileFacts.certificationKeys || []).length === 0) {
-      certificationCounts.set(PROFILE_MISSING, (certificationCounts.get(PROFILE_MISSING) || 0) + 1);
-    } else {
-      for (const key of profileFacts.certificationKeys) {
-        certificationCounts.set(key, (certificationCounts.get(key) || 0) + 1);
-      }
-    }
-  }
-
-  const education = [
-    ...catalog.educationAttainments.map(({ code, label }) => ({
-      value: code,
-      label,
-      memberCount: educationCounts.get(code) || 0,
-    })),
-    { value: PROFILE_MISSING, label: '미입력', memberCount: educationCounts.get(PROFILE_MISSING) || 0 },
-  ];
-  const englishTestOption = ({ code, displayLabel, label }) => ({
-    value: code,
-    label: displayLabel || label,
-    memberCount: englishCounts.get(code) || 0,
-  });
-  const englishEvidence = [
-    ...catalog.englishTests.filter(({ code }) => code !== 'OTHER').map(englishTestOption),
-    {
-      value: 'OVERSEAS_EDUCATION',
-      label: '해외 대학',
-      memberCount: englishCounts.get('OVERSEAS_EDUCATION') || 0,
-    },
-    ...catalog.englishTests.filter(({ code }) => code === 'OTHER').map(englishTestOption),
-    { value: PROFILE_MISSING, label: '미입력', memberCount: englishCounts.get(PROFILE_MISSING) || 0 },
-  ];
-
-  const certificationValues = new Set(certificationCounts.keys());
-  for (const value of selectedCertifications) certificationValues.add(value);
-  const certifications = [...certificationValues]
-    .map((value) => ({
-      value,
-      label: value === PROFILE_MISSING ? '미입력' : (certificationLabels.get(value) || value),
-      memberCount: certificationCounts.get(value) || 0,
-    }))
-    .sort((left, right) => (
-      left.value === PROFILE_MISSING ? -1
-        : right.value === PROFILE_MISSING ? 1
-          : left.label.localeCompare(right.label, 'ko') || left.value.localeCompare(right.value)
-    ));
-
-  return { education, englishEvidence, certifications };
-}
-
-function matchesProfessionalProfileFilters(profileFacts, { education, englishEvidence, certifications }) {
-  const educationValue = profileFacts.highestEducationCode || PROFILE_MISSING;
-  if (education && educationValue !== education) return false;
-  if (englishEvidence && !(profileFacts.englishFacets || []).includes(englishEvidence)) return false;
-  if (certifications.length > 0) {
-    if (certifications[0] === PROFILE_MISSING) {
-      if ((profileFacts.certificationKeys || []).length > 0) return false;
-    } else if (!certifications.some((value) => (profileFacts.certificationKeys || []).includes(value))) {
-      return false;
-    }
-  }
-  return true;
-}
 
 export function selectParticipationDashboardYear(snapshot, year, selectedRuleId = 'all', options = {}) {
   const selectedYear = /^\d{4}$/.test(readOptionalText(year))
@@ -422,16 +319,6 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
       isWarning: rate > 100,
     };
   };
-  const professionalProfileAccess = options.professionalProfileAccess === true;
-  const selectedProfileFilters = {
-    education: readOptionalText(options.education) || null,
-    englishEvidence: readOptionalText(options.englishEvidence) || null,
-    certifications: [...new Set(
-      (Array.isArray(options.certifications) ? options.certifications : [])
-        .map(readOptionalText)
-        .filter(Boolean),
-    )],
-  };
   const baseRows = (selectedRule.members || [])
     .filter((member) => memberOwnsSelectedYear(member, monthKeys))
     .map((member) => {
@@ -442,23 +329,11 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
         months: monthKeys.map((yearMonth) => monthWithStatus(projectRow, yearMonth)),
       })).filter((projectRow) => projectRow.months.some((month) => month.isConfirmed || month.hasMissing));
       const warnings = monthsWithStatus.filter((month) => month.isWarning).map(({ yearMonth, rate }) => ({ yearMonth, rate }));
-      const profileFacts = member.professionalProfileFacts || EMPTY_PROFILE_FACTS;
-      return { member, monthsWithStatus, selectedYearProjects, warnings, profileFacts };
+      return { member, monthsWithStatus, selectedYearProjects, warnings };
     });
-  const profileFilterOptions = professionalProfileAccess
-    ? buildProfessionalProfileFilterOptions({
-      snapshot,
-      baseRows,
-      catalog: options.professionalProfileCatalog || getProfessionalProfileCatalog(),
-      selectedCertifications: selectedProfileFilters.certifications,
-    })
-    : null;
+  // 학력·어학·자격은 인력 명부(People)가 본다. 참여율 화면은 참여율만 본다.
   const members = baseRows
-    .filter(({ profileFacts }) => !professionalProfileAccess || matchesProfessionalProfileFilters(
-      profileFacts,
-      selectedProfileFilters,
-    ))
-    .map(({ member, monthsWithStatus, selectedYearProjects, warnings: memberWarnings, profileFacts }) => {
+    .map(({ member, monthsWithStatus, selectedYearProjects, warnings: memberWarnings }) => {
       const dto = {
         memberId: member.memberId,
         memberName: member.memberName,
@@ -468,13 +343,6 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
         months: monthsWithStatus,
         warnings: memberWarnings,
       };
-      if (professionalProfileAccess) {
-        dto.profileSummary = {
-          highestEducationDisplayText: profileFacts.highestEducationDisplayText || '',
-          englishEvidenceDisplayText: profileFacts.englishEvidenceDisplayText || '',
-          certificationsDisplayText: profileFacts.certificationsDisplayText || '',
-        };
-      }
       return dto;
     });
   const warnings = members.flatMap((member) => member.warnings.map((warning) => ({ ...warning, memberId: member.memberId, memberName: member.memberName })));
@@ -493,11 +361,6 @@ export function selectParticipationDashboardYear(snapshot, year, selectedRuleId 
     hasWarnings: warnings.length > 0,
     filterOptions: snapshot.filterOptions || { clientOrgs: [], settlementSystems: [] },
     unlinkedEntryCount: Number(snapshot.unlinkedEntryCount) || 0,
-    professionalProfileAccess,
   };
-  if (professionalProfileAccess) {
-    result.selectedProfileFilters = selectedProfileFilters;
-    result.profileFilterOptions = profileFilterOptions;
-  }
   return result;
 }

@@ -616,193 +616,22 @@ describe('participation dashboard', () => {
   });
 });
 
-describe('participation dashboard professional profile facts and filters', () => {
-  const profileOptions = {
-    professionalProfileAccess: true,
-    professionalProfileCatalog: getProfessionalProfileCatalog(),
-  };
-
-  it('전문 프로필 옵션은 선택 View·연도의 base 인력에서 필터 전 고정 집계한다', () => {
-    const snapshot = buildParticipationDashboardSnapshot(buildProfessionalProfileFixture());
-    const base = selectParticipationDashboardYear(snapshot, '2026', 'koica', profileOptions);
-    const educationCounts = Object.fromEntries(
-      base.profileFilterOptions.education.map(({ value, memberCount }) => [value, memberCount]),
-    );
-    const englishCounts = Object.fromEntries(
-      base.profileFilterOptions.englishEvidence.map(({ value, memberCount }) => [value, memberCount]),
-    );
-    const certificationCounts = Object.fromEntries(
-      base.profileFilterOptions.certifications.map(({ value, memberCount }) => [value, memberCount]),
-    );
-
-    expect(base.members.map(({ memberId }) => memberId).sort()).toEqual(['p1', 'p2', 'p3']);
-    expect(educationCounts).toMatchObject({
-      MASTER_GRADUATED: 1,
-      BACHELOR_GRADUATED: 1,
-      DOCTOR_GRADUATED: 0,
-      MASTER_COMPLETED: 0,
-      __MISSING__: 1,
-    });
-    expect(englishCounts).toMatchObject({
-      TOEIC: 1,
-      TOEFL: 1,
-      OVERSEAS_EDUCATION: 1,
-      OPIC: 0,
-      __MISSING__: 1,
-    });
-    expect(certificationCounts).toMatchObject({ pmp: 1, 'oda 전문가': 1, __MISSING__: 1 });
-    expect(base.profileFilterOptions.education.map(({ value }) => value)).toEqual([
-      ...getProfessionalProfileCatalog().educationAttainments.map(({ code }) => code),
-      '__MISSING__',
-    ]);
-    expect(base.profileFilterOptions.englishEvidence.map(({ value }) => value)).toEqual([
-      'TOEIC', 'TOEFL', 'OPIC', 'IELTS', 'TEPS', 'OVERSEAS_EDUCATION', 'OTHER', '__MISSING__',
-    ]);
-    expect(JSON.stringify(base.profileFilterOptions)).not.toContain('과거인력');
-
-    const filtered = selectParticipationDashboardYear(snapshot, '2026', 'koica', {
-      ...profileOptions,
-      education: 'MASTER_GRADUATED',
-    });
-    expect(filtered.members.map(({ memberId }) => memberId)).toEqual(['p1']);
-    expect(filtered.profileFilterOptions).toEqual(base.profileFilterOptions);
-    expect(filtered.selectedProfileFilters).toEqual({
-      education: 'MASTER_GRADUATED', englishEvidence: null, certifications: [],
-    });
-
-    const selectedAfterViewSwitch = selectParticipationDashboardYear(snapshot, '2026', 'test', {
-      ...profileOptions,
-      certifications: ['pmp'],
-    });
-    expect(selectedAfterViewSwitch.members).toEqual([]);
-    expect(selectedAfterViewSwitch.profileFilterOptions.certifications).toContainEqual({
-      value: 'pmp', label: 'PMP', memberCount: 0,
-    });
-  });
-
-  it('최종학력 exact, 영어 facet, 자격증 OR를 차원 간 AND로 적용하고 참여율 객체는 보존한다', () => {
-    const snapshot = buildParticipationDashboardSnapshot(buildProfessionalProfileFixture());
-    const base = selectParticipationDashboardYear(snapshot, '2026', 'koica', profileOptions);
-    const baseP1 = base.members.find(({ memberId }) => memberId === 'p1');
-    const filtered = selectParticipationDashboardYear(snapshot, '2026', 'koica', {
-      ...profileOptions,
-      education: 'MASTER_GRADUATED',
-      englishEvidence: 'OVERSEAS_EDUCATION',
-      certifications: ['pmp', 'not-observed'],
-    });
-
-    expect(filtered.members.map(({ memberId }) => memberId)).toEqual(['p1']);
-    expect(filtered.members[0].months).toEqual(baseP1.months);
-    expect(filtered.members[0].projects).toEqual(baseP1.projects);
-    expect(filtered.members[0].warnings).toEqual(baseP1.warnings);
-    expect(filtered.unlinkedEntryCount).toBe(base.unlinkedEntryCount);
-    expect(filtered.members[0].profileSummary).toEqual({
-      highestEducationDisplayText: '석사 졸업 · University of Sussex',
-      englishEvidenceDisplayText: 'TOEIC 920 · 해외 대학',
-      certificationsDisplayText: 'PMP',
-    });
-
-    const certOr = selectParticipationDashboardYear(snapshot, '2026', 'koica', {
-      ...profileOptions,
-      certifications: ['pmp', 'oda 전문가'],
-    });
-    expect(certOr.members.map(({ memberId }) => memberId)).toEqual(['p1', 'p2']);
-
-    const crossDimensionNoMatch = selectParticipationDashboardYear(snapshot, '2026', 'koica', {
-      ...profileOptions,
-      education: 'BACHELOR_GRADUATED',
-      englishEvidence: 'TOEIC',
-    });
-    expect(crossDimensionNoMatch.members).toEqual([]);
-  });
-
-  it('전문 프로필 미입력은 각 차원의 __MISSING__으로만 필터한다', () => {
-    const snapshot = buildParticipationDashboardSnapshot(buildProfessionalProfileFixture());
-    const missing = selectParticipationDashboardYear(snapshot, '2026', 'koica', {
-      ...profileOptions,
-      education: '__MISSING__',
-      englishEvidence: '__MISSING__',
-      certifications: ['__MISSING__'],
-    });
-
-    expect(missing.members.map(({ memberId }) => memberId)).toEqual(['p3']);
-    expect(missing.members[0].profileSummary).toEqual({
-      highestEducationDisplayText: '', englishEvidenceDisplayText: '', certificationsDisplayText: '',
-    });
-  });
-
-  it('전체 View도 같은 base-set 옵션과 서버 필터를 쓰되 사업 상세는 비운다', () => {
-    const snapshot = buildParticipationDashboardSnapshot(buildProfessionalProfileFixture());
-    const base = selectParticipationDashboardYear(snapshot, '2026', 'all', profileOptions);
-    const filtered = selectParticipationDashboardYear(snapshot, '2026', 'all', {
-      ...profileOptions,
-      education: 'MASTER_GRADUATED',
-    });
-
-    expect(base.selectedRule.id).toBe('all');
-    expect(base.members.map(({ memberId }) => memberId).sort()).toEqual(['p1', 'p2', 'p3']);
-    expect(base.profileFilterOptions.education).toContainEqual(expect.objectContaining({
-      value: 'DOCTOR_GRADUATED', memberCount: 0,
-    }));
-    expect(filtered.members).toHaveLength(1);
-    expect(filtered.members[0]).toMatchObject({
-      memberId: 'p1',
-      projects: [],
-      profileSummary: {
-        highestEducationDisplayText: '석사 졸업 · University of Sussex',
-        englishEvidenceDisplayText: 'TOEIC 920 · 해외 대학',
-        certificationsDisplayText: 'PMP',
-      },
-    });
-    expect(filtered.profileFilterOptions).toEqual(base.profileFilterOptions);
-
-    const unauthorized = selectParticipationDashboardYear(snapshot, '2026', 'all');
-    expect(unauthorized.professionalProfileAccess).toBe(false);
-    expect(unauthorized).not.toHaveProperty('profileFilterOptions');
-    expect(unauthorized.members.every((member) => !Object.hasOwn(member, 'profileSummary'))).toBe(true);
-  });
-
-  it('권한 옵션이 없으면 기존 참여율 DTO를 유지하면서 프로필 필드를 직렬화하지 않는다', () => {
-    const snapshot = buildParticipationDashboardSnapshot(buildProfessionalProfileFixture());
-    const result = selectParticipationDashboardYear(snapshot, '2026', 'koica');
-    const serialized = JSON.stringify(result);
-
-    expect(result.professionalProfileAccess).toBe(false);
-    expect(result).not.toHaveProperty('profileFilterOptions');
-    expect(result).not.toHaveProperty('selectedProfileFilters');
-    expect(result.members[0]).not.toHaveProperty('profileSummary');
-    expect(serialized).not.toContain('educationRecords');
-    expect(serialized).not.toContain('testedAt');
-    expect(serialized).not.toContain('PROFILE_FIXTURE_SECRET');
-  });
-});
 
 describe('participation dashboard routes', () => {
-  it('전문 프로필 권한 응답은 고정 4-read로 서버 필터·allowlist·no-store를 제공한다', async () => {
+  it('고정 4-read 로 참여율만 돌려주고 인사정보 원문은 흘리지 않는다', async () => {
+    // 2026-08-27 보람: 학력·어학·자격 컬럼과 필터는 인력 명부(People)로 옮겼다.
+    // 참여율 응답에는 권한과 무관하게 인사정보가 실리지 않는다.
     const harness = createDashboardRouteHarness();
     const response = await request(harness.app)
       .get('/api/v1/participation-dashboard')
-      .query({
-        year: '2026', ruleId: 'koica', education: 'MASTER_GRADUATED',
-        englishEvidence: 'TOEIC', certification: 'pmp',
-      })
+      .query({ year: '2026', ruleId: 'koica' })
       .expect(200);
 
     expect(response.headers['cache-control']).toBe('private, no-store');
-    expect(response.body.professionalProfileAccess).toBe(true);
-    expect(response.body.selectedProfileFilters).toEqual({
-      education: 'MASTER_GRADUATED', englishEvidence: 'TOEIC', certifications: ['pmp'],
-    });
-    expect(response.body.members).toEqual([
-      expect.objectContaining({
-        memberId: 'p1',
-        profileSummary: {
-          highestEducationDisplayText: '석사 졸업 · University of Sussex',
-          englishEvidenceDisplayText: 'TOEIC 920 · 해외 대학',
-          certificationsDisplayText: 'PMP',
-        },
-      }),
-    ]);
+    expect(response.body).not.toHaveProperty('professionalProfileAccess');
+    expect(response.body).not.toHaveProperty('profileFilterOptions');
+    expect(response.body).not.toHaveProperty('selectedProfileFilters');
+    expect(response.body.members.every((member) => !Object.hasOwn(member, 'profileSummary'))).toBe(true);
     expect(harness.collectionReads).toEqual([
       'orgs/tenant-a/projects',
       'orgs/tenant-a/partEntries',
@@ -813,59 +642,22 @@ describe('participation dashboard routes', () => {
 
     const serialized = JSON.stringify(response.body);
     for (const forbidden of [
-      '"email"', '"uid"', '"note"', 'educationRecords', 'testedAt',
+      '"email"', '"uid"', '"note"', 'educationRecords', 'testedAt', 'PMP', 'TOEIC 920',
       'PROFILE_FIXTURE_SECRET', 'PERSON_NOTE_SECRET', 'secret-uid-p1', 'secret-p1@example.com',
     ]) {
       expect(serialized).not.toContain(forbidden);
     }
   });
 
-  it('전문 프로필 권한 없는 일반 조회는 profileAccess false이고 요약·옵션을 전부 생략한다', async () => {
+  it('권한이 낮은 역할도 같은 참여율 응답을 받는다 — 가려야 할 인사정보 자체가 없다', async () => {
     const harness = createDashboardRouteHarness({ role: 'viewer' });
     const response = await request(harness.app)
       .get('/api/v1/participation-dashboard?year=2026&ruleId=koica')
       .expect(200);
-
-    expect(response.headers['cache-control']).toBe('private, no-store');
-    expect(response.body.professionalProfileAccess).toBe(false);
-    expect(response.body).not.toHaveProperty('profileFilterOptions');
-    expect(response.body).not.toHaveProperty('selectedProfileFilters');
     expect(response.body.members.every((member) => !Object.hasOwn(member, 'profileSummary'))).toBe(true);
-    const serialized = JSON.stringify(response.body);
-    for (const forbidden of ['educationRecords', 'testedAt', 'PROFILE_FIXTURE_SECRET', 'PMP', 'TOEIC 920']) {
-      expect(serialized).not.toContain(forbidden);
-    }
   });
 
-  it('프로필 query 권한 부족은 Firestore를 읽기 전에 전용 403으로 거부한다', async () => {
-    const harness = createDashboardRouteHarness({ role: 'viewer' });
-    const response = await request(harness.app)
-      .get('/api/v1/participation-dashboard?year=2026&education=MASTER_GRADUATED')
-      .expect(403);
-
-    expect(response.body).toMatchObject({ error: 'profile_filter_forbidden' });
-    expect(harness.collectionReads).toEqual([]);
-    expect(harness.writes).toEqual([]);
-  });
-
-  it('주입 policy를 role 이름보다 우선하고 반대 policy에서도 동일한 권한 경계를 지킨다', async () => {
-    const oppositePolicy = profilePolicy({ readers: ['pm'] });
-    const denied = createDashboardRouteHarness({ role: 'admin', rbacPolicy: oppositePolicy });
-    const deniedResponse = await request(denied.app)
-      .get('/api/v1/participation-dashboard?education=MASTER_GRADUATED')
-      .expect(403);
-    expect(deniedResponse.body.error).toBe('profile_filter_forbidden');
-    expect(denied.collectionReads).toEqual([]);
-
-    const allowed = createDashboardRouteHarness({ role: 'pm', rbacPolicy: oppositePolicy });
-    const allowedResponse = await request(allowed.app)
-      .get('/api/v1/participation-dashboard?year=2026&ruleId=koica&education=MASTER_GRADUATED')
-      .expect(200);
-    expect(allowedResponse.body.professionalProfileAccess).toBe(true);
-    expect(allowedResponse.body.members.map(({ memberId }) => memberId)).toEqual(['p1']);
-  });
-
-  it('production BFF 조립도 participation route에 주입 policy와 catalog를 전달한다', async () => {
+  it('production BFF 조립에서도 참여율만 돌려준다', async () => {
     const fixture = buildProfessionalProfileFixture();
     const byCollection = {
       projects: fixture.projects,
@@ -910,7 +702,7 @@ describe('participation dashboard routes', () => {
 
     const response = await request(app)
       .get('/api/v1/participation-dashboard')
-      .query({ year: '2026', ruleId: 'all', education: 'MASTER_GRADUATED' })
+      .query({ year: '2026', ruleId: 'all' })
       .set({
         'x-tenant-id': 'tenant-a',
         'x-actor-id': 'actor-a',
@@ -918,33 +710,9 @@ describe('participation dashboard routes', () => {
       })
       .expect(200);
 
-    expect(response.body.professionalProfileAccess).toBe(true);
-    expect(response.body.members.map(({ memberId }) => memberId)).toEqual(['p1']);
-    expect(response.body.profileFilterOptions.education).toContainEqual(expect.objectContaining({
-      value: 'DOCTOR_GRADUATED', memberCount: 0,
-    }));
-  });
-
-  it.each([
-    ['unknown education', 'education=NOT_A_CODE'],
-    ['unknown English facet', 'englishEvidence=NOT_A_CODE'],
-    ['multiple education', 'education=MASTER_GRADUATED&education=BACHELOR_GRADUATED'],
-    ['multiple English', 'englishEvidence=TOEIC&englishEvidence=TOEFL'],
-    ['missing and real education', 'education=__MISSING__&education=MASTER_GRADUATED'],
-    ['missing and real English', 'englishEvidence=__MISSING__&englishEvidence=TOEIC'],
-    ['missing and real certification', 'certification=__MISSING__&certification=pmp'],
-    ['too many certifications', Array.from({ length: 21 }, (_, index) => `certification=cert-${index}`).join('&')],
-    ['too many repeated certifications', Array.from({ length: 21 }, () => 'certification=pmp').join('&')],
-    ['oversized certification', `certification=${'a'.repeat(81)}`],
-  ])('잘못된 전문 프로필 query(%s)는 DB read 전 400이다', async (_name, query) => {
-    const harness = createDashboardRouteHarness();
-    const response = await request(harness.app)
-      .get(`/api/v1/participation-dashboard?year=2026&${query}`)
-      .expect(400);
-
-    expect(response.body.error).toBe('invalid_professional_profile_filter');
-    expect(harness.collectionReads).toEqual([]);
-    expect(harness.writes).toEqual([]);
+    // 인사정보는 응답에 실리지 않는다 - 사람을 고르는 일은 인력 명부에서 한다.
+    expect(response.body).not.toHaveProperty('professionalProfileAccess');
+    expect(response.body.members.every((member) => !Object.hasOwn(member, 'profileSummary'))).toBe(true);
   });
 
   it('returns project participation as a server snapshot and saves a freely named rule', async () => {

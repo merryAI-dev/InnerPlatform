@@ -1633,8 +1633,6 @@ export function createBffApp(options = {}) {
     now,
     googleSheetsService,
     idempotencyService,
-    rbacPolicy,
-    professionalProfileCatalog,
   });
   mountParticipationRosterRoutes(app, {
     db, now, idempotencyService, processRosterEventInline,

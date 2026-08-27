@@ -60,14 +60,13 @@ describe('ParticipationPage server snapshot contract', () => {
     expect(toggleSource).not.toContain('fetch');
   });
 
-  it('shows server-owned profile columns and filters only with explicit access', () => {
-    expect(source).toContain('snapshot.professionalProfileAccess === true');
-    expect(source).toContain('snapshot.profileFilterOptions');
-    expect(source).toContain('<ParticipationProfileFilters');
-    expect(source).toContain('member.profileSummary?.highestEducationDisplayText');
-    expect(source).toContain('member.profileSummary?.englishEvidenceDisplayText');
-    expect(source).toContain('member.profileSummary?.certificationsDisplayText');
-    expect(source).toContain("display === '—' ? '미입력'");
+  it('참여율만 본다 — 학력·어학·자격은 인력 명부(People)가 본다', () => {
+    // 2026-08-27 보람: view(참여율)와 DB(인사정보)를 나눈다. 사람을 고르는 일은 People 에서 한다.
+    expect(source).not.toContain('professionalProfileAccess');
+    expect(source).not.toContain('profileSummary');
+    expect(source).not.toContain('ParticipationProfileFilters');
+    expect(source).not.toContain('최종학력');
+    expect(source).not.toContain('자격증');
   });
 
   it('passes filter codes to an abortable server request and never renders stale rows', () => {
@@ -76,11 +75,7 @@ describe('ParticipationPage server snapshot contract', () => {
     expect(source).toContain('snapshotRequestKey === requestKey');
     expect(source).toContain('참여율 결과를 불러오는 중입니다.');
     expect(source).toContain('controller.abort()');
-    expect(source).toContain('education: education || undefined');
-    expect(source).toContain('englishEvidence: englishEvidence || undefined');
-    expect(source).toContain('certifications,');
     expect(source).not.toContain('snapshot.members.filter');
-    expect(source).not.toContain('profileFilterOptions.reduce');
   });
 
   it('debounces only profile filter requests while keeping scope and View changes immediate', () => {
@@ -91,20 +86,16 @@ describe('ParticipationPage server snapshot contract', () => {
     expect(source).toContain('window.clearTimeout(debounceTimer)');
   });
 
-  it('toggles certifications against the current URL to avoid rapid lost updates', () => {
+  it('URL 갱신은 직전 값 위에 쌓아 빠른 조작에서 값을 잃지 않는다', () => {
     expect(source).toContain('pendingSearchParamsRef.current || current');
     expect(source).toContain('pendingSearchParamsRef.current = next');
     expect(source).toContain("navigationType === 'POP'");
     expect(source).toContain('previousImmediateUrlScopeKeyRef.current !== immediateUrlScopeKey');
-    expect(source).toContain("const currentValues = next.getAll('certification')");
-    expect(source).toContain("value === '__MISSING__'");
-    expect(source).toContain('withoutMissing.length >= 20');
-    expect(source).toContain('onCertificationToggle={toggleCertificationValue}');
   });
 
   it('uses the URL as bidirectional filter state and only replaces server canonicalization', () => {
     expect(source).toContain("searchParams.get('view') || 'all'");
-    expect(source).toContain("searchParams.getAll('certification')");
+    expect(source).toContain("searchParams.get('year') || '2026'");
     expect(source).toContain('setSearchParams((current) =>');
     expect(source).toContain('{ replace: false }');
     expect(source).toContain('{ replace: true }');
@@ -118,18 +109,13 @@ describe('ParticipationPage server snapshot contract', () => {
     expect(source).not.toContain('[requestKey, orgId, refreshToken, user]');
   });
 
-  it('keeps retry and clear recovery available for active-filter errors', () => {
-    expect(source).toContain('데이터 필터를 초기화하고 다시 조회');
+  it('오류에서 다시 시도할 길을 남긴다', () => {
     expect(source).toContain('다시 시도');
-    expect(source).toContain('clearProfileFilters');
-    expect(source).toContain("next.delete('education')");
-    expect(source).toContain("next.delete('englishEvidence')");
-    expect(source).toContain("next.delete('certification')");
+    expect(source).toContain('setRefreshToken((value) => value + 1)');
   });
 
   it('shows the server result length and separates filtered from unfiltered empty states', () => {
     expect(source).toContain('조회 결과 {snapshot.members.length}명');
-    expect(source).toContain('선택한 데이터 필터에 맞는 참여자가 없습니다.');
     expect(source).toContain('선택한 범위에 등록된 프로젝트 참여자가 없습니다.');
     expect(source).not.toContain('members.reduce');
   });
