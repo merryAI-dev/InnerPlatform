@@ -392,6 +392,9 @@ describe('라우트 — 인력 명부', () => {
       hrSummary: {
         highestEducationDisplayText: '',
         highestDegreeYear: '',
+        highestEducationCode: '',
+        highestEducationInstitution: '',
+        highestEducationMajor: '',
         englishEvidenceDisplayText: '',
         certificationsDisplayText: '',
       },

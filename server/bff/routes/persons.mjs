@@ -102,6 +102,9 @@ function personHrSummary(person) {
     return {
       highestEducationDisplayText: facts.highestEducationDisplayText || '',
       highestDegreeYear: facts.highestDegreeYear || '',
+      highestEducationCode: facts.highestEducationCode || '',
+      highestEducationInstitution: facts.highestEducationInstitution || '',
+      highestEducationMajor: facts.highestEducationMajor || '',
       englishEvidenceDisplayText: facts.englishEvidenceDisplayText || '',
       certificationsDisplayText: facts.certificationsDisplayText || '',
     };
@@ -110,6 +113,9 @@ function personHrSummary(person) {
     return {
       highestEducationDisplayText: '',
       highestDegreeYear: '',
+      highestEducationCode: '',
+      highestEducationInstitution: '',
+      highestEducationMajor: '',
       englishEvidenceDisplayText: '',
       certificationsDisplayText: '',
     };

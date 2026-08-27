@@ -471,7 +471,7 @@ describe('deriveProfessionalProfileFacts', () => {
       highestEducationInstitution: 'University of Sussex',
       highestEducationMajor: 'Development Studies',
       englishFacets: ['TOEIC', 'TOEFL', 'OVERSEAS_EDUCATION'],
-      highestEducationDisplayText: '석사 졸업 · University of Sussex',
+      highestEducationDisplayText: '석사 졸업 · Development Studies',
       englishEvidenceDisplayText: 'TOEIC 920 · TOEFL 105 · 해외 대학',
       certificationsDisplayText: 'PMP · ODA 전문가',
       certificationKeys: ['pmp', 'oda 전문가'],

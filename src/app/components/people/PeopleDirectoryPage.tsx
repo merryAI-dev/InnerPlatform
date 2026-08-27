@@ -26,6 +26,14 @@ import {
   deriveYearsSinceDegree,
 } from '../../platform/person-employment';
 import { normalizeProjectTeamMembers } from '../../platform/project-team-members';
+import {
+  ANY,
+  collectFilterOptions,
+  emptyPeopleFilter,
+  filterPeopleRows,
+  isPeopleFilterActive,
+  type PeopleFilterState,
+} from '../../platform/people-directory-filters';
 import { PageHeader } from '../layout/PageHeader';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -40,8 +48,8 @@ import {
 } from '../ui/select';
 import { Separator } from '../ui/separator';
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '../ui/table';
+  DataGrid, DataGridBody, DataGridCell, DataGridEmpty, DataGridHead, DataGridHeadCell, DataGridRow,
+} from '../ui/data-grid';
 import { PersonHrConsole } from './PersonHrConsole';
 import {
   NewPersonProfessionalProfileFields,
@@ -191,6 +199,46 @@ interface PersonRow {
  * 인력 표. 근로형태 열은 두지 않는다 — 이름 옆에 붙는 신분 표시가 되기 때문이다.
  * 계약 형태가 필요한 자리는 계약 관리 다이얼로그뿐이고, 거기서는 그대로 보인다.
  */
+function FilterSelect({ label, value, onChange, options }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<[string, string]>;
+}) {
+  return (
+    <label className="grid gap-1 text-xs font-medium text-slate-500">
+      <span>{label}</span>
+      <select
+        className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-800"
+        value={value} onChange={(event) => onChange(event.target.value)} aria-label={label}
+      >
+        <option value={ANY}>전체</option>
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>{optionLabel}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function FilterNumber({ label, placeholder, value, onChange }: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs font-medium text-slate-500">
+      <span>{label}</span>
+      <Input
+        className="h-9 w-24 text-sm tabular-nums" inputMode="numeric" placeholder={placeholder}
+        value={value} aria-label={label}
+        onChange={(event) => onChange(event.target.value.replace(/\D/g, '').slice(0, 3))}
+      />
+    </label>
+  );
+}
+
 function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
   rows: PersonRow[];
   loading: boolean;
@@ -198,94 +246,91 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
   canReadProfile: boolean;
   asOf: string;
 }) {
+  const columnCount = canReadProfile ? 11 : 9;
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/30">
-            <TableHead className="min-w-[130px]">이름</TableHead>
-            <TableHead className="min-w-[90px]">재직상태</TableHead>
-            <TableHead className="min-w-[150px]">소속</TableHead>
-            <TableHead className="min-w-[110px]">직급</TableHead>
-            <TableHead className="min-w-[100px]">직책</TableHead>
-            <TableHead className="min-w-[120px]">생년월일</TableHead>
-            <TableHead className="min-w-[100px]">입사일</TableHead>
-            <TableHead className="min-w-[100px]">근속</TableHead>
+    <DataGrid minWidth={canReadProfile ? 1560 : 1180}>
+      <DataGridHead>
+        <DataGridHeadCell width="min-w-[150px]">이름</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[100px]">재직상태</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[190px]">소속 · 팀</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[120px]">직급</DataGridHeadCell>
+        <DataGridHeadCell width="min-w-[110px]">직책</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[150px]">생년월일</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[110px]">입사일</DataGridHeadCell>
+        <DataGridHeadCell align="center" width="min-w-[110px]">근속</DataGridHeadCell>
+        {canReadProfile ? <>
+          <DataGridHeadCell width="min-w-[230px]">최종학력</DataGridHeadCell>
+          <DataGridHeadCell align="center" width="min-w-[140px]">학위취득</DataGridHeadCell>
+        </> : null}
+        <DataGridHeadCell align="center" width="w-32" last>관리</DataGridHeadCell>
+      </DataGridHead>
+      <DataGridBody>
+        {rows.length === 0 ? (
+          <DataGridEmpty
+            colSpan={columnCount}
+            loading={loading}
+            message="조건에 맞는 인력이 없습니다"
+          />
+        ) : rows.map(({ person, current, separatedAt, tenure }) => (
+          <DataGridRow key={person.personId} onClick={() => onOpen(person)}>
+            <DataGridCell>
+              <span className="font-semibold">{person.name}</span>
+              {person.nickname ? <span className="ml-1 text-xs text-slate-500">({person.nickname})</span> : null}
+            </DataGridCell>
+            <DataGridCell align="center">
+              {current ? (
+                <Badge variant="outline" className={`text-xs ${STATE_TONE[current.state as EmploymentState]}`}>
+                  {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
+                </Badge>
+              ) : (
+                <span className="text-xs text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
+              )}
+            </DataGridCell>
+            <DataGridCell muted>
+              {person.departmentTop || '-'}
+              {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
+            </DataGridCell>
+            {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
+            <DataGridCell>{person.grade || '-'}</DataGridCell>
+            <DataGridCell muted>{person.title || '-'}</DataGridCell>
+            {/* 만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다. */}
+            <DataGridCell align="center" muted>
+              {person.birthDate
+                ? <>{formatDate(person.birthDate)} <span className="text-slate-400">(만 {deriveAge(person.birthDate, asOf) ?? '-'}세)</span></>
+                : '-'}
+            </DataGridCell>
+            <DataGridCell align="center" muted>{formatDate(person.joinedAt)}</DataGridCell>
+            <DataGridCell align="center">{tenure?.label || '-'}</DataGridCell>
             {canReadProfile ? <>
-              <TableHead className="min-w-[200px]">최종학력</TableHead>
-              <TableHead className="min-w-[120px]">학위취득</TableHead>
+              <DataGridCell className="max-w-[300px]" title={[person.hrSummary?.highestEducationMajor, person.hrSummary?.highestEducationInstitution].filter(Boolean).join(' · ')}>
+                {/* 학과를 앞세우고 학교는 아래 작은 줄로 - 전공이 먼저 읽혀야 한다. */}
+                <span className="block truncate">{person.hrSummary?.highestEducationDisplayText || '-'}</span>
+                {person.hrSummary?.highestEducationInstitution && person.hrSummary?.highestEducationMajor ? (
+                  <span className="block truncate text-xs text-slate-500">{person.hrSummary.highestEducationInstitution}</span>
+                ) : null}
+              </DataGridCell>
+              <DataGridCell align="center" muted>
+                {person.hrSummary?.highestDegreeYear
+                  ? <>{person.hrSummary.highestDegreeYear}년 <span className="text-slate-400">({deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)}년차)</span></>
+                  : '-'}
+              </DataGridCell>
             </> : null}
-            <TableHead className="w-28" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={canReadProfile ? 11 : 9} className="py-10 text-center text-sm text-slate-500">
-                {loading ? '불러오는 중…' : '조건에 맞는 인력이 없습니다.'}
-              </TableCell>
-            </TableRow>
-          ) : rows.map(({ person, current, separatedAt, tenure }) => (
-            <TableRow
-              key={person.personId}
-              className="cursor-pointer hover:bg-accent/40"
-              onClick={() => onOpen(person)}
-            >
-              <TableCell>
-                <span className="text-sm font-semibold">{person.name}</span>
-                {person.nickname ? <span className="ml-1 text-xs text-muted-foreground">({person.nickname})</span> : null}
-              </TableCell>
-              <TableCell>
-                {current ? (
-                  <Badge variant="outline" className={`text-[10px] ${STATE_TONE[current.state as EmploymentState]}`}>
-                    {EMPLOYMENT_STATE_LABELS[current.state as EmploymentState]}
-                  </Badge>
-                ) : (
-                  <span className="text-[11px] text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
-                )}
-              </TableCell>
-              <TableCell className="text-sm text-muted-foreground">
-                {person.departmentTop || '-'}
-                {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
-              </TableCell>
-              {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
-              <TableCell className="text-sm">{person.grade || '-'}</TableCell>
-              <TableCell className="text-sm text-muted-foreground">{person.title || '-'}</TableCell>
-              {/* 만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다. */}
-              <TableCell className="text-sm tabular-nums text-muted-foreground">
-                {person.birthDate ? <>{formatDate(person.birthDate)} <span className="text-slate-400">(만 {deriveAge(person.birthDate, asOf) ?? '-'}세)</span></> : '-'}
-              </TableCell>
-              <TableCell className="text-sm tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
-              <TableCell className="text-sm tabular-nums">{tenure?.label || '-'}</TableCell>
-              {canReadProfile ? <>
-                <TableCell className="max-w-[260px] truncate text-sm" title={person.hrSummary?.highestEducationDisplayText || ''}>
-                  {person.hrSummary?.highestEducationDisplayText || '-'}
-                </TableCell>
-                <TableCell className="text-sm tabular-nums text-muted-foreground">
-                  {person.hrSummary?.highestDegreeYear
-                    ? <>{person.hrSummary.highestDegreeYear}년 <span className="text-slate-400">({deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)}년차)</span></>
-                    : '-'}
-                </TableCell>
-              </> : null}
-              <TableCell>
-                <div className="flex items-center justify-end gap-1">
-                  <Button
-                    variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]"
-                    aria-label={`${person.name} 인사정보`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpen(person);
-                    }}
-                  >
-                    <IdCard className="h-3 w-3" /> 인사정보
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+            <DataGridCell align="center" last>
+              <Button
+                variant="outline" size="sm" className="h-8 gap-1 px-2.5 text-xs"
+                aria-label={`${person.name} 인사정보`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen(person);
+                }}
+              >
+                <IdCard className="h-3.5 w-3.5" /> 인사정보
+              </Button>
+            </DataGridCell>
+          </DataGridRow>
+        ))}
+      </DataGridBody>
+    </DataGrid>
   );
 }
 
@@ -301,6 +346,7 @@ export function PeopleDirectoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | EmploymentType | 'SEPARATED'>('ALL');
+  const [filter, setFilter] = useState<PeopleFilterState>(emptyPeopleFilter);
   const [selected, setSelected] = useState<PersonRecord | null>(null);
   const [profilePerson, setProfilePerson] = useState<PersonRecord | null>(null);
   const [hrPerson, setHrPerson] = useState<PersonRecord | null>(null);
@@ -401,25 +447,28 @@ export function PeopleDirectoryPage() {
   }, [orgId, authUser?.uid, authUser?.role, actorReady]);
 
   const rows = useMemo(() => {
-    const query = searchText.trim().toLowerCase();
-    return scopedPeople
-      .map((person) => {
-        const current = resolveCurrentEmployment(person as unknown as Person, asOf);
-        return {
-          person,
-          current,
-          separatedAt: current ? null : resolveSeparationDate(person as unknown as Person),
-          tenure: deriveTenure(person.joinedAt, asOf),
-        };
-      })
-      .filter((row) => {
-        if (typeFilter === 'SEPARATED') return !row.current;
-        if (!query) return true;
-        return [row.person.name, row.person.nickname, row.person.departmentTop, row.person.grade]
-          .some((value) => String(value || '').toLowerCase().includes(query));
-      })
-      .sort((a, b) => a.person.name.localeCompare(b.person.name, 'ko'));
-  }, [scopedPeople, searchText, typeFilter, asOf]);
+    const built = scopedPeople.map((person) => {
+      const current = resolveCurrentEmployment(person as unknown as Person, asOf);
+      return {
+        person,
+        current,
+        separatedAt: current ? null : resolveSeparationDate(person as unknown as Person),
+        tenure: deriveTenure(person.joinedAt, asOf),
+      };
+    });
+    // 검색·계약 종료 버튼과 칸별 필터를 한 곳에서 건다. 나이·근속·학위 후 경력은
+    // 저장값이 아니라 오늘 기준 계산이라 화면 숫자와 필터 결과가 늘 같다.
+    const merged = { ...filter, search: searchText, status: typeFilter === 'SEPARATED' ? 'SEPARATED' : filter.status };
+    // 기본 정렬은 입사순이다. 가나다순은 조직에서 누가 오래 다녔는지를 못 읽게 한다.
+    // 입사일이 없는 사람은 뒤로 보내고 그 안에서만 이름순으로 정리한다.
+    return filterPeopleRows(built, merged, asOf).sort((left, right) => {
+      const leftJoined = String(left.person.joinedAt || '');
+      const rightJoined = String(right.person.joinedAt || '');
+      if (leftJoined && rightJoined && leftJoined !== rightJoined) return leftJoined.localeCompare(rightJoined);
+      if (leftJoined !== rightJoined) return leftJoined ? -1 : 1;
+      return left.person.name.localeCompare(right.person.name, 'ko');
+    });
+  }, [scopedPeople, searchText, typeFilter, filter, asOf]);
 
   // 근로형태는 이름 옆에 붙는 신분 표시라 목록에서 보여주지 않는다. 인턴은 섞지 않고
   // 아래 별도 표로 뗀다 - 한 표에 두면 근로형태를 가려도 순서와 빈칸으로 드러난다.
@@ -432,6 +481,17 @@ export function PeopleDirectoryPage() {
     () => rows.filter((row) => row.current?.type === 'INTERN'),
     [rows],
   );
+
+  const filterOptions = useMemo(() => collectFilterOptions(scopedPeople), [scopedPeople]);
+  const educationOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const person of scopedPeople) {
+      const code = String(person.hrSummary?.highestEducationCode || '').trim();
+      const text = String(person.hrSummary?.highestEducationDisplayText || '').split(' · ')[0];
+      if (code && !seen.has(code)) seen.set(code, text || code);
+    }
+    return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1], 'ko'));
+  }, [scopedPeople]);
 
   const counts = useMemo(() => {
     const base = { MAIN: 0, INTERN: 0, SEPARATED: 0 };
@@ -611,6 +671,62 @@ export function PeopleDirectoryPage() {
         </div>
       </div>
 
+      {/* ── 칸별 필터: 적정 대상을 빠르게 좁힌다 ── */}
+      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+        <FilterSelect
+          label="재직상태" value={filter.status} onChange={(value) => setFilter({ ...filter, status: value })}
+          options={[['WORKING', '재직'], ['ON_LEAVE', '휴직'], ['PARENTAL_LEAVE', '육아휴직'], ['SEPARATED', '계약 종료']]}
+        />
+        <FilterSelect
+          label="소속" value={filter.departmentTop} onChange={(value) => setFilter({ ...filter, departmentTop: value })}
+          options={filterOptions.departmentTop.map((option) => [option, option])}
+        />
+        <FilterSelect
+          label="팀" value={filter.departmentMid} onChange={(value) => setFilter({ ...filter, departmentMid: value })}
+          options={filterOptions.departmentMid.map((option) => [option, option])}
+        />
+        <FilterSelect
+          label="직급" value={filter.grade} onChange={(value) => setFilter({ ...filter, grade: value })}
+          options={filterOptions.grade.map((option) => [option, option])}
+        />
+        <FilterSelect
+          label="직책" value={filter.title} onChange={(value) => setFilter({ ...filter, title: value })}
+          options={filterOptions.title.map((option) => [option, option])}
+        />
+        {scopedProfileCapabilities.read ? (
+          <FilterSelect
+            label="최종학력" value={filter.educationCode} onChange={(value) => setFilter({ ...filter, educationCode: value })}
+            options={educationOptions}
+          />
+        ) : null}
+        <FilterNumber
+          label="만 나이" placeholder="최소" value={filter.ageMin}
+          onChange={(value) => setFilter({ ...filter, ageMin: value })}
+        />
+        <FilterNumber
+          label="~" placeholder="최대" value={filter.ageMax}
+          onChange={(value) => setFilter({ ...filter, ageMax: value })}
+        />
+        <FilterNumber
+          label="근속(년) 이상" placeholder="예: 3" value={filter.tenureMinYears}
+          onChange={(value) => setFilter({ ...filter, tenureMinYears: value })}
+        />
+        {scopedProfileCapabilities.read ? (
+          <FilterNumber
+            label="학위 후(년) 이상" placeholder="예: 5" value={filter.degreeYearsMin}
+            onChange={(value) => setFilter({ ...filter, degreeYearsMin: value })}
+          />
+        ) : null}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{rows.length}명</span>
+          {isPeopleFilterActive(filter) ? (
+            <Button variant="outline" size="sm" className="h-9 text-sm" onClick={() => setFilter(emptyPeopleFilter())}>
+              필터 초기화
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
       {directoryScopeLoaded && error ? (
         <Card className="border-rose-200 bg-rose-50">
           <CardContent className="py-4 text-sm text-rose-800">{error}</CardContent>
@@ -683,7 +799,7 @@ export function PeopleDirectoryPage() {
 
       {/* ── 계약 관리 ── */}
       <Dialog open={!!selected && directoryScopeLoaded} onOpenChange={(open) => { if (!open) setSelected(null); }}>
-        <DialogContent className="flex max-h-[90vh] w-[min(94vw,860px)] max-w-[860px] flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[92vh] w-[92vw] max-w-[980px] flex-col overflow-hidden sm:max-w-[980px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <Briefcase className="h-4 w-4" />
@@ -796,7 +912,7 @@ export function PeopleDirectoryPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[92vh] w-[min(96vw,1000px)] max-w-[1000px] overflow-y-auto">
+        <DialogContent className="max-h-[94vh] w-[94vw] max-w-[1160px] overflow-y-auto sm:max-w-[1160px]">
           <DialogHeader>
             <DialogTitle className="text-base">인력 등록</DialogTitle>
             <DialogDescription>

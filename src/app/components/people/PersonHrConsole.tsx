@@ -4,6 +4,7 @@ import {
   Briefcase,
   CalendarClock,
   FileCheck2,
+  FileX2,
   GraduationCap,
   Languages,
   Loader2,
@@ -89,17 +90,23 @@ function RecordCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-md border border-slate-200 bg-white">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <h4 className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-800">
+    <section className="rounded-md border border-slate-300 bg-white">
+      {/* 표의 머리와 같은 회색 띠 - 어디까지가 제목이고 어디부터가 값인지 한 번에 갈린다. */}
+      <header className="flex items-center justify-between border-b-2 border-slate-300 bg-slate-100 px-3 py-2.5">
+        <h4 className="flex items-center gap-1.5 text-[14px] font-semibold text-slate-700">
           <span className="text-slate-500" aria-hidden>{icon}</span>
           {title}
         </h4>
-        <span className="text-[12px] tabular-nums text-slate-500">{count}건</span>
+        <span className="text-[13px] tabular-nums text-slate-500">{count}건</span>
       </header>
-      <div className="px-3 py-2.5">
+      <div className="px-3 py-1">
         {count === 0
-          ? <p className="py-4 text-center text-[12px] text-slate-400">데이터가 존재하지 않습니다.</p>
+          ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-slate-400">
+              <FileX2 className="h-7 w-7" aria-hidden />
+              <p className="text-[14px]">데이터가 존재하지 않습니다</p>
+            </div>
+          )
           : children}
       </div>
     </section>
@@ -112,13 +119,13 @@ function RecordRow({ primary, secondary, hasEvidence }: {
   hasEvidence?: boolean;
 }) {
   return (
-    <div className="border-b border-slate-100 py-1.5 last:border-b-0">
-      <p className="flex items-center gap-1.5 text-[12px] font-medium text-slate-900">
+    <div className="border-b border-slate-200 py-2.5 last:border-b-0">
+      <p className="flex items-center gap-1.5 text-[14px] font-medium text-slate-900">
         <span className="min-w-0 truncate">{primary}</span>
         {/* 증빙이 붙은 항목만 표시한다 - 없는 것을 빨갛게 알리면 화면이 경고로 뒤덮인다. */}
-        {hasEvidence ? <FileCheck2 className="h-3 w-3 shrink-0 text-emerald-600" aria-label="증빙 있음" /> : null}
+        {hasEvidence ? <FileCheck2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-label="증빙 있음" /> : null}
       </p>
-      {secondary ? <p className="text-[14px] text-slate-500">{secondary}</p> : null}
+      {secondary ? <p className="mt-0.5 text-[13px] text-slate-500">{secondary}</p> : null}
     </div>
   );
 }
@@ -266,7 +273,8 @@ export function PersonHrConsole({
       - (catalog?.educationAttainments.find((entry) => entry.code === left.attainmentCode)?.rank || 0)
     ));
     const top = ranked[0];
-    const parts = [educationLabelOf(top.attainmentCode), top.institutionName, top.major].filter(Boolean);
+    // 학과를 앞세운다 - 사람을 고를 때 전공이 학교보다 먼저 읽혀야 한다.
+    const parts = [educationLabelOf(top.attainmentCode), top.major, top.institutionName].filter(Boolean);
     return { summary: parts.join(' · '), degreeYear: top.degreeYear || '' };
   }, [profile, catalog, person.hrSummary]);
 
@@ -323,7 +331,7 @@ export function PersonHrConsole({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
-      <DialogContent className="flex max-h-[92vh] w-[min(96vw,1120px)] max-w-[1120px] flex-col overflow-hidden p-0">
+      <DialogContent className="flex max-h-[94vh] w-[96vw] max-w-[1400px] flex-col overflow-hidden p-0 sm:max-w-[1400px]">
         <DialogHeader className="sr-only">
           <DialogTitle>{person.name} 인사정보</DialogTitle>
           <DialogDescription>인적사항, 학력·어학·자격, 계약 이력을 확인하고 수정합니다.</DialogDescription>
@@ -342,10 +350,10 @@ export function PersonHrConsole({
                   {person.grade ? <span className="text-[16px] font-medium text-slate-700">{person.grade}</span> : null}
                   {person.nickname ? <span className="text-[14px] text-slate-500">({person.nickname})</span> : null}
                 </p>
-                <p className="mt-1 text-[12px] text-slate-600">
+                <p className="mt-1 text-[14px] text-slate-600">
                   {[person.departmentTop, person.departmentMid, person.title].filter(Boolean).join(' · ') || '소속 미지정'}
                 </p>
-                <p className="mt-1 text-[12px] text-slate-600">
+                <p className="mt-1 text-[14px] text-slate-600">
                   {person.joinedAt ? `${formatDate(person.joinedAt)} 입사` : '입사일 미등록'}
                   {' · '}
                   <span className={separated ? 'text-slate-500' : 'font-medium text-slate-800'}>{statusText}</span>
@@ -395,19 +403,19 @@ export function PersonHrConsole({
             <TabsContent value="basic" className="mt-0 space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <Label className="text-[12px]">이름</Label>
+                  <Label className="text-[14px]">이름</Label>
                   <Input className="mt-1.5 h-10" value={person.name} disabled readOnly />
                   <p className="mt-1 text-[14px] text-slate-500">이름은 재직자 명단이 정하므로 여기서 고치지 않습니다.</p>
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-nickname">닉네임</Label>
+                  <Label className="text-[14px]" htmlFor="hr-nickname">닉네임</Label>
                   <Input
                     id="hr-nickname" className="mt-1.5 h-10" value={form.nickname} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, nickname: event.target.value })}
                   />
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-birth">생년월일</Label>
+                  <Label className="text-[14px]" htmlFor="hr-birth">생년월일</Label>
                   <Input
                     id="hr-birth" type="date" className="mt-1.5 h-10 tabular-nums" value={form.birthDate}
                     disabled={!canWritePerson || saving}
@@ -418,7 +426,7 @@ export function PersonHrConsole({
                   </p>
                 </div>
                 <div>
-                  <Label className="text-[12px]">직급</Label>
+                  <Label className="text-[14px]">직급</Label>
                   <Select
                     value={gradeOptionValue}
                     disabled={!canWritePerson || saving}
@@ -455,7 +463,7 @@ export function PersonHrConsole({
                   )}
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-title">직책</Label>
+                  <Label className="text-[14px]" htmlFor="hr-title">직책</Label>
                   <Input
                     id="hr-title" className="mt-1.5 h-10" value={form.title} disabled={!canWritePerson || saving}
                     placeholder="예: 팀장" onChange={(event) => setForm({ ...form, title: event.target.value })}
@@ -463,14 +471,14 @@ export function PersonHrConsole({
                   <p className="mt-1 text-[14px] text-slate-500">직급과 다른 축입니다. 맡은 역할을 적습니다.</p>
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-email">이메일</Label>
+                  <Label className="text-[14px]" htmlFor="hr-email">이메일</Label>
                   <Input
                     id="hr-email" className="mt-1.5 h-10" value={form.email} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, email: event.target.value })}
                   />
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-dept-top">소속</Label>
+                  <Label className="text-[14px]" htmlFor="hr-dept-top">소속</Label>
                   {/* 선택지는 설정 > 조직에서 온다. 지금 저장된 값이 목록에 없어도 지우지 않고 남긴다. */}
                   <select
                     id="hr-dept-top"
@@ -485,7 +493,7 @@ export function PersonHrConsole({
                   </select>
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-dept-mid">팀</Label>
+                  <Label className="text-[14px]" htmlFor="hr-dept-mid">팀</Label>
                   <select
                     id="hr-dept-mid"
                     className="mt-1.5 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[14px] disabled:opacity-50"
@@ -499,7 +507,7 @@ export function PersonHrConsole({
                   </select>
                 </div>
                 <div>
-                  <Label className="text-[12px]" htmlFor="hr-location">근무지</Label>
+                  <Label className="text-[14px]" htmlFor="hr-location">근무지</Label>
                   <Input
                     id="hr-location" className="mt-1.5 h-10" value={form.workLocation} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, workLocation: event.target.value })}
@@ -521,16 +529,16 @@ export function PersonHrConsole({
             {/* ── 인사정보조회: 학력·어학·자격·계약을 카드로 훑는다 ── */}
             <TabsContent value="records" className="mt-0 space-y-3">
               {!canReadProfile ? (
-                <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-[12px] text-slate-600">
+                <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-[14px] text-slate-600">
                   학력·어학·자격 정보를 볼 권한이 없습니다. 계약 이력은 상세정보 탭에서 확인할 수 있습니다.
                 </p>
               ) : profileLoading ? (
                 <p className="py-10 text-center text-[14px] text-slate-500">인사정보를 불러오는 중…</p>
               ) : profileError ? (
-                <div className="rounded-md border border-rose-200 bg-white px-3 py-3 text-[12px] text-rose-700" role="alert">
+                <div className="rounded-md border border-rose-200 bg-white px-3 py-3 text-[14px] text-rose-700" role="alert">
                   <p>{profileError}</p>
                   <Button
-                    variant="outline" size="sm" className="mt-2 h-7 gap-1 text-[12px]"
+                    variant="outline" size="sm" className="mt-2 h-7 gap-1 text-[14px]"
                     onClick={() => setReloadToken((token) => token + 1)}
                   >
                     <RefreshCw className="h-3 w-3" /> 다시 불러오기
@@ -547,7 +555,7 @@ export function PersonHrConsole({
                       {(profile?.educationRecords || []).map((record, index) => (
                         <RecordRow
                           key={`${record.attainmentCode}-${index}`}
-                          primary={[record.institutionName, record.major].filter(Boolean).join(' · ') || educationLabelOf(record.attainmentCode)}
+                          primary={[record.major, record.institutionName].filter(Boolean).join(' · ') || educationLabelOf(record.attainmentCode)}
                           secondary={[
                             educationLabelOf(record.attainmentCode),
                             record.admissionYear || record.degreeYear
@@ -611,13 +619,13 @@ export function PersonHrConsole({
                 <div className="space-y-1.5">
                   {person.employments.map((item) => (
                     <div key={item.id} className="flex flex-wrap items-center gap-2 border-b border-slate-100 py-1.5 last:border-b-0">
-                      <span className="text-[12px] tabular-nums text-slate-700">
+                      <span className="text-[13px] tabular-nums text-slate-700">
                         {formatDate(item.startDate)} ~ {formatDate(item.endDate)}
                       </span>
-                      <Badge variant="outline" className="text-[12px]">
+                      <Badge variant="outline" className="text-[13px]">
                         {EMPLOYMENT_TYPE_LABELS[item.type as EmploymentType]}
                       </Badge>
-                      <Badge variant="outline" className="text-[12px]">
+                      <Badge variant="outline" className="text-[13px]">
                         {EMPLOYMENT_STATE_LABELS[item.state as EmploymentState]}
                       </Badge>
                       {item.note ? <span className="text-[14px] text-slate-500">{item.note}</span> : null}
