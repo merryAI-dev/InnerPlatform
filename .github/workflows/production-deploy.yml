@@ -311,20 +311,6 @@ jobs:
             --token "${VERCEL_TOKEN}" \
             --scope merryai-devs-projects
 
-      # alias 는 도메인이 가리킬 배포만 바꾼다. 크론은 Vercel 이 "현재 프로덕션 배포" 로
-      # 인식하는 배포의 vercel.json 에서만 읽으므로, 승격까지 해야 크론 변경이 반영된다.
-      # 이게 빠져 있어 2026-07-14 ~ 08-27 동안 크론 목록이 옛 배포 시점에 얼어 있었다.
-      - name: Promote deployment to current production
-        if: needs.preflight.outputs.promote == 'true'
-        env:
-          DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
-        run: |
-          set -euo pipefail
-          npx --yes "${VERCEL_CLI_PACKAGE}" promote \
-            "${DEPLOYMENT_URL}" \
-            --token "${VERCEL_TOKEN}" \
-            --scope merryai-devs-projects
-
       - name: Verify canonical production alias
         if: needs.preflight.outputs.promote == 'true'
         env:
