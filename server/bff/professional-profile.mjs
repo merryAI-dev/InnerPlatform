@@ -4,6 +4,12 @@ import { getProfessionalProfileCatalog } from './professional-profile-catalog.mj
 const PROFILE_SCHEMA_VERSION = 1;
 const PROFILE_SOURCE = 'PEOPLE_MANUAL';
 const TEXT_MAX_LENGTH = 80;
+// 증빙 경로는 사람이 쓰는 글자가 아니라 서버가 만든 저장 키다.
+// orgs/{tenant}/person-hr-evidence/{personId}/{evidenceId}-{파일명} 만 해도 80자를 넘는다.
+const EVIDENCE_PATH_MAX_LENGTH = 512;
+const EVIDENCE_NAME_MAX_LENGTH = 200;
+const EVIDENCE_CONTENT_TYPE_MAX_LENGTH = 128;
+const EVIDENCE_ROOT_SEGMENT = 'person-hr-evidence/';
 const ARRAY_LIMITS = Object.freeze({
   educationRecords: 10,
   englishEvidence: 10,
@@ -30,15 +36,32 @@ function textLength(value) {
   return Array.from(value).length;
 }
 
-function optionalText(value, field) {
+function boundedText(value, field, max) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string') invalid(field, 'must be text');
   const normalized = value.trim();
   if (!normalized) return null;
-  if (textLength(normalized) > TEXT_MAX_LENGTH) {
-    invalid(field, `must be at most ${TEXT_MAX_LENGTH} characters`);
+  if (textLength(normalized) > max) {
+    invalid(field, `must be at most ${max} characters`);
   }
   return normalized;
+}
+
+function optionalText(value, field) {
+  return boundedText(value, field, TEXT_MAX_LENGTH);
+}
+
+/**
+ * 증빙 경로. 길이를 넉넉히 두는 대신 어디를 가리키는지는 좁힌다 —
+ * 증빙 보관함 밖을 가리키는 경로는 저장하지 않는다.
+ */
+function normalizeEvidencePath(value, field) {
+  const path = boundedText(value, field, EVIDENCE_PATH_MAX_LENGTH);
+  if (!path) return null;
+  if (!path.includes(EVIDENCE_ROOT_SEGMENT) || path.includes('..')) {
+    invalid(field, 'must point inside the person evidence store');
+  }
+  return path;
 }
 
 function requiredCode(value, field) {
@@ -91,15 +114,15 @@ function normalizeEvidenceRef(value, field) {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) invalid(field, 'must be an object');
   const evidenceId = optionalText(value.evidenceId, `${field}.evidenceId`);
-  const path = optionalText(value.path, `${field}.path`);
+  const path = normalizeEvidencePath(value.path, `${field}.path`);
   if (!evidenceId || !path) invalid(field, 'requires evidenceId and path');
   const size = Number(value.size);
   return {
     evidenceId,
     path,
-    name: optionalText(value.name, `${field}.name`) || evidenceId,
+    name: boundedText(value.name, `${field}.name`, EVIDENCE_NAME_MAX_LENGTH) || evidenceId,
     size: Number.isSafeInteger(size) && size >= 0 ? size : 0,
-    contentType: optionalText(value.contentType, `${field}.contentType`) || 'application/octet-stream',
+    contentType: boundedText(value.contentType, `${field}.contentType`, EVIDENCE_CONTENT_TYPE_MAX_LENGTH) || 'application/octet-stream',
     uploadedAt: optionalText(value.uploadedAt, `${field}.uploadedAt`),
   };
 }
