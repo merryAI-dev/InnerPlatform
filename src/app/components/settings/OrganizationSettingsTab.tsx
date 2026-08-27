@@ -4,6 +4,12 @@ import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { useOrganizationSettings } from '../../data/use-organization-settings';
+import { usePersonGradeSettings } from '../../data/use-person-grade-settings';
+import {
+  activeGradeLabels,
+  formatGradeOptionLabel,
+  type PersonGradeOption,
+} from '../../data/person-grade-settings';
 import {
   optionsWithCurrentValue,
   type OrganizationGroup,
@@ -34,14 +40,22 @@ import {
  *   보여 주고, 관리자가 '함께 옮기기'를 고를 때만 옮긴다.
  */
 
+type RosterField = 'departmentTop' | 'departmentMid' | 'grade';
+
+const FIELD_LABELS: Record<RosterField, string> = {
+  departmentTop: '소속',
+  departmentMid: '팀',
+  grade: '직급',
+};
+
 interface RenamePlan {
   before: string;
   after: string;
   people: PersonRecord[];
-  field: 'departmentTop' | 'departmentMid';
+  field: RosterField;
 }
 
-function countUsage(people: PersonRecord[], field: 'departmentTop' | 'departmentMid', label: string) {
+function countUsage(people: PersonRecord[], field: RosterField, label: string) {
   return people.filter((person) => String(person[field] || '').trim() === label).length;
 }
 
@@ -49,7 +63,10 @@ export function OrganizationSettingsTab() {
   const { user } = useAuth();
   const { orgId } = useFirebase();
   const { groups, isLoading, error, saveGroups } = useOrganizationSettings();
+  const { grades, saveGrades } = usePersonGradeSettings();
   const [draft, setDraft] = useState<OrganizationGroup[] | null>(null);
+  const [gradeDraft, setGradeDraft] = useState<PersonGradeOption[] | null>(null);
+  const [savingGrades, setSavingGrades] = useState(false);
   const [people, setPeople] = useState<PersonRecord[]>([]);
   const [peopleLoaded, setPeopleLoaded] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -127,7 +144,7 @@ export function OrganizationSettingsTab() {
       }
       const refreshed = await fetchPersonsViaBff({ tenantId: orgId, actor: user });
       setPeople(refreshed.items);
-      toast.success(`${moved}명의 소속을 "${renamePlan.after}"로 옮겼습니다.`);
+      toast.success(`${moved}명의 ${FIELD_LABELS[renamePlan.field]}을 "${renamePlan.after}"로 바꿨습니다.`);
     } catch {
       toast.error(`${moved}명까지 옮기고 멈췄습니다. 남은 인원은 다시 시도해 주세요.`);
     } finally {
@@ -136,7 +153,7 @@ export function OrganizationSettingsTab() {
     }
   };
 
-  const staleLabelsFor = (field: 'departmentTop' | 'departmentMid', known: string[]) => {
+  const staleLabelsFor = (field: RosterField, known: string[]) => {
     const used = new Map<string, number>();
     for (const person of people) {
       const value = String(person[field] || '').trim();
@@ -146,10 +163,31 @@ export function OrganizationSettingsTab() {
     return [...used.entries()].sort((left, right) => right[1] - left[1]);
   };
 
+  const gradeRows = gradeDraft ?? grades;
+  const gradesDirty = gradeDraft !== null && JSON.stringify(gradeDraft) !== JSON.stringify(grades);
+
+  const saveGradeList = async () => {
+    if (!gradeDraft) return;
+    setSavingGrades(true);
+    try {
+      await saveGrades(gradeDraft, user?.uid);
+      setGradeDraft(null);
+      toast.success('직급 목록을 저장했습니다.');
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : '직급 목록을 저장하지 못했습니다.');
+    } finally {
+      setSavingGrades(false);
+    }
+  };
+
   const knownGroupLabels = rows.map((group) => group.label);
   const knownTeamLabels = rows.flatMap((group) => group.teams.map((team) => team.label));
+  const knownGradeLabels = gradeRows.map((grade) => grade.label);
   const staleGroups = staleLabelsFor('departmentTop', knownGroupLabels);
   const staleTeams = staleLabelsFor('departmentMid', knownTeamLabels);
+  const staleGrades = staleLabelsFor('grade', knownGradeLabels);
+  const mismatchCount = [...staleGroups, ...staleTeams, ...staleGrades]
+    .reduce((total, [, count]) => total + count, 0);
 
   return (
     <div className="space-y-4">
@@ -245,47 +283,102 @@ export function OrganizationSettingsTab() {
         })}
       </div>
 
-      {/* 목록에 없는 이름을 쓰는 사람들. 개편·오타의 흔적이라 여기서 정리한다. */}
-      {staleGroups.length > 0 || staleTeams.length > 0 ? (
+      {/* ── 직급 목록 ── */}
+      <section className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h4 className="text-[12px] font-semibold text-slate-800">직급 목록</h4>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              직책(팀장·센터장)과 다른 축입니다. 경영기획실(재경)·사내벤처는 별도 체계를 쓰므로 목록 밖 값도 저장됩니다.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline" size="sm" disabled={savingGrades}
+              onClick={() => setGradeDraft([...gradeRows, {
+                id: `grade-${Date.now()}`, label: '새 직급', sortOrder: gradeRows.length, active: true, equivalentTitles: [],
+              }])}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" /> 직급 추가
+            </Button>
+            <Button size="sm" onClick={() => void saveGradeList()} disabled={!gradesDirty || savingGrades}>
+              {savingGrades ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1 h-3.5 w-3.5" />}
+              {savingGrades ? '저장 중…' : '저장'}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {gradeRows.map((grade, gradeIndex) => (
+            <div key={grade.id} className="flex flex-wrap items-center gap-2">
+              <Input
+                className="h-8 w-48 text-[13px]" value={grade.label} disabled={savingGrades}
+                aria-label={`직급 ${gradeIndex + 1} 이름`}
+                onChange={(event) => setGradeDraft(gradeRows.map((item, index) => (
+                  index === gradeIndex ? { ...item, label: event.target.value } : item
+                )))}
+              />
+              {grade.equivalentTitles.length > 0 ? (
+                <span className="text-[11px] text-slate-500">({grade.equivalentTitles.join('·')})</span>
+              ) : null}
+              <Badge variant="outline" className="gap-1 text-[10px]">
+                <Users className="h-3 w-3" /> {countUsage(people, 'grade', grade.label)}명
+              </Badge>
+              {!grade.active ? <Badge variant="secondary" className="text-[10px]">숨김</Badge> : null}
+              <Button
+                variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-slate-500"
+                disabled={savingGrades}
+                onClick={() => setGradeDraft(gradeRows.map((item, index) => (
+                  index === gradeIndex ? { ...item, active: !item.active } : item
+                )))}
+              >
+                <EyeOff className="h-3 w-3" /> {grade.active ? '숨기기' : '다시 표시'}
+              </Button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 지금 목록과 어긋난 값들. 개편·오타의 흔적이라 여기서 정리한다. ── */}
+      {mismatchCount > 0 ? (
         <section className="rounded-lg border border-slate-200 bg-white p-3">
-          <h4 className="text-[12px] font-semibold text-slate-800">목록에 없는 소속을 쓰는 사람</h4>
+          <h4 className="flex items-center gap-2 text-[12px] font-semibold text-slate-800">
+            목록에 없는 값을 쓰는 사람
+            <Badge variant="outline" className="text-[10px]">{mismatchCount}명</Badge>
+          </h4>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            표기가 갈렸거나 예전 조직입니다. 옮길 곳을 고르면 그 사람들의 소속을 함께 바꿉니다.
+            표기가 갈렸거나 예전 값입니다. 옮길 곳을 고르면 그 사람들의 값을 함께 바꿉니다.
+            별도 체계를 쓰는 값이라면 위 목록에 추가해 두면 더 이상 어긋난 것으로 보이지 않습니다.
           </p>
           <div className="mt-2 space-y-1.5">
-            {staleGroups.map(([label, count]) => (
+            {[
+              ...staleGroups.map(([label, count]) => ({ label, count, field: 'departmentTop' as RosterField, options: knownGroupLabels })),
+              ...staleTeams.map(([label, count]) => ({ label, count, field: 'departmentMid' as RosterField, options: knownTeamLabels })),
+              ...staleGrades.map(([label, count]) => ({ label, count, field: 'grade' as RosterField, options: knownGradeLabels })),
+            ].map(({ label, count, field, options }) => (
               <StaleRow
-                key={`top-${label}`} label={label} count={count} field="departmentTop"
-                options={knownGroupLabels} disabled={renaming}
+                key={`${field}-${label}`} label={label} count={count} field={field}
+                options={options} disabled={renaming}
                 onMove={(after) => setRenamePlan({
-                  before: label, after, field: 'departmentTop',
-                  people: people.filter((person) => String(person.departmentTop || '').trim() === label),
-                })}
-              />
-            ))}
-            {staleTeams.map(([label, count]) => (
-              <StaleRow
-                key={`mid-${label}`} label={label} count={count} field="departmentMid"
-                options={knownTeamLabels} disabled={renaming}
-                onMove={(after) => setRenamePlan({
-                  before: label, after, field: 'departmentMid',
-                  people: people.filter((person) => String(person.departmentMid || '').trim() === label),
+                  before: label, after, field,
+                  people: people.filter((person) => String(person[field] || '').trim() === label),
                 })}
               />
             ))}
           </div>
         </section>
-      ) : null}
+      ) : (
+        <p className="text-[11px] text-slate-500">모든 인력의 소속·팀·직급이 지금 목록과 맞습니다.</p>
+      )}
 
       <AlertDialog open={renamePlan !== null} onOpenChange={(open) => { if (!open && !renaming) setRenamePlan(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {renamePlan?.people.length}명의 소속을 옮길까요?
+              {renamePlan?.people.length}명의 {renamePlan ? FIELD_LABELS[renamePlan.field] : ''}을 바꿀까요?
             </AlertDialogTitle>
             <AlertDialogDescription>
               &quot;{renamePlan?.before}&quot; → &quot;{renamePlan?.after}&quot; 로 바꿉니다.
-              인력 명부에 각각 기록으로 남고, 되돌리려면 같은 방법으로 다시 옮겨야 합니다.
+              인력 명부에 각각 기록으로 남고, 되돌리려면 같은 방법으로 다시 바꿔야 합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -301,11 +394,11 @@ export function OrganizationSettingsTab() {
 }
 
 function StaleRow({
-  label, count, options, disabled, onMove,
+  label, count, field, options, disabled, onMove,
 }: {
   label: string;
   count: number;
-  field: 'departmentTop' | 'departmentMid';
+  field: RosterField;
   options: string[];
   disabled: boolean;
   onMove: (after: string) => void;
@@ -314,6 +407,7 @@ function StaleRow({
   const choices = optionsWithCurrentValue(options, '');
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <Badge variant="secondary" className="text-[10px]">{FIELD_LABELS[field]}</Badge>
       <span className="text-[12px] font-medium text-slate-800">{label}</span>
       <Badge variant="outline" className="gap-1 text-[10px]"><Users className="h-3 w-3" /> {count}명</Badge>
       <Label className="sr-only" htmlFor={`move-${label}`}>{label} 옮길 조직</Label>

@@ -29,8 +29,17 @@ describe('조직 설정', () => {
   it('이름을 바꿔도 저장된 데이터는 자동으로 따라가지 않고, 몇 명인지 보고 관리자가 고른다', () => {
     expect(source).toContain('함께 옮기기');
     expect(source).toContain('updatePersonProfileViaBff');
-    expect(source).toContain('명의 소속을 옮길까요?');
+    expect(source).toContain('FIELD_LABELS[renamePlan.field]');
     expect(source).toContain('countUsage');
+  });
+
+  it('직급도 여기서 고치고, 목록과 어긋난 값은 몇 명인지 보여 준다', () => {
+    // 재경·사내벤처는 별도 체계를 쓴다. 목록에 없는 값도 저장되므로 여기서 정리하거나 목록에 더한다.
+    expect(source).toContain('직급 목록');
+    expect(source).toContain('usePersonGradeSettings');
+    expect(source).toContain('목록에 없는 값을 쓰는 사람');
+    expect(source).toContain('staleGrades');
+    expect(source).toContain('모든 인력의 소속·팀·직급이 지금 목록과 맞습니다.');
   });
 
   it('프로젝트 담당조직과 인력 소속이 같은 조직 목록에서 뻗어 나온다', () => {

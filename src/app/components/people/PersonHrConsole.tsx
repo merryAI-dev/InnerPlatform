@@ -33,9 +33,10 @@ import {
   type EmploymentState,
   type EmploymentType,
 } from '../../platform/person-employment';
-import { PERSON_GRADES, formatPersonGradeOption, isKnownPersonGrade } from '../../platform/person-grade';
 import { optionsWithCurrentValue } from '../../data/organization-settings';
 import { useOrganizationSettings } from '../../data/use-organization-settings';
+import { usePersonGradeSettings } from '../../data/use-person-grade-settings';
+import { formatGradeOptionLabel } from '../../data/person-grade-settings';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -186,6 +187,7 @@ export function PersonHrConsole({
   const [saving, setSaving] = useState(false);
   const [customGrade, setCustomGrade] = useState(false);
   const { groups: organizationGroups } = useOrganizationSettings();
+  const { grades: gradeSettings } = usePersonGradeSettings();
   const [profile, setProfile] = useState<StoredProfessionalProfile | null>(null);
   const [catalog, setCatalog] = useState<ProfessionalProfileCatalog | null>(null);
   const [profileLoading, setProfileLoading] = useState(canReadProfile);
@@ -225,6 +227,10 @@ export function PersonHrConsole({
     });
     return () => controller.abort();
   }, [tenantId, actor, person.personId, canReadProfile, reloadToken]);
+
+  // 직급 선택지도 설정에서 뻗어 나온다. 숨긴 직급은 새로 고를 수 없지만 이미 그 값인 사람은 그대로다.
+  const gradeOptions = useMemo(() => gradeSettings.filter((grade) => grade.active), [gradeSettings]);
+  const knownGradeLabels = useMemo(() => gradeOptions.map((grade) => grade.label), [gradeOptions]);
 
   // 소속·팀 선택지는 조직 목록에서 뻗어 나온다. 소속을 고르면 그 아래 팀만 보인다.
   const groupOptions = useMemo(
@@ -283,10 +289,10 @@ export function PersonHrConsole({
   };
 
   // 목록 밖 값(별도 직급체계)은 직접 입력 칸으로 보여 준다 - 지우거나 목록 값으로 바꿔치지 않는다.
-  const usesCustomGrade = customGrade || (!!form.grade && !isKnownPersonGrade(form.grade));
+  const usesCustomGrade = customGrade || (!!form.grade && !knownGradeLabels.includes(form.grade));
   const gradeOptionValue = usesCustomGrade
     ? CUSTOM_GRADE
-    : (form.grade && isKnownPersonGrade(form.grade) ? form.grade : NO_GRADE);
+    : (form.grade && knownGradeLabels.includes(form.grade) ? form.grade : NO_GRADE);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
@@ -385,8 +391,8 @@ export function PersonHrConsole({
                     <SelectTrigger className="mt-1 h-9 text-[13px]" aria-label="직급"><SelectValue placeholder="직급 선택" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NO_GRADE}>미지정</SelectItem>
-                      {PERSON_GRADES.map((grade) => (
-                        <SelectItem key={grade.code} value={grade.label}>{formatPersonGradeOption(grade)}</SelectItem>
+                      {gradeOptions.map((grade) => (
+                        <SelectItem key={grade.id} value={grade.label}>{formatGradeOptionLabel(grade)}</SelectItem>
                       ))}
                       <SelectItem value={CUSTOM_GRADE}>직접 입력 (별도 직급체계)</SelectItem>
                     </SelectContent>
