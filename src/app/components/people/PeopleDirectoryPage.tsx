@@ -248,9 +248,9 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
   canReadProfile: boolean;
   asOf: string;
 }) {
-  const columnCount = canReadProfile ? 15 : 13;
+  const columnCount = canReadProfile ? 17 : 13;
   return (
-    <DataGrid minWidth={canReadProfile ? 2030 : 1650}>
+    <DataGrid minWidth={canReadProfile ? 2450 : 1650}>
       <DataGridHead>
         {/* 개인 정보를 앞에 모으고 회사 정보를 뒤로 몬다. 재직상태는 관리 뒤 맨 끝. */}
         <DataGridHeadCell align="center" width="w-14">No</DataGridHeadCell>
@@ -268,6 +268,8 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
         {canReadProfile ? <>
           <DataGridHeadCell width="min-w-[230px]">최종학력</DataGridHeadCell>
           <DataGridHeadCell align="center" width="min-w-[140px]">학위취득</DataGridHeadCell>
+          <DataGridHeadCell width="min-w-[200px]">어학능력</DataGridHeadCell>
+          <DataGridHeadCell width="min-w-[200px]">자격증</DataGridHeadCell>
         </> : null}
         <DataGridHeadCell align="center" width="w-32">관리</DataGridHeadCell>
         <DataGridHeadCell align="center" width="min-w-[110px]" last>재직상태</DataGridHeadCell>
@@ -318,6 +320,13 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
                 {person.hrSummary?.highestDegreeYear
                   ? <>{person.hrSummary.highestDegreeYear}년 <span className="text-slate-400">({deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)}년차)</span></>
                   : '-'}
+              </DataGridCell>
+              {/* 증빙이 제출된 건만 요약에 들어간다 - 서버가 그렇게 만들어 보낸다. */}
+              <DataGridCell className="max-w-[240px]" muted title={person.hrSummary?.englishEvidenceDisplayText || ''}>
+                <span className="block truncate">{person.hrSummary?.englishEvidenceDisplayText || '-'}</span>
+              </DataGridCell>
+              <DataGridCell className="max-w-[240px]" muted title={person.hrSummary?.certificationsDisplayText || ''}>
+                <span className="block truncate">{person.hrSummary?.certificationsDisplayText || '-'}</span>
               </DataGridCell>
             </> : null}
             <DataGridCell align="center">

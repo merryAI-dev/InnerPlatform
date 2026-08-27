@@ -47,7 +47,7 @@ describe('PeopleDirectoryPage 근로형태 노출 계약', () => {
     const order = [
       'No', '이름', '별명', '생년월일',
       '입사일', '휴직·퇴사일', '근속', '대분류', '중분류', '직책', '직급', '이메일 주소',
-      '최종학력', '학위취득', '관리', '재직상태',
+      '최종학력', '학위취득', '어학능력', '자격증', '관리', '재직상태',
     ];
     const positions = order.map((column) => {
       const at = table.indexOf(`>${column}</DataGridHeadCell>`);
