@@ -598,3 +598,45 @@ describe('RAG canonical boundary', () => {
     });
   });
 });
+
+describe('증빙 경로', () => {
+  const evidence = (path) => ({
+    evidenceId: 'ev_a1b2c3d4e5f6',
+    path,
+    name: '졸업증명서.pdf',
+    size: 12345,
+    contentType: 'application/pdf',
+    uploadedAt: '2026-08-27T00:00:00.000Z',
+  });
+  const withPath = (path) => ({
+    educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', evidence: evidence(path) }],
+    englishEvidence: [],
+    certifications: [],
+  });
+
+  /**
+   * 실제로 저장이 막혔던 사고다. 사람이 쓰는 글자 제한(80자)이 서버가 만든 저장 키에도
+   * 그대로 걸려 있었다. 경로는 org/사람/증빙id/파일명이 이어붙어 80자를 쉽게 넘는다.
+   */
+  it('80자가 넘는 저장 경로를 받는다', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    const long = 'orgs/mysc/person-hr-evidence/p1774523456789012/ev_a1b2c3d4e5f6-2019년_학사학위증명서_사본.pdf';
+    expect(long.length).toBeGreaterThan(80);
+    const parsed = normalizeProfessionalProfileInput(withPath(long));
+    expect(parsed.educationRecords[0].evidence.path).toBe(long);
+  });
+
+  it('증빙 보관함 밖을 가리키는 경로는 거부한다', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    expect(() => normalizeProfessionalProfileInput(withPath('orgs/mysc/payroll/secret.pdf')))
+      .toThrow(/person evidence store/);
+    expect(() => normalizeProfessionalProfileInput(withPath('orgs/mysc/person-hr-evidence/../payroll/x.pdf')))
+      .toThrow(/person evidence store/);
+  });
+
+  it('경로가 아무리 길어도 한계는 있다', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    const tooLong = `orgs/mysc/person-hr-evidence/p1/${'가'.repeat(600)}.pdf`;
+    expect(() => normalizeProfessionalProfileInput(withPath(tooLong))).toThrow(/at most 512 characters/);
+  });
+});
