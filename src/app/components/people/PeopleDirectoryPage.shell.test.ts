@@ -107,13 +107,19 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
     expect(source).toContain('open={addOpen && directoryScopeLoaded}');
   });
 
-  it('읽기 capability가 있을 때만 사람별 전문 프로필 action/editor를 조립한다', () => {
-    expect(source).toContain('{canReadProfile ? (');
+  it('사람별 진입점은 인사정보 콘솔 하나이고, 학력 편집기는 거기서 이어 연다', () => {
+    // 계약 관리와 전문 프로필이 서로 다른 창이라 같은 사람을 두 번 열어야 했다.
+    expect(source).toContain('<PersonHrConsole');
+    expect(source).toContain('aria-label={`${person.name} 인사정보`}');
     expect(source).toContain('canReadProfile={scopedProfileCapabilities.read}');
-    expect(source).toContain('onOpenProfile={setProfilePerson}');
+    expect(source).toContain('canWriteProfile={scopedProfileCapabilities.write}');
+    expect(source).toContain('onEditProfessionalProfile={');
+    expect(source).toContain('onManageEmployment={');
     expect(source).toContain('profilePerson && scopedProfileCapabilities.read');
     expect(source).toContain('<ProfessionalProfileEditor');
-    expect(source).toContain('aria-label={`${person.name} 전문 프로필`}');
+    // 직급과 직책은 다른 축이라 표에서도 칸을 나눈다.
+    expect(source).toContain('{person.grade || \'-\'}');
+    expect(source).toContain('{person.title || \'-\'}');
   });
 
   it('신규 등록은 쓰기 capability와 실제 입력이 있을 때만 프로필을 POST한다', () => {

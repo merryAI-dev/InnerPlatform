@@ -29,10 +29,16 @@ const MAX_ENGLISH_EVIDENCE = 10;
 const MAX_CERTIFICATIONS = 20;
 const EMPTY_OPTION = '__EMPTY_OPTION__';
 
+export interface ProfessionalProfileCertificationDraft {
+  label: string;
+  acquiredAt: string;
+}
+
 export interface ProfessionalProfileDraft {
   educationRecords: ProfessionalProfileEducationRecordInput[];
   englishEvidence: ProfessionalProfileEnglishEvidenceInput[];
-  certificationText: string;
+  /** 취득일을 항목마다 받아야 해서 자유 텍스트가 아니라 행으로 관리한다. */
+  certifications: ProfessionalProfileCertificationDraft[];
 }
 
 export interface ProfessionalProfileSaveAttempt {
@@ -46,15 +52,7 @@ type EditorError = {
 };
 
 export function createEmptyProfessionalProfileDraft(): ProfessionalProfileDraft {
-  return { educationRecords: [], englishEvidence: [], certificationText: '' };
-}
-
-export function splitCertificationLabels(value: string): Array<{ label: string }> {
-  return value
-    .split(/[\n,]/)
-    .map((label) => label.trim())
-    .filter(Boolean)
-    .map((label) => ({ label }));
+  return { educationRecords: [], englishEvidence: [], certifications: [] };
 }
 
 export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft): ProfessionalProfileInput {
@@ -64,6 +62,8 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
       institutionName: record.institutionName?.trim() || null,
       countryCode: record.countryCode?.trim() || null,
       major: record.major?.trim() || null,
+      admissionYear: record.admissionYear?.trim() || null,
+      degreeYear: record.degreeYear?.trim() || null,
     })),
     englishEvidence: draft.englishEvidence.map((evidence) => ({
       testCode: evidence.testCode,
@@ -72,14 +72,19 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
       otherTestName: evidence.otherTestName?.trim() || null,
       testedAt: evidence.testedAt?.trim() || null,
     })),
-    certifications: splitCertificationLabels(draft.certificationText),
+    certifications: draft.certifications
+      .map((certification) => ({
+        label: certification.label.trim(),
+        acquiredAt: certification.acquiredAt.trim() || null,
+      }))
+      .filter((certification) => certification.label.length > 0),
   };
 }
 
 export function hasProfessionalProfileFacts(draft: ProfessionalProfileDraft): boolean {
   return draft.educationRecords.length > 0
     || draft.englishEvidence.length > 0
-    || splitCertificationLabels(draft.certificationText).length > 0;
+    || draft.certifications.some((certification) => certification.label.trim().length > 0);
 }
 
 export function resolveProfessionalProfileSaveAttempt(
@@ -104,9 +109,12 @@ export function resolveProfessionalProfileSaveAttempt(
 }
 
 function certificationDraftError(draft: ProfessionalProfileDraft): string | null {
-  const certifications = splitCertificationLabels(draft.certificationText);
-  if (certifications.length > MAX_CERTIFICATIONS) return '자격증은 최대 20개까지 입력할 수 있습니다.';
-  if (certifications.some(({ label }) => label.length > 80)) return '자격증 이름은 각각 80자 이내로 입력해 주세요.';
+  const filled = draft.certifications.filter((certification) => certification.label.trim().length > 0);
+  if (filled.length > MAX_CERTIFICATIONS) return '자격증은 최대 20개까지 입력할 수 있습니다.';
+  if (filled.some(({ label }) => label.trim().length > 80)) return '자격증 이름은 각각 80자 이내로 입력해 주세요.';
+  if (draft.certifications.some(({ acquiredAt }) => acquiredAt.trim() && !/^\d{4}-(0[1-9]|1[0-2])$/.test(acquiredAt.trim()))) {
+    return '자격증 취득일은 YYYY-MM 형식으로 입력해 주세요.';
+  }
   return null;
 }
 
@@ -114,7 +122,10 @@ function storedProfileToDraft(profile: StoredProfessionalProfile): ProfessionalP
   return {
     educationRecords: profile.educationRecords.map((record) => ({ ...record })),
     englishEvidence: profile.englishEvidence.map((evidence) => ({ ...evidence })),
-    certificationText: profile.certifications.map(({ label }) => label).join('\n'),
+    certifications: profile.certifications.map((certification) => ({
+      label: certification.label,
+      acquiredAt: certification.acquiredAt || '',
+    })),
   };
 }
 
@@ -219,7 +230,7 @@ function ProfessionalProfileFields({
     });
   };
 
-  const certificationCount = splitCertificationLabels(draft.certificationText).length;
+  const certificationCount = draft.certifications.filter((certification) => certification.label.trim()).length;
   const certificationError = certificationDraftError(draft);
 
   return (
@@ -282,6 +293,26 @@ function ProfessionalProfileFields({
                   value={record.major || ''} disabled={disabled || readOnly}
                   placeholder="전공명"
                   onChange={(event) => updateEducation(index, { major: event.target.value })}
+                />
+              </div>
+              {/* 재학·수료·졸업 상태는 위 '학력 구분' 코드가 이미 담고 있다(석사 수료 등).
+                  여기서는 언제 다녔는지만 받는다. */}
+              <div>
+                <Label className="text-[11px]" htmlFor={`education-admission-${index}`}>입학년도</Label>
+                <Input
+                  id={`education-admission-${index}`} className="mt-1 h-9 tabular-nums" inputMode="numeric" maxLength={4}
+                  value={record.admissionYear || ''} disabled={disabled || readOnly}
+                  placeholder="예: 2015"
+                  onChange={(event) => updateEducation(index, { admissionYear: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                />
+              </div>
+              <div>
+                <Label className="text-[11px]" htmlFor={`education-degree-year-${index}`}>학위취득년도</Label>
+                <Input
+                  id={`education-degree-year-${index}`} className="mt-1 h-9 tabular-nums" inputMode="numeric" maxLength={4}
+                  value={record.degreeYear || ''} disabled={disabled || readOnly}
+                  placeholder="예: 2019"
+                  onChange={(event) => updateEducation(index, { degreeYear: event.target.value.replace(/\D/g, '').slice(0, 4) })}
                 />
               </div>
             </div>
@@ -432,19 +463,67 @@ function ProfessionalProfileFields({
             {certificationCount}/{MAX_CERTIFICATIONS}
           </span>
         </div>
-        <Label className="text-[11px]" htmlFor="professional-profile-certifications">자격증 이름</Label>
-        <Textarea
-          id="professional-profile-certifications"
-          value={draft.certificationText} disabled={disabled || readOnly}
-          maxLength={2000} rows={3} aria-invalid={!!certificationError}
-          aria-describedby="professional-profile-certifications-description"
-          placeholder="쉼표 또는 줄바꿈으로 구분해 주세요. 예: PMP, ODA 전문가"
-          onChange={(event) => onChange({ ...draft, certificationText: event.target.value })}
-        />
-        <p id="professional-profile-certifications-description" className={`text-[11px] ${certificationError ? 'text-rose-700' : 'text-slate-500'}`}>
+        {!readOnly ? (
+          <Button
+            type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]"
+            disabled={disabled || draft.certifications.length >= MAX_CERTIFICATIONS}
+            onClick={() => onChange({
+              ...draft,
+              certifications: [...draft.certifications, { label: '', acquiredAt: '' }],
+            })}
+          >
+            <Plus className="h-3 w-3" /> 자격증 추가
+          </Button>
+        ) : null}
+        {draft.certifications.length === 0 ? (
+          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-slate-500">입력된 자격증이 없습니다.</p>
+        ) : draft.certifications.map((certification, index) => (
+          <div key={`certification-${index}`} className="grid gap-2.5 rounded-lg border bg-slate-50/60 p-3 sm:grid-cols-[minmax(0,1fr)_150px_auto] sm:items-end">
+            <div>
+              <Label className="text-[11px]" htmlFor={`certification-label-${index}`}>자격증 이름</Label>
+              <Input
+                id={`certification-label-${index}`} className="mt-1 h-9" maxLength={80}
+                value={certification.label} disabled={disabled || readOnly}
+                placeholder="예: 정보처리기사"
+                onChange={(event) => onChange({
+                  ...draft,
+                  certifications: draft.certifications.map((item, itemIndex) => (
+                    itemIndex === index ? { ...item, label: event.target.value } : item
+                  )),
+                })}
+              />
+            </div>
+            <div>
+              <Label className="text-[11px]" htmlFor={`certification-acquired-${index}`}>취득일</Label>
+              <Input
+                id={`certification-acquired-${index}`} type="month" className="mt-1 h-9 tabular-nums"
+                value={certification.acquiredAt} disabled={disabled || readOnly}
+                onChange={(event) => onChange({
+                  ...draft,
+                  certifications: draft.certifications.map((item, itemIndex) => (
+                    itemIndex === index ? { ...item, acquiredAt: event.target.value } : item
+                  )),
+                })}
+              />
+            </div>
+            {!readOnly ? (
+              <Button
+                type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2 text-[11px] text-slate-500"
+                disabled={disabled} aria-label={`자격증 ${index + 1} 삭제`}
+                onClick={() => onChange({
+                  ...draft,
+                  certifications: draft.certifications.filter((_, itemIndex) => itemIndex !== index),
+                })}
+              >
+                <Trash2 className="h-3 w-3" /> 삭제
+              </Button>
+            ) : null}
+          </div>
+        ))}
+        <p className={`text-[11px] ${certificationError ? 'text-rose-700' : 'text-slate-500'}`}>
           {certificationError
             ? certificationError
-            : '대소문자와 중복 표기는 저장할 때 서버에서 하나로 정리됩니다.'}
+            : '증빙자료가 제출된 자격증만 적습니다. 같은 이름은 저장할 때 하나로 정리됩니다.'}
         </p>
       </section>
     </div>
@@ -522,7 +601,7 @@ export function ProfessionalProfileEditor({
       if (controller.signal.aborted || !aliveRef.current || currentScopeRef.current !== scopeKey) return;
       setError({
         kind: 'load',
-        message: resolveApiErrorMessage(loadError, '전문 프로필을 불러오지 못했습니다.'),
+        message: resolveApiErrorMessage(loadError, '인사정보를 불러오지 못했습니다.'),
       });
       setLoading(false);
     });
@@ -555,7 +634,7 @@ export function ProfessionalProfileEditor({
       if (controller.signal.aborted || !aliveRef.current || currentScopeRef.current !== reloadScope) return;
       setError({
         kind: 'load',
-        message: resolveApiErrorMessage(loadError, '최신 전문 프로필을 불러오지 못했습니다.'),
+        message: resolveApiErrorMessage(loadError, '최신 인사정보를 불러오지 못했습니다.'),
       });
     } finally {
       if (!controller.signal.aborted && aliveRef.current && currentScopeRef.current === reloadScope) setLoading(false);
@@ -595,7 +674,7 @@ export function ProfessionalProfileEditor({
       setDraft(storedProfileToDraft(canonical.profile));
       setExpectedRevision(canonical.revision);
       saveAttemptRef.current = null;
-      toast.success(`${personName}님의 전문 프로필을 저장했습니다.`);
+      toast.success(`${personName}님의 인사정보를 저장했습니다.`);
     } catch (saveError: unknown) {
       if (!aliveRef.current
         || currentScopeRef.current !== saveScope
@@ -608,7 +687,7 @@ export function ProfessionalProfileEditor({
       } else {
         setError({
           kind: 'save',
-          message: resolveApiErrorMessage(saveError, '전문 프로필을 저장하지 못했습니다. 입력값을 확인해 주세요.'),
+          message: resolveApiErrorMessage(saveError, '인사정보를 저장하지 못했습니다. 입력값을 확인해 주세요.'),
         });
       }
     } finally {
@@ -630,10 +709,10 @@ export function ProfessionalProfileEditor({
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
-            <GraduationCap className="h-4 w-4" /> {personName} — 전문 프로필
+            <GraduationCap className="h-4 w-4" /> {personName} — 학력·어학·자격
           </DialogTitle>
           <DialogDescription>
-            학력·영어 증빙·자격증을 인력 명부에 저장합니다. 참여인력 대시보드는 이 값을 그대로 조회합니다.
+            학력·어학·자격을 인력 명부에 저장합니다. 인사정보조회가 이 값을 그대로 읽습니다.
           </DialogDescription>
         </DialogHeader>
 
@@ -654,7 +733,7 @@ export function ProfessionalProfileEditor({
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6 py-1">
           {loading || !catalog || !scopeLoaded ? (
-            <div className="py-12 text-center text-sm text-slate-500">전문 프로필을 불러오는 중…</div>
+            <div className="py-12 text-center text-sm text-slate-500">인사정보를 불러오는 중…</div>
           ) : (
             <ProfessionalProfileFields
               catalog={catalog} draft={draft} onChange={setDraft}
@@ -670,7 +749,7 @@ export function ProfessionalProfileEditor({
               type="button" size="sm" onClick={() => void save()}
               disabled={loading || saving || !catalog || loadedScopeRef.current !== scopeKey || !!certificationDraftError(draft)}
             >
-              {saving ? '저장 중…' : '전문 프로필 저장'}
+              {saving ? '저장 중…' : '저장'}
             </Button>
           ) : null}
         </div>
@@ -709,7 +788,7 @@ export function NewPersonProfessionalProfileFields({
       setLoading(false);
     }).catch((loadError: unknown) => {
       if (controller.signal.aborted) return;
-      setError(resolveApiErrorMessage(loadError, '전문 프로필 입력 기준을 불러오지 못했습니다.'));
+      setError(resolveApiErrorMessage(loadError, '인사정보 입력 기준을 불러오지 못했습니다.'));
       setLoading(false);
     });
     return () => controller.abort();
@@ -722,9 +801,9 @@ export function NewPersonProfessionalProfileFields({
   };
 
   return (
-    <section className="space-y-3 rounded-xl border bg-slate-50/40 p-4" aria-label="신규 인력 전문 프로필">
+    <section className="space-y-3 rounded-xl border bg-slate-50/40 p-4" aria-label="신규 인력 인사정보">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">전문 프로필 <span className="font-normal text-slate-500">(선택)</span></h3>
+        <h3 className="text-sm font-semibold text-slate-800">인사정보 <span className="font-normal text-slate-500">(선택)</span></h3>
         <p className="mt-0.5 text-[11px] text-slate-500">입력한 경우에만 인력 등록과 함께 저장됩니다.</p>
       </div>
       {error ? (

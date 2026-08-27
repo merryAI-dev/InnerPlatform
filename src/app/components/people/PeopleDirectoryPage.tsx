@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Briefcase, CalendarClock, GraduationCap, Plus, RefreshCw, Search, UserPlus, Users,
+  AlertTriangle, Briefcase, CalendarClock, IdCard, Plus, RefreshCw, Search, UserPlus, Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { featureFlags } from '../../config/feature-flags';
@@ -40,6 +40,7 @@ import { Separator } from '../ui/separator';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../ui/table';
+import { PersonHrConsole } from './PersonHrConsole';
 import {
   NewPersonProfessionalProfileFields,
   ProfessionalProfileEditor,
@@ -188,12 +189,10 @@ interface PersonRow {
  * 인력 표. 근로형태 열은 두지 않는다 — 이름 옆에 붙는 신분 표시가 되기 때문이다.
  * 계약 형태가 필요한 자리는 계약 관리 다이얼로그뿐이고, 거기서는 그대로 보인다.
  */
-function PeopleTable({ rows, loading, onOpen, canReadProfile, onOpenProfile }: {
+function PeopleTable({ rows, loading, onOpen }: {
   rows: PersonRow[];
   loading: boolean;
   onOpen: (person: PersonRecord) => void;
-  canReadProfile: boolean;
-  onOpenProfile: (person: PersonRecord) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -204,15 +203,16 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, onOpenProfile }: {
             <TableHead className="min-w-[90px]">재직상태</TableHead>
             <TableHead className="min-w-[150px]">소속</TableHead>
             <TableHead className="min-w-[110px]">직급</TableHead>
+            <TableHead className="min-w-[100px]">직책</TableHead>
             <TableHead className="min-w-[100px]">입사일</TableHead>
             <TableHead className="min-w-[100px]">근속</TableHead>
-            <TableHead className="w-40" />
+            <TableHead className="w-28" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">
+              <TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">
                 {loading ? '불러오는 중…' : '조건에 맞는 인력이 없습니다.'}
               </TableCell>
             </TableRow>
@@ -239,24 +239,23 @@ function PeopleTable({ rows, loading, onOpen, canReadProfile, onOpenProfile }: {
                 {person.departmentTop || '-'}
                 {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
               </TableCell>
-              <TableCell className="text-xs">{person.grade || person.title || '-'}</TableCell>
+              {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
+              <TableCell className="text-xs">{person.grade || '-'}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">{person.title || '-'}</TableCell>
               <TableCell className="text-xs tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
               <TableCell className="text-xs tabular-nums">{tenure?.label || '-'}</TableCell>
               <TableCell>
                 <div className="flex items-center justify-end gap-1">
-                  {canReadProfile ? (
-                    <Button
-                      variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]"
-                      aria-label={`${person.name} 전문 프로필`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onOpenProfile(person);
-                      }}
-                    >
-                      <GraduationCap className="h-3 w-3" /> 전문 프로필
-                    </Button>
-                  ) : null}
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]">계약 관리</Button>
+                  <Button
+                    variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]"
+                    aria-label={`${person.name} 인사정보`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpen(person);
+                    }}
+                  >
+                    <IdCard className="h-3 w-3" /> 인사정보
+                  </Button>
                 </div>
               </TableCell>
             </TableRow>
@@ -281,6 +280,7 @@ export function PeopleDirectoryPage() {
   const [typeFilter, setTypeFilter] = useState<'ALL' | EmploymentType | 'SEPARATED'>('ALL');
   const [selected, setSelected] = useState<PersonRecord | null>(null);
   const [profilePerson, setProfilePerson] = useState<PersonRecord | null>(null);
+  const [hrPerson, setHrPerson] = useState<PersonRecord | null>(null);
   const [profileCapabilities, setProfileCapabilities] = useState({ read: false, write: false });
   const [draft, setDraft] = useState<EmploymentDraft>(emptyDraft());
   const [saving, setSaving] = useState(false);
@@ -302,6 +302,8 @@ export function PeopleDirectoryPage() {
   const asOf = today();
   const directoryScopeLoaded = loadedDirectoryScopeRef.current === directoryScopeKey;
   const scopedPeople = directoryScopeLoaded ? people : [];
+  // 인적사항 수정은 명부 쓰기 역할이 한다. 최종 판단은 BFF 가 하고 화면은 미리 가린다.
+  const canWritePersonProfile = ['admin', 'tenant_admin', 'finance'].includes(String(authUser?.role || ''));
   const scopedProfileCapabilities = directoryScopeLoaded
     ? profileCapabilities
     : { read: false, write: false };
@@ -425,6 +427,11 @@ export function PeopleDirectoryPage() {
   );
 
   const openPerson = (person: PersonRecord) => {
+    setHrPerson(person);
+  };
+
+  /** 인사정보 콘솔에서 계약 변경으로 넘어가는 자리. 계약 폼은 기존 흐름을 그대로 쓴다. */
+  const openEmploymentManager = (person: PersonRecord) => {
     setSelected(person);
     setDraft(emptyDraft('change'));
   };
@@ -627,7 +634,6 @@ export function PeopleDirectoryPage() {
 
       <PeopleTable
         rows={mainRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
-        canReadProfile={scopedProfileCapabilities.read} onOpenProfile={setProfilePerson}
       />
 
       {internRows.length > 0 || counts.INTERN > 0 ? (
@@ -638,7 +644,6 @@ export function PeopleDirectoryPage() {
           </div>
           <PeopleTable
             rows={internRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
-            canReadProfile={scopedProfileCapabilities.read} onOpenProfile={setProfilePerson}
           />
         </section>
       ) : null}
@@ -726,6 +731,23 @@ export function PeopleDirectoryPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── 인사정보: 인적사항·학력/어학/자격·계약 이력을 한 창에서 ── */}
+      {hrPerson && directoryScopeLoaded && authUser ? (
+        <PersonHrConsole
+          tenantId={orgId}
+          actor={authUser}
+          person={scopedPeople.find((item) => item.personId === hrPerson.personId) || hrPerson}
+          canReadProfile={scopedProfileCapabilities.read}
+          canWriteProfile={scopedProfileCapabilities.write}
+          canWritePerson={canWritePersonProfile}
+          asOf={asOf}
+          onClose={() => setHrPerson(null)}
+          onPersonUpdated={() => { void load(); }}
+          onManageEmployment={() => { openEmploymentManager(hrPerson); setHrPerson(null); }}
+          onEditProfessionalProfile={() => { setProfilePerson(hrPerson); setHrPerson(null); }}
+        />
+      ) : null}
 
       {profilePerson && scopedProfileCapabilities.read && authUser ? (
         <ProfessionalProfileEditor
