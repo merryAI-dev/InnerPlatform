@@ -8,7 +8,7 @@ import catalog from '../../policies/person-grades.json' with { type: 'json' };
  */
 
 function validate(value) {
-  if (value?.catalogVersion !== 1) throw new Error('person grade catalogVersion must be 1');
+  if (value?.catalogVersion !== 2) throw new Error('person grade catalogVersion must be 2');
   if (!Array.isArray(value.grades) || value.grades.length === 0) {
     throw new Error('person grades are required');
   }
