@@ -53,6 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
  */
 
 const NO_GRADE = '__NO_GRADE__';
+const CUSTOM_GRADE = '__CUSTOM_GRADE__';
 
 function formatDate(value?: string | null) {
   return value ? value.slice(0, 10) : '-';
@@ -181,6 +182,7 @@ export function PersonHrConsole({
 }) {
   const [form, setForm] = useState<PersonProfileFormValue>(() => personProfileFormFromRecord(person));
   const [saving, setSaving] = useState(false);
+  const [customGrade, setCustomGrade] = useState(false);
   const [profile, setProfile] = useState<StoredProfessionalProfile | null>(null);
   const [catalog, setCatalog] = useState<ProfessionalProfileCatalog | null>(null);
   const [profileLoading, setProfileLoading] = useState(canReadProfile);
@@ -266,7 +268,11 @@ export function PersonHrConsole({
     }
   };
 
-  const gradeOptionValue = form.grade && isKnownPersonGrade(form.grade) ? form.grade : NO_GRADE;
+  // 목록 밖 값(별도 직급체계)은 직접 입력 칸으로 보여 준다 - 지우거나 목록 값으로 바꿔치지 않는다.
+  const usesCustomGrade = customGrade || (!!form.grade && !isKnownPersonGrade(form.grade));
+  const gradeOptionValue = usesCustomGrade
+    ? CUSTOM_GRADE
+    : (form.grade && isKnownPersonGrade(form.grade) ? form.grade : NO_GRADE);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
@@ -356,7 +362,11 @@ export function PersonHrConsole({
                   <Select
                     value={gradeOptionValue}
                     disabled={!canWritePerson || saving}
-                    onValueChange={(value) => setForm({ ...form, grade: value === NO_GRADE ? '' : value })}
+                    onValueChange={(value) => {
+                      if (value === NO_GRADE) setForm({ ...form, grade: '' });
+                      else if (value === CUSTOM_GRADE) setCustomGrade(true);
+                      else { setCustomGrade(false); setForm({ ...form, grade: value }); }
+                    }}
                   >
                     <SelectTrigger className="mt-1 h-9 text-[13px]" aria-label="직급"><SelectValue placeholder="직급 선택" /></SelectTrigger>
                     <SelectContent>
@@ -364,12 +374,22 @@ export function PersonHrConsole({
                       {PERSON_GRADES.map((grade) => (
                         <SelectItem key={grade.code} value={grade.label}>{formatPersonGradeOption(grade)}</SelectItem>
                       ))}
+                      <SelectItem value={CUSTOM_GRADE}>직접 입력 (별도 직급체계)</SelectItem>
                     </SelectContent>
                   </Select>
-                  {form.grade && !isKnownPersonGrade(form.grade) ? (
-                    <p className="mt-1 text-[11px] text-amber-700">
-                      현재 값 &quot;{form.grade}&quot;은 오피스핸드북 직급이 아닙니다. 목록에서 고르면 바뀝니다.
-                    </p>
+                  {usesCustomGrade ? (
+                    <>
+                      <Input
+                        className="mt-2 h-9" maxLength={100} value={form.grade}
+                        disabled={!canWritePerson || saving}
+                        placeholder="예: 매니저"
+                        aria-label="직급 직접 입력"
+                        onChange={(event) => setForm({ ...form, grade: event.target.value })}
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        경영기획실(재경)과 사내벤처는 별도 직급체계를 씁니다. 그 외에는 목록에서 골라 주세요.
+                      </p>
+                    </>
                   ) : (
                     <p className="mt-1 text-[11px] text-slate-500">괄호 안은 대외 문서용 대응 직급입니다.</p>
                   )}

@@ -46,9 +46,12 @@ describe('인사정보 콘솔', () => {
     expect(source).not.toContain('person.age');
   });
 
-  it('직급은 카탈로그에서만 고르고 직책과 섞지 않는다', () => {
+  it('직급은 카탈로그에서 고르되 별도 직급체계는 직접 입력으로 남긴다', () => {
     expect(source).toContain('PERSON_GRADES.map');
     expect(source).toContain('formatPersonGradeOption(grade)');
     expect(source).toContain('직급과 다른 축입니다');
+    // 경영기획실(재경)·사내벤처는 별도 체계를 쓴다. 목록으로 막으면 그 사람들이 저장을 못 한다.
+    expect(source).toContain('직접 입력 (별도 직급체계)');
+    expect(source).toContain('aria-label="직급 직접 입력"');
   });
 });
