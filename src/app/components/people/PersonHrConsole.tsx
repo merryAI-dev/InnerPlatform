@@ -29,6 +29,7 @@ import {
   resolveCurrentEmployment,
   deriveAge,
   deriveTenure,
+  deriveYearsSinceDegree,
   resolveSeparationDate,
   type EmploymentState,
   type EmploymentType,
@@ -68,8 +69,8 @@ function SummaryField({ icon, label, value }: { icon: ReactNode; label: string; 
     <div className="flex items-start gap-2">
       <span className="mt-0.5 text-slate-400" aria-hidden>{icon}</span>
       <div className="min-w-0">
-        <p className="text-[11px] text-slate-500">{label}</p>
-        <p className="truncate text-[13px] font-medium text-slate-900">{value || '-'}</p>
+        <p className="text-[14px] text-slate-500">{label}</p>
+        <p className="truncate text-[14px] font-medium text-slate-900">{value || '-'}</p>
       </div>
     </div>
   );
@@ -94,7 +95,7 @@ function RecordCard({
           <span className="text-slate-500" aria-hidden>{icon}</span>
           {title}
         </h4>
-        <span className="text-[11px] tabular-nums text-slate-500">{count}건</span>
+        <span className="text-[12px] tabular-nums text-slate-500">{count}건</span>
       </header>
       <div className="px-3 py-2.5">
         {count === 0
@@ -117,7 +118,7 @@ function RecordRow({ primary, secondary, hasEvidence }: {
         {/* 증빙이 붙은 항목만 표시한다 - 없는 것을 빨갛게 알리면 화면이 경고로 뒤덮인다. */}
         {hasEvidence ? <FileCheck2 className="h-3 w-3 shrink-0 text-emerald-600" aria-label="증빙 있음" /> : null}
       </p>
-      {secondary ? <p className="text-[11px] text-slate-500">{secondary}</p> : null}
+      {secondary ? <p className="text-[14px] text-slate-500">{secondary}</p> : null}
     </div>
   );
 }
@@ -248,6 +249,32 @@ export function PersonHrConsole({
   const tenure = useMemo(() => deriveTenure(person.joinedAt, asOf), [person.joinedAt, asOf]);
   const age = useMemo(() => deriveAge(person.birthDate, asOf), [person.birthDate, asOf]);
 
+  /**
+   * 최고 학력 한 줄. 학력 구분의 순위(catalog rank)가 기준이며, 학위취득년도는 졸업증에 찍힌 해다.
+   * 목록에서 오는 요약이 있으면 그것을 먼저 쓴다 - 상세를 열기 전에도 같은 값이 보이게.
+   */
+  const highestEducation = useMemo(() => {
+    const records = profile?.educationRecords || [];
+    if (records.length === 0) {
+      const summary = person.hrSummary?.highestEducationDisplayText || '';
+      return summary
+        ? { summary, degreeYear: person.hrSummary?.highestDegreeYear || '' }
+        : null;
+    }
+    const ranked = [...records].sort((left, right) => (
+      (catalog?.educationAttainments.find((entry) => entry.code === right.attainmentCode)?.rank || 0)
+      - (catalog?.educationAttainments.find((entry) => entry.code === left.attainmentCode)?.rank || 0)
+    ));
+    const top = ranked[0];
+    const parts = [educationLabelOf(top.attainmentCode), top.institutionName, top.major].filter(Boolean);
+    return { summary: parts.join(' · '), degreeYear: top.degreeYear || '' };
+  }, [profile, catalog, person.hrSummary]);
+
+  const yearsSinceDegree = useMemo(
+    () => deriveYearsSinceDegree(highestEducation?.degreeYear, asOf),
+    [highestEducation, asOf],
+  );
+
   const educationLabelOf = (code: string) => (
     catalog?.educationAttainments.find((entry) => entry.code === code)?.label || code
   );
@@ -296,24 +323,24 @@ export function PersonHrConsole({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
-      <DialogContent className="flex max-h-[90vh] max-w-[940px] flex-col overflow-hidden p-0">
+      <DialogContent className="flex max-h-[92vh] w-[min(96vw,1120px)] max-w-[1120px] flex-col overflow-hidden p-0">
         <DialogHeader className="sr-only">
           <DialogTitle>{person.name} 인사정보</DialogTitle>
           <DialogDescription>인적사항, 학력·어학·자격, 계약 이력을 확인하고 수정합니다.</DialogDescription>
         </DialogHeader>
 
         {/* ── 인사기록카드 머리 — 누구인지, 지금 어떤 상태인지 한 줄에 ── */}
-        <div className="border-b border-slate-200 bg-white px-6 py-4">
+        <div className="border-b border-slate-200 bg-white px-7 py-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex items-start gap-3">
-              <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full border border-slate-200 bg-slate-50 text-slate-400">
-                <User className="h-7 w-7" aria-hidden />
+              <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full border border-slate-200 bg-slate-50 text-slate-400">
+                <User className="h-8 w-8" aria-hidden />
               </div>
               <div className="min-w-0">
                 <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-[17px] font-semibold text-slate-950">{person.name}</span>
-                  {person.grade ? <span className="text-[14px] font-medium text-slate-700">{person.grade}</span> : null}
-                  {person.nickname ? <span className="text-[12px] text-slate-500">({person.nickname})</span> : null}
+                  <span className="text-[22px] font-semibold text-slate-950">{person.name}</span>
+                  {person.grade ? <span className="text-[16px] font-medium text-slate-700">{person.grade}</span> : null}
+                  {person.nickname ? <span className="text-[14px] text-slate-500">({person.nickname})</span> : null}
                 </p>
                 <p className="mt-1 text-[12px] text-slate-600">
                   {[person.departmentTop, person.departmentMid, person.title].filter(Boolean).join(' · ') || '소속 미지정'}
@@ -339,41 +366,54 @@ export function PersonHrConsole({
                 value={tenure ? tenure.label : '입사일 필요'}
               />
               <SummaryField icon={<MapPin className="h-4 w-4" />} label="근무지" value={person.workLocation || '미등록'} />
+              {/* KOICA 제안서가 '학위 취득 후 경력 몇 년' 을 본다. 학력 카드를 열지 않고 여기서 읽힌다. */}
+              <SummaryField
+                icon={<GraduationCap className="h-4 w-4" />}
+                label="최종학력"
+                value={highestEducation ? highestEducation.summary : (canReadProfile ? '미등록' : '조회 권한 없음')}
+              />
+              <SummaryField
+                icon={<CalendarClock className="h-4 w-4" />}
+                label="학위취득"
+                value={highestEducation?.degreeYear
+                  ? `${highestEducation.degreeYear}년${yearsSinceDegree === null ? '' : ` · 취득 후 ${yearsSinceDegree}년`}`
+                  : '미등록'}
+              />
             </div>
           </div>
         </div>
 
         <Tabs defaultValue="records" className="flex min-h-0 flex-1 flex-col">
-          <TabsList className="mx-6 mt-4 w-fit">
-            <TabsTrigger value="basic" className="text-[13px]">기본정보</TabsTrigger>
-            <TabsTrigger value="records" className="text-[13px]">인사정보조회</TabsTrigger>
-            <TabsTrigger value="detail" className="text-[13px]">상세정보</TabsTrigger>
+          <TabsList className="mx-7 mt-5 w-fit">
+            <TabsTrigger value="basic" className="px-4 py-2 text-[14px]">기본정보</TabsTrigger>
+            <TabsTrigger value="records" className="px-4 py-2 text-[14px]">인사정보조회</TabsTrigger>
+            <TabsTrigger value="detail" className="px-4 py-2 text-[14px]">상세정보</TabsTrigger>
           </TabsList>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6 pt-4">
             {/* ── 기본정보: 사람이 적는 인적사항 ── */}
             <TabsContent value="basic" className="mt-0 space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label className="text-[12px]">이름</Label>
-                  <Input className="mt-1 h-9" value={person.name} disabled readOnly />
-                  <p className="mt-1 text-[11px] text-slate-500">이름은 재직자 명단이 정하므로 여기서 고치지 않습니다.</p>
+                  <Input className="mt-1.5 h-10" value={person.name} disabled readOnly />
+                  <p className="mt-1 text-[14px] text-slate-500">이름은 재직자 명단이 정하므로 여기서 고치지 않습니다.</p>
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-nickname">닉네임</Label>
                   <Input
-                    id="hr-nickname" className="mt-1 h-9" value={form.nickname} disabled={!canWritePerson || saving}
+                    id="hr-nickname" className="mt-1.5 h-10" value={form.nickname} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, nickname: event.target.value })}
                   />
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-birth">생년월일</Label>
                   <Input
-                    id="hr-birth" type="date" className="mt-1 h-9 tabular-nums" value={form.birthDate}
+                    id="hr-birth" type="date" className="mt-1.5 h-10 tabular-nums" value={form.birthDate}
                     disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, birthDate: event.target.value })}
                   />
-                  <p className="mt-1 text-[11px] text-slate-500">
+                  <p className="mt-1 text-[14px] text-slate-500">
                     만 나이는 저장하지 않고 오늘({asOf}) 기준으로 계산합니다.
                   </p>
                 </div>
@@ -388,7 +428,7 @@ export function PersonHrConsole({
                       else { setCustomGrade(false); setForm({ ...form, grade: value }); }
                     }}
                   >
-                    <SelectTrigger className="mt-1 h-9 text-[13px]" aria-label="직급"><SelectValue placeholder="직급 선택" /></SelectTrigger>
+                    <SelectTrigger className="mt-1.5 h-10 text-[14px]" aria-label="직급"><SelectValue placeholder="직급 선택" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NO_GRADE}>미지정</SelectItem>
                       {gradeOptions.map((grade) => (
@@ -406,26 +446,26 @@ export function PersonHrConsole({
                         aria-label="직급 직접 입력"
                         onChange={(event) => setForm({ ...form, grade: event.target.value })}
                       />
-                      <p className="mt-1 text-[11px] text-slate-500">
+                      <p className="mt-1 text-[14px] text-slate-500">
                         경영기획실(재경)과 사내벤처는 별도 직급체계를 씁니다. 그 외에는 목록에서 골라 주세요.
                       </p>
                     </>
                   ) : (
-                    <p className="mt-1 text-[11px] text-slate-500">괄호 안은 대외 문서용 대응 직급입니다.</p>
+                    <p className="mt-1 text-[14px] text-slate-500">괄호 안은 대외 문서용 대응 직급입니다.</p>
                   )}
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-title">직책</Label>
                   <Input
-                    id="hr-title" className="mt-1 h-9" value={form.title} disabled={!canWritePerson || saving}
+                    id="hr-title" className="mt-1.5 h-10" value={form.title} disabled={!canWritePerson || saving}
                     placeholder="예: 팀장" onChange={(event) => setForm({ ...form, title: event.target.value })}
                   />
-                  <p className="mt-1 text-[11px] text-slate-500">직급과 다른 축입니다. 맡은 역할을 적습니다.</p>
+                  <p className="mt-1 text-[14px] text-slate-500">직급과 다른 축입니다. 맡은 역할을 적습니다.</p>
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-email">이메일</Label>
                   <Input
-                    id="hr-email" className="mt-1 h-9" value={form.email} disabled={!canWritePerson || saving}
+                    id="hr-email" className="mt-1.5 h-10" value={form.email} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, email: event.target.value })}
                   />
                 </div>
@@ -434,7 +474,7 @@ export function PersonHrConsole({
                   {/* 선택지는 설정 > 조직에서 온다. 지금 저장된 값이 목록에 없어도 지우지 않고 남긴다. */}
                   <select
                     id="hr-dept-top"
-                    className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] disabled:opacity-50"
+                    className="mt-1.5 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[14px] disabled:opacity-50"
                     value={form.departmentTop} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, departmentTop: event.target.value, departmentMid: '' })}
                   >
@@ -448,7 +488,7 @@ export function PersonHrConsole({
                   <Label className="text-[12px]" htmlFor="hr-dept-mid">팀</Label>
                   <select
                     id="hr-dept-mid"
-                    className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] disabled:opacity-50"
+                    className="mt-1.5 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[14px] disabled:opacity-50"
                     value={form.departmentMid} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, departmentMid: event.target.value })}
                   >
@@ -461,7 +501,7 @@ export function PersonHrConsole({
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-location">근무지</Label>
                   <Input
-                    id="hr-location" className="mt-1 h-9" value={form.workLocation} disabled={!canWritePerson || saving}
+                    id="hr-location" className="mt-1.5 h-10" value={form.workLocation} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, workLocation: event.target.value })}
                   />
                 </div>
@@ -474,7 +514,7 @@ export function PersonHrConsole({
                   </Button>
                 </div>
               ) : (
-                <p className="text-[12px] text-slate-500">조회 권한만 있어 인적사항을 고칠 수 없습니다.</p>
+                <p className="text-[14px] text-slate-500">조회 권한만 있어 인적사항을 고칠 수 없습니다.</p>
               )}
             </TabsContent>
 
@@ -485,12 +525,12 @@ export function PersonHrConsole({
                   학력·어학·자격 정보를 볼 권한이 없습니다. 계약 이력은 상세정보 탭에서 확인할 수 있습니다.
                 </p>
               ) : profileLoading ? (
-                <p className="py-10 text-center text-[13px] text-slate-500">인사정보를 불러오는 중…</p>
+                <p className="py-10 text-center text-[14px] text-slate-500">인사정보를 불러오는 중…</p>
               ) : profileError ? (
                 <div className="rounded-md border border-rose-200 bg-white px-3 py-3 text-[12px] text-rose-700" role="alert">
                   <p>{profileError}</p>
                   <Button
-                    variant="outline" size="sm" className="mt-2 h-7 gap-1 text-[11px]"
+                    variant="outline" size="sm" className="mt-2 h-7 gap-1 text-[12px]"
                     onClick={() => setReloadToken((token) => token + 1)}
                   >
                     <RefreshCw className="h-3 w-3" /> 다시 불러오기
@@ -574,18 +614,18 @@ export function PersonHrConsole({
                       <span className="text-[12px] tabular-nums text-slate-700">
                         {formatDate(item.startDate)} ~ {formatDate(item.endDate)}
                       </span>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-[12px]">
                         {EMPLOYMENT_TYPE_LABELS[item.type as EmploymentType]}
                       </Badge>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-[12px]">
                         {EMPLOYMENT_STATE_LABELS[item.state as EmploymentState]}
                       </Badge>
-                      {item.note ? <span className="text-[11px] text-slate-500">{item.note}</span> : null}
+                      {item.note ? <span className="text-[14px] text-slate-500">{item.note}</span> : null}
                     </div>
                   ))}
                 </div>
               </RecordCard>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[14px] text-slate-500">
                 계약 이력은 지우지 않고 쌓습니다 — 지난 기간의 참여율이 왜 그 기준이었는지 설명할 근거가 남아야 합니다.
               </p>
               {canWritePerson ? (
@@ -597,7 +637,7 @@ export function PersonHrConsole({
           </div>
         </Tabs>
 
-        <div className="flex justify-end border-t border-slate-200 px-6 py-3">
+        <div className="flex justify-end border-t border-slate-200 px-7 py-4">
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>닫기</Button>
         </div>
       </DialogContent>

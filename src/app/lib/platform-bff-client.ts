@@ -2866,6 +2866,13 @@ export interface PersonRecord {
   employments: PersonEmploymentRecord[];
   uid: string | null;
   note?: string;
+  /** 인사정보 읽기 권한이 있을 때만 실린다. 원문이 아니라 화면이 바로 읽을 요약이다. */
+  hrSummary?: {
+    highestEducationDisplayText: string;
+    highestDegreeYear: string;
+    englishEvidenceDisplayText: string;
+    certificationsDisplayText: string;
+  };
 }
 
 export async function provisionProjectEvidenceDriveRootViaBff(params: {

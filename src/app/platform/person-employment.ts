@@ -147,6 +147,21 @@ export function deriveAge(birthDate: string | null | undefined, asOf: string): n
   return Math.max(0, ay - by - (beforeBirthday ? 1 : 0));
 }
 
+/**
+ * 학위 취득 후 몇 해가 지났는지.
+ *
+ * KOICA 제안서는 '학위 취득일로부터 몇 년 경력' 을 본다. 학위취득년도(졸업증에 찍힌 해)만
+ * 있으면 언제 기준으로든 다시 계산되므로 만 나이·근속과 같은 방식으로 저장하지 않는다.
+ * 해 단위로만 적힌 값이라 연 단위로 센다.
+ */
+export function deriveYearsSinceDegree(degreeYear: string | null | undefined, asOf: string): number | null {
+  const year = Number(String(degreeYear || '').trim());
+  if (!Number.isInteger(year) || year < 1900 || year > 2100) return null;
+  const asOfYear = Number(String(asOf || '').slice(0, 4));
+  if (!Number.isInteger(asOfYear) || asOfYear < year) return null;
+  return asOfYear - year;
+}
+
 /** 근속. joinedAt 만 있으면 언제 기준으로든 다시 계산된다 — 저장값이 낡아도 화면은 정확하다. */
 export function deriveTenure(joinedAt: string | null, asOf: string): Tenure | null {
   if (!isIsoDate(joinedAt) || !isIsoDate(asOf) || joinedAt > asOf) return null;
