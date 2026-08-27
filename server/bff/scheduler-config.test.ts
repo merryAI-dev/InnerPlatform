@@ -10,8 +10,8 @@ const VERCEL_OWNED_CRONS = [
   ['/api/internal/workers/work-queue/run', '15 2 * * *'],
   ['/api/internal/workers/outbox/run', '30 2 * * *'],
   ['/api/internal/workers/payroll/run', '45 2 * * *'],
-  // 주정산 완료 다이제스트. 18:30 / 23:59 KST = 09:30 / 14:59 UTC.
-  ['/api/internal/workers/cashflow-weekly-digest/run', '30 9 * * *'],
+  // 주정산 완료 다이제스트. 19:00 / 23:59 KST = 10:00 / 14:59 UTC.
+  ['/api/internal/workers/cashflow-weekly-digest/run', '0 10 * * *'],
   ['/api/internal/workers/cashflow-weekly-digest/run', '59 14 * * *'],
 ];
 

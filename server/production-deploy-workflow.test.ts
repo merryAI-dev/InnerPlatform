@@ -75,13 +75,26 @@ describe('production deployment workflow safety', () => {
   it('promotes the canonical production alias before verifying it', () => {
     expect(workflowText).toContain('promote_alias:');
     expect(workflowText).toContain('default: true');
-    expect(workflowText.match(/if: needs\.preflight\.outputs\.promote == 'true'/g)).toHaveLength(2);
+    expect(workflowText.match(/if: needs\.preflight\.outputs\.promote == 'true'/g)).toHaveLength(3);
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
     expect(workflowText).toContain('Promote canonical production alias');
     expect(workflowText).toContain('"${VERCEL_CANONICAL_PRODUCTION_HOST}"');
     expect(workflowText).toContain('--scope merryai-devs-projects');
     expect(workflowText.indexOf('Promote canonical production alias')).toBeLessThan(
+      workflowText.indexOf('Verify canonical production alias'),
+    );
+  });
+
+  // alias 만으로는 Vercel 이 크론을 갱신하지 않는다. 이 스텝이 빠지면 스케줄러 설정이
+  // 조용히 옛 배포에 얼어붙는다 - 2026-07-14 ~ 08-27 동안 실제로 그랬다.
+  it('promotes the deployment itself so cron jobs are re-registered', () => {
+    expect(workflowText).toContain('Promote deployment to current production');
+    expect(workflowText).toContain('promote \\\n            "${DEPLOYMENT_URL}"');
+    expect(workflowText.indexOf('Promote canonical production alias')).toBeLessThan(
+      workflowText.indexOf('Promote deployment to current production'),
+    );
+    expect(workflowText.indexOf('Promote deployment to current production')).toBeLessThan(
       workflowText.indexOf('Verify canonical production alias'),
     );
   });
