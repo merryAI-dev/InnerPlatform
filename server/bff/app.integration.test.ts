@@ -1636,7 +1636,8 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       educationRecords: [{
         attainmentCode: 'MASTER_GRADUATED',
         institutionName: 'University of Sussex',
-        countryCode: 'GB',
+        // 옛 국가 코드(GB)로 보내도 국내/해외 구분으로 옮겨 저장된다.
+        regionCode: 'OVERSEAS_ENGLISH',
         major: 'private-major-secret',
       }],
       englishEvidence: [{
@@ -1733,7 +1734,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(JSON.stringify(dashboard.body)).not.toContain('profile-secret@example.com');
     expect(JSON.stringify(dashboard.body)).not.toContain('private-person-note');
     expect(JSON.stringify(dashboard.body)).not.toContain('private-major-secret');
-    for (const forbidden of ['"testedAt"', '"major"', '"countryCode"', '"resultValue"', '"professionalProfile"', 'PMP', 'University of Sussex']) {
+    for (const forbidden of ['"testedAt"', '"major"', '"countryCode"', '"regionCode"', '"resultValue"', '"professionalProfile"', 'PMP', 'University of Sussex']) {
       expect(JSON.stringify(dashboard.body)).not.toContain(forbidden);
     }
     expect(await snapshotProtectedCollections()).toEqual(beforeDashboardRead);
