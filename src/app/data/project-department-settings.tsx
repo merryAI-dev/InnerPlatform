@@ -2,8 +2,11 @@ import { doc, onSnapshot, setDoc, type Firestore } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { getOrgRootPath } from '../lib/firebase';
 import { useFirebase } from '../lib/firebase-context';
+import { activeTeamLabels } from './organization-settings';
+import { useOrganizationSettings } from './use-organization-settings';
 import {
   PROJECT_DEPARTMENT_OPTIONS,
+  dedupeProjectDepartmentLabels,
   buildProjectDepartmentSettingsOptions,
   resolveProjectDepartmentSettingsOptions,
   type ProjectDepartmentSettingsOption,
@@ -49,8 +52,16 @@ export async function saveProjectDepartmentSettings(
   );
 }
 
+/**
+ * 프로젝트 담당조직 선택지.
+ *
+ * 뿌리는 조직 목록(settings/organizations)이다 - 조직 개편을 두 곳에서 따로 고치면
+ * CIC1 이 한쪽에만 남는다. 예전 담당조직 문서에만 있던 값은 지우지 않고 함께 보여 주다가,
+ * 설정 화면에서 정리한다.
+ */
 export function useProjectDepartmentSettings() {
   const { db, isOnline, orgId } = useFirebase();
+  const { groups } = useOrganizationSettings();
   const [options, setOptions] = useState<string[]>(() => resolveProjectDepartmentSettingsOptions(null));
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,8 +94,14 @@ export function useProjectDepartmentSettings() {
     await saveProjectDepartmentSettings(db, orgId, labels, actorId);
   }, [db, orgId]);
 
+  // 조직 트리의 활성 팀이 먼저 오고, 예전 문서에만 있던 값이 뒤에 붙는다.
+  const mergedOptions = useMemo(
+    () => dedupeProjectDepartmentLabels(['미지정', ...activeTeamLabels(groups), ...options]),
+    [groups, options],
+  );
+
   return {
-    options,
+    options: mergedOptions,
     isLoading,
     error,
     saveOptions,

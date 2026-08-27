@@ -123,7 +123,7 @@ service cloud.firestore {
 
     function isCatchallExcludedPath(collection, document) {
       return isCatchallExcludedCollection(collection)
-        || (collection == 'settings' && document == 'project-departments');
+        || (collection == 'settings' && document in ['project-departments', 'organizations']);
     }
 
     // Canonical finance/project state is written only by the BFF/JVM Admin SDK.
@@ -329,6 +329,14 @@ service cloud.firestore {
 
     // ── 관리자 설정: 프로젝트 선택값 ──
     match /orgs/{orgId}/settings/project-departments {
+      allow read: if canRead(orgId);
+      allow write: if isAdmin(orgId);
+    }
+
+    // ── 관리자 설정: 조직(소속) 목록 ──
+    // 인력 명부의 소속·팀과 프로젝트 담당조직이 함께 뻗어 나오는 뿌리다.
+    // 조직 개편은 배포와 무관하게 일어나므로 관리자가 직접 고친다.
+    match /orgs/{orgId}/settings/organizations {
       allow read: if canRead(orgId);
       allow write: if isAdmin(orgId);
     }

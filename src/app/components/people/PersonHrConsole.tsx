@@ -34,6 +34,8 @@ import {
   type EmploymentType,
 } from '../../platform/person-employment';
 import { PERSON_GRADES, formatPersonGradeOption, isKnownPersonGrade } from '../../platform/person-grade';
+import { optionsWithCurrentValue } from '../../data/organization-settings';
+import { useOrganizationSettings } from '../../data/use-organization-settings';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -183,6 +185,7 @@ export function PersonHrConsole({
   const [form, setForm] = useState<PersonProfileFormValue>(() => personProfileFormFromRecord(person));
   const [saving, setSaving] = useState(false);
   const [customGrade, setCustomGrade] = useState(false);
+  const { groups: organizationGroups } = useOrganizationSettings();
   const [profile, setProfile] = useState<StoredProfessionalProfile | null>(null);
   const [catalog, setCatalog] = useState<ProfessionalProfileCatalog | null>(null);
   const [profileLoading, setProfileLoading] = useState(canReadProfile);
@@ -222,6 +225,17 @@ export function PersonHrConsole({
     });
     return () => controller.abort();
   }, [tenantId, actor, person.personId, canReadProfile, reloadToken]);
+
+  // 소속·팀 선택지는 조직 목록에서 뻗어 나온다. 소속을 고르면 그 아래 팀만 보인다.
+  const groupOptions = useMemo(
+    () => organizationGroups.filter((group) => group.active).map((group) => group.label),
+    [organizationGroups],
+  );
+  const teamOptions = useMemo(() => {
+    const selected = organizationGroups.find((group) => group.label === form.departmentTop);
+    const source = selected ? [selected] : organizationGroups;
+    return source.flatMap((group) => group.teams.filter((team) => team.active).map((team) => team.label));
+  }, [organizationGroups, form.departmentTop]);
 
   const current = useMemo(() => resolveCurrentEmployment(person, asOf), [person, asOf]);
   const separated = useMemo(() => resolveSeparationDate(person), [person]);
@@ -411,17 +425,32 @@ export function PersonHrConsole({
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-dept-top">소속</Label>
-                  <Input
-                    id="hr-dept-top" className="mt-1 h-9" value={form.departmentTop} disabled={!canWritePerson || saving}
-                    onChange={(event) => setForm({ ...form, departmentTop: event.target.value })}
-                  />
+                  {/* 선택지는 설정 > 조직에서 온다. 지금 저장된 값이 목록에 없어도 지우지 않고 남긴다. */}
+                  <select
+                    id="hr-dept-top"
+                    className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] disabled:opacity-50"
+                    value={form.departmentTop} disabled={!canWritePerson || saving}
+                    onChange={(event) => setForm({ ...form, departmentTop: event.target.value, departmentMid: '' })}
+                  >
+                    <option value="">미지정</option>
+                    {optionsWithCurrentValue(groupOptions, form.departmentTop).map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-dept-mid">팀</Label>
-                  <Input
-                    id="hr-dept-mid" className="mt-1 h-9" value={form.departmentMid} disabled={!canWritePerson || saving}
+                  <select
+                    id="hr-dept-mid"
+                    className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] disabled:opacity-50"
+                    value={form.departmentMid} disabled={!canWritePerson || saving}
                     onChange={(event) => setForm({ ...form, departmentMid: event.target.value })}
-                  />
+                  >
+                    <option value="">미지정</option>
+                    {optionsWithCurrentValue(teamOptions, form.departmentMid).map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <Label className="text-[12px]" htmlFor="hr-location">근무지</Label>
