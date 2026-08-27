@@ -31,7 +31,7 @@
     },
     {
       "path": "/api/internal/workers/cashflow-weekly-digest/run",
-      "schedule": "0 10 * * *"
+      "schedule": "30 9 * * *"
     },
     {
       "path": "/api/internal/workers/cashflow-weekly-digest/run",
