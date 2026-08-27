@@ -88,6 +88,12 @@ import { createBusinessCardGeminiAiService } from './business-card-gemini-ai.mjs
 import { createBusinessCardStorageService } from './business-card-storage.mjs';
 import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 import { createSlackAlertService } from './slack-alerts.mjs';
+import {
+  buildCashflowWeeklyDigestMessage,
+  kstDayWindow,
+  kstTimeLabel,
+  selectCompletedInWindow,
+} from './cashflow-weekly-digest.mjs';
 import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterparty-budget-history.mjs';
 import {
   assertBffRuntimeSafety,
@@ -1168,6 +1174,77 @@ export function createBffApp(options = {}) {
   });
   app.get('/api/internal/workers/client-errors/run', runClientErrorSlackWorkerRoute);
   app.post('/api/internal/workers/client-errors/run', runClientErrorSlackWorkerRoute);
+
+  // 주정산 완료를 하루치로 모아 알린다. JVM 이 쓴 완료 기록을 읽기만 하고 상태를 바꾸지 않는다.
+  const runCashflowWeeklyDigestWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || 'mysc';
+
+    if (!cashflowSlackService.enabled) {
+      res.status(200).json({
+        ok: true,
+        worker: 'cashflow_weekly_digest',
+        enabled: false,
+        reason: 'cashflow_slack_not_configured',
+        completed: 0,
+        delivered: 0,
+      });
+      return;
+    }
+
+    const at = now();
+    const window = kstDayWindow(at);
+    const snapshot = await db
+      .collection(`orgs/${tenantId}/cashflow_weekly_update_completions`)
+      .where('completedAt', '>=', window.startAt)
+      .where('completedAt', '<', window.endAt)
+      .get();
+    const completions = selectCompletedInWindow(snapshot.docs.map((doc) => doc.data() || {}), window);
+
+    const projectIds = [...new Set(completions.map((item) => readOptionalText(item.projectId)).filter(Boolean))];
+    const memberUids = [...new Set(completions.map((item) => readOptionalText(item.completedByUid)).filter(Boolean))];
+    const [projectSnapshots, memberSnapshots] = await Promise.all([
+      Promise.all(projectIds.map((id) => db.doc(`orgs/${tenantId}/projects/${id}`).get())),
+      Promise.all(memberUids.map((uid) => db.doc(`orgs/${tenantId}/members/${uid}`).get())),
+    ]);
+    const projectNames = new Map(projectSnapshots.map((snap, index) => {
+      const project = snap.exists ? snap.data() || {} : {};
+      return [projectIds[index], readOptionalText(project.name)
+        || readOptionalText(project.officialContractName)
+        || readOptionalText(project.projectCode)
+        || projectIds[index]];
+    }));
+    const slackUserIds = new Map(memberSnapshots.map((snap, index) => [
+      memberUids[index],
+      readOptionalText((snap.exists ? snap.data() || {} : {}).slackUserId),
+    ]));
+
+    const entries = completions.map((item) => ({
+      projectName: projectNames.get(readOptionalText(item.projectId)) || readOptionalText(item.projectId),
+      completedByName: readOptionalText(item.completedByName),
+      slackUserId: slackUserIds.get(readOptionalText(item.completedByUid)) || '',
+    }));
+    const message = buildCashflowWeeklyDigestMessage({
+      date: window.date,
+      timeLabel: kstTimeLabel(at),
+      entries,
+    });
+    if (message) {
+      await cashflowSlackService.notifyMessage(message);
+    }
+
+    res.status(200).json({
+      ok: true,
+      worker: 'cashflow_weekly_digest',
+      enabled: true,
+      tenantId,
+      date: window.date,
+      completed: entries.length,
+      delivered: message ? 1 : 0,
+    });
+  });
+  app.get('/api/internal/workers/cashflow-weekly-digest/run', runCashflowWeeklyDigestWorkerRoute);
+  app.post('/api/internal/workers/cashflow-weekly-digest/run', runCashflowWeeklyDigestWorkerRoute);
 
   app.post('/api/v1/client-errors', asyncHandler(async (req, res) => {
     req.context = await resolveApiRequestContext(req, {

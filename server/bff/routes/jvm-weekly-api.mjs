@@ -4802,12 +4802,22 @@ export function mountJvmWeeklyApiRoutes(app, {
       { cashflowWrite: true },
     );
     void Promise.resolve().then(async () => {
-      const { requestedByName } = await readCashflowRequestPartyNames({
-        db,
-        tenantId: req.context.tenantId,
-        record: { requestedByUid: req.context.actorId },
-      });
-      notifyCashflowSlack(`*[MYSCube] 주정산 완료*\n프로젝트: ${projectId}\n대상: ${hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth} ${hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo}주차\n처리자: ${requestedByName || '미확인'}`);
+      const [projectSnapshot, { requestedByName }] = await Promise.all([
+        db.doc(`orgs/${req.context.tenantId}/projects/${projectId}`).get(),
+        readCashflowRequestPartyNames({
+          db,
+          tenantId: req.context.tenantId,
+          record: { requestedByUid: req.context.actorId },
+        }),
+      ]);
+      const project = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
+      const projectName = readOptionalText(project.name)
+        || readOptionalText(project.officialContractName)
+        || readOptionalText(project.projectCode)
+        || projectId;
+      const yearMonth = hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth;
+      const weekNo = hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo;
+      notifyCashflowSlack(`*[MYSCube] 주정산 완료*\n프로젝트명: ${projectName}\n대상: ${yearMonth} ${weekNo}주차\n처리자: ${requestedByName || '미확인'}`);
     }).catch(() => {});
     res.status(200).json(result);
   }));
