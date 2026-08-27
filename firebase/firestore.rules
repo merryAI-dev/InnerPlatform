@@ -224,11 +224,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // 포털 '내 프로필'. 생년월일·연락처·학력이 들어 있어 조직 구성원 전체가 볼 값이 아니다.
-    // 본인 문서만 읽고 쓴다 - 인사 담당자는 인력 명부(persons) 쪽 권한 경로로 본다.
+    // 은퇴한 컬렉션. 포털 마이페이지는 인력 명부(persons)를 읽는다.
+    // 지우는 대신 닫아 둔다 - 제외 목록에서 빼면 catchall 의 canRead 가 걸려 조직 전체가 읽게 된다.
     match /orgs/{orgId}/careerProfiles/{uid} {
-      allow read: if canRead(orgId) && request.auth.uid == uid;
-      allow write: if canWrite(orgId) && request.auth.uid == uid;
+      allow read, write: if false;
     }
 
     match /orgs/{orgId}/persons/{personId} {

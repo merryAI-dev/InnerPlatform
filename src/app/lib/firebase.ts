@@ -320,7 +320,6 @@ export const ORG_COLLECTIONS = {
   projectRequestDrafts: 'projectRequestDrafts',
   projectDashboardProjects: 'project_dashboard_projects',
   projectMigrationCandidates: 'project_migration_candidates',
-  careerProfiles: 'careerProfiles',
   trainingCourses: 'trainingCourses',
   trainingEnrollments: 'trainingEnrollments',
 } as const;
