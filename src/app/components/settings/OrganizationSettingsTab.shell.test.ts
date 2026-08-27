@@ -39,7 +39,7 @@ describe('조직 설정', () => {
     expect(source).toContain('usePersonGradeSettings');
     expect(source).toContain('목록에 없는 값을 쓰는 사람');
     expect(source).toContain('staleGrades');
-    expect(source).toContain('모든 인력의 소속·팀·직급이 지금 목록과 맞습니다.');
+    expect(source).toContain('모든 인력의 대분류·중분류·직급이 지금 목록과 맞습니다.');
   });
 
   it('프로젝트 담당조직과 인력 소속이 같은 조직 목록에서 뻗어 나온다', () => {

@@ -128,6 +128,27 @@ export function resolveSeparationDate(person: Person): string | null {
     .at(-1) || null;
 }
 
+/**
+ * 명부에서 한 칸으로 보여 줄 휴직·퇴사일.
+ *
+ * 휴직은 그 계약이 시작된 날이고, 퇴사는 마지막 계약이 끝난 날이다. 두 값은 성격이 다르므로
+ * 라벨을 함께 돌려준다 — 날짜만 보여 주면 휴직인지 퇴사인지 읽는 사람이 알 수 없다.
+ */
+export function resolveLeaveOrSeparation(
+  person: Person,
+  today: string,
+): { kind: 'LEAVE' | 'SEPARATED'; date: string } | null {
+  const current = resolveCurrentEmployment(person, today);
+  if (!current) {
+    const separated = resolveSeparationDate(person);
+    return separated ? { kind: 'SEPARATED', date: separated } : null;
+  }
+  if (current.state === 'ON_LEAVE' || current.state === 'PARENTAL_LEAVE') {
+    return { kind: 'LEAVE', date: current.startDate };
+  }
+  return null;
+}
+
 export interface Tenure {
   months: number;
   years: number;

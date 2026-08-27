@@ -6,6 +6,7 @@ import {
   EmploymentChangeError,
   resolveAssignability,
   resolveCurrentEmployment,
+  resolveLeaveOrSeparation,
   resolveEmploymentAt,
   resolveSeparationDate,
   selectableAt,
@@ -267,5 +268,35 @@ describe('deriveYearsSinceDegree — 학위 취득 후 경력', () => {
     expect(deriveYearsSinceDegree(null, '2026-08-27')).toBeNull();
     expect(deriveYearsSinceDegree('17', '2026-08-27')).toBeNull();
     expect(deriveYearsSinceDegree('2030', '2026-08-27')).toBeNull();
+  });
+});
+
+describe('휴직·퇴사일', () => {
+  const base = (employments: unknown): Person => ({
+    personId: 'p1', name: '홍길동', nickname: '', email: '',
+    departmentTop: '', departmentMid: '', departmentSub: '', title: '', grade: '',
+    birthDate: '', workLocation: '', joinedAt: '2020-01-01', uid: null, employments,
+  } as unknown as Person);
+
+  it('휴직 중이면 그 계약이 시작된 날을 휴직일로 돌려준다', () => {
+    const person = base([
+      { type: 'FULL_TIME', state: 'WORKING', startDate: '2020-01-01', endDate: '2026-02-28' },
+      { type: 'FULL_TIME', state: 'PARENTAL_LEAVE', startDate: '2026-03-01', endDate: null },
+    ]);
+    expect(resolveLeaveOrSeparation(person, '2026-08-27')).toEqual({ kind: 'LEAVE', date: '2026-03-01' });
+  });
+
+  it('열린 계약이 없으면 마지막 종료일을 퇴사일로 돌려준다', () => {
+    const person = base([
+      { type: 'FULL_TIME', state: 'WORKING', startDate: '2020-01-01', endDate: '2026-05-31' },
+    ]);
+    expect(resolveLeaveOrSeparation(person, '2026-08-27')).toEqual({ kind: 'SEPARATED', date: '2026-05-31' });
+  });
+
+  it('정상 재직 중이면 보여 줄 날짜가 없다', () => {
+    const person = base([
+      { type: 'FULL_TIME', state: 'WORKING', startDate: '2020-01-01', endDate: null },
+    ]);
+    expect(resolveLeaveOrSeparation(person, '2026-08-27')).toBeNull();
   });
 });
