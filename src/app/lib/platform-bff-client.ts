@@ -63,11 +63,6 @@ export interface ParticipationDashboardMember {
   months: ParticipationDashboardMonth[];
   projects?: ParticipationDashboardProject[];
   warnings: Array<{ yearMonth: string; rate: number }>;
-  profileSummary?: {
-    highestEducationDisplayText: string;
-    englishEvidenceDisplayText: string;
-    certificationsDisplayText: string;
-  };
 }
 
 export interface ParticipationDashboardProfileFilterOption {
@@ -99,17 +94,6 @@ export interface ParticipationDashboardSnapshot {
   unlinkedEntryCount: number;
   filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string; projectCount?: number }> };
   projects: Array<{ id: string; name: string; clientOrg: string }>;
-  professionalProfileAccess?: boolean;
-  selectedProfileFilters?: {
-    education: string | null;
-    englishEvidence: string | null;
-    certifications: string[];
-  };
-  profileFilterOptions?: {
-    education: ParticipationDashboardProfileFilterOption[];
-    englishEvidence: ParticipationDashboardProfileFilterOption[];
-    certifications: ParticipationDashboardProfileFilterOption[];
-  };
 }
 
 /** 참여율 시트 검증 결과. 읽기 전용이라 무엇도 바뀌지 않는다. */
@@ -2209,20 +2193,12 @@ export async function fetchParticipationDashboardViaBff(params: {
   actor: ActorLike;
   year?: string;
   ruleId?: string;
-  education?: string;
-  englishEvidence?: string;
-  certifications?: string[];
   signal?: AbortSignal;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationDashboardSnapshot> {
   const query = new URLSearchParams();
   if (/^\d{4}$/.test(params.year || '')) query.set('year', params.year || '');
   if (params.ruleId) query.set('ruleId', params.ruleId);
-  if (params.education) query.set('education', params.education);
-  if (params.englishEvidence) query.set('englishEvidence', params.englishEvidence);
-  for (const certification of params.certifications || []) {
-    if (certification) query.append('certification', certification);
-  }
   const response = await resolveClient(params.client).get<ParticipationDashboardSnapshot>(
     `/api/v1/participation-dashboard${query.size ? `?${query}` : ''}`,
     {

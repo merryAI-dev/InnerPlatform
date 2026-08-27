@@ -100,15 +100,13 @@ describe('platform-bff-client', () => {
       actor: { uid: 'admin-1', role: 'admin' },
       year: '2026',
       ruleId: 'koica',
-      education: 'MASTER_GRADUATED',
-      englishEvidence: 'TOEIC',
-      certifications: ['pmp', 'oda 전문가'],
       signal: controller.signal,
       client,
     })).resolves.toBe(snapshot);
 
+    // 학력·어학·자격 필터는 인력 명부(People)로 옮겼다. 참여율 조회는 연도와 규칙만 받는다.
     expect(client.get).toHaveBeenCalledWith(
-      '/api/v1/participation-dashboard?year=2026&ruleId=koica&education=MASTER_GRADUATED&englishEvidence=TOEIC&certification=pmp&certification=oda+%EC%A0%84%EB%AC%B8%EA%B0%80',
+      '/api/v1/participation-dashboard?year=2026&ruleId=koica',
       expect.objectContaining({ signal: controller.signal }),
     );
   });
