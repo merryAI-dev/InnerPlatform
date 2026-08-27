@@ -63,6 +63,23 @@ async function downloadDraftAttachment(params: {
   };
 }
 
+/** 인사정보 증빙 원문. 권한 검사와 경로 검증은 BFF 가 한다. */
+export async function downloadPersonHrEvidenceViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  personId: string;
+  path: string;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+}) {
+  const personId = params.personId.trim();
+  if (!personId || personId.includes('/')) throw new Error('person ID is invalid');
+  return downloadDraftAttachment({
+    ...params,
+    path: `/api/v1/persons/${encodeURIComponent(personId)}/hr-evidence?path=${encodeURIComponent(params.path)}`,
+  });
+}
+
 export async function downloadProjectRegistrationDraftAttachmentViaBff(params: {
   tenantId: string;
   actor: ActorLike;

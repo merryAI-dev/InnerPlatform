@@ -21,8 +21,8 @@ describe('ProfessionalProfileEditor draft contract', () => {
     ];
     expect(hasProfessionalProfileFacts(draft)).toBe(true);
     expect(professionalProfileDraftToInput(draft).certifications).toEqual([
-      { label: 'PMP', acquiredAt: '2019-05' },
-      { label: 'ODA 전문가', acquiredAt: null },
+      { label: 'PMP', acquiredAt: '2019-05', evidence: null },
+      { label: 'ODA 전문가', acquiredAt: null, evidence: null },
     ]);
   });
 
@@ -130,6 +130,9 @@ describe('ProfessionalProfileEditor draft contract', () => {
     // 학력은 언제 다녔는지까지 남긴다.
     expect(source).toContain('htmlFor={`education-admission-${index}`}');
     expect(source).toContain('htmlFor={`education-degree-year-${index}`}');
+    // 증빙은 세 종류 모두에 붙는다. 파일은 저장과 별개로 곧장 올라가고 참조만 남는다.
+    expect(source).toContain('<EvidenceAttachment');
+    expect(source).toContain('증빙은 인력을 등록한 뒤 붙일 수 있습니다.');
     expect(source).not.toContain('Revision {expectedRevision}');
   });
 

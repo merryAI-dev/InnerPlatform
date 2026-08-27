@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import {
   createPersonProfessionalProfileClient,
   type ProfessionalProfileCatalog,
+  type ProfessionalProfileEvidenceRef,
   type ProfessionalProfileEducationRecordInput,
   type ProfessionalProfileEnglishEvidenceInput,
   type ProfessionalProfileInput,
@@ -12,6 +13,7 @@ import {
 import type { ActorLike } from '../../lib/platform-bff-client';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { Badge } from '../ui/badge';
+import { EvidenceAttachment } from './EvidenceAttachment';
 import { Button } from '../ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -32,6 +34,7 @@ const EMPTY_OPTION = '__EMPTY_OPTION__';
 export interface ProfessionalProfileCertificationDraft {
   label: string;
   acquiredAt: string;
+  evidence?: ProfessionalProfileEvidenceRef | null;
 }
 
 export interface ProfessionalProfileDraft {
@@ -64,6 +67,7 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
       major: record.major?.trim() || null,
       admissionYear: record.admissionYear?.trim() || null,
       degreeYear: record.degreeYear?.trim() || null,
+      evidence: record.evidence || null,
     })),
     englishEvidence: draft.englishEvidence.map((evidence) => ({
       testCode: evidence.testCode,
@@ -71,11 +75,13 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
       resultValue: evidence.resultValue.trim(),
       otherTestName: evidence.otherTestName?.trim() || null,
       testedAt: evidence.testedAt?.trim() || null,
+      evidence: evidence.evidence || null,
     })),
     certifications: draft.certifications
       .map((certification) => ({
         label: certification.label.trim(),
         acquiredAt: certification.acquiredAt.trim() || null,
+        evidence: certification.evidence || null,
       }))
       .filter((certification) => certification.label.length > 0),
   };
@@ -125,6 +131,7 @@ function storedProfileToDraft(profile: StoredProfessionalProfile): ProfessionalP
     certifications: profile.certifications.map((certification) => ({
       label: certification.label,
       acquiredAt: certification.acquiredAt || '',
+      evidence: certification.evidence || null,
     })),
   };
 }
@@ -174,13 +181,17 @@ export function formatEnglishScaleLabel(scale: ProfessionalProfileCatalog['engli
 }
 
 function ProfessionalProfileFields({
-  catalog, draft, onChange, disabled, readOnly,
+  catalog, draft, onChange, disabled, readOnly, tenantId, actor, personId,
 }: {
   catalog: ProfessionalProfileCatalog;
   draft: ProfessionalProfileDraft;
   onChange: (next: ProfessionalProfileDraft) => void;
   disabled: boolean;
   readOnly: boolean;
+  tenantId: string;
+  actor: ActorLike;
+  /** 새 인력 등록처럼 아직 사람이 없으면 증빙은 등록 뒤에 붙인다. */
+  personId: string | null;
 }) {
   const addEducation = () => {
     const attainment = catalog.educationAttainments[0];
@@ -316,18 +327,27 @@ function ProfessionalProfileFields({
                 />
               </div>
             </div>
-            {!readOnly ? (
-              <Button
-                type="button" variant="ghost" size="sm" className="mt-2 h-7 gap-1 px-2 text-[11px] text-slate-500"
-                disabled={disabled}
-                onClick={() => onChange({
-                  ...draft,
-                  educationRecords: draft.educationRecords.filter((_, recordIndex) => recordIndex !== index),
-                })}
-              >
-                <Trash2 className="h-3 w-3" /> 이 학력 삭제
-              </Button>
-            ) : null}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              {personId ? (
+                <EvidenceAttachment
+                  tenantId={tenantId} actor={actor} personId={personId}
+                  label={`학력 ${index + 1}`} evidence={record.evidence} disabled={disabled} readOnly={readOnly}
+                  onChange={(evidence) => updateEducation(index, { evidence })}
+                />
+              ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
+              {!readOnly ? (
+                <Button
+                  type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-slate-500"
+                  disabled={disabled}
+                  onClick={() => onChange({
+                    ...draft,
+                    educationRecords: draft.educationRecords.filter((_, recordIndex) => recordIndex !== index),
+                  })}
+                >
+                  <Trash2 className="h-3 w-3" /> 이 학력 삭제
+                </Button>
+              ) : null}
+            </div>
           </div>
         ))}
       </section>
@@ -436,18 +456,27 @@ function ProfessionalProfileFields({
                   </div>
                 ) : null}
               </div>
-              {!readOnly ? (
-                <Button
-                  type="button" variant="ghost" size="sm" className="mt-2 h-7 gap-1 px-2 text-[11px] text-slate-500"
-                  disabled={disabled}
-                  onClick={() => onChange({
-                    ...draft,
-                    englishEvidence: draft.englishEvidence.filter((_, evidenceIndex) => evidenceIndex !== index),
-                  })}
-                >
-                  <Trash2 className="h-3 w-3" /> 이 증빙 삭제
-                </Button>
-              ) : null}
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                {personId ? (
+                  <EvidenceAttachment
+                    tenantId={tenantId} actor={actor} personId={personId}
+                    label={`어학 ${index + 1}`} evidence={evidence.evidence} disabled={disabled} readOnly={readOnly}
+                    onChange={(next) => updateEnglish(index, { evidence: next })}
+                  />
+                ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
+                {!readOnly ? (
+                  <Button
+                    type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-slate-500"
+                    disabled={disabled}
+                    onClick={() => onChange({
+                      ...draft,
+                      englishEvidence: draft.englishEvidence.filter((_, evidenceIndex) => evidenceIndex !== index),
+                    })}
+                  >
+                    <Trash2 className="h-3 w-3" /> 이 어학 삭제
+                  </Button>
+                ) : null}
+              </div>
             </div>
           );
         })}
@@ -469,7 +498,7 @@ function ProfessionalProfileFields({
             disabled={disabled || draft.certifications.length >= MAX_CERTIFICATIONS}
             onClick={() => onChange({
               ...draft,
-              certifications: [...draft.certifications, { label: '', acquiredAt: '' }],
+              certifications: [...draft.certifications, { label: '', acquiredAt: '', evidence: null }],
             })}
           >
             <Plus className="h-3 w-3" /> 자격증 추가
@@ -518,6 +547,20 @@ function ProfessionalProfileFields({
                 <Trash2 className="h-3 w-3" /> 삭제
               </Button>
             ) : null}
+            <div className="sm:col-span-3">
+              {personId ? (
+                <EvidenceAttachment
+                  tenantId={tenantId} actor={actor} personId={personId}
+                  label={`자격증 ${index + 1}`} evidence={certification.evidence} disabled={disabled} readOnly={readOnly}
+                  onChange={(evidence) => onChange({
+                    ...draft,
+                    certifications: draft.certifications.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, evidence } : item
+                    )),
+                  })}
+                />
+              ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
+            </div>
           </div>
         ))}
         <p className={`text-[11px] ${certificationError ? 'text-rose-700' : 'text-slate-500'}`}>
@@ -738,6 +781,7 @@ export function ProfessionalProfileEditor({
             <ProfessionalProfileFields
               catalog={catalog} draft={draft} onChange={setDraft}
               disabled={saving} readOnly={!canWrite}
+              tenantId={tenantId} actor={actor} personId={personId}
             />
           )}
         </div>
@@ -823,6 +867,7 @@ export function NewPersonProfessionalProfileFields({
         <ProfessionalProfileFields
           catalog={catalog} draft={draft} onChange={updateDraft}
           disabled={disabled} readOnly={false}
+          tenantId={tenantId} actor={actor} personId={null}
         />
       )}
     </section>

@@ -106,6 +106,7 @@ import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
 import { mountPersonRoutes } from './routes/persons.mjs';
 import { mountPersonProfessionalProfileRoutes } from './routes/person-professional-profiles.mjs';
+import { createPersonHrEvidenceStorageService } from './person-hr-evidence-storage.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
@@ -771,6 +772,15 @@ export function createBffApp(options = {}) {
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
+  // 인사정보 증빙 저장소. 실패해도 명부·프로필은 살아 있어야 하므로 생성 실패를 삼킨다.
+  const personHrEvidenceStorageService = options.personHrEvidenceStorageService
+    || (() => {
+      try {
+        return createPersonHrEvidenceStorageService({});
+      } catch {
+        return null;
+      }
+    })();
   const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
     || projectRequestContractStorageService;
   const projectRegistrationDraftService = options.projectRegistrationDraftService || (editLeasesEnabled
@@ -1680,6 +1690,7 @@ export function createBffApp(options = {}) {
     auditChainService,
     piiProtector,
     rbacPolicy,
+    evidenceStorageService: personHrEvidenceStorageService,
     catalog: professionalProfileCatalog,
   });
 

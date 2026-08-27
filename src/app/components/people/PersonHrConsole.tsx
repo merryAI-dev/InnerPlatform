@@ -3,6 +3,7 @@ import {
   Award,
   Briefcase,
   CalendarClock,
+  FileCheck2,
   GraduationCap,
   Languages,
   Loader2,
@@ -100,10 +101,18 @@ function RecordCard({
   );
 }
 
-function RecordRow({ primary, secondary }: { primary: string; secondary?: string }) {
+function RecordRow({ primary, secondary, hasEvidence }: {
+  primary: string;
+  secondary?: string;
+  hasEvidence?: boolean;
+}) {
   return (
     <div className="border-b border-slate-100 py-1.5 last:border-b-0">
-      <p className="text-[12px] font-medium text-slate-900">{primary}</p>
+      <p className="flex items-center gap-1.5 text-[12px] font-medium text-slate-900">
+        <span className="min-w-0 truncate">{primary}</span>
+        {/* 증빙이 붙은 항목만 표시한다 - 없는 것을 빨갛게 알리면 화면이 경고로 뒤덮인다. */}
+        {hasEvidence ? <FileCheck2 className="h-3 w-3 shrink-0 text-emerald-600" aria-label="증빙 있음" /> : null}
+      </p>
       {secondary ? <p className="text-[11px] text-slate-500">{secondary}</p> : null}
     </div>
   );
@@ -450,6 +459,7 @@ export function PersonHrConsole({
                               ? `${record.admissionYear || '?'}~${record.degreeYear || '?'}`
                               : '',
                           ].filter(Boolean).join(' · ')}
+                          hasEvidence={!!record.evidence?.path}
                         />
                       ))}
                     </RecordCard>
@@ -464,6 +474,7 @@ export function PersonHrConsole({
                           key={`${evidence.testCode}-${index}`}
                           primary={`${englishLabelOf(evidence.testCode, evidence.otherTestName)} ${evidence.resultValue}`}
                           secondary={evidence.testedAt ? `${evidence.testedAt} 취득` : ''}
+                          hasEvidence={!!evidence.evidence?.path}
                         />
                       ))}
                     </RecordCard>
@@ -478,6 +489,7 @@ export function PersonHrConsole({
                           key={certification.key}
                           primary={certification.label}
                           secondary={certification.acquiredAt ? `${certification.acquiredAt} 취득` : ''}
+                          hasEvidence={!!certification.evidence?.path}
                         />
                       ))}
                     </RecordCard>

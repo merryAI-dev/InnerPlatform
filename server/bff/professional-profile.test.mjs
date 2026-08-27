@@ -33,13 +33,13 @@ const baseInput = () => ({
       attainmentCode: 'BACHELOR_GRADUATED',
       institutionName: ' 연세대학교 ',
       countryCode: ' kr ',
-      major: ' 경영학 ', admissionYear: null, degreeYear: null,
+      major: ' 경영학 ', admissionYear: null, degreeYear: null, evidence: null,
     },
     {
       attainmentCode: 'MASTER_GRADUATED',
       institutionName: ' University of Sussex ',
       countryCode: ' gb ',
-      major: ' Development Studies ', admissionYear: null, degreeYear: null,
+      major: ' Development Studies ', admissionYear: null, degreeYear: null, evidence: null,
     },
   ],
   englishEvidence: [
@@ -48,14 +48,14 @@ const baseInput = () => ({
       scaleCode: 'TOEIC_990',
       resultValue: '920',
       otherTestName: '  ',
-      testedAt: '2026-06',
+      testedAt: '2026-06', evidence: null,
     },
     {
       testCode: 'TOEFL',
       scaleCode: 'TOEFL_IBT_120',
       resultValue: '105',
       otherTestName: null,
-      testedAt: '2025-12',
+      testedAt: '2025-12', evidence: null,
     },
   ],
   certifications: [
@@ -142,13 +142,13 @@ describe('normalizeProfessionalProfileInput', () => {
           attainmentCode: 'BACHELOR_GRADUATED',
           institutionName: '연세대학교',
           countryCode: 'KR',
-          major: '경영학', admissionYear: null, degreeYear: null,
+          major: '경영학', admissionYear: null, degreeYear: null, evidence: null,
         },
         {
           attainmentCode: 'MASTER_GRADUATED',
           institutionName: 'University of Sussex',
           countryCode: 'GB',
-          major: 'Development Studies', admissionYear: null, degreeYear: null,
+          major: 'Development Studies', admissionYear: null, degreeYear: null, evidence: null,
         },
       ],
       englishEvidence: [
@@ -157,19 +157,19 @@ describe('normalizeProfessionalProfileInput', () => {
           scaleCode: 'TOEIC_990',
           resultValue: '920',
           otherTestName: null,
-          testedAt: '2026-06',
+          testedAt: '2026-06', evidence: null,
         },
         {
           testCode: 'TOEFL',
           scaleCode: 'TOEFL_IBT_120',
           resultValue: '105',
           otherTestName: null,
-          testedAt: '2025-12',
+          testedAt: '2025-12', evidence: null,
         },
       ],
       certifications: [
-        { key: 'pmp', label: 'PMP', acquiredAt: null },
-        { key: 'oda 전문가', label: 'ODA 전문가', acquiredAt: null },
+        { key: 'pmp', label: 'PMP', acquiredAt: null, evidence: null },
+        { key: 'oda 전문가', label: 'ODA 전문가', acquiredAt: null, evidence: null },
       ],
     });
   });
@@ -189,6 +189,40 @@ describe('normalizeProfessionalProfileInput', () => {
       field === 'certifications' ? { label: `Certificate ${index}` } : value
     ));
     expect(() => normalizeProfessionalProfileInput({ [field]: tooMany })).toThrow(/maximum|최대/i);
+  });
+
+  it('keeps evidence references and collects the paths that a save drops', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    const collectProfileEvidencePaths = useExport('collectProfileEvidencePaths');
+    const evidence = (id) => ({
+      evidenceId: id,
+      path: `orgs/mysc/person-hr-evidence/psn-a/${id}-diploma.pdf`,
+      name: 'diploma.pdf',
+      size: 1024,
+      contentType: 'application/pdf',
+      uploadedAt: '2026-08-27T00:00:00.000Z',
+    });
+
+    const before = normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', evidence: evidence('ev-1') }],
+      certifications: [{ label: 'PMP', evidence: evidence('ev-2') }],
+    });
+    expect(before.educationRecords[0].evidence).toMatchObject({ evidenceId: 'ev-1' });
+    expect(collectProfileEvidencePaths(before)).toHaveLength(2);
+
+    // 학력의 증빙만 떼어내면 그 파일 경로 하나가 고아가 된다.
+    const after = normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED' }],
+      certifications: [{ label: 'PMP', evidence: evidence('ev-2') }],
+    });
+    const kept = new Set(collectProfileEvidencePaths(after));
+    expect(collectProfileEvidencePaths(before).filter((path) => !kept.has(path)))
+      .toEqual([evidence('ev-1').path]);
+
+    // 경로 없는 참조는 받지 않는다 - 가리키는 곳이 없는 증빙은 뜻이 없다.
+    expect(() => normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', evidence: { evidenceId: 'ev-3' } }],
+    })).toThrow(/evidence/);
   });
 
   it('keeps admission/degree years and certification acquisition month, and rejects impossible ones', () => {
@@ -234,13 +268,13 @@ describe('normalizeProfessionalProfileInput', () => {
         attainmentCode: 'OTHER',
         institutionName: eightyCharacters,
         countryCode: null,
-        major: '   ', admissionYear: null, degreeYear: null,
+        major: '   ', admissionYear: null, degreeYear: null, evidence: null,
       }],
     }).educationRecords[0]).toEqual({
       attainmentCode: 'OTHER',
       institutionName: eightyCharacters,
       countryCode: null,
-      major: null, admissionYear: null, degreeYear: null,
+      major: null, admissionYear: null, degreeYear: null, evidence: null,
     });
 
     expect(normalizeProfessionalProfileInput({
@@ -271,8 +305,8 @@ describe('normalizeProfessionalProfileInput', () => {
     });
 
     expect(normalized.certifications).toEqual([
-      { key: 'aws solutions architect', label: 'AWS Solutions Architect', acquiredAt: null },
-      { key: 'pmp', label: 'PMP', acquiredAt: null },
+      { key: 'aws solutions architect', label: 'AWS Solutions Architect', acquiredAt: null, evidence: null },
+      { key: 'pmp', label: 'PMP', acquiredAt: null, evidence: null },
     ]);
     expect(() => normalizeProfessionalProfileInput({ certifications: [{ label: ' ' }] }))
       .toThrow(/label/i);
@@ -296,7 +330,7 @@ describe('normalizeProfessionalProfileInput', () => {
           scaleCode: 'OTHER_TEXT',
           resultValue: ' C2 ',
           otherTestName: ' Cambridge English ',
-          testedAt: '2026-08',
+          testedAt: '2026-08', evidence: null,
         },
       ],
     });
@@ -308,7 +342,7 @@ describe('normalizeProfessionalProfileInput', () => {
       scaleCode: 'OTHER_TEXT',
       resultValue: 'C2',
       otherTestName: 'Cambridge English',
-      testedAt: '2026-08',
+      testedAt: '2026-08', evidence: null,
     });
   });
 
@@ -385,13 +419,13 @@ describe('stored model and read DTO', () => {
           attainmentCode: 'BACHELOR_GRADUATED',
           institutionName: '연세대학교',
           countryCode: 'KR',
-          major: '경영학', admissionYear: null, degreeYear: null,
+          major: '경영학', admissionYear: null, degreeYear: null, evidence: null,
         },
         {
           attainmentCode: 'MASTER_GRADUATED',
           institutionName: 'University of Sussex',
           countryCode: 'GB',
-          major: 'Development Studies', admissionYear: null, degreeYear: null,
+          major: 'Development Studies', admissionYear: null, degreeYear: null, evidence: null,
         },
       ],
       englishEvidence: [
@@ -400,19 +434,19 @@ describe('stored model and read DTO', () => {
           scaleCode: 'TOEIC_990',
           resultValue: '920',
           otherTestName: null,
-          testedAt: '2026-06',
+          testedAt: '2026-06', evidence: null,
         },
         {
           testCode: 'TOEFL',
           scaleCode: 'TOEFL_IBT_120',
           resultValue: '105',
           otherTestName: null,
-          testedAt: '2025-12',
+          testedAt: '2025-12', evidence: null,
         },
       ],
       certifications: [
-        { key: 'pmp', label: 'PMP', acquiredAt: null },
-        { key: 'oda 전문가', label: 'ODA 전문가', acquiredAt: null },
+        { key: 'pmp', label: 'PMP', acquiredAt: null, evidence: null },
+        { key: 'oda 전문가', label: 'ODA 전문가', acquiredAt: null, evidence: null },
       ],
       provenance: {
         source: 'PEOPLE_MANUAL',
@@ -546,7 +580,7 @@ describe('RAG canonical boundary', () => {
         ...baseArgs,
         profile: {
           ...profile,
-          certifications: [{ key: 'cpa', label: 'CPA', acquiredAt: null }],
+          certifications: [{ key: 'cpa', label: 'CPA', acquiredAt: null, evidence: null }],
         },
       },
     ];
