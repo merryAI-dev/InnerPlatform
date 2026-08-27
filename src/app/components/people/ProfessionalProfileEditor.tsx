@@ -746,7 +746,7 @@ export function ProfessionalProfileEditor({
   return (
     <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent
-        className="flex max-h-[92vh] w-[min(96vw,1140px)] max-w-[1140px] flex-col overflow-hidden"
+        className="flex max-h-[94vh] w-[96vw] max-w-[1360px] flex-col overflow-hidden sm:max-w-[1360px]"
         onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }}
         onPointerDownOutside={(event) => { if (saving) event.preventDefault(); }}
       >

@@ -2870,6 +2870,9 @@ export interface PersonRecord {
   hrSummary?: {
     highestEducationDisplayText: string;
     highestDegreeYear: string;
+    highestEducationCode: string;
+    highestEducationInstitution: string;
+    highestEducationMajor: string;
     englishEvidenceDisplayText: string;
     certificationsDisplayText: string;
   };

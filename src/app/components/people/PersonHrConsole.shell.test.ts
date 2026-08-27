@@ -36,7 +36,7 @@ describe('인사정보 콘솔', () => {
     expect(source).toContain('<TabsTrigger value="basic"');
     expect(source).toContain('<TabsTrigger value="records"');
     expect(source).toContain('<TabsTrigger value="detail"');
-    expect(source).toContain('데이터가 존재하지 않습니다.');
+    expect(source).toContain('데이터가 존재하지 않습니다');
     expect(source).toContain('{count}건');
   });
 
@@ -50,11 +50,12 @@ describe('인사정보 콘솔', () => {
     expect(source).not.toContain('person.age');
   });
 
-  it('읽는 크기를 지킨다 — DESIGN.md 본문 14~15px, 팝업은 넓게', () => {
-    // 처음엔 11~13px 로 만들어 화면이 깨졌다. 조밀한 것은 되지만 비좁은 것은 안 된다.
-    expect(source).toContain('max-w-[1120px]');
+  it('읽는 크기를 지킨다 — 본문 14~15px, 팝업 폭은 sm 변형까지 함께 준다', () => {
+    // 기본 DialogContent 에 sm:max-w-lg(512px) 가 박혀 있다. sm 변형을 같이 주지 않으면
+    // max-w-[...] 가 640px 이상 화면에서 무시되고 팝업이 512px 로 잘린다.
+    expect(source).toContain('sm:max-w-[1400px]');
+    expect(source).toContain('max-w-[1400px]');
     expect(source).not.toContain('text-[11px]');
-    expect(source).not.toContain('max-w-[940px]');
   });
 
   it('직급은 설정 목록에서 고르되 별도 직급체계는 직접 입력으로 남긴다', () => {

@@ -357,10 +357,15 @@ export function serializeProfessionalProfile(value) {
   };
 }
 
+/**
+ * 최종학력 한 줄. 학교보다 **학과(전공)** 를 앞세운다 - 사람을 고를 때 무엇을 전공했는지가
+ * 어느 학교를 나왔는지보다 먼저 읽혀야 한다. 전공이 없으면 학교로 대신한다.
+ */
 function formatEducation(record) {
   if (!record) return '';
   const label = educationByCode.get(record.attainmentCode).label;
-  return record.institutionName ? `${label} · ${record.institutionName}` : label;
+  const detail = record.major || record.institutionName;
+  return detail ? `${label} · ${detail}` : label;
 }
 
 function formatEnglishEvidence(evidence) {

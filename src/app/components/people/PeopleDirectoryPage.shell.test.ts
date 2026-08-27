@@ -40,8 +40,8 @@ describe('PeopleDirectoryPage 근로형태 노출 계약', () => {
 
   it('목록에는 이름·재직상태·소속·직급·입사일·근속만 둔다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
-    ['이름', '재직상태', '소속', '직급', '입사일', '근속'].forEach((column) => {
-      expect(table).toContain(`>${column}</TableHead>`);
+    ['이름', '재직상태', '소속 · 팀', '직급', '입사일', '근속'].forEach((column) => {
+      expect(table).toContain(`>${column}</DataGridHeadCell>`);
     });
   });
 });
@@ -117,6 +117,13 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
     expect(source).toContain('onManageEmployment={');
     expect(source).toContain('profilePerson && scopedProfileCapabilities.read');
     expect(source).toContain('<ProfessionalProfileEditor');
+    // 기본 정렬은 입사순이다 - 가나다순은 누가 오래 다녔는지를 못 읽게 한다.
+    expect(source).toContain('leftJoined.localeCompare(rightJoined)');
+    // 칸별 필터로 적정 대상을 좁힌다. 계산값(나이·근속·학위 후 경력)도 같은 기준일을 쓴다.
+    expect(source).toContain('filterPeopleRows(built, merged, asOf)');
+    expect(source).toContain('label="근속(년) 이상"');
+    expect(source).toContain('label="학위 후(년) 이상"');
+    expect(source).toContain('필터 초기화');
     // 인사정보는 상세를 열지 않고 기본 목록에서도 보인다(권한 있을 때만).
     expect(source).toContain('canReadProfile ? <>');
     expect(source).toContain('person.hrSummary?.highestEducationDisplayText');
