@@ -542,6 +542,16 @@ export const personCreateSchema = z.object({
   professionalProfile: professionalProfileInputSchema.optional(),
 }).strict();
 
+/**
+ * 본인이 마이페이지에서 고치는 값. 증빙이 필요 없는 것만 둔다 -
+ * 소속·직급·직책·입사일은 회사가 관리하고, 학력·어학·자격은 증빙과 함께 전문 프로필로 들어간다.
+ */
+export const personSelfProfileSchema = z.object({
+  nickname: z.string().trim().max(100).optional(),
+  birthDate: ISO_DATE_STRING.nullish(),
+  workLocation: z.string().trim().max(100).optional(),
+}).strict();
+
 export const personProfileSchema = z.object({
   nickname: z.string().trim().max(100).optional(),
   email: z.string().trim().max(200).optional(),

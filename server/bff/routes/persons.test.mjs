@@ -353,6 +353,60 @@ describe('라우트 — 인력 명부', () => {
     expect(unlinked.body).toEqual({ linked: false, person: null, profile: null });
   });
 
+  /**
+   * 마이페이지에서 본인이 고치는 값. 대상은 경로가 아니라 로그인 계정의 uid 로 정해진다 -
+   * 남의 personId 를 넣을 자리 자체가 없다.
+   */
+  it('본인 기본정보만 고치고, 회사가 관리하는 값은 열지 않는다', async () => {
+    const documents = {
+      'orgs/tenant-a/persons/person-me': {
+        personId: 'person-me', name: '변민욱', nickname: '옛닉', uid: 'actor-a',
+        grade: '책임연구원', departmentTop: '대표이사실', joinedAt: '2025-04-02', employments: [],
+      },
+      'orgs/tenant-a/persons/person-other': {
+        personId: 'person-other', name: '남', nickname: '남닉', uid: 'actor-z', employments: [],
+      },
+    };
+    const { app, store } = createApp({ role: 'viewer', documents });
+
+    const saved = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-1' })
+      .send({ nickname: '새닉', birthDate: '1996-12-20', workLocation: '성수' });
+
+    expect(saved.status).toBe(200);
+    expect(saved.body.personId).toBe('person-me');
+    expect(store['orgs/tenant-a/persons/person-me']).toMatchObject({
+      nickname: '새닉', birthDate: '1996-12-20', workLocation: '성수',
+    });
+    // 남의 문서는 그대로다.
+    expect(store['orgs/tenant-a/persons/person-other'].nickname).toBe('남닉');
+    // 회사가 관리하는 값은 스키마가 막는다.
+    expect(store['orgs/tenant-a/persons/person-me'].grade).toBe('책임연구원');
+
+    const forbidden = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-2' })
+      .send({ grade: '대표이사' });
+    expect(forbidden.status).toBe(400);
+
+    const empty = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-3' })
+      .send({});
+    expect(empty.status).toBe(400);
+  });
+
+  it('명부에 연결되지 않은 계정은 본인 기본정보를 고칠 수 없다', async () => {
+    const { app } = createApp({ role: 'viewer', documents: {} });
+    const response = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-unlinked' })
+      .send({ nickname: '아무개' });
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe('person_not_linked');
+  });
+
   it('목록은 명시적 allowlist만 반환하고 전문 프로필 원문은 전역 store에 흘리지 않는다', async () => {
     const { app } = createApp({ documents: {
       'orgs/tenant-a/persons/person-a': {

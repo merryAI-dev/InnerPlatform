@@ -68,20 +68,40 @@ function idempotencyError(lock) {
   return null;
 }
 
-function requireProfileWrite(rbacPolicy) {
-  return (req, _res, next) => {
-    try {
-      assertActorPermissionAllowed(
-        rbacPolicy,
-        req,
-        PROFILE_WRITE_PERMISSION,
-        'write a professional profile',
-      );
-      next();
-    } catch (error) {
-      next(error);
+/**
+ * 담당자 권한이 없어도 본인이면 통과시킨다.
+ *
+ * 자기 학력·어학·자격은 자기 계정으로 넣는 것이 자연스럽다. 판정 기준은 역할이 아니라
+ * 대상 person 문서의 uid 가 로그인 계정과 같은지다 - 남의 것은 여전히 담당자만 만진다.
+ */
+async function assertProfileAccessOrSelf({ rbacPolicy, req, db, permission, action }) {
+  try {
+    assertActorPermissionAllowed(rbacPolicy, req, permission, action);
+    return { self: false };
+  } catch (error) {
+    const { tenantId, actorId } = req.context;
+    const { personId } = req.params;
+    if (actorId && personId) {
+      const snapshot = await db.doc(`orgs/${tenantId}/persons/${personId}`).get();
+      if (snapshot.exists && snapshot.data()?.uid === actorId) return { self: true };
     }
-  };
+    throw error;
+  }
+}
+
+/** 카탈로그는 코드 목록일 뿐이라, 명부에 연결된 본인 계정이면 권한 없이도 준다. */
+async function assertCatalogAccessOrLinked({ rbacPolicy, req, db }) {
+  try {
+    assertActorPermissionAllowed(rbacPolicy, req, PROFILE_READ_PERMISSION, 'read the professional profile catalog');
+    return;
+  } catch (error) {
+    const { tenantId, actorId } = req.context;
+    if (actorId) {
+      const snap = await db.collection(`orgs/${tenantId}/persons`).where('uid', '==', actorId).limit(1).get();
+      if (!snap.empty) return;
+    }
+    throw error;
+  }
 }
 
 export function mountPersonProfessionalProfileRoutes(app, {
@@ -98,12 +118,7 @@ export function mountPersonProfessionalProfileRoutes(app, {
     '/api/v1/person-professional-profile/catalog',
     preventProfileCaching,
     asyncHandler(async (req, res) => {
-      assertActorPermissionAllowed(
-        rbacPolicy,
-        req,
-        PROFILE_READ_PERMISSION,
-        'read the professional profile catalog',
-      );
+      await assertCatalogAccessOrLinked({ rbacPolicy, req, db });
       res.status(200).json(catalog);
     }),
   );
@@ -112,12 +127,9 @@ export function mountPersonProfessionalProfileRoutes(app, {
     '/api/v1/persons/:personId/professional-profile',
     preventProfileCaching,
     asyncHandler(async (req, res) => {
-      assertActorPermissionAllowed(
-        rbacPolicy,
-        req,
-        PROFILE_READ_PERMISSION,
-        'read a professional profile',
-      );
+      await assertProfileAccessOrSelf({
+        rbacPolicy, req, db, permission: PROFILE_READ_PERMISSION, action: 'read a professional profile',
+      });
       const { tenantId } = req.context;
       const { personId } = req.params;
       const snapshot = await db.doc(`orgs/${tenantId}/persons/${personId}`).get();
@@ -131,8 +143,10 @@ export function mountPersonProfessionalProfileRoutes(app, {
   app.put(
     '/api/v1/persons/:personId/professional-profile',
     preventProfileCaching,
-    requireProfileWrite(rbacPolicy),
     asyncHandler(async (req, res) => {
+      await assertProfileAccessOrSelf({
+        rbacPolicy, req, db, permission: PROFILE_WRITE_PERMISSION, action: 'write a professional profile',
+      });
       const parsed = parseWithSchema(
         personProfessionalProfilePutSchema,
         req.body,
@@ -273,8 +287,10 @@ export function mountPersonProfessionalProfileRoutes(app, {
   app.post(
     '/api/v1/persons/:personId/hr-evidence/upload-url',
     preventProfileCaching,
-    requireProfileWrite(rbacPolicy),
     asyncHandler(async (req, res) => {
+      await assertProfileAccessOrSelf({
+        rbacPolicy, req, db, permission: PROFILE_WRITE_PERMISSION, action: 'upload professional profile evidence',
+      });
       if (!evidenceStorageService?.createUploadUrl) {
         throw createHttpError(503, '증빙 업로드가 아직 켜져 있지 않습니다.', 'hr_evidence_unavailable');
       }
@@ -304,7 +320,9 @@ export function mountPersonProfessionalProfileRoutes(app, {
     '/api/v1/persons/:personId/hr-evidence',
     preventProfileCaching,
     asyncHandler(async (req, res) => {
-      assertActorPermissionAllowed(rbacPolicy, req, PROFILE_READ_PERMISSION, 'read professional profile evidence');
+      await assertProfileAccessOrSelf({
+        rbacPolicy, req, db, permission: PROFILE_READ_PERMISSION, action: 'read professional profile evidence',
+      });
       if (!evidenceStorageService?.downloadEvidence) {
         throw createHttpError(503, '증빙 조회가 아직 켜져 있지 않습니다.', 'hr_evidence_unavailable');
       }

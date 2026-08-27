@@ -7,8 +7,8 @@ import { fetchMyHrProfileViaBff, type MyHrProfileResponse } from '../../lib/plat
 /**
  * 내 인사정보.
  *
- * 학력·어학·자격의 단일 진실은 인력 명부(persons)다. 포털에서는 자기 것만 읽어 보여 준다 —
- * 고치는 일은 인사 담당자가 명부에서 한다(증빙과 감사가 그쪽에 있다).
+ * 학력·어학·자격의 단일 진실은 인력 명부(persons)다. 포털에서는 자기 것을 읽고,
+ * 본인이 고치면 reload 로 다시 불러온다.
  */
 export function useMyHrProfile() {
   const { user } = useAuth();
@@ -16,6 +16,7 @@ export function useMyHrProfile() {
   const [data, setData] = useState<MyHrProfileResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     if (!featureFlags.platformApiEnabled || !user?.uid) {
@@ -36,7 +37,7 @@ export function useMyHrProfile() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [orgId, user?.uid, user?.idToken]);
+  }, [orgId, user?.uid, user?.idToken, reloadToken]);
 
-  return { data, loading, error };
+  return { data, loading, error, reload: () => setReloadToken((value) => value + 1) };
 }

@@ -3,7 +3,7 @@ import {
   asyncHandler, createMutatingRoute, assertActorRoleAllowed, assertActorPermissionAllowed,
   ROUTE_ROLES, createHttpError, encryptAuditEmail,
 } from '../bff-utils.mjs';
-import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema } from '../schemas.mjs';
+import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema, personSelfProfileSchema } from '../schemas.mjs';
 import { deriveProfessionalProfileFacts, normalizeProfessionalProfileInput, serializeProfessionalProfile } from '../professional-profile.mjs';
 import { buildRequestFingerprint } from '../utils.mjs';
 
@@ -522,6 +522,45 @@ export function mountPersonRoutes(app, {
     });
 
     return { status: 200, body: { personId, employments: result.after, updatedAt: timestamp } };
+  }));
+
+  /**
+   * 본인 기본정보 수정. 대상은 경로가 아니라 로그인 계정의 uid 로 정한다 -
+   * 남의 personId 를 넣어도 자기 문서만 바뀐다. 필드는 증빙이 필요 없는 것만 연다.
+   */
+  app.patch('/api/v1/persons/me/profile', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    if (!actorId) throw createHttpError(400, 'actorId is required', 'actor_required');
+    const parsed = parseWithSchema(personSelfProfileSchema, req.body, 'Invalid self profile payload');
+    if (Object.keys(parsed).length === 0) {
+      throw createHttpError(400, '고칠 값이 없습니다.', 'empty_self_profile_patch');
+    }
+    const timestamp = now();
+
+    const snap = await db.collection(`orgs/${tenantId}/persons`).where('uid', '==', actorId).limit(2).get();
+    const doc = snap.docs[0];
+    if (!doc) {
+      throw createHttpError(404, '아직 인력 명부에 연결되지 않은 계정입니다.', 'person_not_linked');
+    }
+    const personId = doc.id;
+    await db.doc(`orgs/${tenantId}/persons/${personId}`)
+      .set({ ...parsed, updatedAt: timestamp, updatedBy: actorId }, { merge: true });
+
+    await auditChainService.append({
+      tenantId,
+      entityType: 'person',
+      entityId: personId,
+      action: 'SELF_PROFILE_UPDATE',
+      actorId,
+      actorRole,
+      actorEmailEnc: await encryptAuditEmail(piiProtector, actorEmail),
+      requestId,
+      details: `본인 기본정보 수정: ${Object.keys(parsed).join(', ')}`,
+      metadata: { source: 'portal_self', fields: Object.keys(parsed) },
+      timestamp,
+    });
+
+    return { status: 200, body: { personId, updatedAt: timestamp } };
   }));
 
   app.patch('/api/v1/persons/:personId', createMutatingRoute(idempotencyService, async (req) => {

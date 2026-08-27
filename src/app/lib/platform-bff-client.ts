@@ -2737,6 +2737,26 @@ export async function fetchMyHrProfileViaBff(params: {
 }
 
 /** 인적사항 수정. 계약 이력과 달리 사람이 적는 값이라 부분 갱신(merge)으로 보낸다. */
+/** 본인 기본정보 수정. 대상은 서버가 로그인 계정의 uid 로 정한다. */
+export async function updateMyPersonProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  profile: { nickname?: string; birthDate?: string | null; workLocation?: string };
+  client?: PlatformApiClientLike;
+}): Promise<{ personId: string; updatedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.patch<{ personId: string; updatedAt: string }>(
+    '/api/v1/persons/me/profile',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.profile,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
 export async function updatePersonProfileViaBff(params: {
   tenantId: string;
   actor: ActorLike;

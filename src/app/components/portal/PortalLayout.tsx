@@ -102,6 +102,8 @@ const NAV_SECTIONS: PortalNavSection[] = [
   {
     title: '마이메뉴',
     items: [
+      // 자기 인사정보를 넣는 자리다. 아바타 드롭다운 안에만 두면 실무자가 못 찾는다.
+      { to: '/portal/career-profile', icon: User, label: '마이페이지' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
     ],
   },
