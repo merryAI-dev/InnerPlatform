@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { BoardProvider } from './board-store';
-import { CareerProfileProvider } from './career-profile-store';
 import { CashflowWeekProvider } from './cashflow-weeks-store';
 import { FirestoreRouteModeProvider } from './firestore-realtime-mode';
 import { HrAnnouncementProvider } from './hr-announcements-store';
@@ -20,7 +19,6 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
       payroll: true,
       cashflowWeeks: true,
       board: false,
-      careerProfile: false,
       training: false,
     };
   }
@@ -30,7 +28,6 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
       payroll: true,
       cashflowWeeks: true,
       board: false,
-      careerProfile: false,
       training: false,
     };
   }
@@ -40,7 +37,6 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
       payroll: true,
       cashflowWeeks: false,
       board: true,
-      careerProfile: false,
       training: false,
     };
   }
@@ -50,7 +46,6 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
       payroll: true,
       cashflowWeeks: false,
       board: false,
-      careerProfile: false,
       training: true,
     };
   }
@@ -60,7 +55,6 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
       payroll: true,
       cashflowWeeks: false,
       board: false,
-      careerProfile: true,
       training: true,
     };
   }
@@ -69,7 +63,6 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
     payroll: true,
     cashflowWeeks: true,
     board: true,
-    careerProfile: true,
     training: true,
   };
 }
@@ -84,7 +77,6 @@ export function PortalRouteProviderFrame({
   const scope = resolvePortalProviderScope(pathname);
   let tree = children;
   if (scope.training) tree = <TrainingProvider>{tree}</TrainingProvider>;
-  if (scope.careerProfile) tree = <CareerProfileProvider>{tree}</CareerProfileProvider>;
   if (scope.board) tree = <BoardProvider>{tree}</BoardProvider>;
   if (scope.cashflowWeeks) tree = <CashflowWeekProvider>{tree}</CashflowWeekProvider>;
   if (scope.payroll) tree = <PayrollProvider>{tree}</PayrollProvider>;

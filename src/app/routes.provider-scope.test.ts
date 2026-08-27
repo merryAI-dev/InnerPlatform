@@ -12,7 +12,6 @@ describe('route-scoped provider architecture', () => {
     expect(appSource).not.toContain('<CashflowWeekProvider>');
     expect(appSource).not.toContain('<BoardProvider>');
     expect(appSource).not.toContain('<TrainingProvider>');
-    expect(appSource).not.toContain('<CareerProfileProvider>');
   });
 
   it('mounts dedicated admin and portal provider wrappers in routes', () => {

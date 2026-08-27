@@ -11,9 +11,6 @@ vi.mock('./board-store', () => ({
   BoardProvider: PassthroughProvider,
 }));
 
-vi.mock('./career-profile-store', () => ({
-  CareerProfileProvider: PassthroughProvider,
-}));
 
 vi.mock('./cashflow-weeks-store', () => ({
   CashflowWeekProvider: PassthroughProvider,
@@ -102,7 +99,6 @@ describe('route provider behavior', () => {
       payroll: true,
       cashflowWeeks: true,
       board: false,
-      careerProfile: false,
       training: false,
     });
     expect(resolvePortalProviderScope('/portal/cashflow/sheets-lab')).toMatchObject({
@@ -110,7 +106,6 @@ describe('route provider behavior', () => {
       payroll: true,
       cashflowWeeks: true,
       board: false,
-      careerProfile: false,
       training: false,
     });
     expect(resolvePortalProviderScope('/portal/payroll')).toEqual({
@@ -118,11 +113,9 @@ describe('route provider behavior', () => {
       payroll: true,
       cashflowWeeks: true,
       board: false,
-      careerProfile: false,
       training: false,
     });
     expect(resolvePortalProviderScope('/portal/career-profile')).toMatchObject({
-      careerProfile: true,
       training: true,
     });
   });

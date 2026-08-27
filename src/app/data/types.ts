@@ -1593,54 +1593,10 @@ export interface MonthlyRollup {
 
 export type DegreeType = '학사' | '석사' | '박사' | '전문학사' | '수료' | '기타';
 
-export interface EducationEntry {
-  id: string;
-  school: string;       // 학교명
-  major: string;        // 전공
-  degree: DegreeType;
-  startDate: string;    // YYYY-MM
-  endDate: string;      // YYYY-MM or '재학중'
-}
-
-export interface WorkHistoryEntry {
-  id: string;
-  company: string;      // 기업명
-  title: string;        // 최종직위
-  description: string;  // 담당업무/주요프로젝트
-  startDate: string;    // YYYY-MM
-  endDate: string;      // YYYY-MM or '현재'
-}
-
-export interface CertificationEntry {
-  id: string;
-  name: string;         // 자격증명
-  issuedAt: string;     // YYYY-MM-DD
-  issuer: string;       // 발행기관
-}
-
 /**
  * 개인 경력 프로필 (Firestore: orgs/{orgId}/careerProfiles/{uid})
  * 참여경력(ParticipationEntry)과 사내교육(TrainingEnrollment)은 별도 컬렉션에서 join
  */
-export interface CareerProfile {
-  uid: string;
-  orgId: string;
-  nameKo: string;           // 국문 성명
-  nameEn?: string;          // 영문 성명
-  nameHanja?: string;       // 한자 성명
-  birthDate?: string;       // YYYY-MM-DD
-  phone?: string;           // 핸드폰
-  officePhone?: string;     // 직장 전화
-  department?: string;      // 부서
-  title?: string;           // 직책
-  joinedAt?: string;        // 입사일 YYYY-MM-DD
-  bio?: string;             // 간단 소개
-  education: EducationEntry[];
-  workHistory: WorkHistoryEntry[];
-  certifications: CertificationEntry[];
-  updatedAt: string;
-}
-
 // ── 사내 강의 (Internal Training) ──
 
 export type TrainingCategory = 'technical' | 'compliance' | 'soft-skills' | 'management' | 'language' | 'other';

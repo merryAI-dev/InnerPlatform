@@ -155,27 +155,23 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     if (adminApp) await deleteApp(adminApp);
   }, 60_000);
 
-  it('careerProfiles: 본인 문서만 읽고 쓴다 — 남의 생년월일·연락처를 볼 수 없다', async () => {
+  /**
+   * 은퇴한 컬렉션. 포털 마이페이지가 인력 명부(persons)를 읽도록 바뀌면서 쓰지 않게 됐다.
+   * 규칙에서 그냥 지우면 catchall 의 canRead 가 걸려 조직 전체가 읽게 되므로 닫아 둔다.
+   */
+  it('careerProfiles: 본인도 남도 못 연다 — 은퇴한 경로다', async () => {
     const owner = 'pm-member';
-    const other = 'finance-member';
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), `orgs/${tenantId}/careerProfiles/${owner}`), {
-        uid: owner, orgId: tenantId, nameKo: '본인', birthDate: '1990-01-01', phone: '010-0000-0000',
+        uid: owner, orgId: tenantId, nameKo: '본인', birthDate: '1990-01-01',
       });
     });
 
-    const ownerDb = testEnv.authenticatedContext(owner, { email: `${owner}@mysc.co.kr` }).firestore();
-    await assertSucceeds(getDoc(doc(ownerDb, `orgs/${tenantId}/careerProfiles/${owner}`)));
-    await assertSucceeds(setDoc(doc(ownerDb, `orgs/${tenantId}/careerProfiles/${owner}`), {
-      uid: owner, orgId: tenantId, nameKo: '본인 수정',
-    }));
-
-    // 같은 조직의 다른 사람은 물론, 관리자도 이 경로로는 못 본다 - 인사 담당자는 persons 권한 경로로 본다.
-    for (const stranger of [other, 'admin-member']) {
-      const strangerDb = testEnv.authenticatedContext(stranger, { email: `${stranger}@mysc.co.kr` }).firestore();
-      await assertFails(getDoc(doc(strangerDb, `orgs/${tenantId}/careerProfiles/${owner}`)));
-      await assertFails(setDoc(doc(strangerDb, `orgs/${tenantId}/careerProfiles/${owner}`), { uid: owner, hacked: true }));
-      await assertFails(getDocs(firestoreCollection(strangerDb, `orgs/${tenantId}/careerProfiles`)));
+    for (const actor of [owner, 'finance-member', 'admin-member']) {
+      const actorDb = testEnv.authenticatedContext(actor, { email: `${actor}@mysc.co.kr` }).firestore();
+      await assertFails(getDoc(doc(actorDb, `orgs/${tenantId}/careerProfiles/${owner}`)));
+      await assertFails(setDoc(doc(actorDb, `orgs/${tenantId}/careerProfiles/${owner}`), { uid: owner, hacked: true }));
+      await assertFails(getDocs(firestoreCollection(actorDb, `orgs/${tenantId}/careerProfiles`)));
     }
   });
 

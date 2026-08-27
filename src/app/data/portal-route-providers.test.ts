@@ -10,7 +10,6 @@ describe('portal route provider scope', () => {
       expect(resolvePortalProviderScope(pathname)).toMatchObject({
         cashflowWeeks: true,
         board: false,
-        careerProfile: false,
         training: false,
       });
     }

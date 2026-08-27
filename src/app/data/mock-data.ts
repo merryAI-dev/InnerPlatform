@@ -1,7 +1,7 @@
 import type {
   Organization, OrgMember, LedgerTemplate, Project, Ledger,
   Transaction, Comment, AuditLog, Evidence,
-  CareerProfile, TrainingCourse, TrainingEnrollment,
+  TrainingCourse, TrainingEnrollment,
 } from './types';
 
 // ═══════════════════════════════════════════════════════════════
@@ -998,50 +998,6 @@ export const AUDIT_LOGS: AuditLog[] = [
 ];
 
 // ── Career Profiles (경력 프로필) ──
-
-export const MOCK_CAREER_PROFILES: CareerProfile[] = [
-  {
-    uid: 'u002',
-    orgId: 'org001',
-    nameKo: '데이나',
-    nameEn: 'Dana Kim',
-    birthDate: '1993-05-12',
-    phone: '010-1234-5678',
-    department: '개발협력팀',
-    title: '선임연구원',
-    joinedAt: '2020-03-01',
-    bio: '국제개발협력 전문가. KOICA 사업 기획 및 운영 경험 5년.',
-    education: [
-      { id: 'edu001', school: '서울대학교', major: '국제대학원 국제협력', degree: '석사', startDate: '2018-03', endDate: '2020-02' },
-      { id: 'edu002', school: '한국외국어대학교', major: '영어통번역', degree: '학사', startDate: '2012-03', endDate: '2016-02' },
-    ],
-    workHistory: [
-      { id: 'wh001', company: '한국국제협력단(KOICA)', title: '인턴', description: '개발협력 사업 기획 및 보고서 작성', startDate: '2019-06', endDate: '2019-12' },
-    ],
-    certifications: [
-      { id: 'cert001', name: 'ODA 전문가 과정 수료', issuedAt: '2019-11-30', issuer: '한국국제협력단(KOICA)' },
-    ],
-    updatedAt: '2026-01-15T09:00:00Z',
-  },
-  {
-    uid: 'u003',
-    orgId: 'org001',
-    nameKo: '베리',
-    nameEn: 'Berry Park',
-    birthDate: '1995-08-22',
-    phone: '010-9876-5432',
-    department: '임팩트투자팀',
-    title: '연구원',
-    joinedAt: '2022-01-01',
-    bio: '사회적 경제 및 임팩트 투자 분야 연구.',
-    education: [
-      { id: 'edu003', school: '연세대학교', major: '경제학', degree: '학사', startDate: '2014-03', endDate: '2018-02' },
-    ],
-    workHistory: [],
-    certifications: [],
-    updatedAt: '2026-01-10T09:00:00Z',
-  },
-];
 
 // ── Training Courses (사내 강의) ──
 
