@@ -182,7 +182,23 @@ function createApp({
   };
 
   const db = {
-    collection: (path) => ({ get: async () => ({ docs: collectionDocs(`${path}/`) }) }),
+    collection: (path) => {
+      const state = { filters: [], limit: Infinity };
+      const query = {
+        where(field, op, value) {
+          if (op !== '==') throw new Error('mock collection only supports ==');
+          state.filters.push([field, value]);
+          return query;
+        },
+        limit(count) { state.limit = count; return query; },
+        get: async () => ({
+          docs: collectionDocs(`${path}/`)
+            .filter((doc) => state.filters.every(([field, value]) => (doc.data() || {})[field] === value))
+            .slice(0, state.limit),
+        }),
+      };
+      return query;
+    },
     doc: (path) => ({
       __path: path,
       path,
@@ -291,6 +307,50 @@ describe('라우트 — 인력 명부', () => {
     const response = await request(app).get('/api/v1/persons');
     expect(response.status).toBe(200);
     expect(response.body.items.map((item) => item.name)).toEqual(['강감찬', '홍길동']);
+  });
+
+  it('내 인사정보는 uid 로 자기 것만 찾고, 명부에 없으면 왜 비었는지 알린다', async () => {
+    const documents = {
+      'orgs/tenant-a/persons/person-me': {
+        personId: 'person-me', name: '변민욱', nickname: '보람', uid: 'actor-a',
+        grade: '책임연구원', joinedAt: '2025-04-02', birthDate: '1996-12-20',
+        employments: [], note: 'PERSON_NOTE_SECRET',
+        professionalProfile: {
+          schemaVersion: 1,
+          educationRecords: [{ attainmentCode: 'MASTER_GRADUATED', institutionName: 'Sussex', countryCode: 'GB', major: '개발학', admissionYear: '2015', degreeYear: '2017', evidence: null }],
+          englishEvidence: [],
+          certifications: [{ key: 'pmp', label: 'PMP', acquiredAt: '2019-05', evidence: null }],
+          provenance: { source: 'PEOPLE_MANUAL', revision: 1, updatedAt: '2026-08-27T00:00:00.000Z', updatedBy: 'actor-b' },
+        },
+      },
+      'orgs/tenant-a/persons/person-other': {
+        personId: 'person-other', name: '남', uid: 'actor-z', employments: [],
+        professionalProfile: {
+          schemaVersion: 1, educationRecords: [], englishEvidence: [],
+          certifications: [{ key: 'other-secret', label: 'OTHER_SECRET', acquiredAt: null, evidence: null }],
+          provenance: { source: 'PEOPLE_MANUAL', revision: 1, updatedAt: null, updatedBy: null },
+        },
+      },
+    };
+
+    // 권한이 낮은 역할도 자기 것은 본다 - 본인 데이터라 별도 권한을 요구하지 않는다.
+    const { app } = createApp({ role: 'viewer', documents });
+    const mine = await request(app).get('/api/v1/persons/me/hr-profile');
+    expect(mine.status).toBe(200);
+    expect(mine.body.linked).toBe(true);
+    expect(mine.body.person).toMatchObject({ personId: 'person-me', grade: '책임연구원', birthDate: '1996-12-20' });
+    expect(mine.body.profile.certifications).toEqual([
+      { key: 'pmp', label: 'PMP', acquiredAt: '2019-05', evidence: null },
+    ]);
+    // 남의 인사정보도, 명부 내부 메모도 섞이지 않는다.
+    expect(JSON.stringify(mine.body)).not.toContain('OTHER_SECRET');
+    expect(JSON.stringify(mine.body)).not.toContain('PERSON_NOTE_SECRET');
+
+    // uid 가 명부에 없는 계정은 빈 화면 대신 왜 비었는지 알 수 있어야 한다.
+    const { app: unlinkedApp } = createApp({ role: 'viewer', documents: {} });
+    const unlinked = await request(unlinkedApp).get('/api/v1/persons/me/hr-profile');
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.body).toEqual({ linked: false, person: null, profile: null });
   });
 
   it('목록은 명시적 allowlist만 반환하고 전문 프로필 원문은 전역 store에 흘리지 않는다', async () => {
