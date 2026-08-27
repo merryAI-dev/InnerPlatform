@@ -33,13 +33,13 @@ const baseInput = () => ({
       attainmentCode: 'BACHELOR_GRADUATED',
       institutionName: ' 연세대학교 ',
       countryCode: ' kr ',
-      major: ' 경영학 ',
+      major: ' 경영학 ', admissionYear: null, degreeYear: null,
     },
     {
       attainmentCode: 'MASTER_GRADUATED',
       institutionName: ' University of Sussex ',
       countryCode: ' gb ',
-      major: ' Development Studies ',
+      major: ' Development Studies ', admissionYear: null, degreeYear: null,
     },
   ],
   englishEvidence: [
@@ -142,13 +142,13 @@ describe('normalizeProfessionalProfileInput', () => {
           attainmentCode: 'BACHELOR_GRADUATED',
           institutionName: '연세대학교',
           countryCode: 'KR',
-          major: '경영학',
+          major: '경영학', admissionYear: null, degreeYear: null,
         },
         {
           attainmentCode: 'MASTER_GRADUATED',
           institutionName: 'University of Sussex',
           countryCode: 'GB',
-          major: 'Development Studies',
+          major: 'Development Studies', admissionYear: null, degreeYear: null,
         },
       ],
       englishEvidence: [
@@ -168,8 +168,8 @@ describe('normalizeProfessionalProfileInput', () => {
         },
       ],
       certifications: [
-        { key: 'pmp', label: 'PMP' },
-        { key: 'oda 전문가', label: 'ODA 전문가' },
+        { key: 'pmp', label: 'PMP', acquiredAt: null },
+        { key: 'oda 전문가', label: 'ODA 전문가', acquiredAt: null },
       ],
     });
   });
@@ -191,6 +191,40 @@ describe('normalizeProfessionalProfileInput', () => {
     expect(() => normalizeProfessionalProfileInput({ [field]: tooMany })).toThrow(/maximum|최대/i);
   });
 
+  it('keeps admission/degree years and certification acquisition month, and rejects impossible ones', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    const normalized = normalizeProfessionalProfileInput({
+      educationRecords: [{
+        attainmentCode: 'MASTER_GRADUATED',
+        institutionName: '연세대학교',
+        major: '경영학',
+        admissionYear: '2015',
+        degreeYear: 2017,
+      }],
+      certifications: [{ label: '정보처리기사', acquiredAt: '2019-05' }],
+    });
+    expect(normalized.educationRecords[0]).toMatchObject({ admissionYear: '2015', degreeYear: '2017' });
+    expect(normalized.certifications[0]).toMatchObject({ label: '정보처리기사', acquiredAt: '2019-05' });
+
+    // 안 적어도 된다 - 오래된 이력은 연도를 기억하지 못하는 경우가 있다.
+    const blank = normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED' }],
+      certifications: [{ label: '한국사능력검정' }],
+    });
+    expect(blank.educationRecords[0]).toMatchObject({ admissionYear: null, degreeYear: null });
+    expect(blank.certifications[0].acquiredAt).toBeNull();
+
+    expect(() => normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', admissionYear: '15' }],
+    })).toThrow(/admissionYear/);
+    expect(() => normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', admissionYear: '2020', degreeYear: '2018' }],
+    })).toThrow(/degreeYear/);
+    expect(() => normalizeProfessionalProfileInput({
+      certifications: [{ label: '정보처리기사', acquiredAt: '2019-13' }],
+    })).toThrow(/acquiredAt/);
+  });
+
   it('normalizes blank optional text to null and validates text and ISO country boundaries', () => {
     const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
     const eightyCharacters = '가'.repeat(80);
@@ -200,13 +234,13 @@ describe('normalizeProfessionalProfileInput', () => {
         attainmentCode: 'OTHER',
         institutionName: eightyCharacters,
         countryCode: null,
-        major: '   ',
+        major: '   ', admissionYear: null, degreeYear: null,
       }],
     }).educationRecords[0]).toEqual({
       attainmentCode: 'OTHER',
       institutionName: eightyCharacters,
       countryCode: null,
-      major: null,
+      major: null, admissionYear: null, degreeYear: null,
     });
 
     expect(normalizeProfessionalProfileInput({
@@ -237,8 +271,8 @@ describe('normalizeProfessionalProfileInput', () => {
     });
 
     expect(normalized.certifications).toEqual([
-      { key: 'aws solutions architect', label: 'AWS Solutions Architect' },
-      { key: 'pmp', label: 'PMP' },
+      { key: 'aws solutions architect', label: 'AWS Solutions Architect', acquiredAt: null },
+      { key: 'pmp', label: 'PMP', acquiredAt: null },
     ]);
     expect(() => normalizeProfessionalProfileInput({ certifications: [{ label: ' ' }] }))
       .toThrow(/label/i);
@@ -351,13 +385,13 @@ describe('stored model and read DTO', () => {
           attainmentCode: 'BACHELOR_GRADUATED',
           institutionName: '연세대학교',
           countryCode: 'KR',
-          major: '경영학',
+          major: '경영학', admissionYear: null, degreeYear: null,
         },
         {
           attainmentCode: 'MASTER_GRADUATED',
           institutionName: 'University of Sussex',
           countryCode: 'GB',
-          major: 'Development Studies',
+          major: 'Development Studies', admissionYear: null, degreeYear: null,
         },
       ],
       englishEvidence: [
@@ -377,8 +411,8 @@ describe('stored model and read DTO', () => {
         },
       ],
       certifications: [
-        { key: 'pmp', label: 'PMP' },
-        { key: 'oda 전문가', label: 'ODA 전문가' },
+        { key: 'pmp', label: 'PMP', acquiredAt: null },
+        { key: 'oda 전문가', label: 'ODA 전문가', acquiredAt: null },
       ],
       provenance: {
         source: 'PEOPLE_MANUAL',
@@ -512,7 +546,7 @@ describe('RAG canonical boundary', () => {
         ...baseArgs,
         profile: {
           ...profile,
-          certifications: [{ key: 'cpa', label: 'CPA' }],
+          certifications: [{ key: 'cpa', label: 'CPA', acquiredAt: null }],
         },
       },
     ];

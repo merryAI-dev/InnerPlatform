@@ -63,16 +63,42 @@ function normalizeCountryCode(value, field) {
   return code;
 }
 
+
+/** 입학·학위취득 년도. 사람이 기억으로 적는 값이라 연도까지만 받는다. */
+function normalizeYear(value, field) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = typeof value === 'number' ? String(value) : value;
+  if (typeof text !== 'string' || !/^\d{4}$/.test(text.trim())) invalid(field, 'must be a 4-digit year');
+  const year = Number(text.trim());
+  if (year < 1900 || year > 2100) invalid(field, 'must be between 1900 and 2100');
+  return String(year);
+}
+
+/** 자격증 취득일·증빙 일자. 일 단위까지 기억하지 못하는 경우가 많아 YYYY-MM 으로 받는다. */
+function normalizeMonth(value, field) {
+  const normalized = optionalText(value, field);
+  if (normalized === null) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(normalized)) invalid(field, 'must use YYYY-MM');
+  return normalized;
+}
+
 function normalizeEducationRecord(value, index) {
   const field = `educationRecords[${index}]`;
   if (!isRecord(value)) invalid(field, 'must be an object');
   const attainmentCode = requiredCode(value.attainmentCode, `${field}.attainmentCode`);
   if (!educationByCode.has(attainmentCode)) invalid(`${field}.attainmentCode`, 'is not in the catalog');
+  const admissionYear = normalizeYear(value.admissionYear, `${field}.admissionYear`);
+  const degreeYear = normalizeYear(value.degreeYear, `${field}.degreeYear`);
+  if (admissionYear && degreeYear && admissionYear > degreeYear) {
+    invalid(`${field}.degreeYear`, 'must not be earlier than admissionYear');
+  }
   return {
     attainmentCode,
     institutionName: optionalText(value.institutionName, `${field}.institutionName`),
     countryCode: normalizeCountryCode(value.countryCode, `${field}.countryCode`),
     major: optionalText(value.major, `${field}.major`),
+    admissionYear,
+    degreeYear,
   };
 }
 
@@ -154,6 +180,7 @@ function normalizeCertification(value, index) {
   return {
     key: label.toLocaleLowerCase('ko-KR'),
     label,
+    acquiredAt: normalizeMonth(value.acquiredAt, `${field}.acquiredAt`),
   };
 }
 
@@ -258,6 +285,8 @@ export function serializeProfessionalProfile(value) {
       institutionName: record.institutionName,
       countryCode: record.countryCode,
       major: record.major,
+      admissionYear: record.admissionYear,
+      degreeYear: record.degreeYear,
     })),
     englishEvidence: profile.englishEvidence.map((evidence) => ({
       testCode: evidence.testCode,
@@ -269,6 +298,7 @@ export function serializeProfessionalProfile(value) {
     certifications: profile.certifications.map((certification) => ({
       key: certification.key,
       label: certification.label,
+      acquiredAt: certification.acquiredAt,
     })),
     provenance: {
       source: profile.provenance.source,

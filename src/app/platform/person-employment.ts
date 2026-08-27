@@ -34,6 +34,8 @@ export interface Person {
   departmentSub: string;
   title: string;
   grade: string;
+  /** 생년월일 (YYYY-MM-DD). 만 나이는 저장하지 않고 조회 시 계산한다. */
+  birthDate: string;
   workLocation: string;
   /** 최초 입사일 — 근속 계산의 기준 */
   joinedAt: string | null;
@@ -130,6 +132,19 @@ export interface Tenure {
   months: number;
   years: number;
   label: string;
+}
+
+/**
+ * 만 나이. 근속과 같은 이유로 저장하지 않는다 — 생년월일만 있으면 언제 기준으로든
+ * 다시 계산되고, 해가 바뀌어도 화면이 저절로 맞다.
+ */
+export function deriveAge(birthDate: string | null | undefined, asOf: string): number | null {
+  const birth = String(birthDate || '').slice(0, 10);
+  if (!isIsoDate(birth) || !isIsoDate(asOf) || birth > asOf) return null;
+  const [by, bm, bd] = birth.split('-').map(Number);
+  const [ay, am, ad] = asOf.split('-').map(Number);
+  const beforeBirthday = am < bm || (am === bm && ad < bd);
+  return Math.max(0, ay - by - (beforeBirthday ? 1 : 0));
 }
 
 /** 근속. joinedAt 만 있으면 언제 기준으로든 다시 계산된다 — 저장값이 낡아도 화면은 정확하다. */

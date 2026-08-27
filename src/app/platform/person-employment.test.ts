@@ -9,6 +9,7 @@ import {
   resolveEmploymentAt,
   resolveSeparationDate,
   selectableAt,
+  deriveAge,
   type Person,
   type PersonEmployment,
 } from './person-employment';
@@ -26,6 +27,7 @@ function person(overrides: Partial<Person> = {}): Person {
     departmentSub: '',
     title: '실장/팀장',
     grade: '책임컨설턴트',
+    birthDate: '1990-03-15',
     workLocation: '',
     joinedAt: '2015-04-10',
     uid: 'uid-1',
@@ -235,5 +237,20 @@ describe('배정 후보 선별', () => {
 
   it('과거 시점으로 물으면 퇴사자도 후보다', () => {
     expect(selectableAt(people, '2025-06-01').map((item) => item.personId)).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+describe('deriveAge — 만 나이', () => {
+  it('생일이 지났으면 그해 나이, 안 지났으면 한 살 적다', () => {
+    expect(deriveAge('1990-03-15', '2026-03-15')).toBe(36);
+    expect(deriveAge('1990-03-15', '2026-03-14')).toBe(35);
+    expect(deriveAge('1990-12-31', '2026-01-01')).toBe(35);
+  });
+
+  it('생년월일이 없거나 형식이 아니거나 미래면 계산하지 않는다', () => {
+    expect(deriveAge('', '2026-03-15')).toBeNull();
+    expect(deriveAge(null, '2026-03-15')).toBeNull();
+    expect(deriveAge('1990-03', '2026-03-15')).toBeNull();
+    expect(deriveAge('2027-01-01', '2026-03-15')).toBeNull();
   });
 });

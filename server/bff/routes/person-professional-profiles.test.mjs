@@ -31,7 +31,7 @@ function profileInput(overrides = {}) {
       attainmentCode: 'MASTER_GRADUATED',
       institutionName: 'University of Sussex',
       countryCode: 'GB',
-      major: 'Development Studies',
+      major: 'Development Studies', admissionYear: null, degreeYear: null,
     }],
     englishEvidence: [{
       testCode: 'TOEIC',
@@ -294,7 +294,7 @@ describe('professional profile full-replacement command', () => {
         schemaVersion: 1,
         educationRecords: [expect.objectContaining({ institutionName: 'University of Sussex' })],
         englishEvidence: [expect.objectContaining({ resultValue: '920' })],
-        certifications: [{ key: 'pmp', label: 'PMP' }],
+        certifications: [{ key: 'pmp', label: 'PMP', acquiredAt: null }],
       }),
       revision: 1,
       changed: true,
@@ -312,7 +312,7 @@ describe('professional profile full-replacement command', () => {
       schemaVersion: 1,
       educationRecords: [expect.objectContaining({ institutionName: 'University of Sussex' })],
       englishEvidence: [expect.objectContaining({ resultValue: '920' })],
-      certifications: [{ key: 'pmp', label: 'PMP' }],
+      certifications: [{ key: 'pmp', label: 'PMP', acquiredAt: null }],
       provenance: {
         source: 'PEOPLE_MANUAL',
         revision: 1,
@@ -474,7 +474,7 @@ describe('professional profile full-replacement command', () => {
     const first = await putProfile(harness.app, { key: 'stable-key' });
     const canonicalProfile = {
       ...harness.store[PERSON_PATH].professionalProfile,
-      certifications: [{ key: 'aws', label: 'AWS' }],
+      certifications: [{ key: 'aws', label: 'AWS', acquiredAt: null }],
       provenance: {
         ...harness.store[PERSON_PATH].professionalProfile.provenance,
         revision: 2,
@@ -484,7 +484,7 @@ describe('professional profile full-replacement command', () => {
     const replay = await putProfile(harness.app, { key: 'stable-key' });
 
     expect(first.body).toMatchObject({
-      profile: { certifications: [{ key: 'pmp', label: 'PMP' }] },
+      profile: { certifications: [{ key: 'pmp', label: 'PMP', acquiredAt: null }] },
       revision: 1,
       changed: true,
     });

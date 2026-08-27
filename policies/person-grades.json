@@ -1,0 +1,14 @@
+{
+  "catalogVersion": 1,
+  "comment": "MYSC 오피스핸드북 직급. 직책(팀장·센터장 등)과 다른 축이다 - 직책은 persons.title 에 자유 입력으로 남는다. equivalentTitles 는 대외 문서에서 쓰는 일반직급 대응이며 화면 힌트로만 쓴다(저장하지 않는다).",
+  "grades": [
+    { "code": "INTERN_RESEARCHER", "label": "인턴연구원", "rank": 10, "equivalentTitles": ["인턴사원"] },
+    { "code": "RESEARCHER", "label": "연구원", "rank": 20, "equivalentTitles": ["사원"] },
+    { "code": "SENIOR_RESEARCHER", "label": "선임연구원", "rank": 30, "equivalentTitles": ["대리"] },
+    { "code": "PRINCIPAL_RESEARCHER", "label": "책임연구원", "rank": 40, "equivalentTitles": ["대리", "과장"] },
+    { "code": "CONSULTANT", "label": "컨설턴트", "rank": 50, "equivalentTitles": ["과장"] },
+    { "code": "SENIOR_CONSULTANT", "label": "선임컨설턴트", "rank": 60, "equivalentTitles": ["과장", "차장"] },
+    { "code": "PRINCIPAL_CONSULTANT", "label": "책임컨설턴트", "rank": 70, "equivalentTitles": ["차장", "부장"] },
+    { "code": "EXECUTIVE_CONSULTANT", "label": "수석컨설턴트", "rank": 80, "equivalentTitles": ["부장", "이사", "상무", "전무", "부대표"] }
+  ]
+}

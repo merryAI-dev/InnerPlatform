@@ -2822,6 +2822,8 @@ export interface PersonRecord {
   departmentSub: string;
   title: string;
   grade: string;
+  /** 생년월일 (YYYY-MM-DD). 만 나이는 저장하지 않고 조회 시 계산한다. */
+  birthDate: string;
   workLocation: string;
   joinedAt: string | null;
   employments: PersonEmploymentRecord[];
