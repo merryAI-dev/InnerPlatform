@@ -317,7 +317,8 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('allow write: if isAdmin(orgId);');
     // 조직 목록도 같은 문 뒤에 둔다. 인력 소속과 프로젝트 담당조직이 여기서 뻗어 나온다.
     expect(firestoreRulesText).toContain('match /orgs/{orgId}/settings/organizations');
-    expect(firestoreRulesText).toContain("(collection == 'settings' && document in ['project-departments', 'organizations'])");
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/settings/person-grades');
+    expect(firestoreRulesText).toContain("(collection == 'settings' && document in ['project-departments', 'organizations', 'person-grades'])");
   });
 
   it('keeps business-card source images behind BFF-only Storage rules', () => {

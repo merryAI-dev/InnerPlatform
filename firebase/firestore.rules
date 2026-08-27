@@ -123,7 +123,7 @@ service cloud.firestore {
 
     function isCatchallExcludedPath(collection, document) {
       return isCatchallExcludedCollection(collection)
-        || (collection == 'settings' && document in ['project-departments', 'organizations']);
+        || (collection == 'settings' && document in ['project-departments', 'organizations', 'person-grades']);
     }
 
     // Canonical finance/project state is written only by the BFF/JVM Admin SDK.
@@ -329,6 +329,12 @@ service cloud.firestore {
 
     // ── 관리자 설정: 프로젝트 선택값 ──
     match /orgs/{orgId}/settings/project-departments {
+      allow read: if canRead(orgId);
+      allow write: if isAdmin(orgId);
+    }
+
+    // ── 관리자 설정: 직급 목록 ──
+    match /orgs/{orgId}/settings/person-grades {
       allow read: if canRead(orgId);
       allow write: if isAdmin(orgId);
     }

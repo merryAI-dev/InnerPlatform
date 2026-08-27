@@ -46,9 +46,10 @@ describe('인사정보 콘솔', () => {
     expect(source).not.toContain('person.age');
   });
 
-  it('직급은 카탈로그에서 고르되 별도 직급체계는 직접 입력으로 남긴다', () => {
-    expect(source).toContain('PERSON_GRADES.map');
-    expect(source).toContain('formatPersonGradeOption(grade)');
+  it('직급은 설정 목록에서 고르되 별도 직급체계는 직접 입력으로 남긴다', () => {
+    // 직급 목록도 설정에서 뻗어 나온다. 코드 카탈로그는 설정이 없을 때의 기본값이다.
+    expect(source).toContain('usePersonGradeSettings');
+    expect(source).toContain('formatGradeOptionLabel(grade)');
     expect(source).toContain('직급과 다른 축입니다');
     // 경영기획실(재경)·사내벤처는 별도 체계를 쓴다. 목록으로 막으면 그 사람들이 저장을 못 한다.
     expect(source).toContain('직접 입력 (별도 직급체계)');
