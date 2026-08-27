@@ -30,13 +30,11 @@ export function createEmptyCareerProfile(uid: string, orgId: string, nameKo: str
 
 interface CareerProfileState {
   myProfile: CareerProfile | null;
-  viewedProfile: CareerProfile | null; // admin이 타인 프로필 조회 시
   isLoading: boolean;
 }
 
 interface CareerProfileActions {
   saveMyProfile: (updates: Partial<CareerProfile>) => Promise<boolean>;
-  loadProfileByUid: (uid: string) => Promise<CareerProfile | null>;
   addEducation: (entry: Omit<EducationEntry, 'id'>) => Promise<boolean>;
   updateEducation: (id: string, entry: Partial<EducationEntry>) => Promise<boolean>;
   removeEducation: (id: string) => Promise<boolean>;
@@ -66,7 +64,6 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
   const { db, orgId } = useFirebase();
   const [myProfile, setMyProfile] = useState<CareerProfile | null>(null);
-  const [viewedProfile, setViewedProfile] = useState<CareerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && !!db;
@@ -130,31 +127,6 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
     }
   }, [authUser, myProfile, firestoreEnabled, db, tenantId]);
 
-  // admin이 타인 프로필 조회
-  const loadProfileByUid = useCallback(async (uid: string): Promise<CareerProfile | null> => {
-    setIsLoading(true);
-    try {
-      if (firestoreEnabled && db) {
-        const ref = doc(db, getOrgDocumentPath(tenantId, 'careerProfiles', uid));
-        const snap = await getDoc(ref);
-        const profile = snap.exists()
-          ? (snap.data() as CareerProfile)
-          : createEmptyCareerProfile(uid, tenantId, uid);
-        setViewedProfile(profile);
-        return profile;
-      } else {
-        const profile = MOCK_CAREER_PROFILES.find((p) => p.uid === uid) ||
-          createEmptyCareerProfile(uid, tenantId, uid);
-        setViewedProfile(profile);
-        return profile;
-      }
-    } catch (err) {
-      console.error('[CareerProfile] loadByUid failed:', err);
-      return null;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [firestoreEnabled, db, tenantId]);
 
   // ── 학력 CRUD ──
 
@@ -209,10 +181,8 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
 
   const value = {
     myProfile,
-    viewedProfile,
     isLoading,
     saveMyProfile,
-    loadProfileByUid,
     addEducation,
     updateEducation,
     removeEducation,
