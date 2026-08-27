@@ -32,13 +32,13 @@ const baseInput = () => ({
     {
       attainmentCode: 'BACHELOR_GRADUATED',
       institutionName: ' 연세대학교 ',
-      countryCode: ' kr ',
+      regionCode: ' domestic ',
       major: ' 경영학 ', admissionYear: null, degreeYear: null, evidence: null,
     },
     {
       attainmentCode: 'MASTER_GRADUATED',
       institutionName: ' University of Sussex ',
-      countryCode: ' gb ',
+      regionCode: ' overseas_english ',
       major: ' Development Studies ', admissionYear: null, degreeYear: null, evidence: null,
     },
   ],
@@ -101,8 +101,6 @@ describe('professional profile catalog', () => {
     expect(scales).toEqual([
       { testCode: 'TOEIC', scaleCode: 'TOEIC_990', scaleLabel: '990점' },
       { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_120', scaleLabel: 'iBT 120점' },
-      { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_6', scaleLabel: 'iBT 6점' },
-      { testCode: 'TOEFL', scaleCode: 'TOEFL_PBT_677', scaleLabel: 'PBT 677점' },
       { testCode: 'OPIC', scaleCode: 'OPIC_GRADE', scaleLabel: '등급' },
       { testCode: 'IELTS', scaleCode: 'IELTS_9', scaleLabel: '9점' },
       { testCode: 'TEPS', scaleCode: 'TEPS_600', scaleLabel: '600점' },
@@ -110,8 +108,10 @@ describe('professional profile catalog', () => {
     ]);
     expect(catalog.englishTests.find(({ code }) => code === 'OPIC').scales[0].allowedValues)
       .toEqual(['NL', 'NM', 'NH', 'IL', 'IM1', 'IM2', 'IM3', 'IH', 'AL']);
-    expect(catalog.countryCodes).toEqual(expect.arrayContaining(['KR', 'GB']));
-    expect(catalog.countryCodes).not.toContain('ZZ');
+    expect(catalog.educationRegions.map(({ code }) => code))
+      .toEqual(['DOMESTIC', 'OVERSEAS_ENGLISH', 'OVERSEAS_OTHER']);
+    expect(catalog.educationRegions.map(({ label }) => label))
+      .toEqual(['국내', '해외(영미권)', '해외(기타)']);
   });
 
   it('loads policy JSON through a statically traceable module-relative import', async () => {
@@ -141,13 +141,13 @@ describe('normalizeProfessionalProfileInput', () => {
         {
           attainmentCode: 'BACHELOR_GRADUATED',
           institutionName: '연세대학교',
-          countryCode: 'KR',
+          regionCode: 'DOMESTIC',
           major: '경영학', admissionYear: null, degreeYear: null, evidence: null,
         },
         {
           attainmentCode: 'MASTER_GRADUATED',
           institutionName: 'University of Sussex',
-          countryCode: 'GB',
+          regionCode: 'OVERSEAS_ENGLISH',
           major: 'Development Studies', admissionYear: null, degreeYear: null, evidence: null,
         },
       ],
@@ -259,7 +259,7 @@ describe('normalizeProfessionalProfileInput', () => {
     })).toThrow(/acquiredAt/);
   });
 
-  it('normalizes blank optional text to null and validates text and ISO country boundaries', () => {
+  it('normalizes blank optional text to null and validates text and education region boundaries', () => {
     const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
     const eightyCharacters = '가'.repeat(80);
 
@@ -267,28 +267,28 @@ describe('normalizeProfessionalProfileInput', () => {
       educationRecords: [{
         attainmentCode: 'OTHER',
         institutionName: eightyCharacters,
-        countryCode: null,
+        regionCode: null,
         major: '   ', admissionYear: null, degreeYear: null, evidence: null,
       }],
     }).educationRecords[0]).toEqual({
       attainmentCode: 'OTHER',
       institutionName: eightyCharacters,
-      countryCode: null,
+      regionCode: null,
       major: null, admissionYear: null, degreeYear: null, evidence: null,
     });
 
     expect(normalizeProfessionalProfileInput({
-      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', countryCode: ' gb ' }],
-    }).educationRecords[0].countryCode).toBe('GB');
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', regionCode: ' overseas_english ' }],
+    }).educationRecords[0].regionCode).toBe('OVERSEAS_ENGLISH');
     expect(() => normalizeProfessionalProfileInput({
       educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', institutionName: '가'.repeat(81) }],
     })).toThrow(/80/);
     expect(() => normalizeProfessionalProfileInput({
-      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', countryCode: 'ZZ' }],
-    })).toThrow(/country/i);
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', regionCode: 'NOWHERE' }],
+    })).toThrow(/DOMESTIC/);
     expect(() => normalizeProfessionalProfileInput({
-      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', countryCode: 'ABC' }],
-    })).toThrow(/country/i);
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', regionCode: 'ABC' }],
+    })).toThrow(/DOMESTIC/);
     expect(() => normalizeProfessionalProfileInput({
       educationRecords: [{ attainmentCode: '__MISSING__' }],
     })).toThrow(/attainment/i);
@@ -320,8 +320,6 @@ describe('normalizeProfessionalProfileInput', () => {
       englishEvidence: [
         { testCode: 'TOEIC', scaleCode: 'TOEIC_990', resultValue: '990' },
         { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_120', resultValue: '120' },
-        { testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_6', resultValue: '6' },
-        { testCode: 'TOEFL', scaleCode: 'TOEFL_PBT_677', resultValue: '677' },
         { testCode: 'OPIC', scaleCode: 'OPIC_GRADE', resultValue: ' ih ' },
         { testCode: 'IELTS', scaleCode: 'IELTS_9', resultValue: '9' },
         { testCode: 'TEPS', scaleCode: 'TEPS_600', resultValue: '600' },
@@ -336,7 +334,7 @@ describe('normalizeProfessionalProfileInput', () => {
     });
 
     expect(normalized.englishEvidence.map(({ resultValue }) => resultValue))
-      .toEqual(['990', '120', '6', '677', 'IH', '9', '600', 'C2']);
+      .toEqual(['990', '120', 'IH', '9', '600', 'C2']);
     expect(normalized.englishEvidence.at(-1)).toEqual({
       testCode: 'OTHER',
       scaleCode: 'OTHER_TEXT',
@@ -362,8 +360,6 @@ describe('normalizeProfessionalProfileInput', () => {
   it.each([
     [{ testCode: 'TOEIC', scaleCode: 'TOEIC_990', resultValue: '991' }, /result/i],
     [{ testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_120', resultValue: '121' }, /result/i],
-    [{ testCode: 'TOEFL', scaleCode: 'TOEFL_IBT_6', resultValue: '6.5' }, /result/i],
-    [{ testCode: 'TOEFL', scaleCode: 'TOEFL_PBT_677', resultValue: '678' }, /result/i],
     [{ testCode: 'OPIC', scaleCode: 'OPIC_GRADE', resultValue: 'A1' }, /result/i],
     [{ testCode: 'IELTS', scaleCode: 'IELTS_9', resultValue: '9.5' }, /result/i],
     [{ testCode: 'TEPS', scaleCode: 'TEPS_600', resultValue: '601' }, /result/i],
@@ -418,13 +414,13 @@ describe('stored model and read DTO', () => {
         {
           attainmentCode: 'BACHELOR_GRADUATED',
           institutionName: '연세대학교',
-          countryCode: 'KR',
+          regionCode: 'DOMESTIC',
           major: '경영학', admissionYear: null, degreeYear: null, evidence: null,
         },
         {
           attainmentCode: 'MASTER_GRADUATED',
           institutionName: 'University of Sussex',
-          countryCode: 'GB',
+          regionCode: 'OVERSEAS_ENGLISH',
           major: 'Development Studies', admissionYear: null, degreeYear: null, evidence: null,
         },
       ],
@@ -479,8 +475,8 @@ describe('deriveProfessionalProfileFacts', () => {
 
     const tied = normalizeProfessionalProfileInput({
       educationRecords: [
-        { attainmentCode: 'MASTER_GRADUATED', institutionName: 'First University', countryCode: 'KR' },
-        { attainmentCode: 'MASTER_GRADUATED', institutionName: 'Second University', countryCode: 'KR' },
+        { attainmentCode: 'MASTER_GRADUATED', institutionName: 'First University', regionCode: 'DOMESTIC' },
+        { attainmentCode: 'MASTER_GRADUATED', institutionName: 'Second University', regionCode: 'DOMESTIC' },
       ],
     });
     expect(deriveProfessionalProfileFacts(tied).highestEducationDisplayText)
@@ -504,15 +500,15 @@ describe('deriveProfessionalProfileFacts', () => {
     });
     expect(deriveProfessionalProfileFacts(normalizeProfessionalProfileInput({
       educationRecords: [
-        { attainmentCode: 'BACHELOR_GRADUATED', countryCode: null },
-        { attainmentCode: 'MASTER_ENROLLED', countryCode: 'KR' },
+        { attainmentCode: 'BACHELOR_GRADUATED', regionCode: null },
+        { attainmentCode: 'MASTER_ENROLLED', regionCode: 'DOMESTIC' },
       ],
     }))).toMatchObject({
       englishFacets: ['__MISSING__'],
       englishEvidenceDisplayText: '',
     });
     expect(deriveProfessionalProfileFacts(normalizeProfessionalProfileInput({
-      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', countryCode: 'GB' }],
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', regionCode: 'OVERSEAS_ENGLISH' }],
     }))).toMatchObject({
       englishFacets: ['OVERSEAS_EDUCATION'],
       englishEvidenceDisplayText: '해외 대학',
@@ -638,5 +634,36 @@ describe('증빙 경로', () => {
     const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
     const tooLong = `orgs/mysc/person-hr-evidence/p1/${'가'.repeat(600)}.pdf`;
     expect(() => normalizeProfessionalProfileInput(withPath(tooLong))).toThrow(/at most 512 characters/);
+  });
+});
+
+describe('학력 구분', () => {
+  /**
+   * 예전에는 249개 ISO 국가 코드로 저장했다. 국내/해외 셋으로 줄이면서, 이미 적어 둔 학력이
+   * 저장 한 번에 사라지지 않도록 옛 값을 옮겨 읽는다.
+   */
+  it('옛 국가 코드를 국내·영미권·기타로 옮겨 읽는다', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    const regionOf = (countryCode) => normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'BACHELOR_GRADUATED', countryCode }],
+    }).educationRecords[0].regionCode;
+
+    expect(regionOf('KR')).toBe('DOMESTIC');
+    expect(regionOf('US')).toBe('OVERSEAS_ENGLISH');
+    expect(regionOf('GB')).toBe('OVERSEAS_ENGLISH');
+    expect(regionOf('JP')).toBe('OVERSEAS_OTHER');
+    expect(regionOf('DE')).toBe('OVERSEAS_OTHER');
+  });
+
+  it('해외 학위 표시는 영미권·기타 둘 다에서 켜진다', () => {
+    const normalizeProfessionalProfileInput = useExport('normalizeProfessionalProfileInput');
+    const deriveProfessionalProfileFacts = useExport('deriveProfessionalProfileFacts');
+    const factsFor = (regionCode) => deriveProfessionalProfileFacts(normalizeProfessionalProfileInput({
+      educationRecords: [{ attainmentCode: 'MASTER_GRADUATED', regionCode }],
+    }));
+
+    expect(factsFor('OVERSEAS_ENGLISH').englishEvidenceDisplayText).toContain('해외 대학');
+    expect(factsFor('OVERSEAS_OTHER').englishEvidenceDisplayText).toContain('해외 대학');
+    expect(factsFor('DOMESTIC').englishEvidenceDisplayText).not.toContain('해외 대학');
   });
 });

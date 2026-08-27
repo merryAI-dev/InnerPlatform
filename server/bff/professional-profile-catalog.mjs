@@ -30,12 +30,13 @@ function validateCatalog(value) {
     throw new Error('professional profile English scale labels are required');
   }
 
-  if (!Array.isArray(value.countryCodes) || value.countryCodes.length === 0) {
-    throw new Error('professional profile countryCodes are required');
+  if (!Array.isArray(value.educationRegions) || value.educationRegions.length === 0) {
+    throw new Error('professional profile educationRegions are required');
   }
-  assertUnique(value.countryCodes, 'country code');
-  if (value.countryCodes.some((code) => !/^[A-Z]{2}$/.test(code))) {
-    throw new Error('professional profile countryCodes must be ISO alpha-2 codes');
+  assertUnique(value.educationRegions.map(({ code }) => code), 'education region code');
+  assertUnique(value.educationRegions.map(({ label }) => label), 'education region label');
+  if (value.educationRegions.some(({ label }) => typeof label !== 'string' || !label.trim())) {
+    throw new Error('professional profile educationRegion labels are required');
   }
   return value;
 }
