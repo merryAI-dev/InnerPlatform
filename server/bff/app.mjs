@@ -90,6 +90,7 @@ import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 import { createSlackAlertService } from './slack-alerts.mjs';
 import {
   buildCashflowWeeklyDigestMessage,
+  decodeStoredName,
   kstDayWindow,
   kstTimeLabel,
   selectCompletedInWindow,
@@ -1214,16 +1215,23 @@ export function createBffApp(options = {}) {
         || readOptionalText(project.projectCode)
         || projectIds[index]];
     }));
-    const slackUserIds = new Map(memberSnapshots.map((snap, index) => [
-      memberUids[index],
-      readOptionalText((snap.exists ? snap.data() || {} : {}).slackUserId),
-    ]));
-
-    const entries = completions.map((item) => ({
-      projectName: projectNames.get(readOptionalText(item.projectId)) || readOptionalText(item.projectId),
-      completedByName: readOptionalText(item.completedByName),
-      slackUserId: slackUserIds.get(readOptionalText(item.completedByUid)) || '',
+    // 이름은 members 를 먼저 본다. 완료 기록의 completedByName 은 URL 인코딩된 채로 저장돼 있다.
+    const memberProfiles = new Map(memberSnapshots.map((snap, index) => {
+      const member = snap.exists ? snap.data() || {} : {};
+      return [memberUids[index], {
+        name: readOptionalText(member.name),
+        slackUserId: readOptionalText(member.slackUserId),
+      }];
     }));
+
+    const entries = completions.map((item) => {
+      const profile = memberProfiles.get(readOptionalText(item.completedByUid)) || {};
+      return {
+        projectName: projectNames.get(readOptionalText(item.projectId)) || readOptionalText(item.projectId),
+        completedByName: profile.name || decodeStoredName(item.completedByName),
+        slackUserId: profile.slackUserId || '',
+      };
+    });
     const message = buildCashflowWeeklyDigestMessage({
       date: window.date,
       timeLabel: kstTimeLabel(at),
