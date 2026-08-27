@@ -256,6 +256,14 @@ export function PersonHrConsole({
   const tenure = useMemo(() => deriveTenure(person.joinedAt, asOf), [person.joinedAt, asOf]);
   const age = useMemo(() => deriveAge(person.birthDate, asOf), [person.birthDate, asOf]);
 
+  const educationLabelOf = (code: string) => (
+    catalog?.educationAttainments.find((entry) => entry.code === code)?.label || code
+  );
+  const englishLabelOf = (testCode: string, otherName?: string | null) => {
+    if (testCode === 'OTHER') return otherName || '기타';
+    return catalog?.englishTests.find((entry) => entry.code === testCode)?.displayLabel || testCode;
+  };
+
   /**
    * 최고 학력 한 줄. 학력 구분의 순위(catalog rank)가 기준이며, 학위취득년도는 졸업증에 찍힌 해다.
    * 목록에서 오는 요약이 있으면 그것을 먼저 쓴다 - 상세를 열기 전에도 같은 값이 보이게.
@@ -282,14 +290,6 @@ export function PersonHrConsole({
     () => deriveYearsSinceDegree(highestEducation?.degreeYear, asOf),
     [highestEducation, asOf],
   );
-
-  const educationLabelOf = (code: string) => (
-    catalog?.educationAttainments.find((entry) => entry.code === code)?.label || code
-  );
-  const englishLabelOf = (testCode: string, otherName?: string | null) => {
-    if (testCode === 'OTHER') return otherName || '기타';
-    return catalog?.englishTests.find((entry) => entry.code === testCode)?.displayLabel || testCode;
-  };
 
   const statusText = separated
     ? `${formatDate(separated)} 퇴사`
