@@ -91,6 +91,7 @@ service cloud.firestore {
         || collection in ['members']
         || collection in ['projectRequestDrafts']
         || collection in ['privateEditDrafts']
+        || collection in ['careerProfiles']
         || collection in ['project_requests']
         || collection in ['projectRequests']
         || collection in ['projectCodeClaims']
@@ -221,6 +222,13 @@ service cloud.firestore {
 
     match /orgs/{orgId}/contact_events/{eventId} {
       allow read, write: if false;
+    }
+
+    // 포털 '내 프로필'. 생년월일·연락처·학력이 들어 있어 조직 구성원 전체가 볼 값이 아니다.
+    // 본인 문서만 읽고 쓴다 - 인사 담당자는 인력 명부(persons) 쪽 권한 경로로 본다.
+    match /orgs/{orgId}/careerProfiles/{uid} {
+      allow read: if canRead(orgId) && request.auth.uid == uid;
+      allow write: if canWrite(orgId) && request.auth.uid == uid;
     }
 
     match /orgs/{orgId}/persons/{personId} {

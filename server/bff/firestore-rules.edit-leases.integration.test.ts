@@ -155,6 +155,30 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     if (adminApp) await deleteApp(adminApp);
   }, 60_000);
 
+  it('careerProfiles: 본인 문서만 읽고 쓴다 — 남의 생년월일·연락처를 볼 수 없다', async () => {
+    const owner = 'pm-member';
+    const other = 'finance-member';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), `orgs/${tenantId}/careerProfiles/${owner}`), {
+        uid: owner, orgId: tenantId, nameKo: '본인', birthDate: '1990-01-01', phone: '010-0000-0000',
+      });
+    });
+
+    const ownerDb = testEnv.authenticatedContext(owner, { email: `${owner}@mysc.co.kr` }).firestore();
+    await assertSucceeds(getDoc(doc(ownerDb, `orgs/${tenantId}/careerProfiles/${owner}`)));
+    await assertSucceeds(setDoc(doc(ownerDb, `orgs/${tenantId}/careerProfiles/${owner}`), {
+      uid: owner, orgId: tenantId, nameKo: '본인 수정',
+    }));
+
+    // 같은 조직의 다른 사람은 물론, 관리자도 이 경로로는 못 본다 - 인사 담당자는 persons 권한 경로로 본다.
+    for (const stranger of [other, 'admin-member']) {
+      const strangerDb = testEnv.authenticatedContext(stranger, { email: `${stranger}@mysc.co.kr` }).firestore();
+      await assertFails(getDoc(doc(strangerDb, `orgs/${tenantId}/careerProfiles/${owner}`)));
+      await assertFails(setDoc(doc(strangerDb, `orgs/${tenantId}/careerProfiles/${owner}`), { uid: owner, hacked: true }));
+      await assertFails(getDocs(firestoreCollection(strangerDb, `orgs/${tenantId}/careerProfiles`)));
+    }
+  });
+
   for (const collection of protectedCollections) {
     for (const actor of actors) {
       it(`denies ${actor.label} client CRUD on ${collection}`, async () => {
