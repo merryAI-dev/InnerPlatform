@@ -467,6 +467,9 @@ describe('deriveProfessionalProfileFacts', () => {
 
     expect(deriveProfessionalProfileFacts(normalized)).toEqual({
       highestEducationCode: 'MASTER_GRADUATED',
+      highestDegreeYear: null,
+      highestEducationInstitution: 'University of Sussex',
+      highestEducationMajor: 'Development Studies',
       englishFacets: ['TOEIC', 'TOEFL', 'OVERSEAS_EDUCATION'],
       highestEducationDisplayText: '석사 졸업 · University of Sussex',
       englishEvidenceDisplayText: 'TOEIC 920 · TOEFL 105 · 해외 대학',
@@ -490,6 +493,9 @@ describe('deriveProfessionalProfileFacts', () => {
 
     expect(deriveProfessionalProfileFacts(normalizeProfessionalProfileInput({}))).toEqual({
       highestEducationCode: null,
+      highestDegreeYear: null,
+      highestEducationInstitution: null,
+      highestEducationMajor: null,
       englishFacets: ['__MISSING__'],
       highestEducationDisplayText: '',
       englishEvidenceDisplayText: '',

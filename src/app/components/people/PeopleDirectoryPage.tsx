@@ -22,6 +22,8 @@ import {
   type EmploymentState,
   type EmploymentType,
   type Person,
+  deriveAge,
+  deriveYearsSinceDegree,
 } from '../../platform/person-employment';
 import { normalizeProjectTeamMembers } from '../../platform/project-team-members';
 import { PageHeader } from '../layout/PageHeader';
@@ -121,13 +123,13 @@ function EmploymentForm({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div>
-        <Label className="text-[12px]">근로형태</Label>
+        <Label className="text-[13px]">근로형태</Label>
         <Select
           value={draft.type}
           onValueChange={(value) => onChange({ ...draft, type: value as EmploymentType })}
           disabled={disabled}
         >
-          <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             {(Object.keys(EMPLOYMENT_TYPE_LABELS) as EmploymentType[]).map((type) => (
               <SelectItem key={type} value={type}>{EMPLOYMENT_TYPE_LABELS[type]}</SelectItem>
@@ -136,13 +138,13 @@ function EmploymentForm({
         </Select>
       </div>
       <div>
-        <Label className="text-[12px]">재직상태</Label>
+        <Label className="text-[13px]">재직상태</Label>
         <Select
           value={draft.state}
           onValueChange={(value) => onChange({ ...draft, state: value as EmploymentState })}
           disabled={disabled}
         >
-          <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             {(Object.keys(EMPLOYMENT_STATE_LABELS) as EmploymentState[]).map((state) => (
               <SelectItem key={state} value={state}>{EMPLOYMENT_STATE_LABELS[state]}</SelectItem>
@@ -151,25 +153,25 @@ function EmploymentForm({
         </Select>
       </div>
       <div>
-        <Label className="text-[12px]">적용일</Label>
+        <Label className="text-[13px]">적용일</Label>
         <Input
-          type="date" className="mt-1 h-9" value={draft.effectiveFrom} disabled={disabled}
+          type="date" className="mt-1.5 h-10 text-[14px]" value={draft.effectiveFrom} disabled={disabled}
           onChange={(event) => onChange({ ...draft, effectiveFrom: event.target.value })}
         />
         <p className="mt-1 text-[11px] text-slate-500">이 날부터 새 계약이 적용됩니다.</p>
       </div>
       <div>
-        <Label className="text-[12px]">종료일 <span className="text-slate-400">(선택)</span></Label>
+        <Label className="text-[13px]">종료일 <span className="text-slate-400">(선택)</span></Label>
         <Input
-          type="date" className="mt-1 h-9" value={draft.endDate} disabled={disabled}
+          type="date" className="mt-1.5 h-10 text-[14px]" value={draft.endDate} disabled={disabled}
           onChange={(event) => onChange({ ...draft, endDate: event.target.value })}
         />
         <p className="mt-1 text-[11px] text-slate-500">비워두면 진행 중인 계약이 됩니다.</p>
       </div>
       <div className="sm:col-span-2">
-        <Label className="text-[12px]">사유 <span className="text-slate-400">(선택)</span></Label>
+        <Label className="text-[13px]">사유 <span className="text-slate-400">(선택)</span></Label>
         <Input
-          className="mt-1 h-9" value={draft.note} disabled={disabled}
+          className="mt-1.5 h-10 text-[14px]" value={draft.note} disabled={disabled}
           placeholder="예: 퇴사 후 파트너 전환"
           onChange={(event) => onChange({ ...draft, note: event.target.value })}
         />
@@ -189,10 +191,12 @@ interface PersonRow {
  * 인력 표. 근로형태 열은 두지 않는다 — 이름 옆에 붙는 신분 표시가 되기 때문이다.
  * 계약 형태가 필요한 자리는 계약 관리 다이얼로그뿐이고, 거기서는 그대로 보인다.
  */
-function PeopleTable({ rows, loading, onOpen }: {
+function PeopleTable({ rows, loading, onOpen, canReadProfile, asOf }: {
   rows: PersonRow[];
   loading: boolean;
   onOpen: (person: PersonRecord) => void;
+  canReadProfile: boolean;
+  asOf: string;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -204,15 +208,20 @@ function PeopleTable({ rows, loading, onOpen }: {
             <TableHead className="min-w-[150px]">소속</TableHead>
             <TableHead className="min-w-[110px]">직급</TableHead>
             <TableHead className="min-w-[100px]">직책</TableHead>
+            <TableHead className="min-w-[120px]">생년월일</TableHead>
             <TableHead className="min-w-[100px]">입사일</TableHead>
             <TableHead className="min-w-[100px]">근속</TableHead>
+            {canReadProfile ? <>
+              <TableHead className="min-w-[200px]">최종학력</TableHead>
+              <TableHead className="min-w-[120px]">학위취득</TableHead>
+            </> : null}
             <TableHead className="w-28" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">
+              <TableCell colSpan={canReadProfile ? 11 : 9} className="py-10 text-center text-sm text-slate-500">
                 {loading ? '불러오는 중…' : '조건에 맞는 인력이 없습니다.'}
               </TableCell>
             </TableRow>
@@ -223,8 +232,8 @@ function PeopleTable({ rows, loading, onOpen }: {
               onClick={() => onOpen(person)}
             >
               <TableCell>
-                <span className="text-xs font-semibold">{person.name}</span>
-                {person.nickname ? <span className="ml-1 text-[10px] text-muted-foreground">({person.nickname})</span> : null}
+                <span className="text-sm font-semibold">{person.name}</span>
+                {person.nickname ? <span className="ml-1 text-xs text-muted-foreground">({person.nickname})</span> : null}
               </TableCell>
               <TableCell>
                 {current ? (
@@ -235,15 +244,29 @@ function PeopleTable({ rows, loading, onOpen }: {
                   <span className="text-[11px] text-slate-500">{separatedAt ? `${formatDate(separatedAt)} 종료` : '계약 종료'}</span>
                 )}
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
+              <TableCell className="text-sm text-muted-foreground">
                 {person.departmentTop || '-'}
                 {person.departmentMid ? <span className="text-slate-400"> · {person.departmentMid}</span> : null}
               </TableCell>
               {/* 직급과 직책은 다른 축이다 - 한 칸에 섞으면 둘 다 못 읽는다. */}
-              <TableCell className="text-xs">{person.grade || '-'}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">{person.title || '-'}</TableCell>
-              <TableCell className="text-xs tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
-              <TableCell className="text-xs tabular-nums">{tenure?.label || '-'}</TableCell>
+              <TableCell className="text-sm">{person.grade || '-'}</TableCell>
+              <TableCell className="text-sm text-muted-foreground">{person.title || '-'}</TableCell>
+              {/* 만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다. */}
+              <TableCell className="text-sm tabular-nums text-muted-foreground">
+                {person.birthDate ? <>{formatDate(person.birthDate)} <span className="text-slate-400">(만 {deriveAge(person.birthDate, asOf) ?? '-'}세)</span></> : '-'}
+              </TableCell>
+              <TableCell className="text-sm tabular-nums text-muted-foreground">{formatDate(person.joinedAt)}</TableCell>
+              <TableCell className="text-sm tabular-nums">{tenure?.label || '-'}</TableCell>
+              {canReadProfile ? <>
+                <TableCell className="max-w-[260px] truncate text-sm" title={person.hrSummary?.highestEducationDisplayText || ''}>
+                  {person.hrSummary?.highestEducationDisplayText || '-'}
+                </TableCell>
+                <TableCell className="text-sm tabular-nums text-muted-foreground">
+                  {person.hrSummary?.highestDegreeYear
+                    ? <>{person.hrSummary.highestDegreeYear}년 <span className="text-slate-400">({deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)}년차)</span></>
+                    : '-'}
+                </TableCell>
+              </> : null}
               <TableCell>
                 <div className="flex items-center justify-end gap-1">
                   <Button
@@ -634,6 +657,7 @@ export function PeopleDirectoryPage() {
 
       <PeopleTable
         rows={mainRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
+        canReadProfile={scopedProfileCapabilities.read} asOf={asOf}
       />
 
       {internRows.length > 0 || counts.INTERN > 0 ? (
@@ -644,6 +668,7 @@ export function PeopleDirectoryPage() {
           </div>
           <PeopleTable
             rows={internRows} loading={loading || !directoryScopeLoaded} onOpen={openPerson}
+            canReadProfile={scopedProfileCapabilities.read} asOf={asOf}
           />
         </section>
       ) : null}
@@ -658,7 +683,7 @@ export function PeopleDirectoryPage() {
 
       {/* ── 계약 관리 ── */}
       <Dialog open={!!selected && directoryScopeLoaded} onOpenChange={(open) => { if (!open) setSelected(null); }}>
-        <DialogContent className="flex max-h-[85vh] max-w-[680px] flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[90vh] w-[min(94vw,860px)] max-w-[860px] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <Briefcase className="h-4 w-4" />
@@ -771,7 +796,7 @@ export function PeopleDirectoryPage() {
           }
         }}
       >
-        <DialogContent className="max-w-[780px]">
+        <DialogContent className="max-h-[92vh] w-[min(96vw,1000px)] max-w-[1000px] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-base">인력 등록</DialogTitle>
             <DialogDescription>
@@ -781,30 +806,30 @@ export function PeopleDirectoryPage() {
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label className="text-[12px]">이름</Label>
+              <Label className="text-[13px]">이름</Label>
               <Input
-                className="mt-1 h-9" value={newPerson.name} disabled={saving}
+                className="mt-1.5 h-10 text-[14px]" value={newPerson.name} disabled={saving}
                 onChange={(event) => setNewPerson({ ...newPerson, name: event.target.value })}
               />
             </div>
             <div>
-              <Label className="text-[12px]">별명 <span className="text-slate-400">(선택)</span></Label>
+              <Label className="text-[13px]">별명 <span className="text-slate-400">(선택)</span></Label>
               <Input
-                className="mt-1 h-9" value={newPerson.nickname} disabled={saving}
+                className="mt-1.5 h-10 text-[14px]" value={newPerson.nickname} disabled={saving}
                 onChange={(event) => setNewPerson({ ...newPerson, nickname: event.target.value })}
               />
             </div>
             <div>
-              <Label className="text-[12px]">소속 <span className="text-slate-400">(선택)</span></Label>
+              <Label className="text-[13px]">소속 <span className="text-slate-400">(선택)</span></Label>
               <Input
-                className="mt-1 h-9" value={newPerson.departmentTop} disabled={saving}
+                className="mt-1.5 h-10 text-[14px]" value={newPerson.departmentTop} disabled={saving}
                 onChange={(event) => setNewPerson({ ...newPerson, departmentTop: event.target.value })}
               />
             </div>
             <div>
-              <Label className="text-[12px]">직책 <span className="text-slate-400">(선택)</span></Label>
+              <Label className="text-[13px]">직책 <span className="text-slate-400">(선택)</span></Label>
               <Input
-                className="mt-1 h-9" value={newPerson.title} disabled={saving}
+                className="mt-1.5 h-10 text-[14px]" value={newPerson.title} disabled={saving}
                 onChange={(event) => setNewPerson({ ...newPerson, title: event.target.value })}
               />
             </div>

@@ -40,10 +40,21 @@ describe('인사정보 콘솔', () => {
     expect(source).toContain('{count}건');
   });
 
-  it('만 나이와 근속은 저장값이 아니라 오늘 기준 계산이다', () => {
+  it('만 나이·근속·학위 후 경력은 저장값이 아니라 오늘 기준 계산이다', () => {
     expect(source).toContain('deriveAge(person.birthDate, asOf)');
     expect(source).toContain('deriveTenure(person.joinedAt, asOf)');
+    // KOICA 제안서가 '학위 취득 후 경력 몇 년' 을 본다. 학력 카드를 열지 않고 머리에서 읽힌다.
+    expect(source).toContain('deriveYearsSinceDegree(highestEducation?.degreeYear, asOf)');
+    expect(source).toContain('label="최종학력"');
+    expect(source).toContain('label="학위취득"');
     expect(source).not.toContain('person.age');
+  });
+
+  it('읽는 크기를 지킨다 — DESIGN.md 본문 14~15px, 팝업은 넓게', () => {
+    // 처음엔 11~13px 로 만들어 화면이 깨졌다. 조밀한 것은 되지만 비좁은 것은 안 된다.
+    expect(source).toContain('max-w-[1120px]');
+    expect(source).not.toContain('text-[11px]');
+    expect(source).not.toContain('max-w-[940px]');
   });
 
   it('직급은 설정 목록에서 고르되 별도 직급체계는 직접 입력으로 남긴다', () => {

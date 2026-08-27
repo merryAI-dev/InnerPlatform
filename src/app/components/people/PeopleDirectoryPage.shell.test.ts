@@ -117,6 +117,11 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
     expect(source).toContain('onManageEmployment={');
     expect(source).toContain('profilePerson && scopedProfileCapabilities.read');
     expect(source).toContain('<ProfessionalProfileEditor');
+    // 인사정보는 상세를 열지 않고 기본 목록에서도 보인다(권한 있을 때만).
+    expect(source).toContain('canReadProfile ? <>');
+    expect(source).toContain('person.hrSummary?.highestEducationDisplayText');
+    expect(source).toContain('deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)');
+    expect(source).toContain('deriveAge(person.birthDate, asOf)');
     // 직급과 직책은 다른 축이라 표에서도 칸을 나눈다.
     expect(source).toContain('{person.grade || \'-\'}');
     expect(source).toContain('{person.title || \'-\'}');

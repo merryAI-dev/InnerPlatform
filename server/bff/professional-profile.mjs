@@ -399,6 +399,11 @@ export function deriveProfessionalProfileFacts(value) {
 
   return {
     highestEducationCode: highestEducation?.attainmentCode ?? null,
+    // 학위취득년도는 졸업증에 찍힌 해다. KOICA 제안서가 '학위 취득 후 경력 몇 년'을 보므로
+    // 최고 학력의 취득년도를 따로 꺼내 둔다 - 화면이 학력 목록을 다시 뒤지지 않게.
+    highestDegreeYear: highestEducation?.degreeYear ?? null,
+    highestEducationInstitution: highestEducation?.institutionName ?? null,
+    highestEducationMajor: highestEducation?.major ?? null,
     englishFacets,
     highestEducationDisplayText: formatEducation(highestEducation),
     englishEvidenceDisplayText: englishDisplayParts.join(' · '),

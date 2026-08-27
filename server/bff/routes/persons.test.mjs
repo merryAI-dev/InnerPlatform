@@ -384,10 +384,17 @@ describe('라우트 — 인력 명부', () => {
       professionalProfileRead: true,
       professionalProfileWrite: true,
     });
+    // 깨진 프로필(학력 구분 없음)이 들어 있어도 목록은 살아 있어야 한다 - 그 사람만 빈 요약이 된다.
     expect(response.body.items[0]).toEqual({
       personId: 'person-a',
       name: '김정태',
       birthDate: '',
+      hrSummary: {
+        highestEducationDisplayText: '',
+        highestDegreeYear: '',
+        englishEvidenceDisplayText: '',
+        certificationsDisplayText: '',
+      },
       nickname: '정태',
       email: 'jt@example.com',
       departmentTop: '임팩트사업부',

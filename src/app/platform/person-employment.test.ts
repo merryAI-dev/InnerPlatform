@@ -10,6 +10,7 @@ import {
   resolveSeparationDate,
   selectableAt,
   deriveAge,
+  deriveYearsSinceDegree,
   type Person,
   type PersonEmployment,
 } from './person-employment';
@@ -252,5 +253,19 @@ describe('deriveAge — 만 나이', () => {
     expect(deriveAge(null, '2026-03-15')).toBeNull();
     expect(deriveAge('1990-03', '2026-03-15')).toBeNull();
     expect(deriveAge('2027-01-01', '2026-03-15')).toBeNull();
+  });
+});
+
+describe('deriveYearsSinceDegree — 학위 취득 후 경력', () => {
+  it('졸업증에 찍힌 해로부터 몇 해가 지났는지 센다 — KOICA 제안서가 보는 값이다', () => {
+    expect(deriveYearsSinceDegree('2017', '2026-08-27')).toBe(9);
+    expect(deriveYearsSinceDegree('2026', '2026-01-01')).toBe(0);
+  });
+
+  it('없거나 형식이 아니거나 미래 학위면 계산하지 않는다', () => {
+    expect(deriveYearsSinceDegree('', '2026-08-27')).toBeNull();
+    expect(deriveYearsSinceDegree(null, '2026-08-27')).toBeNull();
+    expect(deriveYearsSinceDegree('17', '2026-08-27')).toBeNull();
+    expect(deriveYearsSinceDegree('2030', '2026-08-27')).toBeNull();
   });
 });

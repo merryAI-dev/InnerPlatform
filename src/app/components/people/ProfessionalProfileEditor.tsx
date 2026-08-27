@@ -161,7 +161,7 @@ function ProfileSectionHeader({
   return (
     <div className="flex items-center gap-2">
       <Icon className="h-4 w-4 text-slate-500" />
-      <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+      <h3 className="text-[15px] font-semibold text-slate-800">{title}</h3>
       <span className="text-[11px] tabular-nums text-slate-500">{count}/{limit}</span>
       {!readOnly ? (
         <Button
@@ -253,18 +253,18 @@ function ProfessionalProfileFields({
           onAdd={addEducation} disabled={disabled} readOnly={readOnly}
         />
         {draft.educationRecords.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-slate-500">입력된 학력이 없습니다.</p>
+          <p className="rounded-lg border border-dashed px-3 py-3 text-[13px] text-slate-500">입력된 학력이 없습니다.</p>
         ) : draft.educationRecords.map((record, index) => (
-          <div key={`education-${index}`} className="rounded-lg border bg-slate-50/60 p-3">
-            <div className="grid gap-2.5 sm:grid-cols-2">
+          <div key={`education-${index}`} className="rounded-lg border bg-slate-50/60 p-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <div>
-                <Label className="text-[11px]" htmlFor={`education-attainment-${index}`}>학력 구분</Label>
+                <Label className="text-[13px]" htmlFor={`education-attainment-${index}`}>학력 구분</Label>
                 <Select
                   value={record.attainmentCode}
                   onValueChange={(value) => updateEducation(index, { attainmentCode: value })}
                   disabled={disabled || readOnly}
                 >
-                  <SelectTrigger id={`education-attainment-${index}`} className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id={`education-attainment-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {catalog.educationAttainments.map((attainment) => (
                       <SelectItem key={attainment.code} value={attainment.code}>{attainment.label}</SelectItem>
@@ -273,22 +273,22 @@ function ProfessionalProfileFields({
                 </Select>
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-institution-${index}`}>학교</Label>
+                <Label className="text-[13px]" htmlFor={`education-institution-${index}`}>학교</Label>
                 <Input
-                  id={`education-institution-${index}`} className="mt-1 h-9" maxLength={80}
+                  id={`education-institution-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                   value={record.institutionName || ''} disabled={disabled || readOnly}
                   placeholder="학교명"
                   onChange={(event) => updateEducation(index, { institutionName: event.target.value })}
                 />
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-country-${index}`}>국가</Label>
+                <Label className="text-[13px]" htmlFor={`education-country-${index}`}>국가</Label>
                 <Select
                   value={record.countryCode || EMPTY_OPTION}
                   onValueChange={(value) => updateEducation(index, { countryCode: value === EMPTY_OPTION ? null : value })}
                   disabled={disabled || readOnly}
                 >
-                  <SelectTrigger id={`education-country-${index}`} className="mt-1 h-9"><SelectValue placeholder="국가 선택" /></SelectTrigger>
+                  <SelectTrigger id={`education-country-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue placeholder="국가 선택" /></SelectTrigger>
                   <SelectContent className="max-h-72">
                     <SelectItem value={EMPTY_OPTION}>미입력</SelectItem>
                     {catalog.countryCodes.map((countryCode) => (
@@ -298,9 +298,9 @@ function ProfessionalProfileFields({
                 </Select>
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-major-${index}`}>전공</Label>
+                <Label className="text-[13px]" htmlFor={`education-major-${index}`}>전공</Label>
                 <Input
-                  id={`education-major-${index}`} className="mt-1 h-9" maxLength={80}
+                  id={`education-major-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                   value={record.major || ''} disabled={disabled || readOnly}
                   placeholder="전공명"
                   onChange={(event) => updateEducation(index, { major: event.target.value })}
@@ -309,18 +309,18 @@ function ProfessionalProfileFields({
               {/* 재학·수료·졸업 상태는 위 '학력 구분' 코드가 이미 담고 있다(석사 수료 등).
                   여기서는 언제 다녔는지만 받는다. */}
               <div>
-                <Label className="text-[11px]" htmlFor={`education-admission-${index}`}>입학년도</Label>
+                <Label className="text-[13px]" htmlFor={`education-admission-${index}`}>입학년도</Label>
                 <Input
-                  id={`education-admission-${index}`} className="mt-1 h-9 tabular-nums" inputMode="numeric" maxLength={4}
+                  id={`education-admission-${index}`} className="mt-1.5 h-10 tabular-nums text-[14px]" inputMode="numeric" maxLength={4}
                   value={record.admissionYear || ''} disabled={disabled || readOnly}
                   placeholder="예: 2015"
                   onChange={(event) => updateEducation(index, { admissionYear: event.target.value.replace(/\D/g, '').slice(0, 4) })}
                 />
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-degree-year-${index}`}>학위취득년도</Label>
+                <Label className="text-[13px]" htmlFor={`education-degree-year-${index}`}>학위취득년도</Label>
                 <Input
-                  id={`education-degree-year-${index}`} className="mt-1 h-9 tabular-nums" inputMode="numeric" maxLength={4}
+                  id={`education-degree-year-${index}`} className="mt-1.5 h-10 tabular-nums text-[14px]" inputMode="numeric" maxLength={4}
                   value={record.degreeYear || ''} disabled={disabled || readOnly}
                   placeholder="예: 2019"
                   onChange={(event) => updateEducation(index, { degreeYear: event.target.value.replace(/\D/g, '').slice(0, 4) })}
@@ -337,7 +337,7 @@ function ProfessionalProfileFields({
               ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
               {!readOnly ? (
                 <Button
-                  type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-slate-500"
+                  type="button" variant="ghost" size="sm" className="h-8 gap-1 px-2.5 text-[12px] text-slate-500"
                   disabled={disabled}
                   onClick={() => onChange({
                     ...draft,
@@ -361,7 +361,7 @@ function ProfessionalProfileFields({
           onAdd={addEnglish} disabled={disabled} readOnly={readOnly}
         />
         {draft.englishEvidence.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-slate-500">입력된 영어 증빙이 없습니다.</p>
+          <p className="rounded-lg border border-dashed px-3 py-3 text-[13px] text-slate-500">입력된 영어 증빙이 없습니다.</p>
         ) : draft.englishEvidence.map((evidence, index) => {
           const selectedTest = catalog.englishTests.find(({ code }) => code === evidence.testCode)
             || catalog.englishTests[0];
@@ -369,10 +369,10 @@ function ProfessionalProfileFields({
             || selectedTest?.scales[0];
           const isFreeTextTest = selectedTest?.scales.some(({ resultType }) => resultType === 'TEXT') === true;
           return (
-            <div key={`english-${index}`} className="rounded-lg border bg-slate-50/60 p-3">
-              <div className="grid gap-2.5 sm:grid-cols-2">
+            <div key={`english-${index}`} className="rounded-lg border bg-slate-50/60 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-test-${index}`}>시험</Label>
+                  <Label className="text-[13px]" htmlFor={`english-test-${index}`}>시험</Label>
                   <Select
                     value={evidence.testCode}
                     disabled={disabled || readOnly}
@@ -386,7 +386,7 @@ function ProfessionalProfileFields({
                       });
                     }}
                   >
-                    <SelectTrigger id={`english-test-${index}`} className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id={`english-test-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {catalog.englishTests.map((test) => (
                         <SelectItem key={test.code} value={test.code}>{test.label}</SelectItem>
@@ -395,13 +395,13 @@ function ProfessionalProfileFields({
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-scale-${index}`}>점수 체계</Label>
+                  <Label className="text-[13px]" htmlFor={`english-scale-${index}`}>점수 체계</Label>
                   <Select
                     value={evidence.scaleCode}
                     disabled={disabled || readOnly}
                     onValueChange={(value) => updateEnglish(index, { scaleCode: value, resultValue: '' })}
                   >
-                    <SelectTrigger id={`english-scale-${index}`} className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id={`english-scale-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {selectedTest.scales.map((scale) => (
                         <SelectItem key={scale.code} value={scale.code}>{formatEnglishScaleLabel(scale)}</SelectItem>
@@ -410,14 +410,14 @@ function ProfessionalProfileFields({
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-result-${index}`}>결과</Label>
+                  <Label className="text-[13px]" htmlFor={`english-result-${index}`}>결과</Label>
                   {selectedScale?.resultType === 'GRADE' ? (
                     <Select
                       value={evidence.resultValue || EMPTY_OPTION}
                       disabled={disabled || readOnly}
                       onValueChange={(value) => updateEnglish(index, { resultValue: value === EMPTY_OPTION ? '' : value })}
                     >
-                      <SelectTrigger id={`english-result-${index}`} className="mt-1 h-9"><SelectValue placeholder="등급 선택" /></SelectTrigger>
+                      <SelectTrigger id={`english-result-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue placeholder="등급 선택" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value={EMPTY_OPTION}>미입력</SelectItem>
                         {(selectedScale.allowedValues || []).map((value) => (
@@ -427,7 +427,7 @@ function ProfessionalProfileFields({
                     </Select>
                   ) : (
                     <Input
-                      id={`english-result-${index}`} className="mt-1 h-9" maxLength={80}
+                      id={`english-result-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                       type={selectedScale?.resultType === 'NUMBER' ? 'number' : 'text'}
                       min={selectedScale?.min} max={selectedScale?.max} step={selectedScale?.step}
                       value={evidence.resultValue} disabled={disabled || readOnly}
@@ -437,18 +437,18 @@ function ProfessionalProfileFields({
                   )}
                 </div>
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-tested-at-${index}`}>시험월</Label>
+                  <Label className="text-[13px]" htmlFor={`english-tested-at-${index}`}>시험월</Label>
                   <Input
-                    id={`english-tested-at-${index}`} className="mt-1 h-9" type="month"
+                    id={`english-tested-at-${index}`} className="mt-1.5 h-10 text-[14px]" type="month"
                     value={evidence.testedAt || ''} disabled={disabled || readOnly}
                     onChange={(event) => updateEnglish(index, { testedAt: event.target.value })}
                   />
                 </div>
                 {isFreeTextTest ? (
                   <div className="sm:col-span-2">
-                    <Label className="text-[11px]" htmlFor={`english-other-name-${index}`}>시험명</Label>
+                    <Label className="text-[13px]" htmlFor={`english-other-name-${index}`}>시험명</Label>
                     <Input
-                      id={`english-other-name-${index}`} className="mt-1 h-9" maxLength={80}
+                      id={`english-other-name-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                       value={evidence.otherTestName || ''} disabled={disabled || readOnly}
                       placeholder="시험명을 입력해 주세요"
                       onChange={(event) => updateEnglish(index, { otherTestName: event.target.value })}
@@ -466,7 +466,7 @@ function ProfessionalProfileFields({
                 ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
                 {!readOnly ? (
                   <Button
-                    type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-slate-500"
+                    type="button" variant="ghost" size="sm" className="h-8 gap-1 px-2.5 text-[12px] text-slate-500"
                     disabled={disabled}
                     onClick={() => onChange({
                       ...draft,
@@ -487,7 +487,7 @@ function ProfessionalProfileFields({
       <section className="space-y-2" aria-label="자격증">
         <div className="flex items-center gap-2">
           <Award className="h-4 w-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-800">자격증</h3>
+          <h3 className="text-[15px] font-semibold text-slate-800">자격증</h3>
           <span className={`text-[11px] tabular-nums ${certificationError ? 'font-semibold text-rose-700' : 'text-slate-500'}`}>
             {certificationCount}/{MAX_CERTIFICATIONS}
           </span>
@@ -505,13 +505,13 @@ function ProfessionalProfileFields({
           </Button>
         ) : null}
         {draft.certifications.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-slate-500">입력된 자격증이 없습니다.</p>
+          <p className="rounded-lg border border-dashed px-3 py-3 text-[13px] text-slate-500">입력된 자격증이 없습니다.</p>
         ) : draft.certifications.map((certification, index) => (
           <div key={`certification-${index}`} className="grid gap-2.5 rounded-lg border bg-slate-50/60 p-3 sm:grid-cols-[minmax(0,1fr)_150px_auto] sm:items-end">
             <div>
-              <Label className="text-[11px]" htmlFor={`certification-label-${index}`}>자격증 이름</Label>
+              <Label className="text-[13px]" htmlFor={`certification-label-${index}`}>자격증 이름</Label>
               <Input
-                id={`certification-label-${index}`} className="mt-1 h-9" maxLength={80}
+                id={`certification-label-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                 value={certification.label} disabled={disabled || readOnly}
                 placeholder="예: 정보처리기사"
                 onChange={(event) => onChange({
@@ -523,9 +523,9 @@ function ProfessionalProfileFields({
               />
             </div>
             <div>
-              <Label className="text-[11px]" htmlFor={`certification-acquired-${index}`}>취득일</Label>
+              <Label className="text-[13px]" htmlFor={`certification-acquired-${index}`}>취득일</Label>
               <Input
-                id={`certification-acquired-${index}`} type="month" className="mt-1 h-9 tabular-nums"
+                id={`certification-acquired-${index}`} type="month" className="mt-1.5 h-10 tabular-nums text-[14px]"
                 value={certification.acquiredAt} disabled={disabled || readOnly}
                 onChange={(event) => onChange({
                   ...draft,
@@ -746,7 +746,7 @@ export function ProfessionalProfileEditor({
   return (
     <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent
-        className="flex max-h-[90vh] max-w-[820px] flex-col overflow-hidden"
+        className="flex max-h-[92vh] w-[min(96vw,1140px)] max-w-[1140px] flex-col overflow-hidden"
         onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }}
         onPointerDownOutside={(event) => { if (saving) event.preventDefault(); }}
       >
@@ -776,7 +776,7 @@ export function ProfessionalProfileEditor({
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6 py-1">
           {loading || !catalog || !scopeLoaded ? (
-            <div className="py-12 text-center text-sm text-slate-500">인사정보를 불러오는 중…</div>
+            <div className="py-12 text-center text-[15px] text-slate-500">인사정보를 불러오는 중…</div>
           ) : (
             <ProfessionalProfileFields
               catalog={catalog} draft={draft} onChange={setDraft}
@@ -847,7 +847,7 @@ export function NewPersonProfessionalProfileFields({
   return (
     <section className="space-y-3 rounded-xl border bg-slate-50/40 p-4" aria-label="신규 인력 인사정보">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">인사정보 <span className="font-normal text-slate-500">(선택)</span></h3>
+        <h3 className="text-[15px] font-semibold text-slate-800">인사정보 <span className="font-normal text-slate-500">(선택)</span></h3>
         <p className="mt-0.5 text-[11px] text-slate-500">입력한 경우에만 인력 등록과 함께 저장됩니다.</p>
       </div>
       {error ? (

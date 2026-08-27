@@ -4,7 +4,7 @@ import {
   ROUTE_ROLES, createHttpError, encryptAuditEmail,
 } from '../bff-utils.mjs';
 import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema } from '../schemas.mjs';
-import { normalizeProfessionalProfileInput, serializeProfessionalProfile } from '../professional-profile.mjs';
+import { deriveProfessionalProfileFacts, normalizeProfessionalProfileInput, serializeProfessionalProfile } from '../professional-profile.mjs';
 import { buildRequestFingerprint } from '../utils.mjs';
 
 /**
@@ -90,6 +90,30 @@ function readPerson(snapshot) {
   if (!snapshot.exists) return null;
   const data = snapshot.data() || {};
   return { ...data, employments: Array.isArray(data.employments) ? data.employments : [] };
+}
+
+/**
+ * 명부 목록에 실을 인사 요약. 원문(학교·전공 외 나머지 학력 이력, 점수, 시험월)은 싣지 않고
+ * 화면이 바로 읽을 값만 만든다. 권한이 없으면 아예 만들지 않는다.
+ */
+function personHrSummary(person) {
+  try {
+    const facts = deriveProfessionalProfileFacts(person?.professionalProfile);
+    return {
+      highestEducationDisplayText: facts.highestEducationDisplayText || '',
+      highestDegreeYear: facts.highestDegreeYear || '',
+      englishEvidenceDisplayText: facts.englishEvidenceDisplayText || '',
+      certificationsDisplayText: facts.certificationsDisplayText || '',
+    };
+  } catch {
+    // 한 사람의 깨진 프로필이 명부 전체를 무너뜨리면 안 된다. 그 사람만 빈 요약으로 둔다.
+    return {
+      highestEducationDisplayText: '',
+      highestDegreeYear: '',
+      englishEvidenceDisplayText: '',
+      certificationsDisplayText: '',
+    };
+  }
 }
 
 function serializePersonDirectoryItem(person) {
@@ -267,20 +291,19 @@ export function mountPersonRoutes(app, {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read the people directory');
     const { tenantId } = req.context;
     const snap = await db.collection(`orgs/${tenantId}/persons`).get();
+    const canReadProfile = actorCanUseProfile(rbacPolicy, req, 'person:professional_profile:read');
     const items = snap.docs
-      .map((doc) => readPerson(doc))
-      .filter(Boolean)
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'))
-      .map(serializePersonDirectoryItem);
+      .map((doc) => ({ raw: doc.data() || {}, person: readPerson(doc) }))
+      .filter(({ person }) => Boolean(person))
+      .sort((a, b) => String(a.person.name || '').localeCompare(String(b.person.name || ''), 'ko'))
+      .map(({ raw, person }) => (canReadProfile
+        ? { ...serializePersonDirectoryItem(person), hrSummary: personHrSummary(raw) }
+        : serializePersonDirectoryItem(person)));
     res.status(200).json({
       items,
       total: items.length,
       capabilities: {
-        professionalProfileRead: actorCanUseProfile(
-          rbacPolicy,
-          req,
-          'person:professional_profile:read',
-        ),
+        professionalProfileRead: canReadProfile,
         professionalProfileWrite: actorCanUseProfile(
           rbacPolicy,
           req,
