@@ -45,9 +45,9 @@ describe('PeopleDirectoryPage 근로형태 노출 계약', () => {
   it('열 순서를 개인 → 회사 → 관리 → 재직상태로 지킨다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
     const order = [
-      'No', '이름', '별명', '생년월일',
+      'No', '별명', '생년월일',
       '입사일', '휴직·퇴사일', '근속', '대분류', '중분류', '직책', '직급', '이메일 주소',
-      '최종학력', '학위취득', '어학능력', '자격증', '관리', '재직상태',
+      '최종학력', '학위취득', '어학능력', '자격증', '인사정보', '재직상태',
     ];
     const positions = order.map((column) => {
       const at = table.indexOf(`>${column}</DataGridHeadCell>`);
@@ -165,5 +165,32 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
   it('전문 프로필을 PersonRecord나 people 목록에 합치지 않는다', () => {
     expect(source).not.toContain('setPeople((prev) => prev.map((item) => ({ ...item, professionalProfile');
     expect(source).not.toContain('selected.professionalProfile');
+  });
+
+  /**
+   * 열이 18개다. 묶지 않으면 어디까지가 개인 정보이고 어디부터가 소속인지 매번 다시 읽어야 한다.
+   * 이름은 왼쪽에 붙여 둔다 - 가로로 밀었을 때 누구 행인지 잃지 않게.
+   */
+  it('열을 개인·소속·학력 묶음으로 얹고 이름을 왼쪽에 고정한다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    expect(table).toContain('<DataGridGroupCell span={3}>개인 정보</DataGridGroupCell>');
+    expect(table).toContain('소속 · 직위</DataGridGroupCell>');
+    expect(table).toContain('<DataGridGroupCell span={4}>학력 · 자격</DataGridGroupCell>');
+    expect(table).toContain('<DataGridGroupCell rowSpan={2} sticky>이름</DataGridGroupCell>');
+    expect(table).toContain('<DataGridCell sticky className="left-[52px]">');
+  });
+
+  it('빈 표가 걸치는 칸 수를 손으로 세지 않는다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    // 열을 더하고 숫자 고치는 걸 잊으면 빈 상태가 한 칸 모자라게 걸쳐진다.
+    expect(table).toContain('const columnCount = (canReadProfile ? 18 : 14) + 1;');
+  });
+
+  it('여러 명을 골라 소속·직급을 한 번에 바꾼다', () => {
+    expect(source).toContain('applyBulkField');
+    expect(source).toContain('명 선택됨');
+    // 중간에 실패해도 어디까지 갔는지 알려 주고, 실패한 사람만 선택에 남긴다.
+    expect(source).toContain('setSelectedIds(new Set(failed))');
+    expect(source).toContain('명 실패했습니다');
   });
 });
