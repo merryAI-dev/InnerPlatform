@@ -93,6 +93,25 @@ function createHarness({
     }
   };
   const db = {
+    collection(path) {
+      return {
+        where(field, _op, value) {
+          return {
+            limit(count) {
+              return {
+                get: async () => {
+                  const docs = Object.entries(store)
+                    .filter(([key, doc]) => key.startsWith(`${path}/`) && doc?.[field] === value)
+                    .slice(0, count)
+                    .map(([key, doc]) => ({ id: key.split('/').pop(), data: () => doc, ref: db.doc(key) }));
+                  return { empty: docs.length === 0, docs };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
     doc(path) {
       return {
         __path: path,
@@ -239,7 +258,7 @@ describe('professional profile catalog and read routes', () => {
     });
   });
 
-  it.each(['pm', 'viewer', 'tenant_admin', 'support'])('denies %s before reading a person document', async (role) => {
+  it.each(['pm', 'viewer', 'tenant_admin', 'support'])('denies %s on someone else\'s profile', async (role) => {
     const { app, personReads } = createHarness({ role });
     const catalog = await request(app).get('/api/v1/person-professional-profile/catalog');
     const profile = await request(app).get('/api/v1/persons/person-a/professional-profile');
@@ -248,7 +267,38 @@ describe('professional profile catalog and read routes', () => {
     expect(catalog.status).toBe(403);
     expect(profile.status).toBe(403);
     expect(save.status).toBe(403);
-    expect(personReads).toEqual([]);
+    // 거부하기 전에 본인인지만 본다 - 다른 사람 문서는 읽지 않는다.
+    expect(personReads.every((path) => path === PERSON_PATH)).toBe(true);
+  });
+
+  /**
+   * 마이페이지에서 본인이 자기 학력·어학·자격을 넣는 경로.
+   * 통과 기준은 역할이 아니라 대상 person 문서의 uid 가 로그인 계정과 같은지다.
+   */
+  it.each(['pm', 'viewer', 'support'])('lets %s read and write their own profile', async (role) => {
+    const { app } = createHarness({
+      role,
+      documents: { [PERSON_PATH]: { personId: 'person-a', name: '김정태', uid: 'actor-a' } },
+    });
+
+    expect((await request(app).get('/api/v1/person-professional-profile/catalog')).status).toBe(200);
+    expect((await request(app).get('/api/v1/persons/person-a/professional-profile')).status).toBe(200);
+    expect((await putProfile(app, { key: `self-${role}` })).status).toBe(200);
+  });
+
+  it('본인 판정은 uid 가 정확히 같을 때만 통과한다', async () => {
+    const { app } = createHarness({
+      role: 'pm',
+      documents: { [PERSON_PATH]: { personId: 'person-a', name: '김정태', uid: 'someone-else' } },
+    });
+
+    expect((await request(app).get('/api/v1/persons/person-a/professional-profile')).status).toBe(403);
+    expect((await putProfile(app, { key: 'not-me' })).status).toBe(403);
+  });
+
+  it('명부에 연결되지 않은 계정은 카탈로그도 못 받는다', async () => {
+    const { app } = createHarness({ role: 'pm', documents: {} });
+    expect((await request(app).get('/api/v1/person-professional-profile/catalog')).status).toBe(403);
   });
 
   it.each(['admin', 'finance'])('allows %s to read and write through the injected production policy', async (role) => {
@@ -264,7 +314,8 @@ describe('professional profile catalog and read routes', () => {
     expect((await request(denied.app).get('/api/v1/person-professional-profile/catalog')).status).toBe(403);
     expect((await request(denied.app).get('/api/v1/persons/person-a/professional-profile')).status).toBe(403);
     expect((await putProfile(denied.app)).status).toBe(403);
-    expect(denied.personReads).toEqual([]);
+    // 거부하기 전에 본인인지 한 번 확인한다. 값을 돌려주지는 않는다.
+    expect(denied.personReads.every((path) => path === PERSON_PATH)).toBe(true);
 
     const allowed = createHarness({ role: 'pm', rbacPolicy: oppositePolicy });
     expect((await request(allowed.app).get('/api/v1/person-professional-profile/catalog')).status).toBe(200);
