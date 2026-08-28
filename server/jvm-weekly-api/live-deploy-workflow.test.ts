@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +7,51 @@ const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/jvm-production-deploy.yml'),
   'utf8',
 );
+
+function extractShellFunction(text: string, name: string) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.trim() === `${name}() {`);
+  if (start < 0) throw new Error(`Missing workflow shell function: ${name}`);
+  const indent = lines[start].search(/\S/);
+  const end = lines.findIndex((line, index) => (
+    index > start && line === `${' '.repeat(indent)}}`
+  ));
+  if (end < 0) throw new Error(`Unclosed workflow shell function: ${name}`);
+  return lines.slice(start, end + 1).map((line) => line.slice(indent)).join('\n');
+}
+
+function runDigestNormalizer(text: string, imageUri: string, expectedRepository: string) {
+  const functionSource = extractShellFunction(text, 'normalize_live_image_digest');
+  return spawnSync('bash', ['-c', [
+    'set -euo pipefail',
+    functionSource,
+    'normalized="$(normalize_live_image_digest "$1" "$2")"',
+    'printf \'%s\\n\' "${normalized}"',
+  ].join('\n'), 'digest-normalizer', imageUri, expectedRepository], { encoding: 'utf8' });
+}
+
+function runJsonNormalizer(text: string, functionName: string, value: unknown) {
+  const functionSource = extractShellFunction(text, functionName);
+  return spawnSync('bash', ['-c', [
+    'set -euo pipefail',
+    functionSource,
+    `normalized="$(${functionName} <<< "$1")"`,
+    'printf \'%s\\n\' "${normalized}"',
+  ].join('\n'), 'json-normalizer', JSON.stringify(value)], { encoding: 'utf8' });
+}
+
+function extractNamedStep(text: string, name: string) {
+  const marker = `      - name: ${name}\n`;
+  const start = text.indexOf(marker);
+  if (start < 0) throw new Error(`Missing workflow step: ${name}`);
+  const next = text.indexOf('\n      - ', start + marker.length);
+  return text.slice(start, next < 0 ? text.length : next);
+}
+
+function extractStepIf(step: string) {
+  return step.match(/^        if:\s*(.+)$/m)?.[1] ?? null;
+}
+
 describe('JVM production deploy workflow', () => {
   it('smokes the legacy live read before promoting traffic', () => {
     expect(workflow.indexOf('--no-traffic')).toBeGreaterThan(-1);
@@ -56,18 +102,49 @@ describe('JVM production deploy workflow', () => {
     expect(workflow).not.toContain('traffic_flag=""');
   });
 
-  it('blocks promotion until the JVM-first settlement inventory and future BFF adapter agree', () => {
+  it('promotes the backward-compatible JVM after candidate canaries without using frontend cutover inventory as the automatic gate', () => {
+    const identityStep = extractNamedStep(workflow, 'Verify candidate image and commit identity');
+    const candidateCanary = extractNamedStep(workflow, 'Verify candidate against legacy live read');
+    const inventoryStep = extractNamedStep(
+      workflow,
+      'Verify settlement-cycle inventory and BFF read compatibility',
+    );
+    const promoteStep = extractNamedStep(workflow, 'Promote verified candidate');
+
     expect(workflow).toContain('JVM_SETTLEMENT_CANARY_ACTOR_UID_LIVE');
     expect(workflow).toContain('node scripts/audit-cashflow-settlement-cycle-rollout.mjs');
     expect(workflow).not.toContain('npm run cashflow:settlement-cycle:audit');
-    expect(workflow).toContain('--verify-cutover');
-    expect(workflow).toContain('--jvm-base-url "${CANDIDATE_URL}"');
-    expect(workflow).toContain('--jvm-audience "${JVM_AUDIENCE}"');
-    expect(workflow).toContain('JVM_WEEKLY_API_ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}');
-    expect(workflow.indexOf('Verify settlement-cycle inventory and BFF read compatibility'))
-      .toBeGreaterThan(workflow.indexOf('Deploy candidate without live traffic'));
-    expect(workflow.indexOf('Promote verified candidate'))
-      .toBeGreaterThan(workflow.indexOf('Verify settlement-cycle inventory and BFF read compatibility'));
+    expect(identityStep).toContain('test "${actual_image}" = "${IMAGE}@${expected_digest}"');
+    expect(identityStep).toContain('test "${actual_sha}" = "${DEPLOY_SHA}"');
+    expect(candidateCanary).toContain('/api/v1/health');
+    expect(candidateCanary).toContain('settlement-cycle-v1');
+    expect(candidateCanary).toContain('SERVICE_URL: ${{ steps.target.outputs.service_url }}');
+    expect(candidateCanary).toContain('legacy_dashboard_path=');
+    expect(candidateCanary).toContain('month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"');
+    expect(candidateCanary).toContain('canonical_legacy_dashboard=');
+    expect(candidateCanary).toContain('candidate_legacy_dashboard=');
+    expect(candidateCanary).toContain('del(.settlementCycle)');
+    expect(candidateCanary).toContain('weekly_overview_request=');
+    expect(candidateCanary).toContain("'{projectIds: [$projectId], yearMonth: $yearMonth}'");
+    expect(candidateCanary).toContain('/api/v1/cashflow/weekly-overview');
+    expect(candidateCanary).toContain('canonical_weekly_overview=');
+    expect(candidateCanary).toContain('candidate_weekly_overview=');
+    expect(candidateCanary).toContain('.version == "1"');
+    expect(candidateCanary).toContain('weekly_overview_cycle_request=');
+    expect(candidateCanary).toContain("'{projectIds: [$projectId], yearMonth: $yearMonth, settlementCycle: true}'");
+    expect(candidateCanary).toContain('candidate_cycle_weekly_overview=');
+    expect(candidateCanary).toContain('.version == "2"');
+    expect(candidateCanary).toContain('.period == "MONTH"');
+    expect(candidateCanary).toContain('legacy_weekly_overview_core');
+    expect(candidateCanary).toContain('settlementCycle=true');
+    expect(workflow.indexOf('Verify candidate image and commit identity'))
+      .toBeLessThan(workflow.indexOf('Verify candidate against legacy live read'));
+    expect(workflow.indexOf('Verify candidate against legacy live read'))
+      .toBeLessThan(workflow.indexOf('Promote verified candidate'));
+    expect(extractStepIf(inventoryStep))
+      .toBe("needs.preflight.outputs.apply_migrations == 'true'");
+    expect(inventoryStep).toContain('--verify-cutover');
+    expect(extractStepIf(promoteStep)).toBeNull();
   });
 
   it('auto-deploys only a green main commit whose JVM sources actually changed', () => {
@@ -112,6 +189,115 @@ describe('JVM production deploy workflow', () => {
       .toBeLessThan(workflow.indexOf('Build tested image'));
   });
 
+  it('normalizes only an exact live image URI from the expected repository', () => {
+    const repository = 'example.pkg.dev/project/repository/service';
+    const digest = `sha256:${'a'.repeat(64)}`;
+    const valid = runDigestNormalizer(workflow, `${repository}@${digest}`, repository);
+    expect(valid.status).toBe(0);
+    expect(valid.stdout.trim()).toBe(digest);
+
+    for (const malformed of [
+      `other.pkg.dev/project/repository/service@${digest}`,
+      digest,
+      `${repository}@sha256:${'a'.repeat(63)}`,
+      `${repository}@SHA256:${'a'.repeat(64)}`,
+      `${repository}@${digest}@${digest}`,
+      `${repository}@`,
+    ]) {
+      expect(runDigestNormalizer(workflow, malformed, repository).status).not.toBe(0);
+    }
+
+    const boundaryBlock = workflow.slice(
+      workflow.indexOf('Verify cashflow settlement split-release boundary'),
+      workflow.indexOf('Build tested image'),
+    );
+    expect(boundaryBlock).toContain('live_image_uri="$(jq -er \'.status.imageDigest\'');
+    expect(boundaryBlock).toContain('live_digest="$(normalize_live_image_digest "${live_image_uri}" "${IMAGE}")"');
+    expect(boundaryBlock).toContain('[[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {');
+    expect(boundaryBlock).toContain('[[ "${bootstrap_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {');
+  });
+
+  it('allows only the dashboard additive field while keeping legacy weekly v1, MONTH, and status exact', () => {
+    const month = { period: 'MONTH', status: 'PENDING_APPROVAL', revision: 3 };
+    const week = { period: 'WEEK_1', status: 'COMPLETED', revision: 7 };
+    const legacyDashboard = {
+      monthClose: { projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN' },
+      cashflow: { projectId: 'project-a', sourceRevision: 'source-1' },
+      settlementStatuses: { projectId: 'project-a', yearMonth: '2026-07', items: [month, week] },
+    };
+    const additiveDashboard = { ...legacyDashboard, settlementCycle: { businessState: 'PENDING_APPROVAL' } };
+    const dashboardBaseline = runJsonNormalizer(workflow, 'legacy_dashboard_core', legacyDashboard);
+    const dashboardAdditive = runJsonNormalizer(workflow, 'legacy_dashboard_core', additiveDashboard);
+    expect(dashboardBaseline.status).toBe(0);
+    expect(dashboardAdditive.stdout).toBe(dashboardBaseline.stdout);
+    expect(runJsonNormalizer(workflow, 'legacy_dashboard_core', {
+      ...legacyDashboard,
+      settlementStatuses: { ...legacyDashboard.settlementStatuses, items: [week] },
+    }).stdout).not.toBe(dashboardBaseline.stdout);
+    expect(runJsonNormalizer(workflow, 'legacy_dashboard_core', {
+      ...legacyDashboard,
+      settlementStatuses: {
+        ...legacyDashboard.settlementStatuses,
+        items: [{ ...month, status: 'COMPLETED' }, week],
+      },
+    }).stdout).not.toBe(dashboardBaseline.stdout);
+
+    const legacyWeekly = {
+      version: '1',
+      yearMonth: '2026-07',
+      items: [{
+        projectId: 'project-a',
+        settlementStatuses: legacyDashboard.settlementStatuses,
+        projectionActualSummary: { cumulativeDifference: 100 },
+      }],
+      errors: [{ projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' }],
+    };
+    const reorderedLegacyWeekly = {
+      ...legacyWeekly,
+      items: [...legacyWeekly.items].reverse(),
+      errors: [...legacyWeekly.errors].reverse(),
+    };
+    const additiveWeekly = {
+      ...legacyWeekly,
+      version: '2',
+      items: legacyWeekly.items.map((item) => ({
+        ...item,
+        settlementCycle: { businessState: 'PENDING_APPROVAL' },
+      })),
+      errors: [...legacyWeekly.errors, { projectId: 'project-a', code: 'MONTH_CLOSE_UNAVAILABLE' }],
+    };
+    const weeklyBaseline = runJsonNormalizer(workflow, 'legacy_weekly_overview_core', legacyWeekly);
+    const weeklyReordered = runJsonNormalizer(
+      workflow,
+      'legacy_weekly_overview_core',
+      reorderedLegacyWeekly,
+    );
+    expect(weeklyBaseline.status).toBe(0);
+    expect(weeklyReordered.stdout).toBe(weeklyBaseline.stdout);
+    expect(runJsonNormalizer(
+      workflow,
+      'legacy_weekly_overview_core',
+      additiveWeekly,
+    ).stdout).not.toBe(weeklyBaseline.stdout);
+    expect(runJsonNormalizer(workflow, 'legacy_weekly_overview_core', {
+      ...legacyWeekly,
+      items: legacyWeekly.items.map((item) => ({
+        ...item,
+        settlementStatuses: { ...item.settlementStatuses, items: [week] },
+      })),
+    }).stdout).not.toBe(weeklyBaseline.stdout);
+    expect(runJsonNormalizer(workflow, 'legacy_weekly_overview_core', {
+      ...legacyWeekly,
+      items: legacyWeekly.items.map((item) => ({
+        ...item,
+        settlementStatuses: {
+          ...item.settlementStatuses,
+          items: [{ ...month, status: 'COMPLETED' }, week],
+        },
+      })),
+    }).stdout).not.toBe(weeklyBaseline.stdout);
+  });
+
   it('can resume the exact zero-traffic candidate for an explicitly approved migration', () => {
     expect(workflow).toContain('resume_candidate_revision:');
     expect(workflow).toContain('apply_settlement_migrations:');
@@ -127,7 +313,9 @@ describe('JVM production deploy workflow', () => {
     expect(workflow).toContain('id: target');
     expect(workflow).toContain('id_token_audience: ${{ steps.target.outputs.service_url }}');
     expect(workflow).toContain('expected_digest=');
-    expect(workflow).toContain('actual_image=');
+    expect(workflow).toContain('[[ "${expected_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {');
+    expect(workflow).toContain('actual_image="$(jq -er \'.status.imageDigest\'');
+    expect(workflow).not.toContain('actual_image="${IMAGE}@${actual_digest}"');
     expect(workflow).toContain('myscube-deploy-sha');
     expect(workflow).toContain('JVM_WEEKLY_COMMIT_SHA=${DEPLOY_SHA}');
     expect(workflow).toContain('select(.name == "JVM_WEEKLY_COMMIT_SHA")');
@@ -178,8 +366,16 @@ describe('JVM production deploy workflow', () => {
   });
 
   it('keeps migration write access manual, allowlisted, and ahead of cutover verification', () => {
-    expect(workflow).toContain('Apply explicitly approved settlement head migrations');
-    expect(workflow).toContain("if: needs.preflight.outputs.apply_migrations == 'true'");
+    const migrationStep = extractNamedStep(
+      workflow,
+      'Apply explicitly approved settlement head migrations',
+    );
+    const inventoryStep = extractNamedStep(
+      workflow,
+      'Verify settlement-cycle inventory and BFF read compatibility',
+    );
+    expect(extractStepIf(migrationStep)).toBe("needs.preflight.outputs.apply_migrations == 'true'");
+    expect(extractStepIf(inventoryStep)).toBe("needs.preflight.outputs.apply_migrations == 'true'");
     expect(workflow).toContain('--apply');
     expect(workflow).toContain('--confirm-project "${PROJECT_ID}"');
     expect(workflow).toContain('--confirm-tenant mysc');

@@ -23,6 +23,25 @@ const JVM_ROLLOUT_SUPPORT_PATHS = new Set([
   'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs',
   'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.test.mjs',
 ]);
+const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
+  '.github/workflows/ci.yml',
+  '.github/workflows/jvm-production-deploy.yml',
+  '.github/workflows/production-deploy.yml',
+  'deploy-prod-align.mjs',
+  'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
+  'scripts/verify-cashflow-settlement-candidate.mjs',
+  'scripts/verify-cashflow-settlement-release-boundary.mjs',
+  'server/bff/cashflow-settlement-cycle-rollout.integration.test.ts',
+  'server/bff/cashflow-settlement-cycle-rollout.mjs',
+  'server/bff/cashflow-settlement-cycle-rollout.test.mjs',
+  'server/bff/cashflow/settlement-cycle/contract.mjs',
+  'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs',
+  'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.test.mjs',
+  'server/cashflow-settlement-candidate-canary.test.mjs',
+  'server/cashflow-settlement-release-boundary.test.mjs',
+  'server/deploy-prod-align.test.ts',
+  'server/production-deploy-workflow.test.ts',
+]);
 const JVM_WEEKLY_ROUTE = 'server/bff/routes/jvm-weekly-api.mjs';
 const JVM_ROLLOUT_SUPPORT_IMPORT = '../cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs';
 
@@ -39,6 +58,24 @@ export function classifyCashflowSettlementReleasePaths(paths, { rolloutSupportIs
       &&
       BFF_CUTOVER_PATHS.some((candidate) => isPathOrChild(path, candidate))
     )),
+  };
+}
+
+export function classifyCashflowSettlementProductionRelease(paths, options) {
+  const normalized = [...new Set(paths.map((path) => String(path || '').trim()).filter(Boolean))];
+  const { jvm, bffFrontendCutover } = classifyCashflowSettlementReleasePaths(normalized, options);
+  const unexpectedPaths = normalized.filter((path) => (
+    !path.startsWith(JVM_ROOT) && !JVM_ONLY_RELEASE_SUPPORT_PATHS.has(path)
+  ));
+  return {
+    releaseMode: jvm.length > 0
+      && bffFrontendCutover.length === 0
+      && unexpectedPaths.length === 0
+      ? 'jvm_only'
+      : 'web',
+    jvm,
+    bffFrontendCutover,
+    unexpectedPaths,
   };
 }
 

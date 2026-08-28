@@ -255,6 +255,14 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
+          normalize_live_image_digest() {
+            local image_uri="$1"
+            local expected_repository="$2"
+            local digest="${image_uri##*@}"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            test "${image_uri}" = "${expected_repository}@${digest}" || return 1
+            printf '%s\n' "${digest}"
+          }
           service_json="$(gcloud run services describe "${SERVICE}" \
             --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
           positive_revision_count="$(jq -r \
@@ -273,7 +281,8 @@ jobs:
           test -n "${live_revision}"
           revision_json="$(gcloud run revisions describe "${live_revision}" \
             --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
-          live_digest="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          live_image_uri="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          live_digest="$(normalize_live_image_digest "${live_image_uri}" "${IMAGE}")"
           jvm_deployed_sha="$(jq -r '
             [.spec.containers[0].env[]?
               | select(.name == "JVM_WEEKLY_COMMIT_SHA")
@@ -282,11 +291,17 @@ jobs:
             | if length == 1 then .[0] else "" end
           ' <<< "${revision_json}")"
           if [ -z "${jvm_deployed_sha}" ]; then
-            [[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+            [[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "JVM split-release base must be a full lowercase commit SHA." >&2
+              exit 1
+            }
             bootstrap_digest="$(gcloud artifacts docker images describe \
               "${IMAGE}:${JVM_SPLIT_RELEASE_BASE_SHA}" \
               --format='value(image_summary.digest)')"
-            test -n "${bootstrap_digest}"
+            [[ "${bootstrap_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "JVM split-release base image returned a malformed digest." >&2
+              exit 1
+            }
             test "${bootstrap_digest}" = "${live_digest}"
             jvm_deployed_sha="${JVM_SPLIT_RELEASE_BASE_SHA}"
           fi
@@ -459,13 +474,15 @@ jobs:
           set -euo pipefail
           expected_digest="$(gcloud artifacts docker images describe "${IMAGE}:${DEPLOY_SHA}" \
             --format='value(image_summary.digest)')"
-          test -n "${expected_digest}"
+          [[ "${expected_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "Candidate image returned a malformed digest." >&2
+            exit 1
+          }
           revision_json="$(gcloud run revisions describe "${REVISION}" \
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
             --format=json)"
-          actual_digest="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
-          actual_image="${IMAGE}@${actual_digest}"
+          actual_image="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
           actual_sha="$(jq -er '
             [.spec.containers[0].env[]
               | select(.name == "JVM_WEEKLY_COMMIT_SHA")
@@ -491,6 +508,7 @@ jobs:
       - name: Verify candidate against legacy live read
         env:
           CANDIDATE_URL: ${{ steps.target.outputs.url }}
+          SERVICE_URL: ${{ steps.target.outputs.service_url }}
           ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
         run: |
@@ -498,17 +516,117 @@ jobs:
           test -n "${CASHFLOW_PROJECT_ID}"
           test -n "${CASHFLOW_YEAR_MONTH}"
           test -n "${CASHFLOW_ACTOR_UID}"
+          test -n "${SERVICE_URL}"
+
+          read_jvm() {
+            local base_url="$1"
+            local path="$2"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${ID_TOKEN}" \
+              -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+              -H 'x-tenant-id: mysc' \
+              -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+              -H 'x-actor-role: ADMIN' \
+              "${base_url}${path}"
+          }
+
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${CANDIDATE_URL}/api/v1/health" \
             | jq -e '.ok == true and .service == "jvm-weekly-api" and (.capabilities | index("settlement-cycle-v1") != null)' >/dev/null
-          curl --fail --silent --show-error \
+
+          legacy_dashboard_path="/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"
+          canonical_legacy_dashboard="$(read_jvm "${SERVICE_URL}" "${legacy_dashboard_path}")"
+          candidate_legacy_dashboard="$(read_jvm "${CANDIDATE_URL}" "${legacy_dashboard_path}")"
+          for dashboard in "${canonical_legacy_dashboard}" "${candidate_legacy_dashboard}"; do
+            jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+                and .cashflow.projectId == env.CASHFLOW_PROJECT_ID
+                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)' \
+              <<< "${dashboard}" >/dev/null
+          done
+          legacy_dashboard_core() {
+            jq -S -c 'del(.settlementCycle)'
+          }
+          canonical_legacy_dashboard_core="$(legacy_dashboard_core \
+            <<< "${canonical_legacy_dashboard}")"
+          candidate_legacy_dashboard_core="$(legacy_dashboard_core \
+            <<< "${candidate_legacy_dashboard}")"
+          test "${candidate_legacy_dashboard_core}" = "${canonical_legacy_dashboard_core}"
+
+          weekly_overview_request="$(jq -cn \
+            --arg projectId "${CASHFLOW_PROJECT_ID}" \
+            --arg yearMonth "${CASHFLOW_YEAR_MONTH}" \
+            '{projectIds: [$projectId], yearMonth: $yearMonth}')"
+          canonical_weekly_overview="$(curl --fail --silent --show-error \
+            --request POST \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
             -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
             -H 'x-actor-role: ADMIN' \
-            "${CANDIDATE_URL}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
+            -H 'content-type: application/json' \
+            --data-binary "${weekly_overview_request}" \
+            "${SERVICE_URL}/api/v1/cashflow/weekly-overview")"
+          candidate_weekly_overview="$(curl --fail --silent --show-error \
+            --request POST \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+            -H 'x-actor-role: ADMIN' \
+            -H 'content-type: application/json' \
+            --data-binary "${weekly_overview_request}" \
+            "${CANDIDATE_URL}/api/v1/cashflow/weekly-overview")"
+          jq -e '.version == "1"
+              and .yearMonth == env.CASHFLOW_YEAR_MONTH
+              and ([.items[]?
+                | select(.projectId == env.CASHFLOW_PROJECT_ID)
+                | .settlementStatuses.items[]?
+                | select(.period == "MONTH")] | length == 1)' \
+            <<< "${canonical_weekly_overview}" >/dev/null
+          jq -e '.version == "1"
+              and .yearMonth == env.CASHFLOW_YEAR_MONTH
+              and ([.items[]?
+                | select(.projectId == env.CASHFLOW_PROJECT_ID)
+                | .settlementStatuses.items[]?
+                | select(.period == "MONTH")] | length == 1)' \
+            <<< "${candidate_weekly_overview}" >/dev/null
+          legacy_weekly_overview_core() {
+            jq -S -c '.'
+          }
+          canonical_weekly_overview_core="$(legacy_weekly_overview_core \
+            <<< "${canonical_weekly_overview}")"
+          candidate_weekly_overview_core="$(legacy_weekly_overview_core \
+            <<< "${candidate_weekly_overview}")"
+          test "${candidate_weekly_overview_core}" = "${canonical_weekly_overview_core}"
+
+          weekly_overview_cycle_request="$(jq -cn \
+            --arg projectId "${CASHFLOW_PROJECT_ID}" \
+            --arg yearMonth "${CASHFLOW_YEAR_MONTH}" \
+            '{projectIds: [$projectId], yearMonth: $yearMonth, settlementCycle: true}')"
+          candidate_cycle_weekly_overview="$(curl --fail --silent --show-error \
+            --request POST \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+            -H 'x-actor-role: ADMIN' \
+            -H 'content-type: application/json' \
+            --data-binary "${weekly_overview_cycle_request}" \
+            "${CANDIDATE_URL}/api/v1/cashflow/weekly-overview")"
+          jq -e '.version == "2"
+              and .yearMonth == env.CASHFLOW_YEAR_MONTH
+              and ([.items[]?
+                | select(.projectId == env.CASHFLOW_PROJECT_ID)
+                | select(.settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH)
+                | select(.settlementCycle.health | type == "string" and length > 0)
+                | .settlementStatuses.items[]?
+                | select(.period == "MONTH")] | length == 1)' \
+            <<< "${candidate_cycle_weekly_overview}" >/dev/null
+
+          read_jvm "${CANDIDATE_URL}" \
+            "/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
             | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
                 and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
                 and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
@@ -537,6 +655,7 @@ jobs:
             --jvm-audience "${JVM_AUDIENCE}"
 
       - name: Verify settlement-cycle inventory and BFF read compatibility
+        if: needs.preflight.outputs.apply_migrations == 'true'
         env:
           CANDIDATE_URL: ${{ steps.target.outputs.url }}
           JVM_AUDIENCE: ${{ steps.target.outputs.service_url }}

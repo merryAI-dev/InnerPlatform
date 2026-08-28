@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -7,10 +7,51 @@ import { describe, expect, it } from 'vitest';
 import {
   assertCashflowSettlementReleaseBoundary,
   changedPathsBetween,
+  classifyCashflowSettlementProductionRelease,
   classifyCashflowSettlementReleasePaths,
 } from '../scripts/verify-cashflow-settlement-release-boundary.mjs';
 
 describe('cashflow settlement split-release boundary', () => {
+  it('runs the real JVM settlement Firestore Emulator integration in CI', () => {
+    const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+    expect(workflow).toContain('- name: JVM settlement Firestore emulator integration');
+    expect(workflow).toContain(
+      'run: bash server/jvm-weekly-api/scripts/test-settlement-cycle-emulator.sh',
+    );
+    expect(workflow.indexOf('JVM settlement Firestore emulator integration'))
+      .toBeGreaterThan(workflow.indexOf('JVM weekly API tests'));
+  });
+
+  it('classifies the exact CI workflow as JVM-only rollout support', () => {
+    expect(classifyCashflowSettlementProductionRelease([
+      'server/jvm-weekly-api/src/main/java/example/Settlement.java',
+      '.github/workflows/ci.yml',
+    ])).toEqual({
+      releaseMode: 'jvm_only',
+      jvm: ['server/jvm-weekly-api/src/main/java/example/Settlement.java'],
+      bffFrontendCutover: [],
+      unexpectedPaths: [],
+    });
+  });
+
+  it('does not broaden JVM-only rollout support beyond the exact CI workflow path', () => {
+    const unexpectedPaths = [
+      '.github/workflows/ci-extra.yml',
+      '.github/workflows/ci.yml/child',
+      '.github/workflows/release.yml',
+      'package.json',
+    ];
+    expect(classifyCashflowSettlementProductionRelease([
+      'server/jvm-weekly-api/src/main/java/example/Settlement.java',
+      ...unexpectedPaths,
+    ])).toEqual({
+      releaseMode: 'web',
+      jvm: ['server/jvm-weekly-api/src/main/java/example/Settlement.java'],
+      bffFrontendCutover: [],
+      unexpectedPaths,
+    });
+  });
+
   it('allows a JVM-first release with rollout tooling but no routed BFF/frontend cutover', () => {
     expect(assertCashflowSettlementReleaseBoundary([
       'server/jvm-weekly-api/src/main/java/example/Settlement.java',
@@ -143,6 +184,10 @@ describe('cashflow settlement split-release boundary', () => {
         'server/bff/routes/jvm-weekly-api.mjs',
         'server/jvm-weekly-api/obsolete.java',
       ]));
+      expect(classifyCashflowSettlementProductionRelease(paths)).toMatchObject({
+        releaseMode: 'web',
+        bffFrontendCutover: ['server/bff/routes/jvm-weekly-api.mjs'],
+      });
       expect(() => assertCashflowSettlementReleaseBoundary(paths))
         .toThrow(/Cashflow settlement release boundary violation/);
     } finally {

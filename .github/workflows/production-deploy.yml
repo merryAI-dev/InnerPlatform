@@ -181,50 +181,34 @@ jobs:
           git merge-base --is-ancestor "${bff_deployed_sha}" "${DEPLOY_SHA}"
           BFF_DEPLOY_BASE_SHA="${bff_deployed_sha}"
 
-          release_mode="$(node --input-type=module - "${BFF_DEPLOY_BASE_SHA}" "${DEPLOY_SHA}" <<'NODE'
+          release_classification="$(node --input-type=module - "${BFF_DEPLOY_BASE_SHA}" "${DEPLOY_SHA}" <<'NODE'
           import {
             changedPathsBetween,
-            classifyCashflowSettlementReleasePaths,
+            classifyCashflowSettlementProductionRelease,
             isJvmRolloutSupportLiveAt,
           } from './scripts/verify-cashflow-settlement-release-boundary.mjs';
 
           const [aliasBase, head] = process.argv.slice(2);
-          const jvmOnlyReleaseSupportPaths = new Set([
-            '.github/workflows/jvm-production-deploy.yml',
-            '.github/workflows/production-deploy.yml',
-            'deploy-prod-align.mjs',
-            'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
-            'scripts/verify-cashflow-settlement-candidate.mjs',
-            'scripts/verify-cashflow-settlement-release-boundary.mjs',
-            'server/bff/cashflow-settlement-cycle-rollout.integration.test.ts',
-            'server/bff/cashflow-settlement-cycle-rollout.mjs',
-            'server/bff/cashflow-settlement-cycle-rollout.test.mjs',
-            'server/bff/cashflow/settlement-cycle/contract.mjs',
-            'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs',
-            'server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.test.mjs',
-            'server/cashflow-settlement-candidate-canary.test.mjs',
-            'server/cashflow-settlement-release-boundary.test.mjs',
-            'server/deploy-prod-align.test.ts',
-            'server/production-deploy-workflow.test.ts',
-          ]);
           const changedPaths = changedPathsBetween(aliasBase, head);
-          const { jvm, bffFrontendCutover } = classifyCashflowSettlementReleasePaths(
+          const { releaseMode, bffFrontendCutover } = classifyCashflowSettlementProductionRelease(
             changedPaths,
             { rolloutSupportIsLive: isJvmRolloutSupportLiveAt(head) },
           );
-          const unexpectedPaths = changedPaths.filter((path) => (
-            !path.startsWith('server/jvm-weekly-api/')
-            && !jvmOnlyReleaseSupportPaths.has(path)
-          ));
-          process.stdout.write(
-            jvm.length > 0
-              && bffFrontendCutover.length === 0
-              && unexpectedPaths.length === 0
-              ? 'jvm_only'
-              : 'web',
-          );
+          process.stdout.write(JSON.stringify({
+            releaseMode,
+            settlementCutover: bffFrontendCutover.length > 0,
+          }));
           NODE
           )"
+          release_mode="$(jq -er '.releaseMode | select(. == "jvm_only" or . == "web")' \
+            <<< "${release_classification}")"
+          settlement_cutover="$(jq -er '
+            .settlementCutover
+            | if . == true then "true"
+              elif . == false then "false"
+              else error("invalid settlement cutover flag")
+              end
+          ' <<< "${release_classification}")"
           case "${release_mode}" in
             jvm_only|web) ;;
             *) echo "Unexpected production release mode: ${release_mode}" >&2; exit 1 ;;
@@ -232,6 +216,7 @@ jobs:
           {
             echo "bff_deployed_sha=${bff_deployed_sha}"
             echo "release_mode=${release_mode}"
+            echo "settlement_cutover=${settlement_cutover}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Skip Production for JVM-only release
@@ -248,23 +233,23 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Authenticate JVM release verifier
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
         uses: google-github-actions/auth@v3
         id: jvm_release_verifier_auth
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
           service_account: ${{ vars.GCP_JVM_RELEASE_VERIFIER_SERVICE_ACCOUNT_LIVE }}
           token_format: access_token
-          create_credentials_file: false
+          create_credentials_file: true
           export_environment_variables: false
 
       - name: Set up gcloud for release verification
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
         uses: google-github-actions/setup-gcloud@v3
 
       - name: Verify cashflow settlement split-release boundary
         id: release_boundary
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
         env:
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           JVM_SPLIT_RELEASE_BASE_SHA: ${{ vars.JVM_SPLIT_RELEASE_BASE_SHA_LIVE }}
@@ -272,6 +257,14 @@ jobs:
           CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.jvm_release_verifier_auth.outputs.access_token }}
         run: |
           set -euo pipefail
+          normalize_live_image_digest() {
+            local image_uri="$1"
+            local expected_repository="$2"
+            local digest="${image_uri##*@}"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            test "${image_uri}" = "${expected_repository}@${digest}" || return 1
+            printf '%s\n' "${digest}"
+          }
           service_json="$(gcloud run services describe "${JVM_SERVICE}" \
             --project "${JVM_PROJECT_ID}" --region "${JVM_REGION}" --format=json)"
           positive_revision_count="$(jq -r \
@@ -290,7 +283,8 @@ jobs:
           test -n "${live_revision}"
           revision_json="$(gcloud run revisions describe "${live_revision}" \
             --project "${JVM_PROJECT_ID}" --region "${JVM_REGION}" --format=json)"
-          live_digest="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          live_image_uri="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          live_digest="$(normalize_live_image_digest "${live_image_uri}" "${JVM_IMAGE}")"
           jvm_deployed_sha="$(jq -r '
             [.spec.containers[0].env[]?
               | select(.name == "JVM_WEEKLY_COMMIT_SHA")
@@ -299,11 +293,17 @@ jobs:
             | if length == 1 then .[0] else "" end
           ' <<< "${revision_json}")"
           if [ -z "${jvm_deployed_sha}" ]; then
-            [[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+            [[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "JVM split-release base must be a full lowercase commit SHA." >&2
+              exit 1
+            }
             bootstrap_digest="$(gcloud artifacts docker images describe \
               "${JVM_IMAGE}:${JVM_SPLIT_RELEASE_BASE_SHA}" \
               --format='value(image_summary.digest)')"
-            test -n "${bootstrap_digest}"
+            [[ "${bootstrap_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "JVM split-release base image returned a malformed digest." >&2
+              exit 1
+            }
             test "${bootstrap_digest}" = "${live_digest}"
             jvm_deployed_sha="${JVM_SPLIT_RELEASE_BASE_SHA}"
           fi
@@ -356,7 +356,7 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
 
       - name: Verify deployed JVM settlement capability and version
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
         env:
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           JVM_DEPLOYED_SHA: ${{ steps.release_boundary.outputs.jvm_deployed_sha }}
@@ -426,6 +426,40 @@ jobs:
             throw new Error(`Live JVM settlement capability check failed with HTTP ${response.status}.`);
           }
           NODE
+
+      - name: Mint JVM cutover verifier ID token
+        id: jvm_cutover_verifier_auth
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
+          service_account: ${{ vars.GCP_JVM_RELEASE_VERIFIER_SERVICE_ACCOUNT_LIVE }}
+          token_format: id_token
+          id_token_audience: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify settlement-cycle cutover inventory
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        env:
+          CASHFLOW_ACTOR_UID: ${{ vars.JVM_SETTLEMENT_CANARY_ACTOR_UID_LIVE }}
+          JVM_WEEKLY_API_ID_TOKEN: ${{ steps.jvm_cutover_verifier_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.jvm_release_verifier_auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          test -n "${CASHFLOW_ACTOR_UID}"
+          test -n "${JVM_WEEKLY_API_ID_TOKEN}"
+          test -n "${JVM_WEEKLY_INTERNAL_API_TOKEN}"
+          test -n "${GOOGLE_APPLICATION_CREDENTIALS}"
+          test "${JVM_WEEKLY_API_BASE_URL%/}" = "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE%/}"
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --firebase-project "${LIVE_FIREBASE_PROJECT_ID}" \
+            --tenant mysc \
+            --verify-cutover \
+            --people-uid "${CASHFLOW_ACTOR_UID}" \
+            --jvm-base-url "${JVM_WEEKLY_API_BASE_URL}" \
+            --jvm-audience "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}"
 
       - name: Deploy to Vercel production
         id: vercel_deploy
@@ -564,7 +598,7 @@ jobs:
           NODE
 
       - name: Verify authenticated settlement reads before alias
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
         env:
           SETTLEMENT_CANARY_BASE_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
           SETTLEMENT_CANARY_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY_LIVE }}
@@ -646,9 +680,10 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          SETTLEMENT_CUTOVER: ${{ steps.release_mode.outputs.settlement_cutover }}
           SETTLEMENT_CANARY_BASE_URL: https://myscube.myscguard.app
           SETTLEMENT_CANARY_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY_LIVE }}
-          SETTLEMENT_CANARY_FIREBASE_REFRESH_TOKEN: ${{ secrets.FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE }}
+          SETTLEMENT_CANARY_FIREBASE_REFRESH_TOKEN: ${{ steps.release_mode.outputs.settlement_cutover == 'true' && secrets.FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE || '' }}
           SETTLEMENT_CANARY_ACTOR_UID: ${{ vars.SETTLEMENT_READ_CANARY_ACTOR_UID_LIVE }}
           SETTLEMENT_CANARY_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
           SETTLEMENT_CANARY_CYCLE_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
@@ -662,11 +697,18 @@ jobs:
           SETTLEMENT_CANARY_CANONICAL_ORIGIN: https://myscube.myscguard.app
         run: |
           set -euo pipefail
+          case "${SETTLEMENT_CUTOVER}" in
+            true|false) ;;
+            *) echo "Missing or invalid settlement cutover classification." >&2; exit 1 ;;
+          esac
           actual_target=""
           actual_target_status=0
           actual_target="$(node deploy-prod-align.mjs --print-current-target 2>/dev/null)" || actual_target_status=$?
           if [ "${actual_target_status}" = "0" ] \
             && [ "${actual_target}" = "${DEPLOYMENT_HOST}" ]; then
+            if [ "${SETTLEMENT_CUTOVER}" != "true" ]; then
+              exit 0
+            fi
             if node scripts/verify-cashflow-settlement-candidate.mjs; then
               exit 0
             fi
@@ -693,7 +735,9 @@ jobs:
             --token "${VERCEL_TOKEN}" \
             --scope merryai-devs-projects || rollback_alias_status=$?
           node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"
-          node scripts/verify-cashflow-settlement-candidate.mjs
+          if [ "${SETTLEMENT_CUTOVER}" = "true" ]; then
+            node scripts/verify-cashflow-settlement-candidate.mjs
+          fi
           if [ "${rollback_alias_status}" != "0" ]; then
             echo "Alias rollback command lost its response, but the restored target and authenticated read were verified." >&2
           fi
