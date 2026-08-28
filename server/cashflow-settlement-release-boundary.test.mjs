@@ -59,6 +59,39 @@ describe('cashflow settlement split-release boundary', () => {
     });
   });
 
+  it('classifies the exact Vercel identity helper and its test as JVM-only rollout support', () => {
+    expect(classifyCashflowSettlementProductionRelease([
+      'server/jvm-weekly-api/src/main/java/example/Settlement.java',
+      'scripts/verify-vercel-deployment-identity.mjs',
+      'server/vercel-deployment-identity.test.ts',
+    ])).toEqual({
+      releaseMode: 'jvm_only',
+      jvm: ['server/jvm-weekly-api/src/main/java/example/Settlement.java'],
+      bffFrontendCutover: [],
+      unexpectedPaths: [],
+    });
+  });
+
+  it('does not broaden JVM-only support around the Vercel identity helper paths', () => {
+    const unexpectedPaths = [
+      'scripts/verify-vercel-deployment-identity.ts',
+      'scripts/verify-vercel-deployment-identity.mjs.backup',
+      'scripts/verify-vercel-deployment-identity.mjs/child',
+      'server/vercel-deployment-identity.test.mjs',
+      'server/vercel-deployment-identity.test.ts.backup',
+      'server/vercel-deployment-identity.test.ts/child',
+    ];
+    expect(classifyCashflowSettlementProductionRelease([
+      'server/jvm-weekly-api/src/main/java/example/Settlement.java',
+      ...unexpectedPaths,
+    ])).toEqual({
+      releaseMode: 'web',
+      jvm: ['server/jvm-weekly-api/src/main/java/example/Settlement.java'],
+      bffFrontendCutover: [],
+      unexpectedPaths,
+    });
+  });
+
   it('does not broaden JVM-only rollout support beyond the exact CI workflow path', () => {
     const unexpectedPaths = [
       '.github/workflows/ci-extra.yml',

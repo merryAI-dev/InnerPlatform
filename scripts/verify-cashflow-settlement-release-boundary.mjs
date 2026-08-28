@@ -32,6 +32,7 @@ const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
   'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
   'scripts/extract_jvm_command_roles.mjs',
   'scripts/verify-cashflow-settlement-candidate.mjs',
+  'scripts/verify-vercel-deployment-identity.mjs',
   'scripts/verify-cashflow-settlement-release-boundary.mjs',
   'server/bff/cashflow-settlement-cycle-rollout.integration.test.ts',
   'server/bff/cashflow-settlement-cycle-rollout.mjs',
@@ -43,6 +44,7 @@ const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
   'server/cashflow-settlement-release-boundary.test.mjs',
   'server/deploy-prod-align.test.ts',
   'server/production-deploy-workflow.test.ts',
+  'server/vercel-deployment-identity.test.ts',
 ]);
 const JVM_WEEKLY_ROUTE = 'server/bff/routes/jvm-weekly-api.mjs';
 const JVM_ROLLOUT_SUPPORT_IMPORT = '../cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs';

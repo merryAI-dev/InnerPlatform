@@ -166,16 +166,18 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
         run: |
           set -euo pipefail
-          bff_deployment_host="$(node deploy-prod-align.mjs --print-current-target)"
-          bff_inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${bff_deployment_host}" --json \
-            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
-          bff_deployed_sha="$(jq -er --arg project "${VERCEL_PROJECT_ID}" '
-            select(.projectId == $project and .target == "production")
-            | .meta.githubCommitSha
+          bff_identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          bff_deployed_sha="$(jq -er '
+            .commitSha
             | select(type == "string" and test("^[0-9a-f]{40}$"))
-          ' <<< "${bff_inspect_json}")"
+          ' <<< "${bff_identity}")"
           [[ "${bff_deployed_sha}" =~ ^[0-9a-f]{40}$ ]]
           git cat-file -e "${bff_deployed_sha}^{commit}"
           git merge-base --is-ancestor "${bff_deployed_sha}" "${DEPLOY_SHA}"
@@ -517,23 +519,25 @@ jobs:
           echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify Vercel candidate identity
+        id: candidate_identity
         if: steps.release_mode.outputs.release_mode != 'jvm_only'
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
         run: |
           set -euo pipefail
-          inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${DEPLOYMENT_HOST}" --json \
-            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
-          jq -e --arg project "${VERCEL_PROJECT_ID}" --arg sha "${DEPLOY_SHA}" \
-            --arg invocation "${DEPLOY_INVOCATION_ID}" '
-            .projectId == $project
-            and .meta.githubCommitSha == $sha
-            and .meta.githubActionsInvocation == $invocation
-            and .target == "production"
-          ' <<< "${inspect_json}" >/dev/null
+          candidate_identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --host "${DEPLOYMENT_HOST}" \
+            --expected-sha "${DEPLOY_SHA}" \
+            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          deployment_id="$(jq -er '.id | select(type == "string" and length > 0)' \
+            <<< "${candidate_identity}")"
+          echo "deployment_id=${deployment_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify production surface before alias
         if: steps.release_mode.outputs.release_mode != 'jvm_only'
@@ -621,23 +625,25 @@ jobs:
         id: previous_alias
         if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
         env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
         run: |
           set -euo pipefail
-          deployment_host="$(node deploy-prod-align.mjs --print-current-target)"
-          test -n "${deployment_host}"
-          inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${deployment_host}" --json \
-            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
-          deployment_id="$(jq -er '.id // .uid | select(type == "string" and length > 0)' <<< "${inspect_json}")"
-          commit_sha="$(jq -er '.meta.githubCommitSha
-            | select(type == "string" and test("^[0-9a-f]{40}$"))' <<< "${inspect_json}")"
-          jq -e --arg project "${VERCEL_PROJECT_ID}" --arg id "${deployment_id}" --arg sha "${commit_sha}" '
-            .projectId == $project
-            and (.id // .uid) == $id
-            and .meta.githubCommitSha == $sha
-            and .target == "production"
-          ' <<< "${inspect_json}" >/dev/null
+          deployment_identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          deployment_host="$(jq -er '.host | select(type == "string" and length > 0)' \
+            <<< "${deployment_identity}")"
+          deployment_id="$(jq -er '.id | select(type == "string" and length > 0)' \
+            <<< "${deployment_identity}")"
+          commit_sha="$(jq -er '.commitSha
+            | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+            <<< "${deployment_identity}")"
           {
             echo "deployment_host=${deployment_host}"
             echo "deployment_id=${deployment_id}"
@@ -662,11 +668,29 @@ jobs:
         id: canonical_alias
         if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
         env:
-          DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+          CANDIDATE_DEPLOYMENT_ID: ${{ steps.candidate_identity.outputs.deployment_id }}
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
         run: |
           set -euo pipefail
-          node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"
+          for attempt in {1..10}; do
+            if node scripts/verify-vercel-deployment-identity.mjs \
+              --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+              --expected-host "${DEPLOYMENT_HOST}" \
+              --expected-id "${CANDIDATE_DEPLOYMENT_ID}" \
+              --expected-sha "${DEPLOY_SHA}" \
+              --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+              --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
+              exit 0
+            fi
+            [ "${attempt}" = "10" ] || sleep 2
+          done
+          echo "Canonical production alias did not resolve to the verified candidate." >&2
+          exit 1
 
       - name: Reconcile canonical alias or roll back
         if: always() && steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true' && steps.vercel_deploy.outcome == 'success' && steps.previous_alias.outcome == 'success'
@@ -675,10 +699,13 @@ jobs:
           PREVIOUS_DEPLOYMENT_HOST: ${{ steps.previous_alias.outputs.deployment_host }}
           PREVIOUS_DEPLOYMENT_ID: ${{ steps.previous_alias.outputs.deployment_id }}
           PREVIOUS_DEPLOYMENT_SHA: ${{ steps.previous_alias.outputs.commit_sha }}
-          ALIAS_OUTCOME: ${{ steps.alias_promotion.outcome }}
-          ALIAS_CHECK_OUTCOME: ${{ steps.canonical_alias.outcome }}
+          CANDIDATE_DEPLOYMENT_ID: ${{ steps.candidate_identity.outputs.deployment_id }}
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           SETTLEMENT_CUTOVER: ${{ steps.release_mode.outputs.settlement_cutover }}
           SETTLEMENT_CANARY_BASE_URL: https://myscube.myscguard.app
@@ -701,11 +728,13 @@ jobs:
             true|false) ;;
             *) echo "Missing or invalid settlement cutover classification." >&2; exit 1 ;;
           esac
-          actual_target=""
-          actual_target_status=0
-          actual_target="$(node deploy-prod-align.mjs --print-current-target 2>/dev/null)" || actual_target_status=$?
-          if [ "${actual_target_status}" = "0" ] \
-            && [ "${actual_target}" = "${DEPLOYMENT_HOST}" ]; then
+          if node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --expected-host "${DEPLOYMENT_HOST}" \
+            --expected-id "${CANDIDATE_DEPLOYMENT_ID}" \
+            --expected-sha "${DEPLOY_SHA}" \
+            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+            --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
             if [ "${SETTLEMENT_CUTOVER}" != "true" ]; then
               exit 0
             fi
@@ -718,23 +747,33 @@ jobs:
             echo "Alias promotion failed and no previous deployment was captured." >&2
             exit 1
           }
-          previous_inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${PREVIOUS_DEPLOYMENT_HOST}" --json \
-            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
-          jq -e --arg project "${VERCEL_PROJECT_ID}" \
-            --arg id "${PREVIOUS_DEPLOYMENT_ID}" \
-            --arg sha "${PREVIOUS_DEPLOYMENT_SHA}" '
-            .projectId == $project
-            and (.id // .uid) == $id
-            and .meta.githubCommitSha == $sha
-            and .target == "production"
-          ' <<< "${previous_inspect_json}" >/dev/null
+          node scripts/verify-vercel-deployment-identity.mjs \
+            --host "${PREVIOUS_DEPLOYMENT_HOST}" \
+            --expected-id "${PREVIOUS_DEPLOYMENT_ID}" \
+            --expected-sha "${PREVIOUS_DEPLOYMENT_SHA}" \
+            --legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}" \
+            --ancestor-of "${DEPLOY_SHA}" >/dev/null
           rollback_alias_status=0
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${PREVIOUS_DEPLOYMENT_HOST}" \
             "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --token "${VERCEL_TOKEN}" \
             --scope merryai-devs-projects || rollback_alias_status=$?
-          node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"
+          restored=false
+          for attempt in {1..10}; do
+            if node scripts/verify-vercel-deployment-identity.mjs \
+              --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+              --expected-host "${PREVIOUS_DEPLOYMENT_HOST}" \
+              --expected-id "${PREVIOUS_DEPLOYMENT_ID}" \
+              --expected-sha "${PREVIOUS_DEPLOYMENT_SHA}" \
+              --legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}" \
+              --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
+              restored=true
+              break
+            fi
+            [ "${attempt}" = "10" ] || sleep 2
+          done
+          test "${restored}" = "true"
           if [ "${SETTLEMENT_CUTOVER}" = "true" ]; then
             node scripts/verify-cashflow-settlement-candidate.mjs
           fi

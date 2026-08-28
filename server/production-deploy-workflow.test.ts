@@ -165,7 +165,7 @@ describe('production deployment workflow safety', () => {
     expect(runBlocks.some((block) => block.includes('${{ steps.'))).toBe(false);
     expect(workflowText).toContain('DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}');
     expect(workflowText).toContain('DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}');
-    expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"');
+    expect(workflowText).toContain('--expected-host "${DEPLOYMENT_HOST}"');
   });
 
   it('promotes the canonical production alias before verifying it', () => {
@@ -472,9 +472,17 @@ describe('production deployment workflow safety', () => {
 
   it('accepts only release bases whose canonical reconciliation step succeeded', () => {
     expect(workflowText).toContain('gcloud run services describe "${JVM_SERVICE}"');
-    expect(workflowText).toContain('node deploy-prod-align.mjs --print-current-target');
-    expect(workflowText).toContain('inspect "${bff_deployment_host}" --json');
-    expect(workflowText).toContain('.meta.githubCommitSha');
+    expect(workflowText).toContain('node scripts/verify-vercel-deployment-identity.mjs');
+    expect(workflowText).toContain('--alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}"');
+    expect(workflowText).toContain('--ancestor-of "${DEPLOY_SHA}"');
+    expect(workflowText).toContain('VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}');
+    expect(workflowText).toContain('VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}');
+    expect(workflowText).not.toMatch(/inspect\s+"\$\{[^}]+\}"\s+--json/);
+    expect(workflowText).not.toContain('deploy-prod-align.mjs');
+    expect(workflowText).not.toContain('BFF_SPLIT_RELEASE_BASE_HOST_LIVE');
+    expect(workflowText).toContain('BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}');
+    expect(workflowText).toContain('--legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}"');
+    expect(workflowText).not.toContain('BFF_DEPLOY_BASE_SHA="${BFF_SPLIT_RELEASE_BASE_SHA}"');
     expect(workflowText).toContain('JVM_SPLIT_RELEASE_BASE_SHA_LIVE');
     expect(workflowText).toContain('status.imageDigest');
     expect(workflowText).not.toContain('git hash-object -t tree /dev/null');
@@ -511,41 +519,75 @@ describe('production deployment workflow safety', () => {
   });
 
   it('binds the parsed Vercel candidate to this project and commit before authenticated reads', () => {
-    expect(workflowText).toContain('Verify Vercel candidate identity');
-    expect(workflowText).toContain('inspect "${DEPLOYMENT_HOST}" --json');
-    expect(workflowText).toContain('.projectId == $project');
-    expect(workflowText).toContain('.meta.githubCommitSha == $sha');
-    expect(workflowText).toContain('.meta.githubActionsInvocation == $invocation');
+    const identityStep = extractNamedStep(workflowText, 'Verify Vercel candidate identity');
+    expect(identityStep).toContain('id: candidate_identity');
+    expect(identityStep).toContain('node scripts/verify-vercel-deployment-identity.mjs');
+    expect(identityStep).toContain('--host "${DEPLOYMENT_HOST}"');
+    expect(identityStep).toContain('--expected-sha "${DEPLOY_SHA}"');
+    expect(identityStep).toContain('--expected-invocation "${DEPLOY_INVOCATION_ID}"');
+    expect(identityStep).toContain('--ancestor-of "${DEPLOY_SHA}"');
+    expect(identityStep).toContain('echo "deployment_id=${deployment_id}" >> "${GITHUB_OUTPUT}"');
+    expect(identityStep).toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}');
+    expect(identityStep).toContain('VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}');
+    expect(identityStep).toContain('VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}');
+    expect(identityStep).toContain('VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}');
+    expect(identityStep).not.toContain('inspect ');
+    expect(identityStep).not.toContain('--legacy-missing-invocation-sha');
     expect(workflowText).toContain('--meta githubActionsInvocation="${DEPLOY_INVOCATION_ID}"');
-    expect(workflowText).toContain('.target == "production"');
     expect(workflowText.indexOf('Verify Vercel candidate identity'))
       .toBeLessThan(workflowText.indexOf('Verify authenticated settlement reads before alias'));
   });
 
   it('captures the prior alias and restores it on any promotion or post-alias canary failure', () => {
     expect(workflowText).toContain('id: previous_alias');
-    expect(workflowText).toContain('--print-current-target');
+    expect(workflowText).toContain('--alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}"');
     expect(workflowText).toContain('id: alias_promotion');
     expect(workflowText).toContain('id: canonical_alias');
     expect(workflowText).toContain(
       "if: always() && steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'",
     );
-    expect(workflowText).toContain('ALIAS_OUTCOME: ${{ steps.alias_promotion.outcome }}');
-    expect(workflowText).toContain('ALIAS_CHECK_OUTCOME: ${{ steps.canonical_alias.outcome }}');
+    expect(workflowText).toContain('CANDIDATE_DEPLOYMENT_ID: ${{ steps.candidate_identity.outputs.deployment_id }}');
     expect(workflowText).toContain('PREVIOUS_DEPLOYMENT_HOST: ${{ steps.previous_alias.outputs.deployment_host }}');
     expect(workflowText).toContain('PREVIOUS_DEPLOYMENT_ID: ${{ steps.previous_alias.outputs.deployment_id }}');
     expect(workflowText).toContain('PREVIOUS_DEPLOYMENT_SHA: ${{ steps.previous_alias.outputs.commit_sha }}');
     expect(workflowText).toContain('"${PREVIOUS_DEPLOYMENT_HOST}"');
-    expect(workflowText).toContain('actual_target="$(node deploy-prod-align.mjs --print-current-target 2>/dev/null)"');
-    expect(workflowText).toContain('if [ "${actual_target_status}" = "0" ]');
-    expect(workflowText).not.toContain('if [ "${ALIAS_OUTCOME}" = "success" ]');
+    const captureStep = extractNamedStep(workflowText, 'Capture current canonical alias');
+    expect(captureStep).toContain('node scripts/verify-vercel-deployment-identity.mjs');
+    expect(captureStep).toContain('--alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}"');
+    expect(captureStep).toContain('--ancestor-of "${DEPLOY_SHA}"');
+    expect(captureStep).not.toContain('inspect ');
+    const canonicalStep = extractNamedStep(workflowText, 'Verify canonical alias target');
+    expect(canonicalStep).toContain('for attempt in {1..10}; do');
+    expect(canonicalStep).toContain('--alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}"');
+    expect(canonicalStep).toContain('--expected-host "${DEPLOYMENT_HOST}"');
+    expect(canonicalStep).toContain('--expected-id "${CANDIDATE_DEPLOYMENT_ID}"');
+    expect(canonicalStep).toContain('--expected-sha "${DEPLOY_SHA}"');
+    expect(canonicalStep).toContain('--expected-invocation "${DEPLOY_INVOCATION_ID}"');
+    expect(canonicalStep).not.toContain('--legacy-missing-invocation-sha');
     expect(workflowText).toContain('rollback_alias_status=0');
-    expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"');
     const reconcileStart = workflowText.lastIndexOf('Reconcile canonical alias or roll back');
-    const rollbackVerify = workflowText.indexOf('node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"', reconcileStart);
+    const reconcileStep = workflowText.slice(reconcileStart);
+    expect(reconcileStep).toContain('node scripts/verify-vercel-deployment-identity.mjs');
+    expect(reconcileStep).toContain('--host "${PREVIOUS_DEPLOYMENT_HOST}"');
+    expect(reconcileStep).toContain('--expected-id "${PREVIOUS_DEPLOYMENT_ID}"');
+    expect(reconcileStep).toContain('--expected-sha "${PREVIOUS_DEPLOYMENT_SHA}"');
+    expect(reconcileStep).toContain('--ancestor-of "${DEPLOY_SHA}"');
+    expect(reconcileStep).toContain('--alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}"');
+    expect(reconcileStep).toContain('--expected-host "${DEPLOYMENT_HOST}"');
+    expect(reconcileStep).not.toContain('inspect ');
+    const rollbackVerify = workflowText.indexOf('--expected-host "${PREVIOUS_DEPLOYMENT_HOST}"', reconcileStart);
     const rollbackCanary = workflowText.indexOf('node scripts/verify-cashflow-settlement-candidate.mjs', rollbackVerify);
     expect(rollbackVerify).toBeGreaterThan(reconcileStart);
     expect(rollbackCanary).toBeGreaterThan(rollbackVerify);
+  });
+
+  it('uses one fail-closed REST identity helper for every Vercel artifact seam', () => {
+    const calls = workflowText.match(/node scripts\/verify-vercel-deployment-identity\.mjs/g) ?? [];
+    expect(calls).toHaveLength(7);
+    expect(workflowText).not.toMatch(/inspect\s+"\$\{[^}]+\}"\s+--json/);
+    expect(workflowText).not.toContain('deploy-prod-align.mjs');
+    expect(workflowText).not.toContain('/deployments?target=production');
+    expect(workflowText).not.toContain('actions/workflows/production-deploy.yml/runs');
   });
 
   it('scopes production deploy secrets away from checkout and dependency installation', () => {
