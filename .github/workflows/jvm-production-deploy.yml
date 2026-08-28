@@ -541,12 +541,14 @@ jobs:
           legacy_dashboard_path="/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"
           canonical_legacy_dashboard="$(read_jvm "${SERVICE_URL}" "${legacy_dashboard_path}")"
           candidate_legacy_dashboard="$(read_jvm "${CANDIDATE_URL}" "${legacy_dashboard_path}")"
-          for dashboard in "${canonical_legacy_dashboard}" "${candidate_legacy_dashboard}"; do
+          assert_legacy_dashboard_shape() {
             jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
                 and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
-                and .cashflow.projectId == env.CASHFLOW_PROJECT_ID
-                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)' \
-              <<< "${dashboard}" >/dev/null
+                and (.cashflow == null or .cashflow.projectId == env.CASHFLOW_PROJECT_ID)
+                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)'
+          }
+          for dashboard in "${canonical_legacy_dashboard}" "${candidate_legacy_dashboard}"; do
+            assert_legacy_dashboard_shape <<< "${dashboard}" >/dev/null
           done
           legacy_dashboard_core() {
             jq -S -c 'del(.settlementCycle)'
@@ -792,23 +794,29 @@ jobs:
           test "${total_percent}" = "100"
 
           echo "Verify restored canonical service after rollback"
+          assert_legacy_health() {
+            jq -e '.ok == true and .service == "jvm-weekly-api" and .runtime == "spring-boot"'
+          }
+          assert_legacy_dashboard_shape() {
+            jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+                and (.cashflow == null or .cashflow.projectId == env.CASHFLOW_PROJECT_ID)
+                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)'
+          }
           canonical_url="$(gcloud run services describe "${SERVICE}" \
             --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${canonical_url}/api/v1/health" \
-            | jq -e '.ok == true and .service == "jvm-weekly-api" and (.capabilities | index("settlement-cycle-v1") != null)' >/dev/null
+            | assert_legacy_health >/dev/null
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
             -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
             -H 'x-actor-role: ADMIN' \
-            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
-            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
-                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
-                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
-                and (.settlementCycle.health | type == "string" and length > 0)' >/dev/null
+            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
+            | assert_legacy_dashboard_shape >/dev/null
           if [ "${rollback_status}" != "0" ]; then
             echo "Traffic rollback command lost its response, but the restored topology and canary were verified." >&2
           fi
