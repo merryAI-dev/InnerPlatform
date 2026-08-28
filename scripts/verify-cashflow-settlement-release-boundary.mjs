@@ -28,6 +28,7 @@ const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
   '.github/workflows/jvm-production-deploy.yml',
   '.github/workflows/production-deploy.yml',
   'deploy-prod-align.mjs',
+  'policies/jvm-command-roles.json',
   'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
   'scripts/verify-cashflow-settlement-candidate.mjs',
   'scripts/verify-cashflow-settlement-release-boundary.mjs',

@@ -26,6 +26,7 @@ describe('cashflow settlement split-release boundary', () => {
     expect(classifyCashflowSettlementProductionRelease([
       'server/jvm-weekly-api/src/main/java/example/Settlement.java',
       '.github/workflows/ci.yml',
+      'policies/jvm-command-roles.json',
     ])).toEqual({
       releaseMode: 'jvm_only',
       jvm: ['server/jvm-weekly-api/src/main/java/example/Settlement.java'],
@@ -39,6 +40,9 @@ describe('cashflow settlement split-release boundary', () => {
       '.github/workflows/ci-extra.yml',
       '.github/workflows/ci.yml/child',
       '.github/workflows/release.yml',
+      'policies/jvm-command-roles.backup.json',
+      'policies/jvm-command-roles.json/child',
+      'policies/rbac-policy.json',
       'package.json',
     ];
     expect(classifyCashflowSettlementProductionRelease([

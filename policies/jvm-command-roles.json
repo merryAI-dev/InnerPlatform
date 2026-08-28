@@ -48,6 +48,12 @@
         "viewer"
       ]
     },
+    "CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND": {
+      "command": "cashflowSettlementCycle.cancelActive",
+      "roles": [
+        "admin"
+      ]
+    },
     "CASHFLOW_MONTH_CLOSE_READ_COMMAND": {
       "command": "cashflowMonth.read",
       "roles": [
@@ -245,12 +251,32 @@
         "viewer"
       ]
     },
+    "SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND": {
+      "command": "cashflowSettlementCycle.submit",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
     "SUBMIT_WEEK_COMMAND": {
       "command": "weeklyExpense.submitWeek",
       "roles": [
         "admin",
         "finance",
         "pm"
+      ]
+    },
+    "TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND": {
+      "command": "cashflowSettlementCycle.transition",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
       ]
     },
     "UPSERT_PROJECTION_COMMAND": {
