@@ -250,7 +250,10 @@ jobs:
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           JVM_SPLIT_RELEASE_BASE_SHA: ${{ vars.JVM_SPLIT_RELEASE_BASE_SHA_LIVE }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
@@ -306,14 +309,14 @@ jobs:
             jvm_deployed_sha="${JVM_SPLIT_RELEASE_BASE_SHA}"
           fi
 
-          bff_deployment_host="$(node deploy-prod-align.mjs --print-current-target)"
-          bff_inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${bff_deployment_host}" --json \
-            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
-          bff_deployed_sha="$(jq -er --arg project "${VERCEL_PROJECT_ID}" '
-            select(.projectId == $project and .target == "production")
-            | .meta.githubCommitSha
+          bff_identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          bff_deployed_sha="$(jq -er '
+            .commitSha
             | select(type == "string" and test("^[0-9a-f]{40}$"))
-          ' <<< "${bff_inspect_json}")"
+          ' <<< "${bff_identity}")"
           for deployed_sha in "${jvm_deployed_sha}" "${bff_deployed_sha}"; do
             [[ "${deployed_sha}" =~ ^[0-9a-f]{40}$ ]]
             git cat-file -e "${deployed_sha}^{commit}"
