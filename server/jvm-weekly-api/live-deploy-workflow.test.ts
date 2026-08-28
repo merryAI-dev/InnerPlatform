@@ -40,6 +40,54 @@ function runJsonNormalizer(text: string, functionName: string, value: unknown) {
   ].join('\n'), 'json-normalizer', JSON.stringify(value)], { encoding: 'utf8' });
 }
 
+function runJsonAssertion(
+  text: string,
+  functionName: string,
+  value: unknown,
+  env: Record<string, string>,
+) {
+  const functionSource = extractShellFunction(text, functionName);
+  return spawnSync('bash', ['-c', [
+    'set -euo pipefail',
+    functionSource,
+    `${functionName} <<< "$1"`,
+  ].join('\n'), 'json-assertion', JSON.stringify(value)], {
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+}
+
+function runJqAssertion(expression: string, value: unknown, env: Record<string, string>) {
+  return spawnSync('jq', ['-e', expression], {
+    input: JSON.stringify(value),
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+}
+
+function runLegacyDashboardGate(
+  text: string,
+  canonical: unknown,
+  candidate: unknown,
+  env: Record<string, string>,
+) {
+  const assertionSource = extractShellFunction(text, 'assert_legacy_dashboard_shape');
+  const normalizerSource = extractShellFunction(text, 'legacy_dashboard_core');
+  return spawnSync('bash', ['-c', [
+    'set -euo pipefail',
+    assertionSource,
+    normalizerSource,
+    'assert_legacy_dashboard_shape <<< "$1"',
+    'assert_legacy_dashboard_shape <<< "$2"',
+    'canonical_core="$(legacy_dashboard_core <<< "$1")"',
+    'candidate_core="$(legacy_dashboard_core <<< "$2")"',
+    'test "${candidate_core}" = "${canonical_core}"',
+  ].join('\n'), 'legacy-dashboard-gate', JSON.stringify(canonical), JSON.stringify(candidate)], {
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+}
+
 function extractNamedStep(text: string, name: string) {
   const marker = `      - name: ${name}\n`;
   const start = text.indexOf(marker);
@@ -50,6 +98,27 @@ function extractNamedStep(text: string, name: string) {
 
 function extractStepIf(step: string) {
   return step.match(/^        if:\s*(.+)$/m)?.[1] ?? null;
+}
+
+function assertCandidateLegacyWiring(step: string) {
+  expect(step).toMatch(
+    /for dashboard in "\$\{canonical_legacy_dashboard\}" "\$\{candidate_legacy_dashboard\}"; do\s+assert_legacy_dashboard_shape <<< "\$\{dashboard\}" >\/dev\/null\s+done/,
+  );
+  expect(step).toContain('canonical_legacy_dashboard_core="$(legacy_dashboard_core \\');
+  expect(step).toContain('candidate_legacy_dashboard_core="$(legacy_dashboard_core \\');
+  expect(step).toContain(
+    'test "${candidate_legacy_dashboard_core}" = "${canonical_legacy_dashboard_core}"',
+  );
+}
+
+function assertRollbackLegacyWiring(step: string) {
+  expect(step).toMatch(/"\$\{canonical_url\}\/api\/v1\/health" \\\n\s+\| assert_legacy_health >\/dev\/null/);
+  expect(step).toMatch(
+    /dashboard-source\?yearMonth=\$\{CASHFLOW_YEAR_MONTH\}" \\\n\s+\| assert_legacy_dashboard_shape >\/dev\/null/,
+  );
+  expect(step).not.toContain('settlementCycle=true');
+  expect(step).not.toContain('settlement-cycle-v1');
+  expect(step.trimEnd().endsWith('exit 1')).toBe(true);
 }
 
 describe('JVM production deploy workflow', () => {
@@ -306,6 +375,80 @@ describe('JVM production deploy workflow', () => {
     }).stdout).not.toBe(weeklyBaseline.stdout);
   });
 
+  it('executes the candidate legacy dashboard gate with nullable cashflow and rejects real drift', () => {
+    const candidateStep = extractNamedStep(workflow, 'Verify candidate against legacy live read');
+    const env = { CASHFLOW_PROJECT_ID: 'project-a', CASHFLOW_YEAR_MONTH: '2026-07' };
+    const month = { period: 'MONTH', status: 'PENDING_APPROVAL', revision: 3 };
+    const canonical = {
+      monthClose: { projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN' },
+      cashflow: null,
+      settlementStatuses: { items: [month] },
+      sectionErrors: [{ section: 'cashflow', code: 'SOURCE_UNAVAILABLE' }],
+    };
+    const additiveCandidate = { ...canonical, settlementCycle: null };
+
+    const incidentPredicate = runJqAssertion(
+      `.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+        and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+        and .cashflow.projectId == env.CASHFLOW_PROJECT_ID
+        and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)`,
+      canonical,
+      env,
+    );
+    expect(incidentPredicate.status).not.toBe(0);
+
+    expect(runLegacyDashboardGate(candidateStep, canonical, additiveCandidate, env).status).toBe(0);
+    expect(runLegacyDashboardGate(candidateStep, {
+      ...canonical,
+      cashflow: { projectId: 'project-a', revision: 7 },
+    }, {
+      ...additiveCandidate,
+      cashflow: { projectId: 'project-a', revision: 7 },
+    }, env).status).toBe(0);
+
+    for (const sabotage of [
+      { ...additiveCandidate, monthClose: { ...canonical.monthClose, projectId: 'project-b' } },
+      { ...additiveCandidate, cashflow: { projectId: 'project-b', revision: 7 } },
+      { ...additiveCandidate, settlementStatuses: { items: [] } },
+      { ...additiveCandidate, settlementStatuses: { items: [month, { ...month, revision: 4 }] } },
+      {
+        ...additiveCandidate,
+        settlementStatuses: { items: [{ ...month, status: 'COMPLETED' }] },
+      },
+      {
+        ...additiveCandidate,
+        settlementStatuses: { items: [{ ...month, revision: 4 }] },
+      },
+      { ...additiveCandidate, sectionErrors: [] },
+    ]) {
+      expect(runLegacyDashboardGate(candidateStep, canonical, sabotage, env).status).not.toBe(0);
+    }
+  });
+
+  it('locks the candidate legacy gate wiring against assertion or parity bypasses', () => {
+    const candidateStep = extractNamedStep(workflow, 'Verify candidate against legacy live read');
+    expect(() => assertCandidateLegacyWiring(candidateStep)).not.toThrow();
+
+    const sabotages = [
+      candidateStep.replace(
+        'assert_legacy_dashboard_shape <<< "${dashboard}" >/dev/null',
+        'true',
+      ),
+      candidateStep.replace(
+        'test "${candidate_legacy_dashboard_core}" = "${canonical_legacy_dashboard_core}"',
+        'true',
+      ),
+      candidateStep.replace(
+        '"${canonical_legacy_dashboard}" "${candidate_legacy_dashboard}"',
+        '"${candidate_legacy_dashboard}"',
+      ),
+    ];
+    for (const sabotage of sabotages) {
+      expect(sabotage).not.toBe(candidateStep);
+      expect(() => assertCandidateLegacyWiring(sabotage)).toThrow();
+    }
+  });
+
   it('can resume the exact zero-traffic candidate for an explicitly approved migration', () => {
     expect(workflow).toContain('resume_candidate_revision:');
     expect(workflow).toContain('apply_settlement_migrations:');
@@ -371,6 +514,48 @@ describe('JVM production deploy workflow', () => {
     expect(reconcile).toContain('test "${candidate_percent}" = "0"');
     expect(reconcile).toContain('test "${previous_percent}" = "100"');
     expect(reconcile).toContain('Verify restored canonical service after rollback');
+  });
+
+  it('executes the rollback canary against the previous legacy contract and keeps the original failure', () => {
+    const reconcile = extractNamedStep(workflow, 'Reconcile promotion traffic or roll back');
+    const env = { CASHFLOW_PROJECT_ID: 'project-a', CASHFLOW_YEAR_MONTH: '2026-07' };
+    const legacyHealth = { ok: true, service: 'jvm-weekly-api', runtime: 'spring-boot' };
+    const legacyDashboard = {
+      monthClose: { projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN' },
+      cashflow: null,
+      settlementStatuses: {
+        items: [{ period: 'MONTH', status: 'PENDING_APPROVAL', revision: 3 }],
+      },
+    };
+
+    expect(runJsonAssertion(reconcile, 'assert_legacy_health', legacyHealth, env).status).toBe(0);
+    expect(runJsonAssertion(reconcile, 'assert_legacy_dashboard_shape', legacyDashboard, env).status).toBe(0);
+    expect(runJsonAssertion(reconcile, 'assert_legacy_health', {
+      ...legacyHealth,
+      runtime: 'unexpected',
+    }, env).status).not.toBe(0);
+    expect(runJsonAssertion(reconcile, 'assert_legacy_dashboard_shape', {
+      ...legacyDashboard,
+      cashflow: { projectId: 'project-b' },
+    }, env).status).not.toBe(0);
+    expect(reconcile).not.toContain('settlement-cycle-v1');
+    expect(reconcile).not.toContain('settlementCycle=true');
+    expect(reconcile).toMatch(/assert_legacy_health[\s\S]*assert_legacy_dashboard_shape[\s\S]*exit 1/);
+  });
+
+  it('locks rollback health/dashboard pipelines and final failure against wiring bypasses', () => {
+    const reconcile = extractNamedStep(workflow, 'Reconcile promotion traffic or roll back');
+    expect(() => assertRollbackLegacyWiring(reconcile)).not.toThrow();
+
+    const sabotages = [
+      reconcile.replace('| assert_legacy_health >/dev/null', '| jq -e .ok >/dev/null'),
+      reconcile.replace('| assert_legacy_dashboard_shape >/dev/null', '| jq -e .monthClose >/dev/null'),
+      reconcile.replace(/exit 1\s*$/, 'exit 0\n'),
+    ];
+    for (const sabotage of sabotages) {
+      expect(sabotage).not.toBe(reconcile);
+      expect(() => assertRollbackLegacyWiring(sabotage)).toThrow();
+    }
   });
 
   it('keeps migration write access manual, allowlisted, and ahead of cutover verification', () => {
