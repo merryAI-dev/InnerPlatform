@@ -181,6 +181,12 @@
         "viewer"
       ]
     },
+    "MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND": {
+      "command": "cashflowSettlementCycle.migrateHeadV2",
+      "roles": [
+        "admin"
+      ]
+    },
     "READ_CASHFLOW_WEEKLY_UPDATE_COMMAND": {
       "command": "cashflowWeeklyUpdate.read",
       "roles": [

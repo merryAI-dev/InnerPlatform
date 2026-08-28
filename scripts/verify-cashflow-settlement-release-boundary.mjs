@@ -30,6 +30,7 @@ const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
   'deploy-prod-align.mjs',
   'policies/jvm-command-roles.json',
   'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
+  'scripts/extract_jvm_command_roles.mjs',
   'scripts/verify-cashflow-settlement-candidate.mjs',
   'scripts/verify-cashflow-settlement-release-boundary.mjs',
   'server/bff/cashflow-settlement-cycle-rollout.integration.test.ts',

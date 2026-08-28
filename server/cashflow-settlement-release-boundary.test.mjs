@@ -22,11 +22,35 @@ describe('cashflow settlement split-release boundary', () => {
       .toBeGreaterThan(workflow.indexOf('JVM weekly API tests'));
   });
 
+  it('publishes every JVM authorization entry including digit-bearing command constants', () => {
+    const authorizationSource = readFileSync(new URL(
+      './jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseAuthorizationService.java',
+      import.meta.url,
+    ), 'utf8');
+    const policy = JSON.parse(readFileSync(
+      new URL('../policies/jvm-command-roles.json', import.meta.url),
+      'utf8',
+    ));
+    const authorizedConstants = [...new Set([
+      ...authorizationSource.matchAll(
+        /WeeklyExpenseCommandService\.([A-Z0-9_]+_COMMAND)/g,
+      ),
+    ].map((match) => match[1]))].sort();
+
+    expect(authorizedConstants).toContain('MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND');
+    expect(Object.keys(policy.commands).sort()).toEqual(authorizedConstants);
+    expect(policy.commands.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND).toEqual({
+      command: 'cashflowSettlementCycle.migrateHeadV2',
+      roles: ['admin'],
+    });
+  });
+
   it('classifies the exact CI workflow as JVM-only rollout support', () => {
     expect(classifyCashflowSettlementProductionRelease([
       'server/jvm-weekly-api/src/main/java/example/Settlement.java',
       '.github/workflows/ci.yml',
       'policies/jvm-command-roles.json',
+      'scripts/extract_jvm_command_roles.mjs',
     ])).toEqual({
       releaseMode: 'jvm_only',
       jvm: ['server/jvm-weekly-api/src/main/java/example/Settlement.java'],
@@ -43,6 +67,8 @@ describe('cashflow settlement split-release boundary', () => {
       'policies/jvm-command-roles.backup.json',
       'policies/jvm-command-roles.json/child',
       'policies/rbac-policy.json',
+      'scripts/extract_jvm_command_roles.ts',
+      'scripts/extract_jvm_command_roles.backup.mjs',
       'package.json',
     ];
     expect(classifyCashflowSettlementProductionRelease([
