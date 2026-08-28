@@ -7,6 +7,7 @@ import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
+import dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy;
 import dev.merryai.innerplatform.weekly.service.command.CashflowMonthReopenCommands;
 import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.query.CashflowMonthReopenAuthorityResult;
@@ -35,6 +36,9 @@ import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleCommandResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleHeadMigrationResponse;
+import dev.merryai.innerplatform.weekly.api.CancelCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
@@ -58,13 +62,16 @@ import dev.merryai.innerplatform.weekly.api.RowDeleteRequest;
 import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
 import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
 import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
+import dev.merryai.innerplatform.weekly.api.SubmitCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementStatusRequest;
+import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
@@ -159,6 +166,12 @@ public class WeeklyExpenseCommandService {
     public static final String REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.requestReopen";
     public static final String DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.decideReopen";
     public static final String READ_CASHFLOW_MONTH_REOPEN_AUTHORITY_COMMAND = "cashflowMonth.readReopenAuthority";
+    public static final String SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND = "cashflowSettlementCycle.submit";
+    public static final String TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND = "cashflowSettlementCycle.transition";
+    public static final String CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND =
+        "cashflowSettlementCycle.cancelActive";
+    public static final String MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND =
+        "cashflowSettlementCycle.migrateHeadV2";
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
 
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
@@ -261,6 +274,241 @@ public class WeeklyExpenseCommandService {
         );
     }
 
+    public CashflowSettlementCycleCommandResponse submitCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        SubmitCashflowSettlementCycleRequest request
+    ) {
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, actor, projectId
+        );
+        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
+        Optional<CashflowSettlementCycleCommandResponse> replay = readIdempotentResponse(
+            writer.tenantId(), projectId, SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND,
+            request.idempotencyKey(), requestHash, CashflowSettlementCycleCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowSettlementCycleCommandState saved =
+            persistence.submitCashflowSettlementCycle(writer, projectId, request);
+        WeeklyExpenseAuditEventEntity audit = saveSettlementCycleAudit(
+            writer, projectId, SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND,
+            request.idempotencyKey(), saved
+        );
+        CashflowSettlementCycleCommandResponse response = settlementCycleCommandResponse(
+            SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, saved, audit.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(), projectId, request.idempotencyKey(),
+            SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, requestHash, writeJson(response)
+        ));
+        return response;
+    }
+
+    public CashflowSettlementCycleCommandResponse transitionCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        TransitionCashflowSettlementCycleRequest request
+    ) {
+        TrustedActorContext writer;
+        if ("REJECT".equals(request.action())) {
+            if (request.reason().isBlank()) {
+                throw new IllegalArgumentException("A reason is required to reject a cashflow settlement cycle.");
+            }
+            writer = requireCashflowMonthReopenDecisionPermission(actor, projectId);
+        } else if ("WITHDRAW".equals(request.action())) {
+            writer = requireCashflowMonthClosePermission(
+                TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, actor, projectId
+            );
+        } else {
+            throw new IllegalArgumentException("Cashflow settlement cycle action must be WITHDRAW or REJECT.");
+        }
+        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
+        Optional<CashflowSettlementCycleCommandResponse> replay = readIdempotentResponse(
+            writer.tenantId(), projectId, TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND,
+            request.idempotencyKey(), requestHash, CashflowSettlementCycleCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowSettlementCycleCommandState saved =
+            persistence.transitionCashflowSettlementCycle(writer, projectId, request);
+        WeeklyExpenseAuditEventEntity audit = saveSettlementCycleAudit(
+            writer, projectId, TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND,
+            request.idempotencyKey(), saved
+        );
+        CashflowSettlementCycleCommandResponse response = settlementCycleCommandResponse(
+            TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, saved, audit.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(), projectId, request.idempotencyKey(),
+            TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, requestHash, writeJson(response)
+        ));
+        return response;
+    }
+
+    public CashflowSettlementCycleCommandResponse cancelCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        CancelCashflowSettlementCycleRequest request
+    ) {
+        if (request.reason().isBlank()) {
+            throw new IllegalArgumentException(
+                "A reason is required to cancel an active cashflow settlement cycle."
+            );
+        }
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, actor, projectId
+        );
+        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
+        Optional<CashflowSettlementCycleCommandResponse> replay = readIdempotentResponse(
+            writer.tenantId(), projectId, CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND,
+            request.idempotencyKey(), requestHash, CashflowSettlementCycleCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowSettlementCycleCommandState saved =
+            persistence.cancelCashflowSettlementCycle(writer, projectId, request);
+        WeeklyExpenseAuditEventEntity audit = saveDeterministicSettlementCycleAudit(
+            writer, projectId, CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND,
+            request.idempotencyKey(), saved
+        );
+        CashflowSettlementCycleCommandResponse response = settlementCycleCommandResponse(
+            CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, saved, audit.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(), projectId, request.idempotencyKey(),
+            CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, requestHash, writeJson(response)
+        ));
+        return response;
+    }
+
+    public CashflowSettlementCycleHeadMigrationResponse migrateCashflowSettlementCycleHeadV2(
+        TrustedActorContext actor,
+        String projectId,
+        MigrateCashflowSettlementCycleHeadV2Request request
+    ) {
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND, actor, projectId
+        );
+        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
+        Optional<CashflowSettlementCycleHeadMigrationResponse> replay = readIdempotentResponse(
+            writer.tenantId(), projectId, MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND,
+            request.idempotencyKey(), requestHash, CashflowSettlementCycleHeadMigrationResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowSettlementCycleHeadMigrationState saved =
+            persistence.migrateCashflowSettlementCycleHeadV2(writer, projectId, request);
+        String auditId = "settlement-cycle-head-migration-" + hashJson(Map.of(
+            "tenantId", writer.tenantId(),
+            "projectId", projectId,
+            "actorUid", writer.id(),
+            "idempotencyKey", request.idempotencyKey()
+        )).replace("sha256:", "");
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("closedThrough", saved.closedThrough());
+        metadata.put("cycleYearMonth", saved.cycleYearMonth());
+        metadata.put("approvalVersionId", saved.approvalVersionId());
+        metadata.put("headRevision", saved.headRevision());
+        metadata.put("reason", request.reason());
+        putActorMetadata(metadata, writer);
+        WeeklyExpenseAuditEventEntity audit = new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(), projectId, "settlement-cycle", MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND,
+            writer.id(), normalizeRole(writer.role()), request.idempotencyKey(), writeJson(metadata)
+        );
+        audit.restorePersistenceState(auditId, audit.getCreatedAt());
+        persistence.saveAuditEvent(audit);
+        CashflowSettlementCycleHeadMigrationResponse response =
+            new CashflowSettlementCycleHeadMigrationResponse(
+                true,
+                MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND,
+                saved.projectId(),
+                saved.closedThrough(),
+                saved.cycleYearMonth(),
+                saved.approvalVersionId(),
+                saved.headRevision(),
+                auditId
+            );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(), projectId, request.idempotencyKey(),
+            MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND, requestHash, writeJson(response)
+        ));
+        return response;
+    }
+
+    private WeeklyExpenseAuditEventEntity saveSettlementCycleAudit(
+        TrustedActorContext actor,
+        String projectId,
+        String commandName,
+        String idempotencyKey,
+        WeeklyExpensePersistence.CashflowSettlementCycleCommandState state
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("cycleYearMonth", state.cycleYearMonth());
+        metadata.put("monthCloseTargetYearMonth", state.monthCloseTargetYearMonth());
+        metadata.put("requestId", state.requestId());
+        metadata.put("businessState", state.businessState());
+        metadata.put("workflowRevision", state.workflowRevision());
+        metadata.put("evidenceRevision", state.evidenceRevision());
+        metadata.put("manifestHash", state.manifestHash());
+        metadata.put("reason", state.reason());
+        putActorMetadata(metadata, actor);
+        return persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            actor.tenantId(), projectId, "settlement-cycle", commandName,
+            actor.id(), normalizeRole(actor.role()), idempotencyKey, writeJson(metadata)
+        ));
+    }
+
+    private WeeklyExpenseAuditEventEntity saveDeterministicSettlementCycleAudit(
+        TrustedActorContext actor,
+        String projectId,
+        String commandName,
+        String idempotencyKey,
+        WeeklyExpensePersistence.CashflowSettlementCycleCommandState state
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("cycleYearMonth", state.cycleYearMonth());
+        metadata.put("monthCloseTargetYearMonth", state.monthCloseTargetYearMonth());
+        metadata.put("requestId", state.requestId());
+        metadata.put("businessState", state.businessState());
+        metadata.put("workflowRevision", state.workflowRevision());
+        metadata.put("reason", state.reason());
+        putActorMetadata(metadata, actor);
+        WeeklyExpenseAuditEventEntity audit = new WeeklyExpenseAuditEventEntity(
+            actor.tenantId(), projectId, "settlement-cycle", commandName,
+            actor.id(), normalizeRole(actor.role()), idempotencyKey, writeJson(metadata)
+        );
+        String auditId = "settlement-cycle-recovery-" + hashJson(Map.of(
+            "tenantId", actor.tenantId(),
+            "projectId", projectId,
+            "commandName", commandName,
+            "actorUid", actor.id(),
+            "idempotencyKey", idempotencyKey
+        )).replace("sha256:", "");
+        Instant decidedAt;
+        try {
+            decidedAt = Instant.parse(state.decidedAt());
+        } catch (RuntimeException error) {
+            decidedAt = audit.getCreatedAt();
+        }
+        audit.restorePersistenceState(auditId, decidedAt);
+        return persistence.saveAuditEvent(audit);
+    }
+
+    private CashflowSettlementCycleCommandResponse settlementCycleCommandResponse(
+        String commandName,
+        WeeklyExpensePersistence.CashflowSettlementCycleCommandState state,
+        String auditId
+    ) {
+        return new CashflowSettlementCycleCommandResponse(
+            true, commandName, state.projectId(), state.cycleYearMonth(),
+            state.monthCloseTargetYearMonth(), state.requestId(), state.businessState(),
+            state.workflowRevision(), state.evidenceRevision(), state.manifestHash(),
+            state.submittedAt(), state.submittedByUid(), state.approverUid(),
+            state.decidedAt(), state.decidedByUid(), state.reason(), auditId
+        );
+    }
+
     private CashflowSettlementStatusesResponse settlementStatusesResponse(
         String projectId,
         String yearMonth,
@@ -360,33 +608,43 @@ public class WeeklyExpenseCommandService {
         authorizationService.requireProjectsAllowedForCommands(
             List.of(CASHFLOW_READ_COMMAND, CASHFLOW_MONTH_CLOSE_READ_COMMAND), actor, projectIds
         );
+        if (!request.settlementCycle()) {
+            return readLegacyCashflowWeeklyOverview(actor, request, projectIds);
+        }
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
             CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
         String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0
             ? request.yearMonth() : boundary.yearMonth();
-        Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> statusesByProject;
         Map<String, CashflowLedgerSource> sourcesByProject;
-        CompletableFuture<Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>>> statusesFuture =
-            CompletableFuture.supplyAsync(() -> persistence.findCashflowSettlementStatusesBatch(actor.tenantId(), projectIds, request.yearMonth()));
+        Map<String, WeeklyExpensePersistence.CashflowSettlementCycleRecord> cyclesByProject;
+        CashflowSettlementCyclePolicy.Identity cycleIdentity =
+            CashflowSettlementCyclePolicy.identity(request.yearMonth());
         CompletableFuture<Map<String, CashflowLedgerSource>> sourcesFuture =
             CompletableFuture.supplyAsync(() -> persistence.findCashflowLedgerSources(
                 actor.tenantId(), projectIds, CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
             ));
-        try {
-            statusesByProject = statusesFuture.join();
-        } catch (RuntimeException unavailable) {
-            statusesByProject = Map.of();
-        }
+        CompletableFuture<Map<String, WeeklyExpensePersistence.CashflowSettlementCycleRecord>> cyclesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowSettlementCyclesBatch(
+                actor, projectIds, cycleIdentity.cycleYearMonth(),
+                cycleIdentity.monthCloseTargetYearMonth()
+            ));
         try {
             sourcesByProject = sourcesFuture.join();
         } catch (RuntimeException unavailable) {
             sourcesByProject = Map.of();
         }
+        try {
+            cyclesByProject = cyclesFuture.join();
+        } catch (RuntimeException unavailable) {
+            cyclesByProject = Map.of();
+        }
         List<CashflowWeeklyOverviewResponse.Item> items = new ArrayList<>();
         List<CashflowWeeklyOverviewResponse.ErrorItem> errors = new ArrayList<>();
         for (String projectId : projectIds) {
+            WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle = cyclesByProject.get(projectId);
             CashflowSettlementStatusesResponse statuses = null;
-            List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records = statusesByProject.get(projectId);
+            List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records = cycle == null
+                ? null : cycle.weeklySettlements();
             if (records == null) {
                 errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
                     projectId, CashflowWeeklyOverviewResponse.STATUS_UNAVAILABLE
@@ -403,9 +661,141 @@ public class WeeklyExpenseCommandService {
             } else {
                 summary = toProjectionActualSummary(projectId, source, boundary, request.yearMonth());
             }
-            items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary));
+            CashflowWeeklyOverviewResponse.SettlementCycle settlementCycle = null;
+            if (cycle == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.MONTH_CLOSE_UNAVAILABLE
+                ));
+            } else {
+                settlementCycle = settlementCycleResponse(cycle);
+            }
+            items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary, settlementCycle));
+        }
+        return new CashflowWeeklyOverviewResponse("2", request.yearMonth(), items, errors);
+    }
+
+    private CashflowWeeklyOverviewResponse readLegacyCashflowWeeklyOverview(
+        TrustedActorContext actor,
+        CashflowWeeklyOverviewRequest request,
+        List<String> projectIds
+    ) {
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
+            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
+        String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0
+            ? request.yearMonth() : boundary.yearMonth();
+        Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> statusesByProject;
+        Map<String, CashflowLedgerSource> sourcesByProject;
+        CompletableFuture<Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>>> statusesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowSettlementStatusesBatch(
+                actor.tenantId(), projectIds, request.yearMonth()
+            ));
+        CompletableFuture<Map<String, CashflowLedgerSource>> sourcesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowLedgerSources(
+                actor.tenantId(), projectIds,
+                CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
+            ));
+        try {
+            statusesByProject = statusesFuture.join();
+        } catch (RuntimeException unavailable) {
+            statusesByProject = Map.of();
+        }
+        try {
+            sourcesByProject = sourcesFuture.join();
+        } catch (RuntimeException unavailable) {
+            sourcesByProject = Map.of();
+        }
+        List<CashflowWeeklyOverviewResponse.Item> items = new ArrayList<>();
+        List<CashflowWeeklyOverviewResponse.ErrorItem> errors = new ArrayList<>();
+        for (String projectId : projectIds) {
+            List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records =
+                statusesByProject.get(projectId);
+            CashflowSettlementStatusesResponse statuses = null;
+            if (records == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.STATUS_UNAVAILABLE
+                ));
+            } else {
+                statuses = settlementStatusesResponse(projectId, request.yearMonth(), records);
+            }
+            CashflowLedgerSource source = sourcesByProject.get(projectId);
+            CashflowProjectionActualSummaryBatchResponse.Item summary = null;
+            if (source == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.SUMMARY_UNAVAILABLE
+                ));
+            } else {
+                summary = toProjectionActualSummary(projectId, source, boundary, request.yearMonth());
+            }
+            items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary, null));
         }
         return new CashflowWeeklyOverviewResponse("1", request.yearMonth(), items, errors);
+    }
+
+    public CashflowWeeklyOverviewResponse.SettlementCycle readCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        String cycleYearMonth
+    ) {
+        authorizationService.requireProjectAllowed(
+            CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectId
+        );
+        CashflowSettlementCyclePolicy.Identity identity =
+            CashflowSettlementCyclePolicy.identity(cycleYearMonth);
+        WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle = persistence
+            .findCashflowSettlementCyclesBatch(
+                actor, List.of(projectId), identity.cycleYearMonth(),
+                identity.monthCloseTargetYearMonth()
+            )
+            .get(projectId);
+        if (cycle == null) {
+            throw new WeeklyExpenseEditLeaseException(
+                503,
+                "cashflow_settlement_cycle_read_unavailable",
+                "Cashflow settlement cycle projection is unavailable."
+            );
+        }
+        return settlementCycleResponse(cycle);
+    }
+
+    private CashflowWeeklyOverviewResponse.SettlementCycle settlementCycleResponse(
+        WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle
+    ) {
+        CashflowSettlementCyclePolicy.Projection projection = cycle.projection();
+        CashflowSettlementCyclePolicy.ApprovalProvenance provenance = projection.provenance();
+        WeeklyExpensePersistence.CashflowSettlementCycleAuthority authority = cycle.authority();
+        Map<String, CashflowWeeklyOverviewResponse.CommandCapability> commandCapabilities =
+            new LinkedHashMap<>();
+        CashflowSettlementCyclePolicy.commandCapabilities(
+            new CashflowSettlementCyclePolicy.CapabilityFacts(
+                projection,
+                authority.legacyReadOnly(),
+                authority.activeMember(),
+                authority.projectWriter(),
+                authority.currentApprover(),
+                authority.requester(),
+                authority.recoveryAdmin()
+            )
+        ).forEach((command, capability) -> commandCapabilities.put(
+            command.name(),
+            new CashflowWeeklyOverviewResponse.CommandCapability(
+                capability.allowed(), capability.reasonCode()
+            )
+        ));
+        return new CashflowWeeklyOverviewResponse.SettlementCycle(
+            cycle.cycleYearMonth(), cycle.cycleYearMonth(), cycle.monthCloseTargetYearMonth(),
+            projection.businessState().name(), projection.health().name(),
+            projection.workflowRevision(),
+            cycle.monthSettlement() == null
+                ? null
+                : settlementStatusItem(cycle.monthCloseTargetYearMonth(), cycle.monthSettlement()),
+            provenance == null ? null : new CashflowWeeklyOverviewResponse.ApprovalProvenance(
+                provenance.affectedFromMonth(), provenance.affectedThroughMonth(),
+                provenance.closedByCycleYearMonth(), provenance.approvalVersionId(),
+                provenance.requestId(), provenance.ledgerRevision(), provenance.rootHash()
+            ),
+            projection.supersededAttempt().isBlank() ? null : projection.supersededAttempt(),
+            commandCapabilities
+        );
     }
 
     public CashflowProjectionActualSummaryBatchResponse.Item readCashflowProjectionActualSummary(
@@ -1135,21 +1525,31 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CloseCashflowMonthRequest request
     ) {
-        TrustedActorContext writer = requireCashflowMonthClosePermission(
-            CLOSE_CASHFLOW_MONTH_COMMAND,
-            actor,
-            projectId
-        );
+        boolean settlementCycleApproval = !request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank();
+        TrustedActorContext writer = settlementCycleApproval
+            ? requireCashflowMonthReopenDecisionPermission(actor, projectId)
+            : requireCashflowMonthClosePermission(
+                CLOSE_CASHFLOW_MONTH_COMMAND,
+                actor,
+                projectId
+            );
         if (!request.cumulativeV2()) {
             CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
         }
-        String requestHash = hashJson(request);
-        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+        String actorBoundRequestHash = hashJson(new ActorBoundIdempotencyRequest(writer.id(), request));
+        String requestFirstActorBoundHash = hashJson(new RequestFirstActorBoundIdempotencyRequest(request, writer.id()));
+        String legacyRequestHash = legacyCloseCashflowMonthRequestHash(request);
+        String requestHash = legacyRequestHash == null ? actorBoundRequestHash : legacyRequestHash;
+        Optional<CashflowMonthCloseResponse> replay = readCompatibleIdempotentResponse(
             writer.tenantId(),
             projectId,
             CLOSE_CASHFLOW_MONTH_COMMAND,
             request.idempotencyKey(),
             requestHash,
+            legacyRequestHash == null
+                ? List.of(requestFirstActorBoundHash)
+                : List.of(actorBoundRequestHash, requestFirstActorBoundHash),
             CashflowMonthCloseResponse.class
         );
         if (replay.isPresent()) return replay.get();
@@ -1633,13 +2033,19 @@ public class WeeklyExpenseCommandService {
             projectId
         );
         persistence.requireCashflowDataProject(dataProjectId);
-        String requestHash = hashJson(request);
-        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+        String actorBoundRequestHash = hashJson(new ActorBoundIdempotencyRequest(writer.id(), request));
+        String requestFirstActorBoundHash = hashJson(new RequestFirstActorBoundIdempotencyRequest(request, writer.id()));
+        String legacyRequestHash = legacyRequestReopenHash(request);
+        String requestHash = legacyRequestHash == null ? actorBoundRequestHash : legacyRequestHash;
+        Optional<CashflowMonthCloseResponse> replay = readCompatibleIdempotentResponse(
             writer.tenantId(),
             projectId,
             REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
             request.idempotencyKey(),
             requestHash,
+            legacyRequestHash == null
+                ? List.of(requestFirstActorBoundHash)
+                : List.of(actorBoundRequestHash, requestFirstActorBoundHash),
             CashflowMonthCloseResponse.class
         );
         if (replay.isPresent()) return replay.get();
@@ -1658,7 +2064,8 @@ public class WeeklyExpenseCommandService {
             reopenActor(writer),
             projectId,
             transition,
-            request.reason()
+            request.reason(),
+            settlementCycleContext(request)
         );
         WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
             writer,
@@ -1698,13 +2105,19 @@ public class WeeklyExpenseCommandService {
             projectId
         );
         persistence.requireCashflowDataProject(dataProjectId);
-        String requestHash = hashJson(request);
-        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+        String actorBoundRequestHash = hashJson(new ActorBoundIdempotencyRequest(writer.id(), request));
+        String requestFirstActorBoundHash = hashJson(new RequestFirstActorBoundIdempotencyRequest(request, writer.id()));
+        String legacyRequestHash = legacyDecideReopenHash(request);
+        String requestHash = legacyRequestHash == null ? actorBoundRequestHash : legacyRequestHash;
+        Optional<CashflowMonthCloseResponse> replay = readCompatibleIdempotentResponse(
             writer.tenantId(),
             projectId,
             DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
             request.idempotencyKey(),
             requestHash,
+            legacyRequestHash == null
+                ? List.of(requestFirstActorBoundHash)
+                : List.of(actorBoundRequestHash, requestFirstActorBoundHash),
             CashflowMonthCloseResponse.class
         );
         if (replay.isPresent()) return replay.get();
@@ -1714,17 +2127,22 @@ public class WeeklyExpenseCommandService {
             projectId,
             request.yearMonth()
         );
-        CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decide(
-            facts,
-            request.yearMonth(),
-            request.expectedRevision(),
-            CashflowMonthReopenPolicy.Decision.valueOf(request.decision())
-        );
+        CashflowMonthReopenPort.SettlementCycleContext cycleContext = settlementCycleContext(request);
+        CashflowMonthReopenPolicy.Decision decision =
+            CashflowMonthReopenPolicy.Decision.valueOf(request.decision());
+        CashflowMonthReopenPolicy.DecisionTransition transition = cycleContext.present()
+            ? CashflowMonthReopenPolicy.decide(
+                facts, request.yearMonth(), request.expectedRevision(), decision
+            )
+            : CashflowMonthReopenPolicy.decideLegacy(
+                facts, request.yearMonth(), request.expectedRevision(), decision
+            );
         CashflowMonthCloseState saved = cashflowMonthReopenPort.applyCashflowMonthReopenDecision(
             reopenActor(writer),
             projectId,
             transition,
-            request.reason()
+            request.reason(),
+            cycleContext
         );
         WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
             writer,
@@ -3985,6 +4403,13 @@ public class WeeklyExpenseCommandService {
         metadata.put("manifestHash", close.snapshot().getOrDefault("manifestHash", ""));
         metadata.put("approvalId", close.snapshot().getOrDefault("approvalId", ""));
         metadata.put("operationId", close.snapshot().getOrDefault("operationId", ""));
+        metadata.put(
+            "previousAuthorityExists",
+            close.snapshot().getOrDefault("previousAuthorityExists", false)
+        );
+        metadata.put("affectedFromMonth", close.snapshot().getOrDefault("affectedFromMonth", ""));
+        metadata.put("affectedThroughMonth", close.snapshot().getOrDefault("affectedThroughMonth", ""));
+        metadata.put("approvalVersionId", close.snapshot().getOrDefault("approvalVersionId", ""));
         putActorMetadata(metadata, actor);
         return persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -4135,6 +4560,24 @@ public class WeeklyExpenseCommandService {
         return new CashflowMonthReopenPort.Actor(actor.tenantId(), actor.id(), actor.name());
     }
 
+    private CashflowMonthReopenPort.SettlementCycleContext settlementCycleContext(
+        CashflowMonthReopenCommands.RequestReopen request
+    ) {
+        return new CashflowMonthReopenPort.SettlementCycleContext(
+            request.idempotencyKey(), request.requestId(), request.cycleYearMonth(), request.monthCloseTargetYearMonth(),
+            request.evidenceRevision(), request.manifestHash(), request.expectedWorkflowRevision()
+        );
+    }
+
+    private CashflowMonthReopenPort.SettlementCycleContext settlementCycleContext(
+        CashflowMonthReopenCommands.DecideReopen request
+    ) {
+        return new CashflowMonthReopenPort.SettlementCycleContext(
+            request.idempotencyKey(), request.requestId(), request.cycleYearMonth(), request.monthCloseTargetYearMonth(),
+            request.evidenceRevision(), request.manifestHash(), request.expectedWorkflowRevision()
+        );
+    }
+
     private List<CashflowSheetLabApplyRequest.Cell> requireCompleteCashflowSheetMonth(
         CashflowSheetLabApplyRequest request
     ) {
@@ -4160,6 +4603,63 @@ public class WeeklyExpenseCommandService {
         return editSession != null && editSession.finalizeLease() ? 1 : 0;
     }
 
+    private String legacyCloseCashflowMonthRequestHash(CloseCashflowMonthRequest request) {
+        if (!request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank()
+            || request.expectedWorkflowRevision() != 0
+            || !request.decisionReason().isBlank()) {
+            return null;
+        }
+        return hashJson(new LegacyCloseCashflowMonthRequest(
+            request.idempotencyKey(),
+            request.sourceRevision(),
+            request.targetRevision(),
+            request.yearMonth(),
+            request.expectedRevision(),
+            request.expectedDraftRevision(),
+            request.humanReviewed(),
+            request.depositScheduleRows(),
+            request.cells(),
+            request.confirmations(),
+            request.managementChecks(),
+            request.managementConfirmations(),
+            request.openingBalances(),
+            request.deadlineSummary(),
+            request.requestId(),
+            request.requestRevision(),
+            request.manifestHash()
+        ));
+    }
+
+    private String legacyRequestReopenHash(CashflowMonthReopenCommands.RequestReopen request) {
+        if (!request.requestId().isBlank()
+            || !request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank()
+            || request.evidenceRevision() != 0
+            || !request.manifestHash().isBlank()
+            || request.expectedWorkflowRevision() != 0) {
+            return null;
+        }
+        return hashJson(new LegacyRequestReopen(
+            request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason()
+        ));
+    }
+
+    private String legacyDecideReopenHash(CashflowMonthReopenCommands.DecideReopen request) {
+        if (!request.requestId().isBlank()
+            || !request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank()
+            || request.evidenceRevision() != 0
+            || !request.manifestHash().isBlank()
+            || request.expectedWorkflowRevision() != 0) {
+            return null;
+        }
+        return hashJson(new LegacyDecideReopen(
+            request.idempotencyKey(), request.yearMonth(), request.expectedRevision(),
+            request.decision(), request.reason()
+        ));
+    }
+
     private String hashJson(Object request) {
         return sha256(writeJson(request));
     }
@@ -4172,6 +4672,26 @@ public class WeeklyExpenseCommandService {
         String requestHash,
         Class<T> responseType
     ) {
+        return readCompatibleIdempotentResponse(
+            tenantId,
+            projectId,
+            commandName,
+            idempotencyKey,
+            requestHash,
+            List.of(),
+            responseType
+        );
+    }
+
+    private <T> Optional<T> readCompatibleIdempotentResponse(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey,
+        String requestHash,
+        List<String> compatibleRequestHashes,
+        Class<T> responseType
+    ) {
         Optional<WeeklyExpenseIdempotencyEntity> existing = persistence.findIdempotency(
             tenantId,
             projectId,
@@ -4181,7 +4701,9 @@ public class WeeklyExpenseCommandService {
         if (existing.isEmpty()) return Optional.empty();
 
         WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-        if (!idempotency.getRequestHash().equals(requestHash)) {
+        boolean exactRequest = idempotency.getRequestHash().equals(requestHash);
+        boolean exactCompatibleRequest = compatibleRequestHashes.contains(idempotency.getRequestHash());
+        if (!exactRequest && !exactCompatibleRequest) {
             throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
         }
         return Optional.of(readJson(idempotency.getResponseJson(), responseType));
@@ -4324,6 +4846,50 @@ public class WeeklyExpenseCommandService {
         }
         String normalized = status.trim().toLowerCase(Locale.ROOT);
         return "all".equals(normalized) ? null : normalized;
+    }
+
+    private record LegacyCloseCashflowMonthRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        long expectedRevision,
+        long expectedDraftRevision,
+        boolean humanReviewed,
+        List<CloseCashflowMonthRequest.DepositScheduleRow> depositScheduleRows,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        List<CloseCashflowMonthRequest.Confirmation> confirmations,
+        List<CloseCashflowMonthRequest.ManagementCheck> managementChecks,
+        List<CloseCashflowMonthRequest.ManagementConfirmation> managementConfirmations,
+        dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse openingBalances,
+        CloseCashflowMonthRequest.DeadlineSummary deadlineSummary,
+        String requestId,
+        long requestRevision,
+        String manifestHash
+    ) {
+    }
+
+    private record ActorBoundIdempotencyRequest(String actorUid, Object request) {
+    }
+
+    private record RequestFirstActorBoundIdempotencyRequest(Object request, String actorUid) {
+    }
+
+    private record LegacyRequestReopen(
+        String idempotencyKey,
+        String yearMonth,
+        long expectedRevision,
+        String reason
+    ) {
+    }
+
+    private record LegacyDecideReopen(
+        String idempotencyKey,
+        String yearMonth,
+        long expectedRevision,
+        String decision,
+        String reason
+    ) {
     }
 
     private record WeekKey(String yearMonth, int weekNo) {

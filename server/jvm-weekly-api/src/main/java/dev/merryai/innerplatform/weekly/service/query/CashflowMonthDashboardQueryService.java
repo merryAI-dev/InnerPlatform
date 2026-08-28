@@ -50,13 +50,30 @@ public class CashflowMonthDashboardQueryService {
     }
 
     public Result read(String tenantId, String projectId, String yearMonth, String requestId) {
+        return read(tenantId, projectId, yearMonth, yearMonth, requestId);
+    }
+
+    public Result readSettlementCycle(String tenantId, String projectId, String cycleYearMonth, String requestId) {
+        String monthCloseTargetYearMonth = YearMonth.parse(cycleYearMonth).minusMonths(1).toString();
+        return read(tenantId, projectId, cycleYearMonth, monthCloseTargetYearMonth, requestId);
+    }
+
+    private Result read(
+        String tenantId,
+        String projectId,
+        String yearMonth,
+        String monthCloseTargetYearMonth,
+        String requestId
+    ) {
         YearMonth.parse(yearMonth);
         // Stage-C measurement: one summary line per request (Firestore reads, phases, instance). No logic change.
         try (CashflowReadMetrics.Scope scope = CashflowReadMetrics.begin("cashflow.dashboard_source", requestId, projectId)) {
             try {
                 for (int attempt = 1; attempt <= 2; attempt += 1) {
                     CashflowReadMetrics.recordPhase("attempts", 1);
-                    Result result = readAttempt(tenantId, projectId, yearMonth, requestId, attempt);
+                    Result result = readAttempt(
+                        tenantId, projectId, yearMonth, monthCloseTargetYearMonth, requestId, attempt
+                    );
                     if (result != null) return result;
                 }
                 throw new UnstableRead();
@@ -70,7 +87,8 @@ public class CashflowMonthDashboardQueryService {
     private Result readAttempt(
         String tenantId,
         String projectId,
-        String yearMonth,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
         String requestId,
         int attempt
     ) {
@@ -81,12 +99,12 @@ public class CashflowMonthDashboardQueryService {
         );
         CashflowMonthCloseState latestRun = measuredRead(
             requestId, projectId, attempt, "month_close",
-            () -> readService.monthClose(tenantId, projectId, yearMonth)
+            () -> readService.monthClose(tenantId, projectId, cycleYearMonth)
         );
         Authority authority = join(authorityFuture);
         boolean pristineOpen = "MISSING".equals(authority.availability()) && latestRun.isPristineOpen();
         String operationalStatus = authority.isAvailable()
-            ? authority.head().operationalStatus(yearMonth)
+            ? authority.head().operationalStatus(cycleYearMonth)
             : pristineOpen ? "OPEN" : null;
         String monthStatusIssueCode = operationalStatus == null
             ? "CUMULATIVE_CLOSE_AUTHORITY_" + authority.availability()
@@ -94,7 +112,7 @@ public class CashflowMonthDashboardQueryService {
                 ? "MONTH_CLOSE_HISTORY_STATUS_DIFFERS_FROM_CUMULATIVE_AUTHORITY"
                 : null;
         ActionCapability reopenRequest = reopenRequestCapability(
-            authority, latestRun, yearMonth
+            authority, latestRun, cycleYearMonth
         );
         boolean open = "OPEN".equals(operationalStatus);
         boolean amendedClosed = "CLOSED".equals(operationalStatus) && isAmendedClosed(latestRun);
@@ -120,7 +138,7 @@ public class CashflowMonthDashboardQueryService {
                     requestId, projectId, attempt, "opening_balance",
                     "cashflow_opening_balances_unavailable",
                     () -> OpeningBalances.live(readService.openingBalance(
-                        tenantId, projectId, Integer.parseInt(yearMonth.substring(0, 4))
+                        tenantId, projectId, Integer.parseInt(monthCloseTargetYearMonth.substring(0, 4))
                     ))
                 )
                 : CompletableFuture.completedFuture(CashflowDashboardSectionResult.available(
@@ -186,7 +204,7 @@ public class CashflowMonthDashboardQueryService {
         if (amendedClosed) {
             CashflowMonthCloseState verified = measuredRead(
                 requestId, projectId, attempt, "month_close_verify",
-                () -> readService.monthClose(tenantId, projectId, yearMonth)
+                () -> readService.monthClose(tenantId, projectId, cycleYearMonth)
             );
             String expectedTargetRevision = String.valueOf(
                 verified.lastAmendmentEvidence().getOrDefault("resultingTargetRevision", "")
@@ -209,14 +227,14 @@ public class CashflowMonthDashboardQueryService {
                 "cashflow_projection_actual_summary_unavailable",
                 () -> {
                     CashflowLedgerSource summarySource = summarySource(
-                        tenantId, projectId, yearMonth
+                        tenantId, projectId, monthCloseTargetYearMonth
                     );
                     return CashflowProjectionActualSummaryCalculator.calculate(
                         projectId,
                         summarySource.projection(),
                         summarySource.actual(),
                         CashflowProjectionActualSummaryCalculator.currentFinanceWeek(clock),
-                        yearMonth
+                        monthCloseTargetYearMonth
                     );
                 }
             );

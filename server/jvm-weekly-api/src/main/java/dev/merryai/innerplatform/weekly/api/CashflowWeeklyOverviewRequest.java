@@ -10,10 +10,15 @@ import java.util.List;
 public record CashflowWeeklyOverviewRequest(
     @NotNull @Size(min = 1, max = MAX_PROJECT_COUNT)
     List<@NotBlank @Size(max = MAX_PROJECT_ID_LENGTH) String> projectIds,
-    @NotBlank @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])") String yearMonth
+    @NotBlank @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])") String yearMonth,
+    boolean settlementCycle
 ) {
     public static final int MAX_PROJECT_COUNT = 100;
     public static final int MAX_PROJECT_ID_LENGTH = 120;
+
+    public CashflowWeeklyOverviewRequest(List<String> projectIds, String yearMonth) {
+        this(projectIds, yearMonth, false);
+    }
 
     public List<String> requireUniqueProjectIds() {
         List<String> normalized = projectIds == null

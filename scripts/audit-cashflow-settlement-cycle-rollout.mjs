@@ -1,0 +1,160 @@
+#!/usr/bin/env node
+
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+import {
+  assertSettlementCycleCutoverReady,
+  assertSettlementCycleInventoryStable,
+  createSettlementCycleJvmOperations,
+  executeSettlementCycleHeadMigrations,
+  parseSettlementCycleRolloutArgs,
+  readSettlementCycleRolloutInventory,
+  settlementCycleRolloutAuditSummary,
+  validateSettlementCycleRolloutOptions,
+  verifySettlementCycleProjections,
+} from '../server/bff/cashflow-settlement-cycle-rollout.mjs';
+import { createFirestoreDb } from '../server/bff/firestore.mjs';
+import { createJavaWeeklyClient } from '../server/bff/java-weekly-client.mjs';
+import { readAlignedCashflowSettlementCycleRequest } from '../server/bff/cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs';
+
+const execFileAsync = promisify(execFile);
+
+function usage() {
+  console.log(`사용:
+  # 기본값: read-only inventory (Firestore write 0건)
+  node scripts/audit-cashflow-settlement-cycle-rollout.mjs \\
+    --firebase-project PROJECT_ID --tenant TENANT_ID
+
+  # JVM canonical projection까지 검증
+  node scripts/audit-cashflow-settlement-cycle-rollout.mjs \\
+    --firebase-project PROJECT_ID --tenant TENANT_ID \\
+    --verify-cutover --people-uid ACTIVE_ADMIN_UID --jvm-base-url CANDIDATE_URL \\
+    --jvm-audience CANONICAL_SERVICE_URL
+
+  # 검증된 v1 head만 JVM transaction command로 migration
+  node scripts/audit-cashflow-settlement-cycle-rollout.mjs \\
+    --apply \\
+    --firebase-project PROJECT_ID --confirm-project PROJECT_ID \\
+    --tenant TENANT_ID --confirm-tenant TENANT_ID \\
+    --allow-projects PROJECT_A[,PROJECT_B] \\
+    --people-uid ACTIVE_ADMIN_UID --reason "승인된 운영 이관 사유" \\
+    --jvm-base-url CANDIDATE_URL --jvm-audience CANONICAL_SERVICE_URL
+
+사전 인증:
+  gcloud auth login
+  gcloud auth application-default login
+
+안전장치:
+  --apply 없이는 쓰지 않습니다. wildcard allowlist, 불일치하는 project/tenant 확인값,
+  빈 People UID/사유, JVM capability 부재는 모두 중단합니다. 스크립트는 Firestore authority를
+  직접 고치지 않고 JVM의 CAS/idempotency transaction command만 호출합니다.`);
+}
+
+async function runGcloud(args, signal) {
+  const { stdout } = await execFileAsync('gcloud', [...args, '--quiet'], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    ...(signal ? { signal } : {}),
+  });
+  const value = String(stdout || '').trim();
+  if (!value) throw new Error(`gcloud returned an empty result for ${args.slice(0, 3).join(' ')}.`);
+  return value;
+}
+
+async function readJvmServiceToken(firebaseProjectId) {
+  const configured = String(process.env.JVM_WEEKLY_INTERNAL_API_TOKEN || '').trim();
+  if (configured) return configured;
+  return runGcloud([
+    'secrets', 'versions', 'access', 'latest',
+    '--secret=innerplatform-weekly-api-token',
+    `--project=${firebaseProjectId}`,
+  ]);
+}
+
+async function createJvmOperations(options) {
+  const serviceToken = await readJvmServiceToken(options.firebaseProjectId);
+  const configuredIdToken = String(process.env.JVM_WEEKLY_API_ID_TOKEN || '').trim();
+  const client = createJavaWeeklyClient({
+    env: {
+      ...process.env,
+      BFF_DATA_PROJECT_ID: options.firebaseProjectId,
+      FIREBASE_PROJECT_ID: options.firebaseProjectId,
+    },
+    jvmWeeklyApiBaseUrl: options.jvmBaseUrl,
+    jvmWeeklyApiServiceToken: serviceToken,
+    jvmWeeklyApiIdTokenAudience: options.jvmAudience,
+    jvmWeeklyApiIdentityTokenResolver: ({ audience, signal }) => configuredIdToken
+      || runGcloud(['auth', 'print-identity-token', `--audiences=${audience}`], signal),
+    jvmWeeklyAuthMode: 'strict',
+    jvmWeeklyFirestoreProjectId: options.firebaseProjectId,
+  });
+  return createSettlementCycleJvmOperations({
+    client,
+    tenantId: options.tenantId,
+    actorUid: options.actorUid,
+  });
+}
+
+async function main() {
+  const parsed = parseSettlementCycleRolloutArgs(process.argv.slice(2));
+  if (parsed.help) {
+    usage();
+    return;
+  }
+  const options = validateSettlementCycleRolloutOptions(parsed);
+  const db = createFirestoreDb({ projectId: options.firebaseProjectId });
+  const before = await readSettlementCycleRolloutInventory({ db, tenantId: options.tenantId });
+
+  let operations = null;
+  let migrations = [];
+  if (options.apply || options.verifyCutover) {
+    operations = await createJvmOperations(options);
+  }
+  if (options.apply) {
+    migrations = await executeSettlementCycleHeadMigrations({
+      inventory: before,
+      options,
+      migrate: operations.migrate,
+    });
+  }
+
+  let after = options.apply
+    ? await readSettlementCycleRolloutInventory({ db, tenantId: options.tenantId })
+    : before;
+  let projections = [];
+  let cutover = null;
+  if (options.verifyCutover) {
+    projections = await verifySettlementCycleProjections({
+      targets: after.verificationTargets,
+      readProjection: operations.readProjection,
+      readAlignedRequest: ({ projectId, context }) => readAlignedCashflowSettlementCycleRequest({
+        db,
+        tenantId: options.tenantId,
+        projectId,
+        context,
+      }),
+    });
+    const confirmed = await readSettlementCycleRolloutInventory({ db, tenantId: options.tenantId });
+    assertSettlementCycleInventoryStable(after, confirmed);
+    after = confirmed;
+    cutover = assertSettlementCycleCutoverReady(after, projections);
+  }
+
+  const report = {
+    mode: options.apply ? 'APPLY' : 'READ_ONLY',
+    firebaseProjectId: options.firebaseProjectId,
+    tenantId: options.tenantId,
+    before,
+    migrations,
+    after,
+    projections,
+    cutover,
+  };
+  console.log(JSON.stringify(settlementCycleRolloutAuditSummary(report), null, 2));
+}
+
+main().catch((error) => {
+  console.error(error?.stack || String(error));
+  process.exitCode = 1;
+});

@@ -11,10 +11,6 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      note:
-        description: Deployment note for the release summary
-        required: false
-        type: string
       promote_alias:
         description: Promote the candidate to the canonical production alias
         required: true
@@ -29,6 +25,7 @@ permissions:
   actions: read
   contents: read
   deployments: write
+  id-token: write
 
 jobs:
   preflight:
@@ -44,7 +41,6 @@ jobs:
       proceed: ${{ steps.resolve.outputs.proceed }}
       sha: ${{ steps.resolve.outputs.sha }}
       promote: ${{ steps.resolve.outputs.promote }}
-      note: ${{ steps.resolve.outputs.note }}
     steps:
       - name: Resolve deploy target
         id: resolve
@@ -53,7 +49,6 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_REF: ${{ github.ref }}
           DISPATCH_SHA: ${{ github.sha }}
-          DISPATCH_NOTE: ${{ inputs.note }}
           DISPATCH_PROMOTE: ${{ inputs.promote_alias }}
           CI_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
@@ -65,11 +60,9 @@ jobs:
             fi
             sha="${DISPATCH_SHA}"
             promote="${DISPATCH_PROMOTE}"
-            note="${DISPATCH_NOTE}"
           else
             sha="${CI_SHA}"
             promote=true
-            note="CI green on main"
           fi
           head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           if [ "${sha}" != "${head}" ]; then
@@ -87,7 +80,6 @@ jobs:
             echo "proceed=true"
             echo "sha=${sha}"
             echo "promote=${promote}"
-            echo "note=${note}"
           } >> "${GITHUB_OUTPUT}"
 
   deploy:
@@ -102,10 +94,8 @@ jobs:
     env:
       VERCEL_CANONICAL_PRODUCTION_HOST: myscube.myscguard.app
       VERCEL_CLI_PACKAGE: vercel@50.14.0
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_DEPLOY_ALLOWED_AUTHOR_EMAILS: ai@mysc.co.kr
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      DEPLOY_INVOCATION_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316
       BFF_DEPLOY_ENV: live
       BFF_AUTH_MODE: firebase_required
@@ -117,19 +107,18 @@ jobs:
       JVM_WEEKLY_AUTH_MODE: strict
       JVM_WEEKLY_API_BASE_URL: ${{ vars.JVM_WEEKLY_API_BASE_URL_LIVE }}
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
-      JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
-      JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
-      SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
+      JVM_SOURCE_PATHS: server/jvm-weekly-api .github/workflows/jvm-production-deploy.yml
+      JVM_PROJECT_ID: inner-platform-live-20260316
+      JVM_REGION: us-central1
+      JVM_SERVICE: innerplatform-jvm-weekly-api-live
+      JVM_IMAGE: asia-northeast3-docker.pkg.dev/inner-platform-live-20260316/jvm-images/innerplatform-jvm-weekly-api-live
       SLACK_ALERT_CHANNEL_ID: C0BQ6980HR6
-      # Use a production-scoped secret name so a stale repository-level
-      # VERCEL_TOKEN cannot be confused with the Production environment token.
-      VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
 
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.preflight.outputs.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Verify checked out deploy target
         env:
@@ -162,7 +151,175 @@ jobs:
             exit 1
           }
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install deployment verification dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Classify Production release mode
+        id: release_mode
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          bff_deployment_host="$(node deploy-prod-align.mjs --print-current-target)"
+          bff_inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${bff_deployment_host}" --json \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
+          bff_deployed_sha="$(jq -er --arg project "${VERCEL_PROJECT_ID}" '
+            select(.projectId == $project and .target == "production")
+            | .meta.githubCommitSha
+            | select(type == "string" and test("^[0-9a-f]{40}$"))
+          ' <<< "${bff_inspect_json}")"
+          [[ "${bff_deployed_sha}" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "${bff_deployed_sha}^{commit}"
+          git merge-base --is-ancestor "${bff_deployed_sha}" "${DEPLOY_SHA}"
+          BFF_DEPLOY_BASE_SHA="${bff_deployed_sha}"
+
+          release_classification="$(node --input-type=module - "${BFF_DEPLOY_BASE_SHA}" "${DEPLOY_SHA}" <<'NODE'
+          import {
+            changedPathsBetween,
+            classifyCashflowSettlementProductionRelease,
+            isJvmRolloutSupportLiveAt,
+          } from './scripts/verify-cashflow-settlement-release-boundary.mjs';
+
+          const [aliasBase, head] = process.argv.slice(2);
+          const changedPaths = changedPathsBetween(aliasBase, head);
+          const { releaseMode, bffFrontendCutover } = classifyCashflowSettlementProductionRelease(
+            changedPaths,
+            { rolloutSupportIsLive: isJvmRolloutSupportLiveAt(head) },
+          );
+          process.stdout.write(JSON.stringify({
+            releaseMode,
+            settlementCutover: bffFrontendCutover.length > 0,
+          }));
+          NODE
+          )"
+          release_mode="$(jq -er '.releaseMode | select(. == "jvm_only" or . == "web")' \
+            <<< "${release_classification}")"
+          settlement_cutover="$(jq -er '
+            .settlementCutover
+            | if . == true then "true"
+              elif . == false then "false"
+              else error("invalid settlement cutover flag")
+              end
+          ' <<< "${release_classification}")"
+          case "${release_mode}" in
+            jvm_only|web) ;;
+            *) echo "Unexpected production release mode: ${release_mode}" >&2; exit 1 ;;
+          esac
+          {
+            echo "bff_deployed_sha=${bff_deployed_sha}"
+            echo "release_mode=${release_mode}"
+            echo "settlement_cutover=${settlement_cutover}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Skip Production for JVM-only release
+        if: steps.release_mode.outputs.release_mode == 'jvm_only'
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          echo "JVM-only release; Vercel production intentionally skipped."
+          {
+            printf '%s\n' "## InnerPlatform production deploy"
+            printf '\n'
+            printf '%s\n' "- Result: JVM-only release; Vercel production intentionally skipped."
+            printf '%s\n' "- Commit: ${DEPLOY_SHA}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Authenticate JVM release verifier
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        uses: google-github-actions/auth@v3
+        id: jvm_release_verifier_auth
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
+          service_account: ${{ vars.GCP_JVM_RELEASE_VERIFIER_SERVICE_ACCOUNT_LIVE }}
+          token_format: access_token
+          create_credentials_file: true
+          export_environment_variables: false
+
+      - name: Set up gcloud for release verification
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Verify cashflow settlement split-release boundary
+        id: release_boundary
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+          JVM_SPLIT_RELEASE_BASE_SHA: ${{ vars.JVM_SPLIT_RELEASE_BASE_SHA_LIVE }}
+          BFF_DEPLOY_BASE_SHA: ${{ steps.release_mode.outputs.bff_deployed_sha }}
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.jvm_release_verifier_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          normalize_live_image_digest() {
+            local image_uri="$1"
+            local expected_repository="$2"
+            local digest="${image_uri##*@}"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            test "${image_uri}" = "${expected_repository}@${digest}" || return 1
+            printf '%s\n' "${digest}"
+          }
+          service_json="$(gcloud run services describe "${JVM_SERVICE}" \
+            --project "${JVM_PROJECT_ID}" --region "${JVM_REGION}" --format=json)"
+          positive_revision_count="$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")"
+          total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${service_json}")"
+          live_revision="$(jq -r '
+            [.status.traffic
+              | group_by(.revisionName)[]
+              | { revision: .[0].revisionName, percent: (map(.percent // 0) | add) }
+              | select(.percent == 100)
+              | .revision][0] // ""
+          ' <<< "${service_json}")"
+          test "${positive_revision_count}" = "1"
+          test "${total_percent}" = "100"
+          test -n "${live_revision}"
+          revision_json="$(gcloud run revisions describe "${live_revision}" \
+            --project "${JVM_PROJECT_ID}" --region "${JVM_REGION}" --format=json)"
+          live_image_uri="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          live_digest="$(normalize_live_image_digest "${live_image_uri}" "${JVM_IMAGE}")"
+          jvm_deployed_sha="$(jq -r '
+            [.spec.containers[0].env[]?
+              | select(.name == "JVM_WEEKLY_COMMIT_SHA")
+              | .value]
+            | unique
+            | if length == 1 then .[0] else "" end
+          ' <<< "${revision_json}")"
+          if [ -z "${jvm_deployed_sha}" ]; then
+            [[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "JVM split-release base must be a full lowercase commit SHA." >&2
+              exit 1
+            }
+            bootstrap_digest="$(gcloud artifacts docker images describe \
+              "${JVM_IMAGE}:${JVM_SPLIT_RELEASE_BASE_SHA}" \
+              --format='value(image_summary.digest)')"
+            [[ "${bootstrap_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "JVM split-release base image returned a malformed digest." >&2
+              exit 1
+            }
+            test "${bootstrap_digest}" = "${live_digest}"
+            jvm_deployed_sha="${JVM_SPLIT_RELEASE_BASE_SHA}"
+          fi
+          [[ "${jvm_deployed_sha}" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "${jvm_deployed_sha}^{commit}"
+          git merge-base --is-ancestor "${jvm_deployed_sha}" "${DEPLOY_SHA}"
+          JVM_DEPLOY_BASE_SHA="${jvm_deployed_sha}"
+          boundary_json="$(node scripts/verify-cashflow-settlement-release-boundary.mjs \
+            --jvm-base "${JVM_DEPLOY_BASE_SHA}" \
+            --bff-base "${BFF_DEPLOY_BASE_SHA}" \
+            --head "${DEPLOY_SHA}")"
+          jq -e '.ok == true' <<< "${boundary_json}" >/dev/null
+          echo "jvm_deployed_sha=${jvm_deployed_sha}" >> "${GITHUB_OUTPUT}"
+
       - name: Verify Vercel deploy author policy
+        if: steps.release_mode.outputs.release_mode != 'jvm_only'
         run: |
           set -euo pipefail
           author_email="$(git show -s --format=%ae HEAD)"
@@ -175,12 +332,16 @@ jobs:
               ;;
           esac
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
       - name: Verify Vercel credentials are configured
+        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+          SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
         run: |
           set -euo pipefail
           test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_DEPLOY_TOKEN_PRODUCTION" >&2; exit 1; }
@@ -194,8 +355,122 @@ jobs:
           test -n "${SLACK_ALERT_BOT_TOKEN}" || { echo "Missing Production secret: SLACK_ALERT_BOT_TOKEN" >&2; exit 1; }
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
 
+      - name: Verify deployed JVM settlement capability and version
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+          JVM_DEPLOYED_SHA: ${{ steps.release_boundary.outputs.jvm_deployed_sha }}
+          JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.jvm_release_verifier_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          test -n "${JVM_DEPLOYED_SHA}" || {
+            echo "No successful JVM deployment is recorded for the settlement cutover." >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "${JVM_DEPLOYED_SHA}" "${DEPLOY_SHA}"
+          git diff --quiet "${JVM_DEPLOYED_SHA}" "${DEPLOY_SHA}" -- ${JVM_SOURCE_PATHS} || {
+            echo "The live JVM deployment does not contain the JVM sources required by ${DEPLOY_SHA}." >&2
+            exit 1
+          }
+          service_json="$(gcloud run services describe "${JVM_SERVICE}" \
+            --project "${JVM_PROJECT_ID}" --region "${JVM_REGION}" --format=json)"
+          positive_revision_count="$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")"
+          total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${service_json}")"
+          live_revision="$(jq -r '
+            [.status.traffic
+              | group_by(.revisionName)[]
+              | { revision: .[0].revisionName, percent: (map(.percent // 0) | add) }
+              | select(.percent == 100)
+              | .revision][0] // ""
+          ' <<< "${service_json}")"
+          live_service_url="$(jq -er '.status.url' <<< "${service_json}")"
+          test "${positive_revision_count}" = "1"
+          test "${total_percent}" = "100"
+          test -n "${live_revision}"
+          revision_json="$(gcloud run revisions describe "${live_revision}" \
+            --project "${JVM_PROJECT_ID}" --region "${JVM_REGION}" --format=json)"
+          live_sha="$(jq -er '
+            [.spec.containers[0].env[]
+              | select(.name == "JVM_WEEKLY_COMMIT_SHA")
+              | .value]
+            | unique
+            | if length == 1 then .[0] else error("missing or ambiguous commit SHA") end
+          ' <<< "${revision_json}")"
+          test "${live_sha}" = "${JVM_DEPLOYED_SHA}"
+          test "${JVM_WEEKLY_API_BASE_URL%/}" = "${live_service_url}"
+          test "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE%/}" = "${live_service_url}"
+          node --input-type=module <<'NODE'
+          import { GoogleAuth } from 'google-auth-library';
+
+          const baseUrl = new URL(process.env.JVM_WEEKLY_API_BASE_URL);
+          const audience = new URL(process.env.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE);
+          if (baseUrl.protocol !== 'https:' || baseUrl.pathname !== '/'
+            || audience.protocol !== 'https:' || audience.pathname !== '/'
+            || baseUrl.origin !== audience.origin) {
+            throw new Error('JVM live origins must be exact HTTPS origins.');
+          }
+          const credentials = JSON.parse(process.env.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON);
+          const client = await new GoogleAuth({ credentials }).getIdTokenClient(audience.origin);
+          const idToken = await client.idTokenProvider.fetchIdToken(audience.origin);
+          const response = await fetch(`${baseUrl.origin}/api/v1/health`, {
+            headers: { authorization: `Bearer ${idToken}` },
+            signal: AbortSignal.timeout(10_000),
+          });
+          const body = await response.json().catch(() => null);
+          if (!response.ok || body?.service !== 'jvm-weekly-api'
+            || !Array.isArray(body?.capabilities)
+            || !body.capabilities.includes('settlement-cycle-v1')) {
+            throw new Error(`Live JVM settlement capability check failed with HTTP ${response.status}.`);
+          }
+          NODE
+
+      - name: Mint JVM cutover verifier ID token
+        id: jvm_cutover_verifier_auth
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
+          service_account: ${{ vars.GCP_JVM_RELEASE_VERIFIER_SERVICE_ACCOUNT_LIVE }}
+          token_format: id_token
+          id_token_audience: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify settlement-cycle cutover inventory
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        env:
+          CASHFLOW_ACTOR_UID: ${{ vars.JVM_SETTLEMENT_CANARY_ACTOR_UID_LIVE }}
+          JVM_WEEKLY_API_ID_TOKEN: ${{ steps.jvm_cutover_verifier_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.jvm_release_verifier_auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          test -n "${CASHFLOW_ACTOR_UID}"
+          test -n "${JVM_WEEKLY_API_ID_TOKEN}"
+          test -n "${JVM_WEEKLY_INTERNAL_API_TOKEN}"
+          test -n "${GOOGLE_APPLICATION_CREDENTIALS}"
+          test "${JVM_WEEKLY_API_BASE_URL%/}" = "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE%/}"
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --firebase-project "${LIVE_FIREBASE_PROJECT_ID}" \
+            --tenant mysc \
+            --verify-cutover \
+            --people-uid "${CASHFLOW_ACTOR_UID}" \
+            --jvm-base-url "${JVM_WEEKLY_API_BASE_URL}" \
+            --jvm-audience "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}"
+
       - name: Deploy to Vercel production
         id: vercel_deploy
+        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+          SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
         run: |
           set -euo pipefail
           output_file="$(mktemp)"
@@ -230,6 +505,7 @@ jobs:
             --env PROJECT_REGISTRATION_SLACK_CHANNEL_ID= \
             --meta maintenanceReadOnly=false \
             --meta githubCommitSha="${commit_sha}" \
+            --meta githubActionsInvocation="${DEPLOY_INVOCATION_ID}" \
             2>&1 | tee "${output_file}"
           deployment_url="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "${output_file}" | tail -n 1 || true)"
           if [ -z "${deployment_url}" ]; then
@@ -240,9 +516,30 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"
 
+      - name: Verify Vercel candidate identity
+        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        env:
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${DEPLOYMENT_HOST}" --json \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
+          jq -e --arg project "${VERCEL_PROJECT_ID}" --arg sha "${DEPLOY_SHA}" \
+            --arg invocation "${DEPLOY_INVOCATION_ID}" '
+            .projectId == $project
+            and .meta.githubCommitSha == $sha
+            and .meta.githubActionsInvocation == $invocation
+            and .target == "production"
+          ' <<< "${inspect_json}" >/dev/null
+
       - name: Verify production surface before alias
+        if: steps.release_mode.outputs.release_mode != 'jvm_only'
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
@@ -251,6 +548,7 @@ jobs:
           const request = async (path, init) => {
             const response = await fetch(`${base}${path}`, {
               ...init,
+              redirect: 'error',
               headers: {
                 ...init?.headers,
                 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
@@ -299,10 +597,59 @@ jobs:
           }
           NODE
 
+      - name: Verify authenticated settlement reads before alias
+        if: steps.release_mode.outputs.settlement_cutover == 'true'
+        env:
+          SETTLEMENT_CANARY_BASE_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
+          SETTLEMENT_CANARY_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY_LIVE }}
+          SETTLEMENT_CANARY_FIREBASE_REFRESH_TOKEN: ${{ secrets.FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          SETTLEMENT_CANARY_ACTOR_UID: ${{ vars.SETTLEMENT_READ_CANARY_ACTOR_UID_LIVE }}
+          SETTLEMENT_CANARY_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
+          SETTLEMENT_CANARY_CYCLE_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_REQUEST_ID: ${{ vars.SETTLEMENT_CANARY_EXPECTED_REQUEST_ID_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_STATUS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_STATUS_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH: ${{ vars.SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_ACTIONS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_ACTIONS_LIVE }}
+          SETTLEMENT_CANARY_TENANT_ID: mysc
+          SETTLEMENT_CANARY_CANONICAL_ORIGIN: https://myscube.myscguard.app
+        run: node scripts/verify-cashflow-settlement-candidate.mjs
+
+      - name: Capture current canonical alias
+        id: previous_alias
+        if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          deployment_host="$(node deploy-prod-align.mjs --print-current-target)"
+          test -n "${deployment_host}"
+          inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${deployment_host}" --json \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
+          deployment_id="$(jq -er '.id // .uid | select(type == "string" and length > 0)' <<< "${inspect_json}")"
+          commit_sha="$(jq -er '.meta.githubCommitSha
+            | select(type == "string" and test("^[0-9a-f]{40}$"))' <<< "${inspect_json}")"
+          jq -e --arg project "${VERCEL_PROJECT_ID}" --arg id "${deployment_id}" --arg sha "${commit_sha}" '
+            .projectId == $project
+            and (.id // .uid) == $id
+            and .meta.githubCommitSha == $sha
+            and .target == "production"
+          ' <<< "${inspect_json}" >/dev/null
+          {
+            echo "deployment_host=${deployment_host}"
+            echo "deployment_id=${deployment_id}"
+            echo "commit_sha=${commit_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Promote canonical production alias
-        if: needs.preflight.outputs.promote == 'true'
+        id: alias_promotion
+        if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
         run: |
           set -euo pipefail
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
@@ -311,15 +658,94 @@ jobs:
             --token "${VERCEL_TOKEN}" \
             --scope merryai-devs-projects
 
-      - name: Verify canonical production alias
-        if: needs.preflight.outputs.promote == 'true'
+      - name: Verify canonical alias target
+        id: canonical_alias
+        if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
-        run: node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+        run: |
+          set -euo pipefail
+          node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"
+
+      - name: Reconcile canonical alias or roll back
+        if: always() && steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true' && steps.vercel_deploy.outcome == 'success' && steps.previous_alias.outcome == 'success'
+        env:
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+          PREVIOUS_DEPLOYMENT_HOST: ${{ steps.previous_alias.outputs.deployment_host }}
+          PREVIOUS_DEPLOYMENT_ID: ${{ steps.previous_alias.outputs.deployment_id }}
+          PREVIOUS_DEPLOYMENT_SHA: ${{ steps.previous_alias.outputs.commit_sha }}
+          ALIAS_OUTCOME: ${{ steps.alias_promotion.outcome }}
+          ALIAS_CHECK_OUTCOME: ${{ steps.canonical_alias.outcome }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          SETTLEMENT_CUTOVER: ${{ steps.release_mode.outputs.settlement_cutover }}
+          SETTLEMENT_CANARY_BASE_URL: https://myscube.myscguard.app
+          SETTLEMENT_CANARY_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY_LIVE }}
+          SETTLEMENT_CANARY_FIREBASE_REFRESH_TOKEN: ${{ steps.release_mode.outputs.settlement_cutover == 'true' && secrets.FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE || '' }}
+          SETTLEMENT_CANARY_ACTOR_UID: ${{ vars.SETTLEMENT_READ_CANARY_ACTOR_UID_LIVE }}
+          SETTLEMENT_CANARY_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
+          SETTLEMENT_CANARY_CYCLE_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_REQUEST_ID: ${{ vars.SETTLEMENT_CANARY_EXPECTED_REQUEST_ID_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_STATUS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_STATUS_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH: ${{ vars.SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_ACTIONS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_ACTIONS_LIVE }}
+          SETTLEMENT_CANARY_TENANT_ID: mysc
+          SETTLEMENT_CANARY_CANONICAL_ORIGIN: https://myscube.myscguard.app
+        run: |
+          set -euo pipefail
+          case "${SETTLEMENT_CUTOVER}" in
+            true|false) ;;
+            *) echo "Missing or invalid settlement cutover classification." >&2; exit 1 ;;
+          esac
+          actual_target=""
+          actual_target_status=0
+          actual_target="$(node deploy-prod-align.mjs --print-current-target 2>/dev/null)" || actual_target_status=$?
+          if [ "${actual_target_status}" = "0" ] \
+            && [ "${actual_target}" = "${DEPLOYMENT_HOST}" ]; then
+            if [ "${SETTLEMENT_CUTOVER}" != "true" ]; then
+              exit 0
+            fi
+            if node scripts/verify-cashflow-settlement-candidate.mjs; then
+              exit 0
+            fi
+          fi
+
+          test -n "${PREVIOUS_DEPLOYMENT_HOST}" || {
+            echo "Alias promotion failed and no previous deployment was captured." >&2
+            exit 1
+          }
+          previous_inspect_json="$(npx --yes "${VERCEL_CLI_PACKAGE}" inspect "${PREVIOUS_DEPLOYMENT_HOST}" --json \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects)"
+          jq -e --arg project "${VERCEL_PROJECT_ID}" \
+            --arg id "${PREVIOUS_DEPLOYMENT_ID}" \
+            --arg sha "${PREVIOUS_DEPLOYMENT_SHA}" '
+            .projectId == $project
+            and (.id // .uid) == $id
+            and .meta.githubCommitSha == $sha
+            and .target == "production"
+          ' <<< "${previous_inspect_json}" >/dev/null
+          rollback_alias_status=0
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
+            "${PREVIOUS_DEPLOYMENT_HOST}" \
+            "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --token "${VERCEL_TOKEN}" \
+            --scope merryai-devs-projects || rollback_alias_status=$?
+          node deploy-prod-align.mjs --verify-only "${PREVIOUS_DEPLOYMENT_HOST}"
+          if [ "${SETTLEMENT_CUTOVER}" = "true" ]; then
+            node scripts/verify-cashflow-settlement-candidate.mjs
+          fi
+          if [ "${rollback_alias_status}" != "0" ]; then
+            echo "Alias rollback command lost its response, but the restored target and authenticated read were verified." >&2
+          fi
+          exit 1
 
       - name: Release summary
+        if: steps.release_mode.outputs.release_mode != 'jvm_only'
         env:
-          DEPLOY_NOTE: ${{ needs.preflight.outputs.note }}
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
         run: |
           {
@@ -330,5 +756,4 @@ jobs:
             printf '%s\n' "- Commit: $(git rev-parse HEAD)"
             printf '%s\n' "- Branch: main"
             printf '%s\n' "- Actor: ${GITHUB_ACTOR}"
-            printf '%s\n' "- Note: ${DEPLOY_NOTE}"
           } >> "${GITHUB_STEP_SUMMARY}"

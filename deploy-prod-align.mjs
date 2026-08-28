@@ -65,24 +65,37 @@ function parseFetchedDeploymentHost(text) {
   const match =
     text.match(/Fetched deployment "https?:\/\/([^"]+)"/i)
     ?? text.match(/Fetched deployment "([^"]+)"/i);
-  return match?.[1]?.replace(/^https?:\/\//i, '') ?? null;
+  return normalizeDeploymentHost(match?.[1] ?? null);
 }
 
 function normalizeDeploymentHost(input) {
   if (!input) return null;
 
   const trimmed = input.trim();
+  if (!trimmed || (!/^https?:\/\//i.test(trimmed) && /[/?#@]/.test(trimmed))) return null;
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 
   try {
-    return new URL(withProtocol).host;
+    const url = new URL(withProtocol);
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:'
+      || url.port
+      || url.pathname !== '/'
+      || url.search
+      || url.hash
+      || url.username
+      || url.password
+      || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.vercel\.app$/.test(host)) {
+      return null;
+    }
+    return host;
   } catch {
     return null;
   }
 }
 
 function parseArgs(argv) {
-  const args = { help: false, verifyOnly: null };
+  const args = { help: false, verifyOnly: null, printCurrentTarget: false };
 
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -98,7 +111,15 @@ function parseArgs(argv) {
       continue;
     }
 
-    fail(`unknown argument: ${value}`, 'Usage: node deploy-prod-align.mjs --verify-only <deployment-url-or-host>');
+    if (value === '--print-current-target') {
+      args.printCurrentTarget = true;
+      continue;
+    }
+
+    fail(
+      `unknown argument: ${value}`,
+      'Usage: node deploy-prod-align.mjs --verify-only <deployment-url-or-host> | --print-current-target',
+    );
   }
 
   return args;
@@ -141,9 +162,20 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
-    console.log('Usage: node deploy-prod-align.mjs --verify-only <deployment-url-or-host>');
+    console.log('Usage: node deploy-prod-align.mjs --verify-only <deployment-url-or-host> | --print-current-target');
     console.log(`Canonical production URL: ${CANONICAL_PRODUCTION_URL}`);
     console.log('Production deploys are intentionally not available from this local CLI.');
+    return;
+  }
+
+  if (args.printCurrentTarget) {
+    if (args.verifyOnly) fail('--print-current-target cannot be combined with --verify-only');
+    const aliasInspect = runVercel(['inspect', CANONICAL_PRODUCTION_HOST]);
+    const deploymentHost = parseFetchedDeploymentHost(aliasInspect.combined);
+    if (!deploymentHost) {
+      fail(`could not resolve an allowed .vercel.app deployment host behind ${CANONICAL_PRODUCTION_URL}`);
+    }
+    console.log(deploymentHost);
     return;
   }
 

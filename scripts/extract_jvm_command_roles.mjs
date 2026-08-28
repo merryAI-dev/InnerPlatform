@@ -33,7 +33,7 @@ function fail(message) {
 function readCommandValues() {
   const source = readFileSync(COMMAND_SERVICE, 'utf8');
   const values = new Map();
-  for (const match of source.matchAll(/static final String ([A-Z_]+_COMMAND)\s*=\s*"([^"]+)"/g)) {
+  for (const match of source.matchAll(/static final String ([A-Z0-9_]+_COMMAND)\s*=\s*"([^"]+)"/g)) {
     values.set(match[1], match[2]);
   }
   if (values.size < MIN_COMMANDS) {
@@ -46,7 +46,7 @@ function readCommandRoles(commandValues) {
   const source = readFileSync(AUTH_SERVICE, 'utf8');
   const commands = {};
   for (const match of source.matchAll(
-    /Map\.entry\(\s*WeeklyExpenseCommandService\.([A-Z_]+_COMMAND)\s*,\s*Set\.of\(([^)]*)\)/g,
+    /Map\.entry\(\s*WeeklyExpenseCommandService\.([A-Z0-9_]+_COMMAND)\s*,\s*Set\.of\(([^)]*)\)/g,
   )) {
     const [, constant, rawRoles] = match;
     const value = commandValues.get(constant);

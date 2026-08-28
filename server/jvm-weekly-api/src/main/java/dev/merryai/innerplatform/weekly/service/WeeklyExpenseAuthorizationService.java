@@ -77,6 +77,18 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of(
             "admin", "finance", "pm", "viewer", "tenant_admin", "auditor", "support", "security"
         )),
+        Map.entry(WeeklyExpenseCommandService.SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, Set.of(
+            "admin", "finance", "pm", "viewer", "tenant_admin"
+        )),
+        Map.entry(WeeklyExpenseCommandService.TRANSITION_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, Set.of(
+            "admin", "finance", "pm", "viewer", "tenant_admin"
+        )),
+        Map.entry(WeeklyExpenseCommandService.CANCEL_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, Set.of(
+            "admin"
+        )),
+        Map.entry(WeeklyExpenseCommandService.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND, Set.of(
+            "admin"
+        )),
         Map.entry(WeeklyExpenseCommandService.CLOSE_WEEK_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND, Set.of("admin", "finance"))
     );
