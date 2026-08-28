@@ -10,6 +10,7 @@ import dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +26,23 @@ class CashflowWeeklyOverviewServiceTest {
     private static final TrustedActorContext ACTOR = new TrustedActorContext(
         "tenant-a", "viewer-a", "viewer@example.com", "viewer", "Viewer A"
     );
+
+    @Test
+    void defaultsTheOldJsonRequestToLegacyAndRequiresAnExplicitCycleOptIn() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        CashflowWeeklyOverviewRequest legacy = mapper.readValue(
+            "{\"projectIds\":[\"project-a\"],\"yearMonth\":\"2026-08\"}",
+            CashflowWeeklyOverviewRequest.class
+        );
+        CashflowWeeklyOverviewRequest cycle = mapper.readValue(
+            "{\"projectIds\":[\"project-a\"],\"yearMonth\":\"2026-08\",\"settlementCycle\":true}",
+            CashflowWeeklyOverviewRequest.class
+        );
+
+        assertThat(legacy.settlementCycle()).isFalse();
+        assertThat(cycle.settlementCycle()).isTrue();
+    }
 
     @Test
     void combinesCanonicalStatusesAndSummariesInOneApplicationRead() {
@@ -51,7 +69,7 @@ class CashflowWeeklyOverviewServiceTest {
             ACTOR, projectIds, "2026-08", "2026-07"
         )).thenReturn(Map.of(
             "project-a", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
-                "project-a", "2026-08", "2026-07", List.of(completedWeek), completedJuly,
+                "project-a", "2026-08", "2026-07", List.of(completedJuly, completedWeek), completedJuly,
                 new CashflowSettlementCyclePolicy.Projection(
                     CashflowSettlementCyclePolicy.BusinessState.APPROVED,
                     CashflowSettlementCyclePolicy.Health.OK,
@@ -67,7 +85,7 @@ class CashflowWeeklyOverviewServiceTest {
                 )
             ),
             "project-b", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
-                "project-b", "2026-08", "2026-07", List.of(pendingWeek), pendingJuly,
+                "project-b", "2026-08", "2026-07", List.of(pendingJuly, pendingWeek), pendingJuly,
                 new CashflowSettlementCyclePolicy.Projection(
                     CashflowSettlementCyclePolicy.BusinessState.PENDING_APPROVAL,
                     CashflowSettlementCyclePolicy.Health.OK,
@@ -87,12 +105,28 @@ class CashflowWeeklyOverviewServiceTest {
             ));
 
         CashflowWeeklyOverviewResponse response = service.readCashflowWeeklyOverview(
-            ACTOR, new CashflowWeeklyOverviewRequest(projectIds, "2026-08")
+            ACTOR, new CashflowWeeklyOverviewRequest(projectIds, "2026-08", true)
         );
 
         assertThat(response.items()).hasSize(2);
-        assertThat(response.items().get(0).settlementStatuses().items().getFirst().status()).isEqualTo("COMPLETED");
-        assertThat(response.items().get(1).settlementStatuses().items().getFirst().status()).isEqualTo("PENDING_APPROVAL");
+        assertThat(response.items().get(0).settlementStatuses().items())
+            .extracting(
+                CashflowSettlementStatusesResponse.Item::period,
+                CashflowSettlementStatusesResponse.Item::status
+            )
+            .containsExactly(
+                org.assertj.core.groups.Tuple.tuple("MONTH", "COMPLETED"),
+                org.assertj.core.groups.Tuple.tuple("WEEK_5", "COMPLETED")
+            );
+        assertThat(response.items().get(1).settlementStatuses().items())
+            .extracting(
+                CashflowSettlementStatusesResponse.Item::period,
+                CashflowSettlementStatusesResponse.Item::status
+            )
+            .containsExactly(
+                org.assertj.core.groups.Tuple.tuple("MONTH", "PENDING_APPROVAL"),
+                org.assertj.core.groups.Tuple.tuple("WEEK_5", "PENDING_APPROVAL")
+            );
         assertThat(response.items().get(0).settlementCycle().monthCloseTargetYearMonth()).isEqualTo("2026-07");
         assertThat(response.items().get(0).settlementCycle().businessState()).isEqualTo("APPROVED");
         assertThat(response.items().get(0).settlementCycle().monthCloseSettlement().approvedAt())
@@ -104,7 +138,7 @@ class CashflowWeeklyOverviewServiceTest {
             .get("APPROVE_MONTH_CLOSE").allowed()).isFalse();
         assertThat(response.items().get(1).settlementCycle().commandCapabilities()
             .get("APPROVE_MONTH_CLOSE").allowed()).isTrue();
-        assertThat(response.items()).allSatisfy(item -> assertThat(item.settlementStatuses().items().getFirst())
+        assertThat(response.items()).allSatisfy(item -> assertThat(item.settlementStatuses().items().getLast())
             .extracting(
                 CashflowSettlementStatusesResponse.Item::deadlineAt,
                 CashflowSettlementStatusesResponse.Item::approverDeadlineAt
@@ -119,5 +153,85 @@ class CashflowWeeklyOverviewServiceTest {
         verify(persistence).findCashflowLedgerSources(anyString(), anyList(), anyString(), anyString());
         verify(persistence).findCashflowSettlementCyclesBatch(ACTOR, projectIds, "2026-08", "2026-07");
         verify(persistence, never()).findCashflowSettlementStatusesBatch(anyString(), anyList(), anyString());
+    }
+
+    @Test
+    void keepsTheUnversionedOldBffRequestOnTheLegacyWeeklyOverviewContract() throws Exception {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
+            persistence, authorization, new ObjectMapper(), false, "live"
+        );
+        List<String> projectIds = List.of("project-a");
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord completedMonth =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "MONTH", "COMPLETED", "2026-08-11T01:00:00Z", "PM A",
+                "2026-08-14T01:00:00Z", "Head A", 2
+            );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord completedWeek =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "WEEK_5", "COMPLETED", "", "", "", "", 1
+            );
+        when(persistence.findCashflowSettlementStatusesBatch("tenant-a", projectIds, "2026-08"))
+            .thenReturn(Map.of("project-a", List.of(completedMonth, completedWeek)));
+        when(persistence.findCashflowLedgerSources(anyString(), anyList(), anyString(), anyString()))
+            .thenReturn(Map.of("project-a", new CashflowLedgerSource(List.of(), List.of())));
+
+        CashflowWeeklyOverviewResponse response = service.readCashflowWeeklyOverview(
+            ACTOR, new CashflowWeeklyOverviewRequest(projectIds, "2026-08")
+        );
+
+        assertThat(response.version()).isEqualTo("1");
+        assertThat(response.errors()).isEmpty();
+        assertThat(response.items()).singleElement().satisfies(item -> {
+            assertThat(item.settlementCycle()).isNull();
+            assertThat(item.settlementStatuses().items())
+                .extracting(CashflowSettlementStatusesResponse.Item::period)
+                .containsExactly("MONTH", "WEEK_5");
+        });
+        List<String> serializedItemKeys = new ArrayList<>();
+        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(response))
+            .path("items").get(0).fieldNames().forEachRemaining(serializedItemKeys::add);
+        assertThat(serializedItemKeys).containsExactly(
+            "projectId", "settlementStatuses", "projectionActualSummary"
+        );
+        verify(persistence).findCashflowSettlementStatusesBatch("tenant-a", projectIds, "2026-08");
+        verify(persistence, never()).findCashflowSettlementCyclesBatch(
+            org.mockito.ArgumentMatchers.any(), anyList(), anyString(), anyString()
+        );
+    }
+
+    @Test
+    void keepsLegacyReadFailuresInsideTheOldBffErrorAllowlist() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
+            persistence, authorization, new ObjectMapper(), false, "live"
+        );
+        List<String> projectIds = List.of("project-a");
+        when(persistence.findCashflowSettlementStatusesBatch("tenant-a", projectIds, "2026-08"))
+            .thenThrow(new IllegalStateException("legacy status read unavailable"));
+        when(persistence.findCashflowLedgerSources(anyString(), anyList(), anyString(), anyString()))
+            .thenReturn(Map.of("project-a", new CashflowLedgerSource(List.of(), List.of())));
+
+        CashflowWeeklyOverviewResponse response = service.readCashflowWeeklyOverview(
+            ACTOR, new CashflowWeeklyOverviewRequest(projectIds, "2026-08")
+        );
+
+        assertThat(response.version()).isEqualTo("1");
+        assertThat(response.errors())
+            .extracting(
+                CashflowWeeklyOverviewResponse.ErrorItem::projectId,
+                CashflowWeeklyOverviewResponse.ErrorItem::code
+            )
+            .containsExactly(org.assertj.core.groups.Tuple.tuple("project-a", "STATUS_UNAVAILABLE"));
+        assertThat(response.items()).singleElement().satisfies(item -> {
+            assertThat(item.settlementStatuses()).isNull();
+            assertThat(item.projectionActualSummary()).isNotNull();
+            assertThat(item.settlementCycle()).isNull();
+        });
+        verify(persistence, never()).findCashflowSettlementCyclesBatch(
+            org.mockito.ArgumentMatchers.any(), anyList(), anyString(), anyString()
+        );
     }
 }

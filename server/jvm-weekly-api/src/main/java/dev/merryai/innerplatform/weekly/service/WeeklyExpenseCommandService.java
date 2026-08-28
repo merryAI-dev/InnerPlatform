@@ -608,6 +608,9 @@ public class WeeklyExpenseCommandService {
         authorizationService.requireProjectsAllowedForCommands(
             List.of(CASHFLOW_READ_COMMAND, CASHFLOW_MONTH_CLOSE_READ_COMMAND), actor, projectIds
         );
+        if (!request.settlementCycle()) {
+            return readLegacyCashflowWeeklyOverview(actor, request, projectIds);
+        }
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
             CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
         String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0
@@ -669,6 +672,63 @@ public class WeeklyExpenseCommandService {
             items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary, settlementCycle));
         }
         return new CashflowWeeklyOverviewResponse("2", request.yearMonth(), items, errors);
+    }
+
+    private CashflowWeeklyOverviewResponse readLegacyCashflowWeeklyOverview(
+        TrustedActorContext actor,
+        CashflowWeeklyOverviewRequest request,
+        List<String> projectIds
+    ) {
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
+            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
+        String throughMonth = request.yearMonth().compareTo(boundary.yearMonth()) > 0
+            ? request.yearMonth() : boundary.yearMonth();
+        Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> statusesByProject;
+        Map<String, CashflowLedgerSource> sourcesByProject;
+        CompletableFuture<Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>>> statusesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowSettlementStatusesBatch(
+                actor.tenantId(), projectIds, request.yearMonth()
+            ));
+        CompletableFuture<Map<String, CashflowLedgerSource>> sourcesFuture =
+            CompletableFuture.supplyAsync(() -> persistence.findCashflowLedgerSources(
+                actor.tenantId(), projectIds,
+                CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
+            ));
+        try {
+            statusesByProject = statusesFuture.join();
+        } catch (RuntimeException unavailable) {
+            statusesByProject = Map.of();
+        }
+        try {
+            sourcesByProject = sourcesFuture.join();
+        } catch (RuntimeException unavailable) {
+            sourcesByProject = Map.of();
+        }
+        List<CashflowWeeklyOverviewResponse.Item> items = new ArrayList<>();
+        List<CashflowWeeklyOverviewResponse.ErrorItem> errors = new ArrayList<>();
+        for (String projectId : projectIds) {
+            List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records =
+                statusesByProject.get(projectId);
+            CashflowSettlementStatusesResponse statuses = null;
+            if (records == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.STATUS_UNAVAILABLE
+                ));
+            } else {
+                statuses = settlementStatusesResponse(projectId, request.yearMonth(), records);
+            }
+            CashflowLedgerSource source = sourcesByProject.get(projectId);
+            CashflowProjectionActualSummaryBatchResponse.Item summary = null;
+            if (source == null) {
+                errors.add(new CashflowWeeklyOverviewResponse.ErrorItem(
+                    projectId, CashflowWeeklyOverviewResponse.SUMMARY_UNAVAILABLE
+                ));
+            } else {
+                summary = toProjectionActualSummary(projectId, source, boundary, request.yearMonth());
+            }
+            items.add(new CashflowWeeklyOverviewResponse.Item(projectId, statuses, summary, null));
+        }
+        return new CashflowWeeklyOverviewResponse("1", request.yearMonth(), items, errors);
     }
 
     public CashflowWeeklyOverviewResponse.SettlementCycle readCashflowSettlementCycle(
@@ -1477,13 +1537,19 @@ public class WeeklyExpenseCommandService {
         if (!request.cumulativeV2()) {
             CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
         }
-        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
-        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+        String actorBoundRequestHash = hashJson(new ActorBoundIdempotencyRequest(writer.id(), request));
+        String requestFirstActorBoundHash = hashJson(new RequestFirstActorBoundIdempotencyRequest(request, writer.id()));
+        String legacyRequestHash = legacyCloseCashflowMonthRequestHash(request);
+        String requestHash = legacyRequestHash == null ? actorBoundRequestHash : legacyRequestHash;
+        Optional<CashflowMonthCloseResponse> replay = readCompatibleIdempotentResponse(
             writer.tenantId(),
             projectId,
             CLOSE_CASHFLOW_MONTH_COMMAND,
             request.idempotencyKey(),
             requestHash,
+            legacyRequestHash == null
+                ? List.of(requestFirstActorBoundHash)
+                : List.of(actorBoundRequestHash, requestFirstActorBoundHash),
             CashflowMonthCloseResponse.class
         );
         if (replay.isPresent()) return replay.get();
@@ -1967,13 +2033,19 @@ public class WeeklyExpenseCommandService {
             projectId
         );
         persistence.requireCashflowDataProject(dataProjectId);
-        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
-        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+        String actorBoundRequestHash = hashJson(new ActorBoundIdempotencyRequest(writer.id(), request));
+        String requestFirstActorBoundHash = hashJson(new RequestFirstActorBoundIdempotencyRequest(request, writer.id()));
+        String legacyRequestHash = legacyRequestReopenHash(request);
+        String requestHash = legacyRequestHash == null ? actorBoundRequestHash : legacyRequestHash;
+        Optional<CashflowMonthCloseResponse> replay = readCompatibleIdempotentResponse(
             writer.tenantId(),
             projectId,
             REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
             request.idempotencyKey(),
             requestHash,
+            legacyRequestHash == null
+                ? List.of(requestFirstActorBoundHash)
+                : List.of(actorBoundRequestHash, requestFirstActorBoundHash),
             CashflowMonthCloseResponse.class
         );
         if (replay.isPresent()) return replay.get();
@@ -2033,13 +2105,19 @@ public class WeeklyExpenseCommandService {
             projectId
         );
         persistence.requireCashflowDataProject(dataProjectId);
-        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
-        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+        String actorBoundRequestHash = hashJson(new ActorBoundIdempotencyRequest(writer.id(), request));
+        String requestFirstActorBoundHash = hashJson(new RequestFirstActorBoundIdempotencyRequest(request, writer.id()));
+        String legacyRequestHash = legacyDecideReopenHash(request);
+        String requestHash = legacyRequestHash == null ? actorBoundRequestHash : legacyRequestHash;
+        Optional<CashflowMonthCloseResponse> replay = readCompatibleIdempotentResponse(
             writer.tenantId(),
             projectId,
             DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
             request.idempotencyKey(),
             requestHash,
+            legacyRequestHash == null
+                ? List.of(requestFirstActorBoundHash)
+                : List.of(actorBoundRequestHash, requestFirstActorBoundHash),
             CashflowMonthCloseResponse.class
         );
         if (replay.isPresent()) return replay.get();
@@ -2049,18 +2127,22 @@ public class WeeklyExpenseCommandService {
             projectId,
             request.yearMonth()
         );
-        CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decide(
-            facts,
-            request.yearMonth(),
-            request.expectedRevision(),
-            CashflowMonthReopenPolicy.Decision.valueOf(request.decision())
-        );
+        CashflowMonthReopenPort.SettlementCycleContext cycleContext = settlementCycleContext(request);
+        CashflowMonthReopenPolicy.Decision decision =
+            CashflowMonthReopenPolicy.Decision.valueOf(request.decision());
+        CashflowMonthReopenPolicy.DecisionTransition transition = cycleContext.present()
+            ? CashflowMonthReopenPolicy.decide(
+                facts, request.yearMonth(), request.expectedRevision(), decision
+            )
+            : CashflowMonthReopenPolicy.decideLegacy(
+                facts, request.yearMonth(), request.expectedRevision(), decision
+            );
         CashflowMonthCloseState saved = cashflowMonthReopenPort.applyCashflowMonthReopenDecision(
             reopenActor(writer),
             projectId,
             transition,
             request.reason(),
-            settlementCycleContext(request)
+            cycleContext
         );
         WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
             writer,
@@ -4521,6 +4603,63 @@ public class WeeklyExpenseCommandService {
         return editSession != null && editSession.finalizeLease() ? 1 : 0;
     }
 
+    private String legacyCloseCashflowMonthRequestHash(CloseCashflowMonthRequest request) {
+        if (!request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank()
+            || request.expectedWorkflowRevision() != 0
+            || !request.decisionReason().isBlank()) {
+            return null;
+        }
+        return hashJson(new LegacyCloseCashflowMonthRequest(
+            request.idempotencyKey(),
+            request.sourceRevision(),
+            request.targetRevision(),
+            request.yearMonth(),
+            request.expectedRevision(),
+            request.expectedDraftRevision(),
+            request.humanReviewed(),
+            request.depositScheduleRows(),
+            request.cells(),
+            request.confirmations(),
+            request.managementChecks(),
+            request.managementConfirmations(),
+            request.openingBalances(),
+            request.deadlineSummary(),
+            request.requestId(),
+            request.requestRevision(),
+            request.manifestHash()
+        ));
+    }
+
+    private String legacyRequestReopenHash(CashflowMonthReopenCommands.RequestReopen request) {
+        if (!request.requestId().isBlank()
+            || !request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank()
+            || request.evidenceRevision() != 0
+            || !request.manifestHash().isBlank()
+            || request.expectedWorkflowRevision() != 0) {
+            return null;
+        }
+        return hashJson(new LegacyRequestReopen(
+            request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason()
+        ));
+    }
+
+    private String legacyDecideReopenHash(CashflowMonthReopenCommands.DecideReopen request) {
+        if (!request.requestId().isBlank()
+            || !request.cycleYearMonth().isBlank()
+            || !request.monthCloseTargetYearMonth().isBlank()
+            || request.evidenceRevision() != 0
+            || !request.manifestHash().isBlank()
+            || request.expectedWorkflowRevision() != 0) {
+            return null;
+        }
+        return hashJson(new LegacyDecideReopen(
+            request.idempotencyKey(), request.yearMonth(), request.expectedRevision(),
+            request.decision(), request.reason()
+        ));
+    }
+
     private String hashJson(Object request) {
         return sha256(writeJson(request));
     }
@@ -4533,6 +4672,26 @@ public class WeeklyExpenseCommandService {
         String requestHash,
         Class<T> responseType
     ) {
+        return readCompatibleIdempotentResponse(
+            tenantId,
+            projectId,
+            commandName,
+            idempotencyKey,
+            requestHash,
+            List.of(),
+            responseType
+        );
+    }
+
+    private <T> Optional<T> readCompatibleIdempotentResponse(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey,
+        String requestHash,
+        List<String> compatibleRequestHashes,
+        Class<T> responseType
+    ) {
         Optional<WeeklyExpenseIdempotencyEntity> existing = persistence.findIdempotency(
             tenantId,
             projectId,
@@ -4542,7 +4701,9 @@ public class WeeklyExpenseCommandService {
         if (existing.isEmpty()) return Optional.empty();
 
         WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-        if (!idempotency.getRequestHash().equals(requestHash)) {
+        boolean exactRequest = idempotency.getRequestHash().equals(requestHash);
+        boolean exactCompatibleRequest = compatibleRequestHashes.contains(idempotency.getRequestHash());
+        if (!exactRequest && !exactCompatibleRequest) {
             throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
         }
         return Optional.of(readJson(idempotency.getResponseJson(), responseType));
@@ -4685,6 +4846,50 @@ public class WeeklyExpenseCommandService {
         }
         String normalized = status.trim().toLowerCase(Locale.ROOT);
         return "all".equals(normalized) ? null : normalized;
+    }
+
+    private record LegacyCloseCashflowMonthRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        long expectedRevision,
+        long expectedDraftRevision,
+        boolean humanReviewed,
+        List<CloseCashflowMonthRequest.DepositScheduleRow> depositScheduleRows,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        List<CloseCashflowMonthRequest.Confirmation> confirmations,
+        List<CloseCashflowMonthRequest.ManagementCheck> managementChecks,
+        List<CloseCashflowMonthRequest.ManagementConfirmation> managementConfirmations,
+        dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse openingBalances,
+        CloseCashflowMonthRequest.DeadlineSummary deadlineSummary,
+        String requestId,
+        long requestRevision,
+        String manifestHash
+    ) {
+    }
+
+    private record ActorBoundIdempotencyRequest(String actorUid, Object request) {
+    }
+
+    private record RequestFirstActorBoundIdempotencyRequest(Object request, String actorUid) {
+    }
+
+    private record LegacyRequestReopen(
+        String idempotencyKey,
+        String yearMonth,
+        long expectedRevision,
+        String reason
+    ) {
+    }
+
+    private record LegacyDecideReopen(
+        String idempotencyKey,
+        String yearMonth,
+        long expectedRevision,
+        String decision,
+        String reason
+    ) {
     }
 
     private record WeekKey(String yearMonth, int weekNo) {

@@ -627,7 +627,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             Map<String, Object> close = documents.close();
             List<CashflowSettlementStatusRecord> weeklySettlements = settlementStatusRecords(
                 documents.weeklySettlement()
-            ).stream().filter(status -> status.period().startsWith("WEEK_")).toList();
+            );
             Map<String, Object> month = nestedMap(nestedMap(documents.settlement().get("periods")).get("MONTH"));
             CashflowSettlementStatusRecord monthSettlement = documents.exactRequestExists()
                 ? settlementStatusRecord("MONTH", month)
@@ -1826,7 +1826,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String action
     ) {
         requireYearMonth(yearMonth);
-        period = CashflowSettlementCyclePolicy.requireWeeklyTransitionPeriod(period);
+        if (!("MONTH".equals(period) || (period != null && period.matches("WEEK_[1-5]")))) {
+            throw new IllegalArgumentException("Cashflow settlement period is invalid.");
+        }
         if ("APPROVE".equals(action)) {
             DocumentReference projectRef = db.document("orgs/" + actor.tenantId() + "/projects/" + projectId);
             Map<String, Object> project = cachedDocumentIfPresent(projectRef).orElseGet(() -> {
@@ -2640,6 +2642,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         ValidatedCumulativeClose cumulative = request.cumulativeV2()
             ? requireCumulativeCloseApproval(actor, projectId, request)
             : null;
+        boolean settlementCycleClose = cumulative != null && cumulative.settlementCycle();
         YearMonth closeThrough = cumulative == null ? targetMonth : requireYearMonth(cumulative.throughMonth());
         if (!closeThrough.isBefore(YearMonth.from(today))) {
             throw new WeeklyExpenseConflictException("Cashflow month close is available after the target month ends.");
@@ -2770,7 +2773,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("reopenDecision", Map.of());
         patch.put("createdAt", text(current.get("createdAt"), now.toString()));
         patch.put("updatedAt", now.toString());
-        if (cumulative == null) {
+        if (!settlementCycleClose) {
             set(closeRef, patch);
         } else {
             replaceDocument(closeRef, patch);
@@ -2778,7 +2781,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> version = new LinkedHashMap<>();
         version.put("id", versionId);
         version.put("contractVersion", CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION);
-        version.put("schemaVersion", cumulative == null ? 1 : 3);
+        version.put("schemaVersion", settlementCycleClose ? 3 : 1);
         version.put("tenantId", actor.tenantId());
         version.put("projectId", projectId);
         version.put("yearMonth", request.yearMonth());
@@ -2794,7 +2797,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         version.put("closedAt", now.toString());
         version.put("closedByUid", actor.id());
         version.put("closedByName", actor.name());
-        if (cumulative != null) {
+        if (settlementCycleClose) {
             version.put("previousAuthorityExists", cumulative.previousAuthorityExists());
             version.put("preApprovalAuthority", cumulative.preApprovalAuthority());
             version.put("affectedFromMonth", cumulative.affectedFromMonth());
@@ -2808,7 +2811,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             head.put("contractVersion", CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION);
             head.put("tenantId", actor.tenantId());
             head.put("projectId", projectId);
-            head.put("authorityExists", true);
             head.put("status", "CLOSED");
             head.put("fromMonth", CASHFLOW_CUMULATIVE_BASELINE.toString());
             head.put("closedThrough", cumulative.throughMonth());
@@ -2821,16 +2823,26 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             head.put("operationId", cumulative.operationId());
             head.put("closedAt", now.toString());
             head.put("closedByUid", actor.id());
-            head.put("closedRanges", appendClosedRange(
-                cumulative,
-                request,
-                versionId,
-                revision
-            ));
-            replaceDocument(db.document(cumulativeCloseHeadPath(actor.tenantId(), projectId)), head);
-            currentCashflowCumulativeHeads.get().put(actor.tenantId() + "\n" + projectId, head);
+            if (settlementCycleClose) {
+                head.put("authorityExists", true);
+                head.put("closedRanges", appendClosedRange(
+                    cumulative,
+                    request,
+                    versionId,
+                    revision
+                ));
+                replaceDocument(db.document(cumulativeCloseHeadPath(actor.tenantId(), projectId)), head);
+                currentCashflowCumulativeHeads.get().put(actor.tenantId() + "\n" + projectId, head);
+            } else {
+                Map<String, Object> mergedHead = merge(
+                    cumulativeCloseHeadRecord(actor.tenantId(), projectId),
+                    head
+                );
+                set(db.document(cumulativeCloseHeadPath(actor.tenantId(), projectId)), head);
+                currentCashflowCumulativeHeads.get().put(actor.tenantId() + "\n" + projectId, mergedHead);
+            }
         }
-        if (cumulative != null && cumulative.settlementCycle()) {
+        if (settlementCycleClose) {
             completeCashflowSettlementCycleApproval(
                 actor, projectId, request, cumulative, versionId, now
             );
@@ -3977,6 +3989,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new IllegalStateException("Cashflow month reopen facts changed inside the canonical transaction.");
         }
         Map<String, Object> current = data(snapshot);
+        if (!settlementCycle.present()) {
+            return applyLegacyCashflowMonthReopenDecision(
+                actor, projectId, transition, reason, closeRef, current
+            );
+        }
         SettlementCycleReopenState cycle = settlementCycle.present()
             ? requireSettlementCycleReopenState(
                 actor, projectId, transition.yearMonth(), settlementCycle,
@@ -4081,6 +4098,110 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             set(cycle.coordinatorRef(), cashflowSettlementCycleCoordinatorDocument(
                 actor.tenantId(), projectId, next, now
             ));
+        }
+        return toMonthCloseRecord(
+            actor.tenantId(),
+            projectId,
+            transition.yearMonth(),
+            merge(current, patch),
+            transition.nextProjectWarningCount()
+        );
+    }
+
+    private CashflowMonthCloseState applyLegacyCashflowMonthReopenDecision(
+        CashflowMonthReopenPort.Actor actor,
+        String projectId,
+        CashflowMonthReopenPolicy.DecisionTransition transition,
+        String reason,
+        DocumentReference closeRef,
+        Map<String, Object> current
+    ) {
+        Map<String, Object> cumulativeHead = transition.updatesHeadAuthority()
+            ? cumulativeCloseHead(actor.tenantId(), projectId)
+            : Map.of();
+        if (transition.updatesHeadAuthority()
+            && (cumulativeHead.containsKey("authorityExists") || cumulativeHead.containsKey("closedRanges"))) {
+            throw new WeeklyExpenseConflictException(
+                "Legacy cumulative reopen cannot modify canonical settlement cycle authority."
+            );
+        }
+        if (transition.legacyRequesterMissing()) {
+            LOGGER.log(
+                System.Logger.Level.WARNING,
+                "cashflow_month_reopen_legacy_requester_missing tenantId={0} projectId={1} yearMonth={2}",
+                actor.tenantId(), projectId, transition.yearMonth()
+            );
+        }
+        Instant now = clock.instant();
+        Map<DocumentReference, Map<String, Object>> weeklyReopenPatches = new LinkedHashMap<>();
+        if (transition.approved()) {
+            String dataYearMonth = transition.dataYearMonth();
+            DocumentReference[] weeklyCompletionRefs = java.util.stream.IntStream.rangeClosed(
+                    1,
+                    CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
+                )
+                .mapToObj(weekNo -> db.document(cashflowWeeklyUpdateCompletionPath(
+                    actor.tenantId(),
+                    projectId + "-" + dataYearMonth + "-w" + weekNo
+                )))
+                .toArray(DocumentReference[]::new);
+            for (DocumentSnapshot weeklyCompletion : getAll(weeklyCompletionRefs)) {
+                if (!weeklyCompletion.exists()) continue;
+                Map<String, Object> completion = data(weeklyCompletion);
+                int weekNo = intValue(completion.get("weekNo"), 0);
+                if (!projectId.equals(text(completion.get("projectId"), ""))
+                    || !dataYearMonth.equals(text(completion.get("yearMonth"), ""))
+                    || weekNo < 1
+                    || weekNo > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
+                    throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
+                }
+                if (!isSettledWeeklyStatus(text(completion.get("status"), ""))) continue;
+                Map<String, Object> weeklyPatch = new LinkedHashMap<>();
+                weeklyPatch.put("status", "OPEN");
+                weeklyPatch.put("revision", Math.addExact(longValue(completion.get("revision"), 0), 1));
+                weeklyPatch.put("reopenCount", Math.addExact(longValue(completion.get("reopenCount"), 0), 1));
+                weeklyPatch.put("reopenedAt", now.toString());
+                weeklyPatch.put("reopenedByUid", actor.id());
+                weeklyPatch.put("reopenedByName", actor.name());
+                weeklyPatch.put("reopenReason", "월 결산 재오픈 승인: " + reason.trim());
+                weeklyPatch.put("reopenSource", "MONTH_REOPEN_APPROVAL");
+                weeklyPatch.put("updatedAt", now.toString());
+                weeklyReopenPatches.put(weeklyCompletion.getReference(), weeklyPatch);
+            }
+        }
+        Map<String, Object> decision = new LinkedHashMap<>();
+        decision.put("decision", transition.decision().name());
+        decision.put("reason", reason);
+        decision.put("decidedAt", now.toString());
+        decision.put("decidedByUid", actor.id());
+        decision.put("decidedByName", actor.name());
+        decision.put("autoReopenedWeeklyCount", weeklyReopenPatches.size());
+        Map<String, Object> patch = new LinkedHashMap<>();
+        patch.put("status", transition.nextMonthState().name());
+        patch.put("revision", transition.nextMonthRevision());
+        patch.put("reopenCount", transition.nextReopenCount());
+        patch.put("reopenDecision", decision);
+        patch.put("updatedAt", now.toString());
+        set(closeRef, patch);
+        if (transition.updatesHeadAuthority()) {
+            Map<String, Object> headPatch = new LinkedHashMap<>();
+            headPatch.put("status", transition.nextHeadState().name());
+            headPatch.put("revision", transition.nextHeadRevision());
+            if (!transition.nextClosedThrough().isBlank()) {
+                headPatch.put("closedThrough", transition.nextClosedThrough());
+            }
+            if (!transition.nextSettlementMonth().isBlank()) {
+                headPatch.put("settlementMonth", transition.nextSettlementMonth());
+            }
+            headPatch.put("updatedAt", now.toString());
+            set(db.document(cumulativeCloseHeadPath(actor.tenantId(), projectId)), headPatch);
+            currentCashflowCumulativeHeads.get().put(
+                actor.tenantId() + "\n" + projectId,
+                merge(cumulativeHead, headPatch)
+            );
+        }
+        for (Map.Entry<DocumentReference, Map<String, Object>> weeklyReopen : weeklyReopenPatches.entrySet()) {
+            set(weeklyReopen.getKey(), weeklyReopen.getValue());
         }
         return toMonthCloseRecord(
             actor.tenantId(),
@@ -5730,6 +5851,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             }
         }
         Map<String, Object> currentHead = cumulativeCloseHeadRecord(actor.tenantId(), projectId);
+        if (!settlementCycle
+            && (currentHead.containsKey("authorityExists") || currentHead.containsKey("closedRanges"))) {
+            throw new WeeklyExpenseConflictException(
+                "Legacy cumulative close cannot modify canonical settlement cycle authority."
+            );
+        }
         boolean previousAuthorityExists = cumulativeAuthorityExists(currentHead);
         String closedThrough = text(currentHead.get("closedThrough"), "");
         boolean legacyHeadTransition = false;
@@ -5938,7 +6065,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Instant now
     ) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("schemaVersion", 3);
+        snapshot.put("schemaVersion", cumulative.settlementCycle() ? 3 : 2);
         snapshot.put("contractVersion", CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION);
         snapshot.put("projectId", projectId);
         snapshot.put("yearMonth", request.yearMonth());
@@ -5949,11 +6076,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         snapshot.put("headRevision", cumulative.headRevision());
         snapshot.put("approvalId", cumulative.approvalId());
         snapshot.put("operationId", cumulative.operationId());
-        snapshot.put("approvalVersionId", approvalVersionId);
-        snapshot.put("previousAuthorityExists", cumulative.previousAuthorityExists());
-        snapshot.put("preApprovalAuthority", cumulative.preApprovalAuthority());
-        snapshot.put("affectedFromMonth", cumulative.affectedFromMonth());
-        snapshot.put("affectedThroughMonth", cumulative.affectedThroughMonth());
+        if (cumulative.settlementCycle()) {
+            snapshot.put("approvalVersionId", approvalVersionId);
+            snapshot.put("previousAuthorityExists", cumulative.previousAuthorityExists());
+            snapshot.put("preApprovalAuthority", cumulative.preApprovalAuthority());
+            snapshot.put("affectedFromMonth", cumulative.affectedFromMonth());
+            snapshot.put("affectedThroughMonth", cumulative.affectedThroughMonth());
+        }
         snapshot.put("source", cumulative.source());
         snapshot.put("monthShards", cumulative.manifestMonths());
         snapshot.put("cells", cumulative.cells().stream().map(cell -> {

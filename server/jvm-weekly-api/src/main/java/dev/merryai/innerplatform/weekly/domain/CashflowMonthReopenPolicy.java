@@ -112,6 +112,62 @@ public final class CashflowMonthReopenPolicy {
         );
     }
 
+    public static DecisionTransition decideLegacy(
+        Facts facts,
+        String yearMonth,
+        long expectedRevision,
+        Decision decision
+    ) {
+        requirePeriod(yearMonth);
+        if (facts.cumulative() && !yearMonth.equals(latestSettlementMonth(facts))) {
+            throw violation(ViolationReason.LATEST_REQUEST_REQUIRED);
+        }
+        if (!facts.monthExists()) {
+            throw violation(ViolationReason.REQUEST_MISSING);
+        }
+        if (facts.monthState() != State.REOPEN_REQUESTED) {
+            throw violation(ViolationReason.NOT_AWAITING_DECISION);
+        }
+        if (facts.monthRevision() != expectedRevision) {
+            throw violation(ViolationReason.REVISION_CHANGED);
+        }
+        if (decision == null) {
+            throw violation(ViolationReason.DECISION_INVALID);
+        }
+
+        boolean approved = decision == Decision.APPROVE;
+        String dataYearMonth = facts.cumulative() && !facts.closedThrough().isBlank()
+            ? facts.closedThrough()
+            : yearMonth;
+        String nextClosedThrough = "";
+        String nextSettlementMonth = "";
+        if (approved && facts.cumulative()) {
+            nextClosedThrough = YearMonth.parse(dataYearMonth).minusMonths(1).toString();
+            nextSettlementMonth = YearMonth.parse(nextClosedThrough).plusMonths(1).toString();
+        }
+
+        return new DecisionTransition(
+            yearMonth,
+            decision,
+            expectedRevision,
+            approved ? State.OPEN : State.CLOSED,
+            increment(expectedRevision),
+            approved ? increment(facts.monthReopenCount()) : facts.monthReopenCount(),
+            approved ? increment(facts.projectWarningCount()) : facts.projectWarningCount(),
+            facts.cumulative(),
+            facts.cumulative() ? State.CLOSED : State.UNKNOWN,
+            approved && facts.cumulative() ? increment(facts.headRevision()) : facts.headRevision(),
+            nextClosedThrough,
+            nextSettlementMonth,
+            dataYearMonth,
+            facts.requestedByUid().isBlank(),
+            false,
+            "",
+            "",
+            ""
+        );
+    }
+
     private static void requireRestorationEvidence(Facts facts) {
         if (facts.approvalVersionId().isBlank()
             || facts.affectedFromMonth().isBlank()

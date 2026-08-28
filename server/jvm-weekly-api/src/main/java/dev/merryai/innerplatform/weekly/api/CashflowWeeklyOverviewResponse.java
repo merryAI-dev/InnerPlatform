@@ -1,5 +1,7 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +28,7 @@ public record CashflowWeeklyOverviewResponse(
         String projectId,
         CashflowSettlementStatusesResponse settlementStatuses,
         CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
         SettlementCycle settlementCycle
     ) {}
 

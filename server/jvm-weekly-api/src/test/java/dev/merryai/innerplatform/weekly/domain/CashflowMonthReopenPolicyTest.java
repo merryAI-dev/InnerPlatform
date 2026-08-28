@@ -147,6 +147,30 @@ class CashflowMonthReopenPolicyTest {
     }
 
     @Test
+    void legacyApprovalPreservesThePreCycleOneMonthRollbackWithoutV3Evidence() {
+        CashflowMonthReopenPolicy.Facts facts = facts(
+            true, "2026-07", "2026-06", 1,
+            true, CashflowMonthReopenPolicy.State.REOPEN_REQUESTED, 2, 0, 0, "requester-1"
+        );
+
+        CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decideLegacy(
+            facts,
+            "2026-07",
+            2,
+            CashflowMonthReopenPolicy.Decision.APPROVE
+        );
+
+        assertThat(transition.nextMonthState()).isEqualTo(CashflowMonthReopenPolicy.State.OPEN);
+        assertThat(transition.nextMonthRevision()).isEqualTo(3);
+        assertThat(transition.dataYearMonth()).isEqualTo("2026-06");
+        assertThat(transition.nextHeadState()).isEqualTo(CashflowMonthReopenPolicy.State.CLOSED);
+        assertThat(transition.nextHeadRevision()).isEqualTo(2);
+        assertThat(transition.nextClosedThrough()).isEqualTo("2026-05");
+        assertThat(transition.nextSettlementMonth()).isEqualTo("2026-06");
+        assertThat(transition.approvalVersionId()).isEmpty();
+    }
+
+    @Test
     void rejectionClosesTheRequestWithoutChangingCountersOrCumulativeHorizon() {
         CashflowMonthReopenPolicy.Facts facts = facts(
             true, "2026-08", "2026-08", 5,
