@@ -186,6 +186,16 @@ describe('계약 기간 대조 - 기간 변경의 순서를 강제한다', () =>
     const result = validatePeriodAgainstProject({ period: { start: '2026-01', end: '2026-03' }, project: {} });
     expect(result.code).toBe('participation_project_period_missing');
   });
+
+  it('종료 기간 없음 계약은 시작월만 대조하고 종료 대조 생략을 알린다', () => {
+    const openEnded = { contractStart: '2026-01-01', contractEnd: '', contractEndUndecided: true };
+    const skipped = validatePeriodAgainstProject({ period: { start: '2026-01', end: '2027-06' }, project: openEnded });
+    expect(skipped.code).toBe('participation_period_open_ended');
+    expect(skipped.message).toContain('종료 기간 없음');
+    const mismatch = validatePeriodAgainstProject({ period: { start: '2026-02', end: '2027-06' }, project: openEnded });
+    expect(mismatch.code).toBe('participation_period_mismatch');
+    expect(mismatch.message).toContain('시작월');
+  });
 });
 
 describe('신원 해석 - 못 찾는 것은 오류가 아니다', () => {

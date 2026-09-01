@@ -7,6 +7,8 @@ import {
   type PlatformApiClientLike,
 } from './platform-bff-client';
 
+/** Vercel 본문 4.5MB - base64 팽창 여유. 넘으면 서명 URL 직접 업로드로 우회한다. */
+const DIRECT_UPLOAD_THRESHOLD_BYTES = 3 * 1024 * 1024;
 export const PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 export type ProjectRegistrationDocumentKind =
@@ -37,6 +39,7 @@ export interface ProjectRegistrationDraft {
   payload: Record<string, unknown>;
   attachmentRefs: ProjectRegistrationAttachment[];
   stepIndex: number;
+  alias?: string;
   status: 'ACTIVE' | 'SUBMITTED' | 'DISCARDED';
   createdAt?: string;
   updatedAt?: string;
@@ -197,6 +200,50 @@ export function createProjectRegistrationDraftClient(options: {
       return parseDraftBody(response.data);
     },
 
+    /** 임시저장 이름(별칭) 저장. 편집 세션(리스)을 쥔 상태에서만 쓴다. */
+    async setAlias(draftId: string, ownership: { leaseId: string; fence: number }, alias: string) {
+      const response = await client.patch<unknown>(`${pathFor(draftId)}/alias`, {
+        ...request,
+        headers: ownershipHeaders(sessionId, ownership),
+        body: { alias },
+      });
+      return parseDraftBody(response.data);
+    },
+
+    /** 임시저장 삭제(소프트). 목록에서 사라지고 첨부는 서버가 정리한다. */
+    async discard(draftId: string) {
+      await client.request<unknown>(pathFor(draftId), {
+        ...request,
+        method: 'DELETE',
+        headers: sessionHeaders,
+      });
+    },
+
+    /** 내가 임시저장한 진행 중 등록 초안 요약 목록. 이어서 작성할 초안을 고르는 용도. */
+    async list() {
+      const response = await client.get<unknown>('/api/v1/project-registration-drafts', {
+        ...request,
+        headers: sessionHeaders,
+      });
+      const body = requireObject(response.data, 'draft list');
+      const rows = Array.isArray(body.drafts) ? body.drafts : [];
+      return {
+        drafts: rows.flatMap((row) => {
+          if (!row || typeof row !== 'object') return [];
+          const entry = row as Record<string, unknown>;
+          const draftId = typeof entry.draftId === 'string' ? entry.draftId.trim() : '';
+          if (!draftId) return [];
+          return [{
+            draftId,
+            alias: typeof entry.alias === 'string' ? entry.alias : '',
+            name: typeof entry.name === 'string' ? entry.name : '',
+            updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : '',
+            stepIndex: typeof entry.stepIndex === 'number' && Number.isInteger(entry.stepIndex) ? entry.stepIndex : 0,
+          }];
+        }),
+      };
+    },
+
     async save(
       draftId: string,
       ownership: { leaseId: string; fence: number },
@@ -228,17 +275,49 @@ export function createProjectRegistrationDraftClient(options: {
       }
       const bytes = new Uint8Array(await input.file.arrayBuffer());
       if (bytes.byteLength !== input.file.size) throw new Error('Attachment size does not match its content');
+      const mimeType = resolveProjectDocumentMimeType(input.documentKind, input.file);
+      const common = {
+        expectedDraftRevision: revision(input.expectedDraftRevision),
+        documentKind: input.documentKind,
+        fileName: input.file.name,
+        mimeType,
+        fileSize: input.file.size,
+      };
+
+      // Vercel 서버리스는 요청 본문을 4.5MB 에서 자른다(413). base64 팽창(~33%)을 감안해
+      // 3MB 를 넘는 파일은 BFF 가 발급한 서명 URL 로 스토리지에 직접 올리고, BFF 에는
+      // 경로만 보낸다 - 검증·저장 계약은 인라인 경로와 동일하다.
+      let contentBody: Record<string, unknown>;
+      if (input.file.size > DIRECT_UPLOAD_THRESHOLD_BYTES) {
+        const session = await client.post<unknown>(`${pathFor(draftId)}/attachments/upload-url`, {
+          ...request,
+          headers: ownershipHeaders(sessionId, ownership),
+          body: {
+            documentKind: input.documentKind,
+            fileName: input.file.name,
+            mimeType,
+            fileSize: input.file.size,
+          },
+        });
+        const sessionBody = requireObject(session.data, 'attachment upload session');
+        const uploadUrl = String(sessionBody.uploadUrl || '');
+        const storagePath = String(sessionBody.storagePath || '');
+        if (!uploadUrl || !storagePath) throw new Error('Invalid attachment upload session response');
+        const put = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'content-type': mimeType },
+          body: bytes,
+        });
+        if (!put.ok) throw new Error('파일 저장소 업로드에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+        contentBody = { ...common, storagePath };
+      } else {
+        contentBody = { ...common, contentBase64: bytesToBase64(bytes) };
+      }
+
       const response = await client.post<unknown>(`${pathFor(draftId)}/attachments`, {
         ...request,
         headers: ownershipHeaders(sessionId, ownership),
-        body: {
-          expectedDraftRevision: revision(input.expectedDraftRevision),
-          documentKind: input.documentKind,
-          fileName: input.file.name,
-          mimeType: resolveProjectDocumentMimeType(input.documentKind, input.file),
-          fileSize: input.file.size,
-          contentBase64: bytesToBase64(bytes),
-        },
+        body: contentBody,
       });
       const body = requireObject(response.data, 'draft attachment');
       return { draft: parseDraft(body.draft), attachment: parseAttachment(body.attachment) };

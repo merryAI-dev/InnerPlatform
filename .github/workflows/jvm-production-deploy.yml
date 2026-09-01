@@ -15,6 +15,23 @@ on:
         required: false
         default: false
         type: boolean
+      resume_candidate_revision:
+        description: Resume the exact zero-traffic candidate for the current main SHA
+        required: false
+        type: string
+      apply_settlement_migrations:
+        description: Apply explicitly approved v1 head migrations through the resumed JVM candidate
+        required: false
+        default: false
+        type: boolean
+      settlement_migration_projects:
+        description: Exact comma-separated project IDs approved for migration
+        required: false
+        type: string
+      settlement_migration_reason:
+        description: Audit reason for the approved migration
+        required: false
+        type: string
 
 concurrency:
   group: inner-platform-jvm-production
@@ -40,6 +57,8 @@ jobs:
     outputs:
       proceed: ${{ steps.resolve.outputs.proceed }}
       sha: ${{ steps.resolve.outputs.sha }}
+      resume_revision: ${{ steps.resolve.outputs.resume_revision }}
+      apply_migrations: ${{ steps.resolve.outputs.apply_migrations }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,6 +73,10 @@ jobs:
           DISPATCH_REF: ${{ github.ref }}
           DISPATCH_SHA: ${{ github.sha }}
           FORCE: ${{ inputs.force }}
+          RESUME_CANDIDATE_REVISION: ${{ inputs.resume_candidate_revision }}
+          APPLY_SETTLEMENT_MIGRATIONS: ${{ inputs.apply_settlement_migrations }}
+          SETTLEMENT_MIGRATION_PROJECTS: ${{ inputs.settlement_migration_projects }}
+          SETTLEMENT_MIGRATION_REASON: ${{ inputs.settlement_migration_reason }}
           CI_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
@@ -76,15 +99,64 @@ jobs:
             echo "proceed=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          if [ "${FORCE}" = "true" ]; then
-            echo "Forced deploy of ${sha}."
-            printf 'proceed=true\nsha=%s\n' "${sha}" >> "${GITHUB_OUTPUT}"
+          resume_revision="${RESUME_CANDIDATE_REVISION:-}"
+          apply_migrations="${APPLY_SETTLEMENT_MIGRATIONS:-false}"
+          if [ -n "${resume_revision}" ]; then
+            if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
+              echo "A candidate can only be resumed through the exceptional manual path." >&2
+              exit 1
+            fi
+            expected_revision="innerplatform-jvm-weekly-api-live-hotfix-${sha::8}"
+            if [ "${resume_revision}" != "${expected_revision}" ]; then
+              echo "Candidate ${resume_revision} does not match current main ${expected_revision}." >&2
+              exit 1
+            fi
+            if [ "${apply_migrations}" = "true" ]; then
+              if ! [[ "${SETTLEMENT_MIGRATION_PROJECTS}" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*(,[A-Za-z0-9][A-Za-z0-9._:-]*)*$ ]]; then
+                echo "Migration requires exact comma-separated project IDs." >&2
+                exit 1
+              fi
+              if [ -z "${SETTLEMENT_MIGRATION_REASON}" ] || [ "${#SETTLEMENT_MIGRATION_REASON}" -gt 1000 ]; then
+                echo "Migration reason must be 1..1000 characters." >&2
+                exit 1
+              fi
+            fi
+            {
+              echo "proceed=true"
+              echo "sha=${sha}"
+              echo "resume_revision=${resume_revision}"
+              echo "apply_migrations=${apply_migrations}"
+            } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          # 마지막으로 성공한 JVM 배포 이후 JVM 소스가 바뀌었는지만 본다.
-          # 성공 이력이 없으면(첫 배포) 배포한다.
-          last="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/jvm-production-deploy.yml/runs" \
-            -f status=success -f branch=main -f per_page=1 --jq '.workflow_runs[0].head_sha // ""')"
+          if [ "${apply_migrations}" = "true" ]; then
+            echo "Migration writes require resume_candidate_revision so the verified candidate is not rebuilt." >&2
+            exit 1
+          fi
+          if [ "${FORCE}" = "true" ]; then
+            echo "Forced deploy of ${sha}."
+            printf 'proceed=true\nsha=%s\nresume_revision=\napply_migrations=false\n' "${sha}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # 워크플로 자체가 success 여도 deploy job 은 skip 일 수 있다. 실제 deploy job 이
+          # 성공한 마지막 SHA 만 배포 기준으로 인정한다.
+          runs="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/jvm-production-deploy.yml/runs" \
+            -f status=success -f branch=main -f per_page=100)"
+          last=""
+          while IFS=$'\t' read -r run_id run_sha; do
+            [ -n "${run_id}" ] || continue
+            jobs="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" -f per_page=100)"
+            if jq -e '.jobs[]
+                | select(.name == "Deploy JVM candidate and promote" and .conclusion == "success")
+                | .steps[]
+                | select((.name == "Reconcile promotion traffic or roll back"
+                    or .name == "Verify canonical service after promotion")
+                  and .conclusion == "success")' \
+              <<< "${jobs}" >/dev/null; then
+              last="${run_sha}"
+              break
+            fi
+          done < <(jq -r '.workflow_runs[] | [.id, .head_sha] | @tsv' <<< "${runs}")
           if [ -z "${last}" ] || ! git cat-file -e "${last}^{commit}" 2>/dev/null; then
             echo "No usable previous successful JVM deploy; deploying ${sha}."
           elif git diff --quiet "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}; then
@@ -95,7 +167,7 @@ jobs:
             echo "JVM sources changed since ${last}:"
             git diff --name-only "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}
           fi
-          printf 'proceed=true\nsha=%s\n' "${sha}" >> "${GITHUB_OUTPUT}"
+          printf 'proceed=true\nsha=%s\nresume_revision=\napply_migrations=false\n' "${sha}" >> "${GITHUB_OUTPUT}"
 
   deploy:
     name: Deploy JVM candidate and promote
@@ -117,21 +189,31 @@ jobs:
       #   github-jvm-deployer@inner-platform-live-20260316.iam.gserviceaccount.com
       RUNTIME_SERVICE_ACCOUNT: innerplatform-jvm-runtime@inner-platform-live-20260316.iam.gserviceaccount.com
       IMAGE: asia-northeast3-docker.pkg.dev/inner-platform-live-20260316/jvm-images/innerplatform-jvm-weekly-api-live
-      JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+      VERCEL_CANONICAL_PRODUCTION_HOST: myscube.myscguard.app
+      VERCEL_CLI_PACKAGE: vercel@50.14.0
       DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
-      CASHFLOW_PROJECT_ID: p1773817948751
-      CASHFLOW_YEAR_MONTH: 2026-07
+      CASHFLOW_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
+      CASHFLOW_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
+      CASHFLOW_ACTOR_UID: ${{ vars.JVM_SETTLEMENT_CANARY_ACTOR_UID_LIVE }}
+      RESUME_CANDIDATE_REVISION: ${{ needs.preflight.outputs.resume_revision }}
+      SETTLEMENT_MIGRATION_PROJECTS: ${{ inputs.settlement_migration_projects }}
+      SETTLEMENT_MIGRATION_REASON: ${{ inputs.settlement_migration_reason }}
 
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.preflight.outputs.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
 
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
 
       - name: Verify checked out deploy target
         env:
@@ -150,26 +232,135 @@ jobs:
             | length > 0
           ' <<< "${runs}" >/dev/null
 
+      - name: Install rollout audit dependencies
+        run: npm ci --ignore-scripts
+
       # gcloud 자격증명만. 서비스 호출용 ID 토큰은 배포 뒤 서비스 URL 을 audience 로 따로 발급한다.
       - uses: google-github-actions/auth@v3
         id: auth
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
           service_account: ${{ vars.GCP_JVM_DEPLOYER_SERVICE_ACCOUNT_LIVE }}
+          export_environment_variables: false
 
       - uses: google-github-actions/setup-gcloud@v3
 
+      - name: Verify cashflow settlement split-release boundary
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+          JVM_SPLIT_RELEASE_BASE_SHA: ${{ vars.JVM_SPLIT_RELEASE_BASE_SHA_LIVE }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          normalize_live_image_digest() {
+            local image_uri="$1"
+            local expected_repository="$2"
+            local digest="${image_uri##*@}"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            test "${image_uri}" = "${expected_repository}@${digest}" || return 1
+            printf '%s\n' "${digest}"
+          }
+          service_json="$(gcloud run services describe "${SERVICE}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
+          positive_revision_count="$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")"
+          total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${service_json}")"
+          live_revision="$(jq -r '
+            [.status.traffic
+              | group_by(.revisionName)[]
+              | { revision: .[0].revisionName, percent: (map(.percent // 0) | add) }
+              | select(.percent == 100)
+              | .revision][0] // ""
+          ' <<< "${service_json}")"
+          test "${positive_revision_count}" = "1"
+          test "${total_percent}" = "100"
+          test -n "${live_revision}"
+          revision_json="$(gcloud run revisions describe "${live_revision}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
+          live_image_uri="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          live_digest="$(normalize_live_image_digest "${live_image_uri}" "${IMAGE}")"
+          jvm_deployed_sha="$(jq -r '
+            [.spec.containers[0].env[]?
+              | select(.name == "JVM_WEEKLY_COMMIT_SHA")
+              | .value]
+            | unique
+            | if length == 1 then .[0] else "" end
+          ' <<< "${revision_json}")"
+          if [ -z "${jvm_deployed_sha}" ]; then
+            [[ "${JVM_SPLIT_RELEASE_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "JVM split-release base must be a full lowercase commit SHA." >&2
+              exit 1
+            }
+            bootstrap_digest="$(gcloud artifacts docker images describe \
+              "${IMAGE}:${JVM_SPLIT_RELEASE_BASE_SHA}" \
+              --format='value(image_summary.digest)')"
+            [[ "${bootstrap_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "JVM split-release base image returned a malformed digest." >&2
+              exit 1
+            }
+            test "${bootstrap_digest}" = "${live_digest}"
+            jvm_deployed_sha="${JVM_SPLIT_RELEASE_BASE_SHA}"
+          fi
+
+          bff_identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          bff_deployed_sha="$(jq -er '
+            .commitSha
+            | select(type == "string" and test("^[0-9a-f]{40}$"))
+          ' <<< "${bff_identity}")"
+          for deployed_sha in "${jvm_deployed_sha}" "${bff_deployed_sha}"; do
+            [[ "${deployed_sha}" =~ ^[0-9a-f]{40}$ ]]
+            git cat-file -e "${deployed_sha}^{commit}"
+            git merge-base --is-ancestor "${deployed_sha}" "${DEPLOY_SHA}"
+          done
+          JVM_DEPLOY_BASE_SHA="${jvm_deployed_sha}"
+          BFF_DEPLOY_BASE_SHA="${bff_deployed_sha}"
+          node scripts/verify-cashflow-settlement-release-boundary.mjs \
+            --jvm-base "${JVM_DEPLOY_BASE_SHA}" \
+            --bff-base "${BFF_DEPLOY_BASE_SHA}" \
+            --head "${DEPLOY_SHA}"
+
       - name: Capture current live revision
         id: previous
+        env:
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
-          # 이 리전에 서비스가 아직 없으면(첫 배포) 비워 둔다. 롤백 단계는 그때 건너뛴다.
-          revision="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json 2>/dev/null \
-            | jq -r '.status.traffic[] | select(.percent == 100) | .revisionName' | head -n 1 || true)"
+          set -euo pipefail
+          service_json="$(gcloud run services describe "${SERVICE}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
+          positive_revision_count="$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")"
+          total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${service_json}")"
+          revision="$(jq -r '
+            [.status.traffic
+              | group_by(.revisionName)[]
+              | { revision: .[0].revisionName, percent: (map(.percent // 0) | add) }
+              | select(.percent == 100)
+              | .revision][0] // ""
+          ' <<< "${service_json}")"
+          test "${positive_revision_count}" = "1"
+          test "${total_percent}" = "100"
+          test -n "${revision}"
           echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
           echo "previous live revision: ${revision:-<none>}"
 
       - name: Build tested image
         id: image
+        if: needs.preflight.outputs.resume_revision == ''
+        env:
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           mvn -f server/jvm-weekly-api/pom.xml test
           gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
@@ -184,18 +375,14 @@ jobs:
 
       - name: Deploy candidate without live traffic
         id: candidate
+        if: needs.preflight.outputs.resume_revision == ''
         env:
           IMAGE_URI: ${{ steps.image.outputs.uri }}
-          PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
+          set -euo pipefail
           revision_suffix="hotfix-${DEPLOY_SHA::8}"
-          # 새 서비스의 첫 리비전은 --no-traffic 을 거부한다(gcloud 오류). 첫 배포에서만 뺀다 —
-          # 아직 아무도(BFF 포함) 이 URL 을 안 보므로 트래픽 100% 가 곧바로 붙어도 사용자 영향은 없다.
-          traffic_flag="--no-traffic"
-          if [ -z "${PREVIOUS_REVISION}" ]; then
-            echo "first deployment in ${REGION}: no previous revision, deploying with traffic"
-            traffic_flag=""
-          fi
           gcloud run deploy "${SERVICE}" \
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
@@ -203,13 +390,14 @@ jobs:
             --image "${IMAGE_URI}" \
             --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
             --revision-suffix "${revision_suffix}" \
-            ${traffic_flag} \
+            --labels "myscube-deploy-sha=${DEPLOY_SHA}" \
+            --no-traffic \
             --tag candidate \
             --ingress all \
             --min-instances 1 \
             --no-cpu-throttling \
             --liveness-probe 'httpGet.path=/api/v1/health,initialDelaySeconds=30,periodSeconds=30,timeoutSeconds=5,failureThreshold=3' \
-            --set-env-vars '^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=live|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_ALLOWED_ORIGINS=https://myscube.myscguard.app' \
+            --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=live|JVM_WEEKLY_COMMIT_SHA=${DEPLOY_SHA}|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_ALLOWED_ORIGINS=https://myscube.myscguard.app" \
             --set-secrets 'JVM_WEEKLY_INTERNAL_API_TOKEN=innerplatform-weekly-api-token:latest,JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY=innerplatform-cashflow-settled-week-confirmation-key:latest'
           revision="${SERVICE}-${revision_suffix}"
           candidate_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json \
@@ -222,6 +410,92 @@ jobs:
           echo "service_url=${service_url}" >> "${GITHUB_OUTPUT}"
           echo "service url (BFF JVM_WEEKLY_API_BASE_URL_LIVE / _ID_TOKEN_AUDIENCE_LIVE 는 이 값): ${service_url}"
 
+      - name: Resolve existing zero-traffic candidate
+        id: resumed_candidate
+        if: needs.preflight.outputs.resume_revision != ''
+        env:
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          expected_revision="${SERVICE}-hotfix-${DEPLOY_SHA::8}"
+          revision="${RESUME_CANDIDATE_REVISION}"
+          test "${revision}" = "${expected_revision}"
+          service_json="$(gcloud run services describe "${SERVICE}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format=json)"
+          candidate_url="$(jq -er --arg revision "${revision}" \
+            '.status.traffic[] | select(.revisionName == $revision and .tag == "candidate") | .url' \
+            <<< "${service_json}")"
+          candidate_percent="$(jq -r --arg revision "${revision}" \
+            '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "${service_json}")"
+          test "${candidate_percent}" = "0"
+          positive_revision_count="$(jq -r --arg revision "${revision}" \
+            '[.status.traffic[] | select((.percent // 0) > 0 and .revisionName != $revision) | .revisionName]
+              | unique | length' <<< "${service_json}")"
+          total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${service_json}")"
+          test "${positive_revision_count}" = "1"
+          test "${total_percent}" = "100"
+          service_url="$(jq -er '.status.url' <<< "${service_json}")"
+          {
+            echo "revision=${revision}"
+            echo "url=${candidate_url}"
+            echo "service_url=${service_url}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve candidate target
+        id: target
+        env:
+          DEPLOYED_REVISION: ${{ steps.candidate.outputs.revision }}
+          DEPLOYED_URL: ${{ steps.candidate.outputs.url }}
+          DEPLOYED_SERVICE_URL: ${{ steps.candidate.outputs.service_url }}
+          RESUMED_REVISION: ${{ steps.resumed_candidate.outputs.revision }}
+          RESUMED_URL: ${{ steps.resumed_candidate.outputs.url }}
+          RESUMED_SERVICE_URL: ${{ steps.resumed_candidate.outputs.service_url }}
+        run: |
+          set -euo pipefail
+          revision="${DEPLOYED_REVISION:-${RESUMED_REVISION}}"
+          candidate_url="${DEPLOYED_URL:-${RESUMED_URL}}"
+          service_url="${DEPLOYED_SERVICE_URL:-${RESUMED_SERVICE_URL}}"
+          test -n "${revision}"
+          test -n "${candidate_url}"
+          test -n "${service_url}"
+          {
+            echo "revision=${revision}"
+            echo "url=${candidate_url}"
+            echo "service_url=${service_url}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Verify candidate image and commit identity
+        env:
+          REVISION: ${{ steps.target.outputs.revision }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          expected_digest="$(gcloud artifacts docker images describe "${IMAGE}:${DEPLOY_SHA}" \
+            --format='value(image_summary.digest)')"
+          [[ "${expected_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "Candidate image returned a malformed digest." >&2
+            exit 1
+          }
+          revision_json="$(gcloud run revisions describe "${REVISION}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format=json)"
+          actual_image="$(jq -er '.status.imageDigest' <<< "${revision_json}")"
+          actual_sha="$(jq -er '
+            [.spec.containers[0].env[]
+              | select(.name == "JVM_WEEKLY_COMMIT_SHA")
+              | .value]
+            | unique
+            | if length == 1 then .[0] else error("missing or ambiguous commit SHA") end
+          ' <<< "${revision_json}")"
+          test "${actual_image}" = "${IMAGE}@${expected_digest}"
+          test "${actual_sha}" = "${DEPLOY_SHA}"
+
       # ID 토큰의 audience 는 호출받는 서비스의 URL 이어야 한다. 서비스 URL 은 배포 뒤에야
       # 확정되므로(리전 이동 첫 배포) 여기서 그 URL 로 다시 발급한다.
       - name: Mint ID token for the deployed service
@@ -231,30 +505,185 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
           service_account: ${{ vars.GCP_JVM_DEPLOYER_SERVICE_ACCOUNT_LIVE }}
           token_format: id_token
-          id_token_audience: ${{ steps.candidate.outputs.service_url }}
+          id_token_audience: ${{ steps.target.outputs.service_url }}
+          export_environment_variables: false
 
       - name: Verify candidate against legacy live read
         env:
-          CANDIDATE_URL: ${{ steps.candidate.outputs.url }}
+          CANDIDATE_URL: ${{ steps.target.outputs.url }}
+          SERVICE_URL: ${{ steps.target.outputs.service_url }}
           ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
         run: |
+          set -euo pipefail
+          test -n "${CASHFLOW_PROJECT_ID}"
+          test -n "${CASHFLOW_YEAR_MONTH}"
+          test -n "${CASHFLOW_ACTOR_UID}"
+          test -n "${SERVICE_URL}"
+
+          read_jvm() {
+            local base_url="$1"
+            local path="$2"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${ID_TOKEN}" \
+              -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+              -H 'x-tenant-id: mysc' \
+              -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+              -H 'x-actor-role: ADMIN' \
+              "${base_url}${path}"
+          }
+
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${CANDIDATE_URL}/api/v1/health" \
-            | jq -e '.ok == true and .service == "jvm-weekly-api"' >/dev/null
-          curl --fail --silent --show-error \
+            | jq -e '.ok == true and .service == "jvm-weekly-api" and (.capabilities | index("settlement-cycle-v1") != null)' >/dev/null
+
+          legacy_dashboard_path="/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"
+          canonical_legacy_dashboard="$(read_jvm "${SERVICE_URL}" "${legacy_dashboard_path}")"
+          candidate_legacy_dashboard="$(read_jvm "${CANDIDATE_URL}" "${legacy_dashboard_path}")"
+          assert_legacy_dashboard_shape() {
+            jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+                and (.cashflow == null or .cashflow.projectId == env.CASHFLOW_PROJECT_ID)
+                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)'
+          }
+          for dashboard in "${canonical_legacy_dashboard}" "${candidate_legacy_dashboard}"; do
+            assert_legacy_dashboard_shape <<< "${dashboard}" >/dev/null
+          done
+          legacy_dashboard_core() {
+            jq -S -c 'del(.settlementCycle)'
+          }
+          canonical_legacy_dashboard_core="$(legacy_dashboard_core \
+            <<< "${canonical_legacy_dashboard}")"
+          candidate_legacy_dashboard_core="$(legacy_dashboard_core \
+            <<< "${candidate_legacy_dashboard}")"
+          test "${candidate_legacy_dashboard_core}" = "${canonical_legacy_dashboard_core}"
+
+          weekly_overview_request="$(jq -cn \
+            --arg projectId "${CASHFLOW_PROJECT_ID}" \
+            --arg yearMonth "${CASHFLOW_YEAR_MONTH}" \
+            '{projectIds: [$projectId], yearMonth: $yearMonth}')"
+          canonical_weekly_overview="$(curl --fail --silent --show-error \
+            --request POST \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
-            -H 'x-actor-id: github-jvm-deployer' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
             -H 'x-actor-role: ADMIN' \
-            "${CANDIDATE_URL}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
-            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH' >/dev/null
+            -H 'content-type: application/json' \
+            --data-binary "${weekly_overview_request}" \
+            "${SERVICE_URL}/api/v1/cashflow/weekly-overview")"
+          candidate_weekly_overview="$(curl --fail --silent --show-error \
+            --request POST \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+            -H 'x-actor-role: ADMIN' \
+            -H 'content-type: application/json' \
+            --data-binary "${weekly_overview_request}" \
+            "${CANDIDATE_URL}/api/v1/cashflow/weekly-overview")"
+          jq -e '.version == "1"
+              and .yearMonth == env.CASHFLOW_YEAR_MONTH
+              and ([.items[]?
+                | select(.projectId == env.CASHFLOW_PROJECT_ID)
+                | .settlementStatuses.items[]?
+                | select(.period == "MONTH")] | length == 1)' \
+            <<< "${canonical_weekly_overview}" >/dev/null
+          jq -e '.version == "1"
+              and .yearMonth == env.CASHFLOW_YEAR_MONTH
+              and ([.items[]?
+                | select(.projectId == env.CASHFLOW_PROJECT_ID)
+                | .settlementStatuses.items[]?
+                | select(.period == "MONTH")] | length == 1)' \
+            <<< "${candidate_weekly_overview}" >/dev/null
+          legacy_weekly_overview_core() {
+            jq -S -c '.'
+          }
+          canonical_weekly_overview_core="$(legacy_weekly_overview_core \
+            <<< "${canonical_weekly_overview}")"
+          candidate_weekly_overview_core="$(legacy_weekly_overview_core \
+            <<< "${candidate_weekly_overview}")"
+          test "${candidate_weekly_overview_core}" = "${canonical_weekly_overview_core}"
+
+          weekly_overview_cycle_request="$(jq -cn \
+            --arg projectId "${CASHFLOW_PROJECT_ID}" \
+            --arg yearMonth "${CASHFLOW_YEAR_MONTH}" \
+            '{projectIds: [$projectId], yearMonth: $yearMonth, settlementCycle: true}')"
+          candidate_cycle_weekly_overview="$(curl --fail --silent --show-error \
+            --request POST \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+            -H 'x-actor-role: ADMIN' \
+            -H 'content-type: application/json' \
+            --data-binary "${weekly_overview_cycle_request}" \
+            "${CANDIDATE_URL}/api/v1/cashflow/weekly-overview")"
+          jq -e '.version == "2"
+              and .yearMonth == env.CASHFLOW_YEAR_MONTH
+              and ([.items[]?
+                | select(.projectId == env.CASHFLOW_PROJECT_ID)
+                | select(.settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH)
+                | select(.settlementCycle.health | type == "string" and length > 0)
+                | .settlementStatuses.items[]?
+                | select(.period == "MONTH")] | length == 1)' \
+            <<< "${candidate_cycle_weekly_overview}" >/dev/null
+
+          read_jvm "${CANDIDATE_URL}" \
+            "/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
+            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
+                 and (.settlementCycle.health | type == "string" and length > 0)' >/dev/null
+
+      - name: Apply explicitly approved settlement head migrations
+        if: needs.preflight.outputs.apply_migrations == 'true'
+        env:
+          CANDIDATE_URL: ${{ steps.target.outputs.url }}
+          JVM_AUDIENCE: ${{ steps.target.outputs.service_url }}
+          JVM_WEEKLY_API_ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --apply \
+            --firebase-project "${PROJECT_ID}" \
+            --confirm-project "${PROJECT_ID}" \
+            --tenant mysc \
+            --confirm-tenant mysc \
+            --allow-projects "${SETTLEMENT_MIGRATION_PROJECTS}" \
+            --people-uid "${CASHFLOW_ACTOR_UID}" \
+            --reason "${SETTLEMENT_MIGRATION_REASON}" \
+            --jvm-base-url "${CANDIDATE_URL}" \
+            --jvm-audience "${JVM_AUDIENCE}"
+
+      - name: Verify settlement-cycle inventory and BFF read compatibility
+        if: needs.preflight.outputs.apply_migrations == 'true'
+        env:
+          CANDIDATE_URL: ${{ steps.target.outputs.url }}
+          JVM_AUDIENCE: ${{ steps.target.outputs.service_url }}
+          JVM_WEEKLY_API_ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          test -n "${CASHFLOW_ACTOR_UID}"
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --firebase-project "${PROJECT_ID}" \
+            --tenant mysc \
+            --verify-cutover \
+            --people-uid "${CASHFLOW_ACTOR_UID}" \
+            --jvm-base-url "${CANDIDATE_URL}" \
+            --jvm-audience "${JVM_AUDIENCE}"
 
       - name: Promote verified candidate
         id: promote
         env:
-          REVISION: ${{ steps.candidate.outputs.revision }}
+          REVISION: ${{ steps.target.outputs.revision }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           gcloud run services update-traffic "${SERVICE}" \
             --project "${PROJECT_ID}" \
@@ -263,30 +692,132 @@ jobs:
             --set-tags "candidate=${REVISION}"
 
       - name: Verify canonical service after promotion
+        id: canonical_canary
         env:
           ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           canonical_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${canonical_url}/api/v1/health" \
-            | jq -e '.ok == true and .service == "jvm-weekly-api"' >/dev/null
+            | jq -e '.ok == true and .service == "jvm-weekly-api" and (.capabilities | index("settlement-cycle-v1") != null)' >/dev/null
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
-            -H 'x-actor-id: github-jvm-deployer' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
             -H 'x-actor-role: ADMIN' \
-            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
-            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH' >/dev/null
+            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
+            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
+                and (.settlementCycle.health | type == "string" and length > 0)' >/dev/null
 
-      - name: Roll back failed promotion
-        if: failure() && steps.promote.outcome == 'success' && steps.previous.outputs.revision != ''
+      # update-traffic 이 서버에 반영된 뒤 CLI 응답만 유실될 수 있다. step outcome만 믿지 않고
+      # 실제 traffic을 다시 읽어 성공이면 candidate 100%, 실패면 이전 revision 100%를 강제한다.
+      - name: Reconcile promotion traffic or roll back
+        if: always() && steps.target.outcome == 'success'
         env:
+          CANDIDATE_REVISION: ${{ steps.target.outputs.revision }}
           PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
+          PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
+          CANARY_OUTCOME: ${{ steps.canonical_canary.outcome }}
+          ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
+          set -euo pipefail
+          candidate_percent=""
+          previous_percent=""
+          positive_revision_count=""
+          total_percent=""
+
+          read_traffic() {
+            local traffic_json
+            traffic_json="$(gcloud run services describe "${SERVICE}" \
+              --project "${PROJECT_ID}" \
+              --region "${REGION}" \
+              --format=json)" || return 1
+            candidate_percent="$(jq -r --arg revision "${CANDIDATE_REVISION}" \
+              '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+              <<< "${traffic_json}")"
+            previous_percent="$(jq -r --arg revision "${PREVIOUS_REVISION}" \
+              '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+              <<< "${traffic_json}")"
+            positive_revision_count="$(jq -r \
+              '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+              <<< "${traffic_json}")"
+            total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${traffic_json}")"
+          }
+
+          if [ "${PROMOTE_OUTCOME}" = "success" ] && [ "${CANARY_OUTCOME}" = "success" ]; then
+            for attempt in {1..10}; do
+              if read_traffic \
+                && [ "${candidate_percent}" = "100" ] \
+                && [ "${positive_revision_count}" = "1" ] \
+                && [ "${total_percent}" = "100" ]; then
+                exit 0
+              fi
+              [ "${attempt}" = "10" ] || sleep 3
+            done
+          fi
+
+          if [ -z "${PREVIOUS_REVISION}" ]; then
+            echo "Candidate verification failed and no previous revision exists for rollback." >&2
+            exit 1
+          fi
+
+          rollback_status=0
           gcloud run services update-traffic "${SERVICE}" \
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
             --to-revisions "${PREVIOUS_REVISION}=100" \
-            --set-tags "candidate=${PREVIOUS_REVISION}"
+            --set-tags "candidate=${CANDIDATE_REVISION}" || rollback_status=$?
+
+          for attempt in {1..10}; do
+            if read_traffic \
+              && [ "${candidate_percent}" = "0" ] \
+              && [ "${previous_percent}" = "100" ] \
+              && [ "${positive_revision_count}" = "1" ] \
+              && [ "${total_percent}" = "100" ]; then
+              break
+            fi
+            [ "${attempt}" = "10" ] || sleep 3
+          done
+          test "${candidate_percent}" = "0"
+          test "${previous_percent}" = "100"
+          test "${positive_revision_count}" = "1"
+          test "${total_percent}" = "100"
+
+          echo "Verify restored canonical service after rollback"
+          assert_legacy_health() {
+            jq -e '.ok == true and .service == "jvm-weekly-api" and .runtime == "spring-boot"'
+          }
+          assert_legacy_dashboard_shape() {
+            jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
+                and (.cashflow == null or .cashflow.projectId == env.CASHFLOW_PROJECT_ID)
+                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)'
+          }
+          canonical_url="$(gcloud run services describe "${SERVICE}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            "${canonical_url}/api/v1/health" \
+            | assert_legacy_health >/dev/null
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
+            -H 'x-actor-role: ADMIN' \
+            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
+            | assert_legacy_dashboard_shape >/dev/null
+          if [ "${rollback_status}" != "0" ]; then
+            echo "Traffic rollback command lost its response, but the restored topology and canary were verified." >&2
+          fi
+          exit 1

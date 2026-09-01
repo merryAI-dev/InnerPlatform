@@ -48,6 +48,9 @@ describe('CashflowProjectSheet schedule bar', () => {
     expect(source).toContain('practitionerDoneAt: monthCloseRequest.requestedAt,');
     // 대상 월로 이름 붙인다. 사람은 "무엇을 결산했나" 로 기억한다.
     expect(source).toContain("label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`");
+    expect(source).toContain("cashflowPresentation?.monthClose.status === 'COMPLETED'");
+    expect(source).toContain('approverDoneAt: executedCycleApproved ? cashflowPresentation?.monthClose.approvedAt : null,');
+    expect(source).not.toContain("approverDoneAt: ['APPROVED', 'REOPEN_REQUESTED'].includes(status)");
   });
 
   it('keeps one month-close action button, on the node that owns the request', () => {
@@ -362,7 +365,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('isAltRow: rowIndex % 2 === 1');
     expect(source).toContain("'text-emerald-700' : 'text-red-700'");
     expect(source).toContain("'bg-[#EAF0F5] text-sky-700'");
-    expect(source).toContain('data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-border bg-border');
+    expect(source).toContain('data-cashflow-settlement-actions className={`grid gap-px overflow-hidden rounded-md border border-border bg-border');
     expect(source).toContain("surface: 'border-border bg-accent'");
     expect(source).toContain('text-card-foreground">주간 정산');
     expect(source).toContain('text-card-foreground">월 결산');
@@ -398,10 +401,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(cashflowTables).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
   });
 
-  it('shows week codes without redundant date ranges in both cashflow tables', () => {
+  it('keeps cashflow tables compact and shows server-owned date ranges in the practitioner timeline', () => {
     expect(source).toContain('{week.label}');
     expect(source).not.toContain('formatShortWeekRange');
     expect(source).not.toContain('week.weekStart.slice(5)');
+    expect(source).toContain('periodLabel: `${week.weekStart} ~ ${week.weekEnd}`');
+    expect(source).toContain('node.periodLabel ? <div className="mt-0.5 text-slate-500">{node.periodLabel}</div> : null');
   });
 
   it('keeps monthly labels while making a closed month a gray locked column group', () => {
@@ -1148,5 +1153,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('Number(change.afterAmount || 0)');
     expect(source).toContain("state === 'EMPTY' ? null : undefined");
     expect(source).toContain("<span className=\"text-red-700\">확인 불가</span>");
+  });
+
+  it('keeps the established layout by default and stacks responsive grids only in a narrow host', () => {
+    expect(source).toContain('compact = false');
+    expect(source).toContain('compact?: boolean;');
+    expect(source).toContain("compact ? '' : 'md:grid-cols-3'");
+    expect(source).toContain("compact ? '' : 'xl:grid-cols-[minmax(0,1fr)_320px]'");
   });
 });

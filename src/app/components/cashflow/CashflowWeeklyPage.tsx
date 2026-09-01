@@ -429,7 +429,7 @@ export function CashflowWeeklyPage() {
                   <th className="sticky left-0 top-0 z-40 min-w-[180px] border-b bg-slate-50 px-3 py-2 text-left font-bold">프로젝트</th>
                   <th className="sticky left-[180px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">조직장</th>
                   <th className="sticky left-[284px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">책임자</th>
-                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{overview?.monthCloseTargetLabel || '직전 월'} 결산</th>
+                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{Number(yearMonth.slice(5, 7))}월 결산</th>
                   <th className="sticky top-0 z-30 min-w-[140px] border-b border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
                   {monthWeeks.map((week) => (
                     <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
@@ -461,7 +461,7 @@ export function CashflowWeeklyPage() {
                             period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
-                            onAction={(action) => void transition(project.id, 'MONTH', action, yearMonth)}
+                            onAction={(action) => void transition(project.id, 'MONTH', action)}
                           />
                         )}
                         <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />

@@ -18,6 +18,7 @@ import {
   parseWithSchema,
   projectDraftAttachmentDeleteSchema,
   projectInfoDraftAttachmentSchema,
+  projectInfoDraftAttachmentUploadUrlSchema,
   projectInfoDraftOpenSchema,
   projectInfoDraftPatchSchema,
   projectInfoDraftRebaseSchema,
@@ -524,6 +525,21 @@ export function createProjectInfoSubmittedOutboxHandler({
   };
 }
 
+
+/** 이 프로젝트를 만든 등록(REGISTRATION) 요청이 아직 검토 대기면 그 참조를 돌려준다. */
+async function findPendingRegistrationRequestRef(db, tenantId, projectId) {
+  const snapshot = await db.collection(`orgs/${tenantId}/project_requests`)
+    .where('approvedProjectId', '==', projectId)
+    .limit(5)
+    .get();
+  const match = snapshot.docs.find((doc) => {
+    const request = doc.data() || {};
+    return readOptionalText(request.requestKind) === 'REGISTRATION'
+      && readOptionalText(request.status) === 'PENDING';
+  });
+  return match ? db.doc(`orgs/${tenantId}/project_requests/${match.id}`) : null;
+}
+
 export function createProjectInfoDraftService({
   db,
   now = () => new Date().toISOString(),
@@ -705,6 +721,9 @@ export function createProjectInfoDraftService({
 
     async withdraw(input) {
       const current = context(input);
+      // 신규 등록 검토 대기 건도 회수할 수 있어야 한다. change-{projectId} 문서가 없으면
+      // 이 프로젝트를 만든 등록 요청을 찾아 그쪽 분기로 회수한다(조회는 트랜잭션 밖, 검증은 안).
+      const registrationRequestRef = await findPendingRegistrationRequestRef(db, current.tenantId, current.projectId);
       const method = 'POST';
       const path = `/api/v1/project-info-drafts/${current.projectId}/withdraw`;
       const fingerprint = buildRequestFingerprint({
@@ -727,7 +746,99 @@ export function createProjectInfoDraftService({
         await assertLease(tx, current, nowDate);
         const request = requestSnap.exists ? (requestSnap.data() || {}) : null;
         if (!request || readOptionalText(request.requestKind) !== 'CHANGE') {
-          throw createHttpError(409, 'No change request to withdraw', 'request_not_withdrawable');
+          if (!registrationRequestRef) {
+            throw createHttpError(409, 'No change request to withdraw', 'request_not_withdrawable');
+          }
+          // ── 등록(REGISTRATION) 회수 ──
+          const registrationSnap = await tx.get(registrationRequestRef);
+          const registration = registrationSnap.exists ? (registrationSnap.data() || {}) : null;
+          if (
+            !registration
+            || readOptionalText(registration.requestKind) !== 'REGISTRATION'
+            || readOptionalText(registration.status) !== 'PENDING'
+          ) {
+            throw createHttpError(409, 'No change request to withdraw', 'request_not_withdrawable');
+          }
+          if (readOptionalText(registration.requestedBy) !== current.actorId) {
+            throw createHttpError(403, 'Only the requester can withdraw this change request', 'request_owner_mismatch');
+          }
+          const sourceDraftId = readOptionalText(registration.sourceDraftId);
+          if (!sourceDraftId) {
+            throw createHttpError(409, '등록 임시저장을 찾지 못해 회수할 수 없습니다.', 'request_not_withdrawable');
+          }
+          const registrationDraftRef = db.doc(`orgs/${current.tenantId}/projectRequestDrafts/${sourceDraftId}`);
+          const registrationDraftSnap = await tx.get(registrationDraftRef);
+          const registrationDraft = registrationDraftSnap.exists ? (registrationDraftSnap.data() || {}) : null;
+          if (!registrationDraft) {
+            throw createHttpError(409, '등록 임시저장을 찾지 못해 회수할 수 없습니다.', 'request_not_withdrawable');
+          }
+          // 제출 이벤트가 원본(사설 경로) 첨부 목록을 들고 있다 - 이관은 복사라 원본이 남아 있다.
+          const submittedOutboxId = readOptionalText(registrationDraft.submittedOutboxId);
+          const outboxSnap = submittedOutboxId ? await tx.get(db.doc(`outbox/${submittedOutboxId}`)) : null;
+          const restoredAttachmentRefs = Array.isArray(outboxSnap?.data?.()?.payload?.attachmentRefs)
+            ? outboxSnap.data().payload.attachmentRefs
+            : [];
+
+          const withdrawnRegistration = stripUndefinedDeep({
+            ...registration,
+            status: 'WITHDRAWN',
+            withdrawnAt: timestamp,
+            withdrawnBy: current.actorId,
+            withdrawnByName: current.actorDisplayName || null,
+            updatedAt: timestamp,
+          });
+          // 검토 대기 프로젝트는 폐기 상태로 내려 결재 대기열에서 뺀다. 사유는 이력에 남는다.
+          const discardedProject = stripUndefinedDeep({
+            ...project,
+            executiveReviewStatus: 'DUPLICATE_DISCARDED',
+            executiveReviewHistory: [
+              ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
+              {
+                status: 'DUPLICATE_DISCARDED',
+                previousStatus: 'PENDING',
+                reviewedAt: timestamp,
+                reviewedById: current.actorId,
+                reviewedByName: current.actorDisplayName || null,
+                reviewComment: '요청자가 등록 요청을 회수했습니다. 등록 임시저장으로 복원되었습니다.',
+              },
+            ],
+            version: (Number.isInteger(project.version) && project.version > 0 ? project.version : 1) + 1,
+            updatedBy: current.actorId,
+            updatedAt: timestamp,
+          });
+          const restoredRegistrationDraft = stripUndefinedDeep({
+            ...registrationDraft,
+            status: 'ACTIVE',
+            payload: registration.payload && typeof registration.payload === 'object'
+              ? registration.payload
+              : (registrationDraft.payload || {}),
+            attachmentRefs: restoredAttachmentRefs,
+            stepIndex: 0,
+            draftRevision: (Number.isInteger(registrationDraft.draftRevision) ? registrationDraft.draftRevision : 0) + 1,
+            submittedAt: null,
+            submittedProjectId: null,
+            submittedProjectRequestId: null,
+            submittedOutboxId: null,
+            updatedAt: timestamp,
+          });
+          await auditChainService.appendManyInTransaction(tx, [
+            auditEntry(current, actorRole, 'PROJECT_INFO_DRAFT_WITHDRAW', 0, timestamp, {
+              fence: current.fence,
+              projectRequestId: readOptionalText(registration.id) || null,
+              requestKind: 'REGISTRATION',
+              registrationDraftId: sourceDraftId,
+            }),
+          ]);
+          tx.set(registrationRequestRef, withdrawnRegistration);
+          tx.set(projectRef, discardedProject);
+          tx.set(registrationDraftRef, restoredRegistrationDraft);
+          const registrationBody = {
+            withdrawn: true,
+            kind: 'REGISTRATION',
+            registrationDraftId: sourceDraftId,
+          };
+          completeIdempotency(tx, current, lock, { method, path, status: 200, body: registrationBody }, nowDate);
+          return { status: 200, body: registrationBody, replayed: false };
         }
         // A decided request is history; only one still awaiting a decision can be pulled back.
         if (readOptionalText(request.status) !== 'PENDING') {
@@ -1021,9 +1132,24 @@ export function createProjectInfoDraftService({
       }
       const current = context(input);
       const expectedDraftRevision = Number(input?.expectedDraftRevision);
-      const buffer = Buffer.isBuffer(input?.buffer)
+      let buffer = Buffer.isBuffer(input?.buffer)
         ? input.buffer
         : (input?.buffer instanceof Uint8Array ? Buffer.from(input.buffer) : null);
+      // 큰 파일은 서명 URL 로 스토리지에 직접 올라온다(Vercel 본문 4.5MB 우회). 여기서는
+      // 그 경로를 읽어 같은 검증·저장 경로를 태운다 - 전송 수단만 다르고 계약은 같다.
+      const incomingPath = !buffer && input?.storagePath ? String(input.storagePath) : null;
+      if (incomingPath) {
+        if (!draftStorageService?.readIncomingUpload) {
+          throw createHttpError(503, '대용량 첨부 업로드가 아직 켜져 있지 않습니다.', 'draft_attachment_direct_unavailable');
+        }
+        try {
+          ({ buffer } = await draftStorageService.readIncomingUpload({
+            tenantId: current.tenantId, draftId: current.draftDocumentId, path: incomingPath,
+          }));
+        } catch {
+          throw createHttpError(422, '업로드된 파일을 찾지 못했습니다. 다시 업로드해 주세요.', 'draft_attachment_incoming_missing');
+        }
+      }
       if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0 || !buffer?.length) {
         throw createHttpError(400, 'Attachment request is invalid', 'draft_attachment_invalid');
       }
@@ -1170,11 +1296,40 @@ export function createProjectInfoDraftService({
             }
           }));
         }
+        if (incomingPath) {
+          await draftStorageService.deleteIncomingUpload?.({
+            tenantId: current.tenantId, draftId: current.draftDocumentId, path: incomingPath,
+          }).catch(() => {});
+        }
         return outcome;
       } catch (error) {
         await cleanup();
         throw error;
       }
+    },
+
+    /** 서명 URL 발급. 소유권(리스)·역할·이름/종류/크기를 먼저 확인하고 10분짜리 PUT URL 을 준다. */
+    async issueAttachmentUploadUrl(input) {
+      if (!draftStorageService?.createIncomingUploadUrl) {
+        throw createHttpError(503, '대용량 첨부 업로드가 아직 켜져 있지 않습니다.', 'draft_attachment_direct_unavailable');
+      }
+      const current = context(input);
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!DOCUMENT_KINDS.includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
+      const fileName = requiredText(input?.fileName, 'fileName');
+      const mimeType = requiredText(input?.mimeType, 'mimeType');
+      await db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const { draft } = await ownedDraft(tx, current);
+        assertActive(draft);
+        await assertLease(tx, current, nowDate);
+      });
+      const session = await draftStorageService.createIncomingUploadUrl({
+        tenantId: current.tenantId, draftId: current.draftDocumentId, fileName, mimeType,
+      });
+      return { status: 200, body: { uploadUrl: session.uploadUrl, storagePath: session.path, expiresAt: session.expiresAt } };
     },
 
     async removeAttachment(input) {
@@ -1504,6 +1659,7 @@ export function mountProjectInfoDraftRoutes(app, {
   enabled = false,
   projectInfoDraftService,
   piiProtector,
+  processOutboxEventInline,
 } = {}) {
   if (!enabled) return;
   if (!projectInfoDraftService) throw new Error('Project information draft routes require a service');
@@ -1540,12 +1696,22 @@ export function mountProjectInfoDraftRoutes(app, {
     }));
   }));
 
+  app.post('/api/v1/project-info-drafts/:projectId/attachments/upload-url', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'request a project information draft upload URL');
+    const parsed = parseWithSchema(projectInfoDraftAttachmentUploadUrlSchema, req.body);
+    sendOutcome(res, await projectInfoDraftService.issueAttachmentUploadUrl({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req),
+      ...parsed,
+    }));
+  }));
+
   app.post('/api/v1/project-info-drafts/:projectId/attachments', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'attach a project information draft file');
     const parsed = parseWithSchema(projectInfoDraftAttachmentSchema, req.body);
     sendOutcome(res, await projectInfoDraftService.addAttachment({
       ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req),
-      ...parsed, buffer: decodeBase64(parsed.contentBase64, parsed.fileSize),
+      ...parsed,
+      buffer: parsed.contentBase64 ? decodeBase64(parsed.contentBase64, parsed.fileSize) : undefined,
     }));
   }));
 
@@ -1580,8 +1746,18 @@ export function mountProjectInfoDraftRoutes(app, {
   app.post('/api/v1/project-info-drafts/:projectId/submit', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'submit a project information draft');
     const parsed = parseWithSchema(projectInfoDraftSubmitSchema, req.body);
-    sendOutcome(res, await projectInfoDraftService.submit({
+    const outcome = await projectInfoDraftService.submit({
       ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req), ...parsed,
-    }));
+    });
+    // 첨부 공개 이관을 같은 요청 안에서 처리한다. 실패해도 크론이 안전망이라 응답은 성공 그대로.
+    const outboxId = !outcome.replayed ? outcome.body?.outbox?.id : null;
+    if (outboxId && processOutboxEventInline) {
+      await processOutboxEventInline(outboxId).catch((error) => {
+        console.warn('[bff] inline info submit outbox processing failed', {
+          outboxId, errorCode: 'submit_outbox_inline_failed', message: error?.message,
+        });
+      });
+    }
+    sendOutcome(res, outcome);
   }));
 }

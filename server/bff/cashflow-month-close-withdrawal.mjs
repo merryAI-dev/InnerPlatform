@@ -16,6 +16,13 @@ function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+export function cashflowSettlementYearMonthForRequest(request) {
+  const current = objectValue(request);
+  return current.contractVersion === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+    ? readOptionalText(current.throughMonth) || readOptionalText(current.yearMonth)
+    : readOptionalText(current.yearMonth);
+}
+
 export async function withdrawPendingCumulativeCloseRequest({
   db,
   tenantId,
@@ -63,7 +70,8 @@ export async function withdrawPendingCumulativeCloseRequest({
       throw createHttpError(409, '조직장 검토가 시작되었거나 변경된 월 결산 요청은 회수할 수 없습니다.', 'cashflow_month_close_request_already_reviewed');
     }
 
-    const settlementStatusRef = db.doc(`orgs/${tenantId}/cashflow_settlement_statuses/${projectId}-${current.yearMonth}`);
+    const settlementYearMonth = cashflowSettlementYearMonthForRequest(current);
+    const settlementStatusRef = db.doc(`orgs/${tenantId}/cashflow_settlement_statuses/${projectId}-${settlementYearMonth}`);
     const settlementSnapshot = await transaction.get(settlementStatusRef);
 
     withdrawn = {
@@ -84,7 +92,7 @@ export async function withdrawPendingCumulativeCloseRequest({
       transaction.set(settlementStatusRef, {
         tenantId,
         projectId,
-        yearMonth: current.yearMonth,
+        yearMonth: settlementYearMonth,
         periods: {
           ...settlementPeriods,
           MONTH: {

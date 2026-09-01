@@ -16,6 +16,7 @@ import {
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
   processOutboxBatch,
+  processOutboxEventById,
 } from './outbox.mjs';
 import {
   createWorkQueueJob,
@@ -87,6 +88,13 @@ import { createBusinessCardGeminiAiService } from './business-card-gemini-ai.mjs
 import { createBusinessCardStorageService } from './business-card-storage.mjs';
 import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 import { createSlackAlertService } from './slack-alerts.mjs';
+import {
+  buildCashflowWeeklyDigestMessage,
+  decodeStoredName,
+  kstDayWindow,
+  kstTimeLabel,
+  selectCompletedInWindow,
+} from './cashflow-weekly-digest.mjs';
 import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterparty-budget-history.mjs';
 import {
   assertBffRuntimeSafety,
@@ -105,6 +113,7 @@ import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
 import { mountPersonRoutes } from './routes/persons.mjs';
 import { mountPersonProfessionalProfileRoutes } from './routes/person-professional-profiles.mjs';
+import { createPersonHrEvidenceStorageService } from './person-hr-evidence-storage.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { createMcpOAuthService, mountMcpOAuthRoutes } from './mcp-oauth.mjs';
@@ -770,6 +779,15 @@ export function createBffApp(options = {}) {
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
+  // 인사정보 증빙 저장소. 실패해도 명부·프로필은 살아 있어야 하므로 생성 실패를 삼킨다.
+  const personHrEvidenceStorageService = options.personHrEvidenceStorageService
+    || (() => {
+      try {
+        return createPersonHrEvidenceStorageService({});
+      } catch {
+        return null;
+      }
+    })();
   const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
     || projectRequestContractStorageService;
   const projectRegistrationDraftService = options.projectRegistrationDraftService || (editLeasesEnabled
@@ -852,6 +870,24 @@ export function createBffApp(options = {}) {
     });
   const participationRosterOutboxHandler = options.participationRosterOutboxHandler
     || createParticipationRosterChangedOutboxHandler({ db, googleSheetsService, now });
+  // outbox 소비의 단일 핸들러 맵. 크론 배치와 인라인 처리(명단 갱신 즉시 실행)가 같은 맵을
+  // 쓴다 - 두 경로가 다른 맵을 들면 한쪽만 아는 이벤트 타입이 생긴다.
+  const outboxEventHandlers = {
+    'project.registration.submitted': projectRegistrationOutboxHandler,
+    'project.info.submitted': projectInfoOutboxHandler,
+    [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
+    [PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE]: participationRosterOutboxHandler,
+  };
+  // 명단 갱신은 사람이 버튼을 누르고 결과를 기다리는 동작이다. 매일 1회 크론만 기다리게
+  // 하면 버튼이 거짓말이 된다 - enqueue 직후 같은 요청 안에서 인라인 처리한다.
+  const processRosterEventInline = (eventId) => processOutboxEventById(db, eventId, {
+    now,
+    eventHandlers: outboxEventHandlers,
+    maxAttempts: outboxMaxAttempts,
+  });
+  // 등록/수정 최종 제출의 첨부 공개 이관도 같은 이유로 인라인 처리한다. 크론(새벽 1회)만
+  // 기다리면 결재 문서의 서류 7종이 하루 종일 '미제출'로 보이고 승인도 막힌다.
+  const processSubmitOutboxInline = processRosterEventInline;
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -998,12 +1034,7 @@ export function createBffApp(options = {}) {
       limit,
       maxAttempts,
       now,
-      eventHandlers: {
-        'project.registration.submitted': projectRegistrationOutboxHandler,
-        'project.info.submitted': projectInfoOutboxHandler,
-        [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
-        [PARTICIPATION_ROSTER_CHANGED_EVENT_TYPE]: participationRosterOutboxHandler,
-      },
+      eventHandlers: outboxEventHandlers,
     });
 
     res.status(200).json({
@@ -1144,6 +1175,84 @@ export function createBffApp(options = {}) {
   });
   app.get('/api/internal/workers/client-errors/run', runClientErrorSlackWorkerRoute);
   app.post('/api/internal/workers/client-errors/run', runClientErrorSlackWorkerRoute);
+
+  // 주정산 완료를 하루치로 모아 알린다. JVM 이 쓴 완료 기록을 읽기만 하고 상태를 바꾸지 않는다.
+  const runCashflowWeeklyDigestWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || 'mysc';
+
+    if (!cashflowSlackService.enabled) {
+      res.status(200).json({
+        ok: true,
+        worker: 'cashflow_weekly_digest',
+        enabled: false,
+        reason: 'cashflow_slack_not_configured',
+        completed: 0,
+        delivered: 0,
+      });
+      return;
+    }
+
+    const at = now();
+    const window = kstDayWindow(at);
+    const snapshot = await db
+      .collection(`orgs/${tenantId}/cashflow_weekly_update_completions`)
+      .where('completedAt', '>=', window.startAt)
+      .where('completedAt', '<', window.endAt)
+      .get();
+    const completions = selectCompletedInWindow(snapshot.docs.map((doc) => doc.data() || {}), window);
+
+    const projectIds = [...new Set(completions.map((item) => readOptionalText(item.projectId)).filter(Boolean))];
+    const memberUids = [...new Set(completions.map((item) => readOptionalText(item.completedByUid)).filter(Boolean))];
+    const [projectSnapshots, memberSnapshots] = await Promise.all([
+      Promise.all(projectIds.map((id) => db.doc(`orgs/${tenantId}/projects/${id}`).get())),
+      Promise.all(memberUids.map((uid) => db.doc(`orgs/${tenantId}/members/${uid}`).get())),
+    ]);
+    const projectNames = new Map(projectSnapshots.map((snap, index) => {
+      const project = snap.exists ? snap.data() || {} : {};
+      return [projectIds[index], readOptionalText(project.name)
+        || readOptionalText(project.officialContractName)
+        || readOptionalText(project.projectCode)
+        || projectIds[index]];
+    }));
+    // 이름은 members 를 먼저 본다. 완료 기록의 completedByName 은 URL 인코딩된 채로 저장돼 있다.
+    const memberProfiles = new Map(memberSnapshots.map((snap, index) => {
+      const member = snap.exists ? snap.data() || {} : {};
+      return [memberUids[index], {
+        name: readOptionalText(member.name),
+        slackUserId: readOptionalText(member.slackUserId),
+      }];
+    }));
+
+    const entries = completions.map((item) => {
+      const profile = memberProfiles.get(readOptionalText(item.completedByUid)) || {};
+      return {
+        projectName: projectNames.get(readOptionalText(item.projectId)) || readOptionalText(item.projectId),
+        completedByName: profile.name || decodeStoredName(item.completedByName),
+        slackUserId: profile.slackUserId || '',
+      };
+    });
+    const message = buildCashflowWeeklyDigestMessage({
+      date: window.date,
+      timeLabel: kstTimeLabel(at),
+      entries,
+    });
+    if (message) {
+      await cashflowSlackService.notifyMessage(message);
+    }
+
+    res.status(200).json({
+      ok: true,
+      worker: 'cashflow_weekly_digest',
+      enabled: true,
+      tenantId,
+      date: window.date,
+      completed: entries.length,
+      delivered: message ? 1 : 0,
+    });
+  });
+  app.get('/api/internal/workers/cashflow-weekly-digest/run', runCashflowWeeklyDigestWorkerRoute);
+  app.post('/api/internal/workers/cashflow-weekly-digest/run', runCashflowWeeklyDigestWorkerRoute);
 
   app.post('/api/v1/client-errors', asyncHandler(async (req, res) => {
     req.context = await resolveApiRequestContext(req, {
@@ -1557,11 +1666,13 @@ export function createBffApp(options = {}) {
     enabled: editLeasesEnabled,
     projectRegistrationDraftService,
     piiProtector,
+    processOutboxEventInline: processSubmitOutboxInline,
   });
   mountProjectInfoDraftRoutes(app, {
     enabled: editLeasesEnabled,
     projectInfoDraftService,
     piiProtector,
+    processOutboxEventInline: processSubmitOutboxInline,
   });
   mountCashflowEditDraftRoutes(app, {
     enabled: editLeasesEnabled,
@@ -1607,10 +1718,10 @@ export function createBffApp(options = {}) {
     now,
     googleSheetsService,
     idempotencyService,
-    rbacPolicy,
-    professionalProfileCatalog,
   });
-  mountParticipationRosterRoutes(app, { db, now, idempotencyService });
+  mountParticipationRosterRoutes(app, {
+    db, now, idempotencyService, processRosterEventInline,
+  });
   mountJvmWeeklyApiRoutes(app, {
     db,
     idempotencyService,
@@ -1662,6 +1773,7 @@ export function createBffApp(options = {}) {
     auditChainService,
     piiProtector,
     rbacPolicy,
+    evidenceStorageService: personHrEvidenceStorageService,
     catalog: professionalProfileCatalog,
   });
 

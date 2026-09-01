@@ -7,7 +7,7 @@ const { mountParticipationRosterRoutes } = await import('./participation-roster.
 
 const TENANT = 'tenant-a';
 
-function createApp({ role = 'admin', documents = {}, idempotencyBegin } = {}) {
+function createApp({ role = 'admin', documents = {}, idempotencyBegin, inlineResult } = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -39,14 +39,23 @@ function createApp({ role = 'admin', documents = {}, idempotencyBegin } = {}) {
     fail: async () => { idempotencyCalls.fail += 1; },
   };
 
-  mountParticipationRosterRoutes(app, { db, now: () => '2026-08-25T09:00:00.000Z', idempotencyService });
+  const inlineCalls = [];
+  const processRosterEventInline = async (eventId) => {
+    inlineCalls.push(eventId);
+    return inlineResult ?? { processed: true, succeeded: true };
+  };
+
+  mountParticipationRosterRoutes(app, {
+    db, now: () => '2026-08-25T09:00:00.000Z', idempotencyService, processRosterEventInline,
+  });
   app.use((error, _req, res, _next) => res.status(error.statusCode || 500).json({ code: error.code, message: error.message }));
-  return { app, writes, idempotencyCalls };
+  return { app, writes, idempotencyCalls, inlineCalls };
 }
 
 const STATUS_DOCS = {
   [`orgs/${TENANT}/${PARTICIPATION_ROSTER_STATUS_COLLECTION}/sheet-ok`]: {
     spreadsheetId: 'sheet-ok', spreadsheetTitle: '참여율 사본 A',
+    sheetTabs: ['안내', '참조', '참여율 관리'],
     projects: [{ projectId: 'proj-1', projectName: '사업 하나' }],
     ok: true, lastAttemptAt: '2026-08-25T08:00:00.000Z', lastSuccessAt: '2026-08-25T08:00:00.000Z', writtenRows: 12,
   },
@@ -65,6 +74,7 @@ describe('GET /api/v1/participation-roster/push-status', () => {
     expect(res.body.counts).toEqual({ total: 2, ok: 1, failed: 1, inactive: 0 });
     expect(res.body.statuses.map((status) => status.spreadsheetTitle)).toEqual(['참여율 사본 B', '참여율 사본 A']);
     expect(res.body.statuses[0]).toMatchObject({ reason: 'permission_denied', projects: [{ projectId: 'proj-2', projectName: '사업 둘' }] });
+    expect(res.body.statuses.find((status) => status.spreadsheetId === 'sheet-ok').sheetTabs).toEqual(['안내', '참조', '참여율 관리']);
     expect(res.body.pendingPush).toEqual({ queued: 0, processing: 0, oldestQueuedAt: null });
   });
 
@@ -95,10 +105,11 @@ describe('GET /api/v1/participation-roster/push-status', () => {
 });
 
 describe('POST /api/v1/participation-roster/push', () => {
-  it('personWrite 역할이면 outbox 이벤트를 넣고 202 를 돌려준다', async () => {
-    const { app, writes, idempotencyCalls } = createApp({ role: 'finance' });
+  it('personWrite 역할이면 outbox 이벤트를 넣고 같은 요청 안에서 즉시 처리한다(200)', async () => {
+    const { app, writes, idempotencyCalls, inlineCalls } = createApp({ role: 'finance' });
     const res = await request(app).post('/api/v1/participation-roster/push');
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ processed: true, succeeded: true });
     expect(writes).toHaveLength(1);
     expect(writes[0].path).toBe(`outbox/${res.body.eventId}`);
     expect(writes[0].value).toMatchObject({
@@ -106,7 +117,19 @@ describe('POST /api/v1/participation-roster/push', () => {
       tenantId: TENANT,
       payload: { trigger: 'manual', actorId: 'actor-a' },
     });
+    expect(inlineCalls).toEqual([res.body.eventId]);
     expect(idempotencyCalls.complete).toBe(1);
+  });
+
+  it('인라인 처리가 안 되면 202 로 대기열에 남았음을 알린다 - 크론이 이어받는다', async () => {
+    const { app, writes } = createApp({
+      role: 'finance',
+      inlineResult: { processed: false, reason: 'not_claimable' },
+    });
+    const res = await request(app).post('/api/v1/participation-roster/push');
+    expect(res.status).toBe(202);
+    expect(res.body).toMatchObject({ processed: false, succeeded: false });
+    expect(writes).toHaveLength(1);
   });
 
   it('같은 idempotency 키의 재전송은 새 이벤트 대신 저장된 응답을 재생한다', async () => {

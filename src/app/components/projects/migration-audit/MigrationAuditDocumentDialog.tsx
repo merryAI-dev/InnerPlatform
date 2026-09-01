@@ -10,6 +10,7 @@ import {
   getManagementPlanningReviewLabel,
 } from '../../../platform/project-management-planning-review';
 import { ContractDocumentPreview } from '../ContractDocumentPreview';
+import { FinancialYearsTable } from './FinancialYearsTable';
 import {
   Dialog,
   DialogContent,
@@ -149,15 +150,6 @@ function formatMoney(value?: number) {
   return Number.isFinite(value) ? `${Number(value).toLocaleString('ko-KR')}원` : '-';
 }
 
-function formatFinancialYears(years: NonNullable<ReturnType<typeof resolveProjectRequestPayload>>['financialYears'] = []) {
-  return (years || []).map((row) => {
-    const payment = row.paymentPlan
-      ? ` · 입금 선금 ${formatMoney(row.paymentPlan.contract)} / 중도금 ${formatMoney(row.paymentPlan.interim)} / 잔금 ${formatMoney(row.paymentPlan.final)}`
-      : '';
-    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
-  }).join('\n') || '-';
-}
-
 function ApprovalSeal({ name, state }: { name: string; state: 'submitted' | 'approved' | 'rejected' }) {
   const tone = state === 'approved'
     ? 'border-[#174a7c] text-[#174a7c]'
@@ -232,7 +224,7 @@ export function MigrationAuditDocumentDialog({
   const financialYears = requestPayload?.financialYears ?? record.project.financialYears;
   const interestRefundPolicy = requestPayload?.interestRefundPolicy ?? record.project.interestRefundPolicy;
   const registrationNote = requestPayload?.note ?? record.project.note;
-  // 등록 확인 사항은 요청 payload 를 먼저 보고 없으면 저장된 프로젝트에서 읽는다(문서 슬롯과 같은 원천).
+  // 계약 체결 방식(모두싸인)은 요청 payload 를 먼저 보고 없으면 저장된 프로젝트에서 읽는다(문서 슬롯과 같은 원천).
   const confirmations = requestPayload?.registrationConfirmations ?? record.project.registrationConfirmations;
   const checkout = requestPayload?.checkout ?? record.project.checkout;
   const checkoutVisible = record.project.status === 'COMPLETED' || record.project.status === 'COMPLETED_PENDING_PAYMENT';
@@ -336,30 +328,48 @@ export function MigrationAuditDocumentDialog({
           </section>
 
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">기본정보</h3><dl className="border border-t-0 border-slate-400">
-            <DocumentCell label="프로젝트명" value={dossier.headerTitle} /><DocumentCell label="공식 계약명" value={dossier.identity.officialContractName} /><DocumentCell label="계약 대상" value={dossier.identity.clientOrg} /><DocumentCell label="담당조직(CIC)" value={dossier.identity.cic} /><DocumentCell label="사업 담당자" value={dossier.identity.pmName} /><DocumentCell label="프로젝트 코드" value={managementReview.projectCode || '부여 대기'} /><DocumentCell label="담당 부서" value={dossier.identity.department} /><DocumentCell label="그룹웨어명" value={dossier.identity.groupwareName} /><DocumentCell label="프로젝트 유형" value={dossier.contract.projectTypeLabel} />
+            <DocumentCell label="프로젝트명" value={dossier.headerTitle} /><DocumentCell label="공식 계약명" value={dossier.identity.officialContractName} /><DocumentCell label="계약 대상" value={dossier.identity.clientOrg} /><DocumentCell label="담당조직(CIC)" value={dossier.identity.cic} /><DocumentCell label="사업 담당자" value={dossier.identity.pmName} /><DocumentCell label="프로젝트 코드" value={managementReview.projectCode || '부여 대기'} /><DocumentCell label="담당 부서" value={dossier.identity.department} /><DocumentCell label="프로젝트 유형" value={dossier.contract.projectTypeLabel} />
           </dl></section>
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">계약/재무</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
-            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약서 유형" value={dossier.contract.contractType} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 기준" value={dossier.contract.basisLabel} /><DocumentCell label="통장 유형" value={dossier.contract.accountTypeLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="사업비 입력 방식" value={dossier.contract.fundInputModeLabel} /><DocumentCell label="통화" value={dossier.budget.currencyLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} /><DocumentCell label="총매출부가세" value={dossier.budget.salesVatAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} className="md:border-r md:border-slate-400" /><DocumentCell label="총지원금" value={dossier.budget.supportAmountLabel} /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} className="md:border-r md:border-slate-400" /><DocumentCell label="선금·중도금·잔금" value={dossier.budget.paymentPlanSplitLabel} /><DocumentCell label="잔금 메모" value={dossier.budget.finalPaymentNote} className="md:col-span-2" /><DocumentCell label="연도별 계약/재무" value={formatFinancialYears(financialYears)} className="md:col-span-2" /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" /><DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
+            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} />
+            <DocumentCell label="계약서 유형" value={dossier.contract.contractType} className="md:border-r md:border-slate-400" /><DocumentCell label="계약 체결 방식" value={confirmations?.modusignContractUsed === true ? '모두싸인' : confirmations?.modusignContractUsed === false ? `서면 계약${confirmations?.originalContractSubmitted === true ? ' · 원본 제출' : ''}` : '미입력'} />
+            <DocumentCell label="정산 기준" value={dossier.contract.basisLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="통장 유형" value={dossier.contract.accountTypeLabel} />
+            <DocumentCell label="사업비 입력 방식" value={dossier.contract.fundInputModeLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="통화" value={dossier.budget.currencyLabel} />
+            <DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총매출부가세" value={dossier.budget.salesVatAmountLabel} />
+            <DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} />
+            <DocumentCell label="총지원금" value={dossier.budget.supportAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 시스템" value={dossier.contract.settlementSystemLabel} />
+            <DocumentCell label="인건비 정산 기준" value={dossier.contract.laborSettlementBasisLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} />
+            <DocumentCell label="선금·중도금·잔금" value={dossier.budget.paymentPlanSplitLabel} className="md:col-span-2" />
+            {dossier.budget.finalPaymentExpectedWeek ? <DocumentCell label="잔금 입금 예정 주차" value={dossier.budget.finalPaymentExpectedWeek} className="md:col-span-2" /> : null}
+            {dossier.budget.advanceInterimBelow70Reason ? <DocumentCell label="선금·중도금 70% 미만 사유" value={dossier.budget.advanceInterimBelow70Reason} className="md:col-span-2" /> : null}
+            {dossier.budget.finalPaymentNote !== '-' ? <DocumentCell label="잔금 메모" value={dossier.budget.finalPaymentNote} className="md:col-span-2" /> : null}
+            <div className="grid min-h-11 grid-cols-[112px_minmax(0,1fr)] border-b border-slate-300 last:border-b-0 md:col-span-2"><dt className="flex items-center border-r border-slate-300 bg-slate-50 px-3 text-[11px] font-semibold text-slate-700">연도별 계약/재무</dt><dd className="min-w-0 px-3 py-2"><FinancialYearsTable years={financialYears} /></dd></div>
+            <DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" />
+            <DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
           </dl></section>
           {/*
             팀/인력은 dossier 가 늘 담고 있었는데 결재 문서에 그리지 않아, 누가 투입되는지
             모르는 채로 결재가 이뤄졌다. 판단에 필요한 값은 빠짐없이 문서에 남긴다.
           */}
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">팀/인력</h3><dl className="border border-t-0 border-slate-400">
-            <DocumentCell label="팀 이름" value={dossier.people.teamName} />
-            <DocumentCell
-              label="참여인력"
-              value={dossier.people.members.length > 0 ? dossier.people.members.join('\n') : '-'}
-            />
+            {dossier.people.teamName !== '-' ? <DocumentCell label="팀 이름" value={dossier.people.teamName} /> : null}
+            <DocumentCell label="실제 투입인력" value={dossier.people.staffingSummary} />
+            {/* 서류상 명단의 원천은 참여율 시트다. 문서에는 요약과 원천 링크만 남기고 시트에서 대조하게 한다. */}
+            <div className="grid min-h-11 grid-cols-[112px_minmax(0,1fr)] border-b border-slate-300 last:border-b-0">
+              <dt className="flex items-center border-r border-slate-300 bg-slate-50 px-3 text-[11px] font-semibold text-slate-700">서류상 참여인력</dt>
+              <dd className="px-3 py-2 text-[12px] leading-5 text-slate-900">
+                {dossier.people.members.length > 0 ? `${dossier.people.members.length}명 등록됨 · ` : ''}
+                월별 참여율 원본은 참여율 시트에서 확인해 주세요.
+                {dossier.people.participationSheetLink ? (
+                  <>
+                    {' '}
+                    <a className="break-all text-blue-700 underline" href={dossier.people.participationSheetLink} target="_blank" rel="noreferrer">참여율 시트 열기</a>
+                  </>
+                ) : ' (참여율 시트 링크 미등록)'}
+              </dd>
+            </div>
           </dl></section>
-          {/* 등록 확인 사항도 읽어만 두고 링크 두 개 말고는 그리지 않고 있었다. */}
-          <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 확인 사항</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
-            <DocumentCell label="인건비 4대보험 포함" value={formatConfirmation(confirmations?.laborIncludesFourInsurance)} className="md:border-r md:border-slate-400" />
-            <DocumentCell label="인건비 퇴직금 포함" value={formatConfirmation(confirmations?.laborIncludesRetirementPay)} />
-            <DocumentCell label="고객사 정산 기준 확인" value={confirmations?.customerSettlementBasisConfirmed === true ? '확인함' : '미확인'} className="md:border-r md:border-slate-400" />
-            <DocumentCell label="모두싸인으로 진행" value={formatConfirmation(confirmations?.modusignContractUsed)} />
-            <DocumentCell label="계약서 원본 제출" value={formatConfirmation(confirmations?.originalContractSubmitted)} className="md:col-span-2" />
-          </dl></section>
+
           {/* 종료사업 체크아웃. 종료 단계 사업만 뜻이 있으므로 그때만 그린다. */}
           {checkoutVisible ? (
             <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">종료사업 체크아웃</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">

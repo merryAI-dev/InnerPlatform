@@ -100,15 +100,13 @@ describe('platform-bff-client', () => {
       actor: { uid: 'admin-1', role: 'admin' },
       year: '2026',
       ruleId: 'koica',
-      education: 'MASTER_GRADUATED',
-      englishEvidence: 'TOEIC',
-      certifications: ['pmp', 'oda 전문가'],
       signal: controller.signal,
       client,
     })).resolves.toBe(snapshot);
 
+    // 학력·어학·자격 필터는 인력 명부(People)로 옮겼다. 참여율 조회는 연도와 규칙만 받는다.
     expect(client.get).toHaveBeenCalledWith(
-      '/api/v1/participation-dashboard?year=2026&ruleId=koica&education=MASTER_GRADUATED&englishEvidence=TOEIC&certification=pmp&certification=oda+%EC%A0%84%EB%AC%B8%EA%B0%80',
+      '/api/v1/participation-dashboard?year=2026&ruleId=koica',
       expect.objectContaining({ signal: controller.signal }),
     );
   });
@@ -191,18 +189,12 @@ describe('platform-bff-client', () => {
     });
   });
 
-  it('uses the canonical month-close review hook for MONTH and the status transition hook for WEEK', async () => {
+  it('uses the same JVM status transition hook for MONTH and WEEK approvals', async () => {
     const status = { projectId: 'p001', yearMonth: '2026-08', items: [] };
-    const monthRequest = {
-      requestId: 'p001-2026-08', projectId: 'p001', yearMonth: '2026-08', status: 'PENDING',
-      revision: 3, manifestHash: 'sha256:manifest', reviewWarnings: [],
-    };
     const client = asMockClient({
-      get: vi.fn()
-        .mockResolvedValueOnce({ data: { request: monthRequest } })
-        .mockResolvedValueOnce({ data: status }),
+      get: vi.fn(),
       post: vi.fn()
-        .mockResolvedValueOnce({ data: { request: { ...monthRequest, status: 'APPROVED' } } })
+        .mockResolvedValueOnce({ data: status })
         .mockResolvedValueOnce({ data: status }),
       request: vi.fn(),
     });
@@ -211,9 +203,9 @@ describe('platform-bff-client', () => {
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'MONTH', action: 'APPROVE' });
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'WEEK_2', action: 'APPROVE' });
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/requests/p001-2026-08/status-review', expect.objectContaining({
-      body: { decision: 'APPROVE', expectedRevision: 3, expectedManifestHash: 'sha256:manifest' },
-      idempotencyKey: 'cashflow-settlement:p001-2026-08:r3:approve',
+    expect(client.get).not.toHaveBeenCalled();
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
+      body: { yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' },
     }));
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
       body: { yearMonth: '2026-08', period: 'WEEK_2', action: 'APPROVE' },
@@ -285,12 +277,15 @@ describe('platform-bff-client', () => {
   it('posts all visible projects once to the weekly overview without rejecting per-project unavailable data', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `p${index + 1}`);
     const data = {
-      version: '1',
+      version: '4',
       yearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07',
+      monthCloseTargetLabel: '7월',
       items: projectIds.map((projectId) => ({
         projectId,
-        settlementStatuses: null,
+        settlementStatuses: { projectId, yearMonth: '2026-08', items: [] },
         projectionActualSummary: null,
+        sheetCapturedAt: null,
       })),
       errors: projectIds.flatMap((projectId) => [
         { projectId, code: 'STATUS_UNAVAILABLE' as const },
@@ -306,6 +301,92 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weekly-overview', expect.objectContaining({
       body: { projectIds, yearMonth: '2026-08' }, retries: 0, timeoutMs: 12000,
     }));
+  });
+
+  it('preserves a complete v4 weekly status and stored mirror item', async () => {
+    const summary = {
+      projectId: 'p001', source: 'SHEET_FORMULA' as const, sourceRevision: 'source-1', fromMonth: '2026-01',
+      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 },
+      differenceAmount: -12_345, settlementDifferenceAmount: -12_345, settlementMatches: false,
+      display: {
+        periodLabel: '누적 2026-01~2026-08 5주차', statusLabel: '불일치',
+        statusTone: 'danger' as const, differenceLabel: '차액 -12,345원',
+      },
+      periods: ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].map((period) => ({
+        period: period as 'MONTH' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4' | 'WEEK_5',
+        differenceAmount: period === 'WEEK_5' ? -12_345 : null,
+      })),
+    };
+    const status = {
+      period: 'WEEK_5' as const, status: 'COMPLETED' as const,
+      deadlineAt: '2026-08-30T15:00:00.000Z', approverDeadlineAt: '2026-08-31T04:00:00.000Z',
+      submittedAt: '2026-08-31T01:00:00.000Z', submittedBy: 'pm-1',
+      approvedAt: '2026-08-31T02:00:00.000Z', approvedBy: 'head-1', revision: 2,
+    };
+    const data = {
+      version: '4' as const, yearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
+      items: [{
+        projectId: 'p001',
+        settlementStatuses: { projectId: 'p001', yearMonth: '2026-08', items: [status] },
+        projectionActualSummary: summary,
+        sheetCapturedAt: '2026-08-25T07:48:00.000Z',
+      }],
+      errors: [],
+    };
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' },
+      projectIds: ['p001'], yearMonth: '2026-08', client,
+    })).resolves.toBe(data);
+  });
+
+  it.each([
+    ['wrong response version', (data: any) => { data.version = '3'; }],
+    ['foreign settlement project', (data: any) => { data.items[0].settlementStatuses.projectId = 'foreign'; }],
+    ['foreign settlement month', (data: any) => { data.items[0].settlementStatuses.yearMonth = '2026-07'; }],
+    ['foreign summary project', (data: any) => {
+      data.items[0].projectionActualSummary = {
+        projectId: 'foreign', source: 'SHEET_FORMULA', sourceRevision: 'source-1', fromMonth: '2026-01',
+        comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 }, differenceAmount: 1,
+        settlementDifferenceAmount: 1, settlementMatches: false, periods: [],
+      };
+    }],
+    ['summary without its stored display labels', (data: any) => {
+      data.items[0].projectionActualSummary = {
+        projectId: 'p001', source: 'SHEET_FORMULA', sourceRevision: 'source-1', fromMonth: '2026-01',
+        comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 }, differenceAmount: 1,
+        settlementDifferenceAmount: 1, settlementMatches: false, periods: [],
+      };
+    }],
+    ['malformed capture timestamp', (data: any) => { data.items[0].sheetCapturedAt = 'not-an-instant'; }],
+    ['duplicate settlement period', (data: any) => {
+      const status = {
+        period: 'WEEK_5', status: 'COMPLETED', submittedAt: '', submittedBy: '',
+        approvedAt: '', approvedBy: '', revision: 1,
+      };
+      data.items[0].settlementStatuses.items = [status, { ...status }];
+    }],
+  ])('fails closed for a weekly overview with %s', async (_label, mutate) => {
+    const data: any = {
+      version: '4', yearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
+      items: [{
+        projectId: 'p001',
+        settlementStatuses: { projectId: 'p001', yearMonth: '2026-08', items: [] },
+        projectionActualSummary: null,
+        sheetCapturedAt: '2026-08-25T07:48:00.000Z',
+      }],
+      errors: [],
+    };
+    mutate(data);
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' },
+      projectIds: ['p001'], yearMonth: '2026-08', client,
+    })).rejects.toThrow('현금흐름 현황 응답이 올바르지 않습니다.');
   });
 
   it.each([

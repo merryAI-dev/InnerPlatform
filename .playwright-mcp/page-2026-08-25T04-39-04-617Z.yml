@@ -1,0 +1,17 @@
+- generic [ref=e2]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "MYSCube" [ref=e7]
+      - heading "프로젝트 운영 플랫폼" [level=1] [ref=e8]
+      - paragraph [ref=e9]: 통합 플랫폼에 로그인하세요
+    - generic [ref=e12]:
+      - generic [ref=e13]: Firebase Auth가 비활성화되어 있습니다. 환경 설정을 확인해 주세요.
+      - button "Google 계정으로 로그인" [disabled]
+      - paragraph [ref=e17]: "`mysc.co.kr` 계정만 로그인할 수 있습니다."
+      - generic [ref=e18]:
+        - paragraph [ref=e19]: 로컬 개발용 인증 harness
+        - generic [ref=e20]:
+          - button "PM 샘플 로그인" [ref=e21]
+          - button "관리자 샘플 로그인" [ref=e22]
+    - paragraph [ref=e23]: MYSC 사업관리통합플랫폼 v1.0
+  - region "Notifications alt+T"

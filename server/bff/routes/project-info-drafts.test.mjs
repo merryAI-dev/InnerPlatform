@@ -32,9 +32,35 @@ function createDb(seed = {}) {
       ),
     };
   }
+  function collection(collectionPath) {
+    const prefix = `${collectionPath}/`;
+    const state = { filters: [], limit: Infinity };
+    const query = {
+      where(field, op, value) {
+        if (op !== '==') throw new Error('mock collection only supports ==');
+        state.filters.push([field, value]);
+        return query;
+      },
+      limit(count) {
+        state.limit = count;
+        return query;
+      },
+      async get() {
+        const docs = [...documents.entries()]
+          .filter(([docPath]) => docPath.startsWith(prefix) && !docPath.slice(prefix.length).includes('/'))
+          .map(([docPath, value]) => ({ id: docPath.slice(prefix.length), data: () => clone(value) }))
+          .filter((docRef) => state.filters.every(([field, value]) => (docRef.data() || {})[field] === value))
+          .slice(0, state.limit);
+        return { docs };
+      },
+    };
+    return query;
+  }
+
   return {
     documents,
     doc,
+    collection,
     async runTransaction(callback) {
       const writes = [];
       const tx = {
@@ -903,6 +929,39 @@ describe('project information private drafts', () => {
     expect([...h.db.documents.keys()].some((path) => path.includes('/idempotency_keys/'))).toBe(true);
     expect(h.auditChainService.appendManyInTransaction).toHaveBeenCalled();
     expect(replay).toEqual({ ...submitted, replayed: true });
+  });
+
+  it('carries staffing and settlementSystemOther changes into the change request snapshot and review diff', async () => {
+    const h = harness();
+    await openedDraft(h, 'open-staffing');
+    await h.service.update({
+      ...h.base, idempotencyKey: 'save-staffing', expectedDraftRevision: 0,
+      payload: validV2Payload({
+        settlementSystem: 'OTHER',
+        settlementSystemOther: '자체 정산 시트',
+        staffing: {
+          lead: { personId: 'person-lead', name: '김총괄', nickname: '리드' },
+          pm: { personId: 'person-pm', name: '박실무', nickname: '' },
+          operators: [{ personId: 'person-op', name: '이운영', nickname: '오퍼' }],
+          settlementSupport: '도담',
+        },
+      }),
+    });
+    await h.service.submit({
+      ...h.base, idempotencyKey: 'submit-staffing', expectedDraftRevision: 1, expectedVersion: 3,
+    });
+
+    const request = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a');
+    expect(request.proposedSnapshot.staffing).toMatchObject({
+      lead: { personId: 'person-lead' },
+      pm: { personId: 'person-pm' },
+      operators: [{ personId: 'person-op' }],
+      settlementSupport: '도담',
+    });
+    expect(request.proposedSnapshot.settlementSystemOther).toBe('자체 정산 시트');
+    const staffingChange = (request.changedFields || []).find((change) => change.key === 'staffing');
+    expect(staffingChange).toMatchObject({ label: '실제 투입인력' });
+    expect(staffingChange.after).toBe('총괄 리드 / 실무 박실무 / 운영 오퍼 / 정산지원 도담');
   });
 
   it('does not reopen organization-head review while management planning is still pending', async () => {
@@ -1970,5 +2029,137 @@ describe('project information private drafts', () => {
       expectedDraftRevision: 2,
       documentKind: 'tax_invoice',
     }));
+  });
+  it('issues a signed upload URL and accepts a storagePath attachment through the same contract', async () => {
+    const readIncomingUpload = vi.fn(async () => ({ buffer: VALID_PDF }));
+    const deleteIncomingUpload = vi.fn(async () => undefined);
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+      createIncomingUploadUrl: vi.fn(async (input) => ({
+        uploadUrl: 'https://storage.example/signed-put',
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/incoming/uuid-${input.fileName}`,
+        expiresAt: '2026-07-12T00:10:00.000Z',
+      })),
+      readIncomingUpload,
+      deleteIncomingUpload,
+    };
+    const h = harness({ storageService });
+    await openedDraft(h, 'open-direct');
+
+    const issued = await h.service.issueAttachmentUploadUrl({
+      ...h.base,
+      idempotencyKey: 'upload-url-direct',
+      documentKind: 'contract',
+      fileName: 'big-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+    });
+    expect(issued.status).toBe(200);
+    expect(issued.body.uploadUrl).toBe('https://storage.example/signed-put');
+    const { storagePath } = issued.body;
+    expect(storagePath).toContain('/incoming/');
+
+    const uploaded = await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'upload-direct',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'big-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      storagePath,
+    });
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.body.attachment.size).toBe(VALID_PDF.byteLength);
+    expect(readIncomingUpload).toHaveBeenCalledWith(expect.objectContaining({ path: storagePath }));
+    expect(deleteIncomingUpload).toHaveBeenCalledWith(expect.objectContaining({ path: storagePath }));
+  });
+
+  it('rejects a storagePath attachment when the direct upload cannot be found', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async () => { throw new Error('unexpected'); }),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+      readIncomingUpload: vi.fn(async () => { throw new Error('missing'); }),
+    };
+    const h = harness({ storageService });
+    await openedDraft(h, 'open-direct-missing');
+    await expect(h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'upload-direct-missing',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'big-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      storagePath: 'orgs/tenant-a/project-registration-drafts/x/incoming/uuid-big-contract.pdf',
+    })).rejects.toMatchObject({ code: 'draft_attachment_incoming_missing' });
+  });
+
+  it('withdraws a pending registration request back into an active registration draft', async () => {
+    const h = harness();
+    await openedDraft(h, 'open-withdraw-reg');
+    h.db.documents.set('orgs/tenant-a/project_requests/pr-registration-1', {
+      id: 'pr-registration-1',
+      tenantId: 'tenant-a',
+      requestKind: 'REGISTRATION',
+      status: 'PENDING',
+      requestedBy: 'actor-a',
+      approvedProjectId: 'project-a',
+      sourceDraftId: 'registration-draft-1',
+      payload: { name: '회수 대상 등록', registrationRequirementsVersion: 2 },
+    });
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/registration-draft-1', {
+      ownerUid: 'actor-a', ownerId: 'actor-a', tenantId: 'tenant-a',
+      resourceType: 'project-registration', resourceId: 'registration-draft-1',
+      draftRevision: 8, status: 'SUBMITTED',
+      submittedAt: '2026-08-26T02:00:00.000Z',
+      submittedProjectId: 'project-a',
+      submittedProjectRequestId: 'pr-registration-1',
+      submittedOutboxId: 'outbox-registration-1',
+      createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-26T02:00:00.000Z',
+    });
+    h.db.documents.set('outbox/outbox-registration-1', {
+      id: 'outbox-registration-1', status: 'DONE',
+      payload: {
+        attachmentRefs: [{
+          documentKind: 'contract',
+          path: 'orgs/tenant-a/project-registration-drafts/registration-draft-1/a-contract.pdf',
+          name: 'contract.pdf', size: 9, contentType: 'application/pdf',
+        }],
+      },
+    });
+
+    const withdrawn = await h.service.withdraw({ ...h.base, idempotencyKey: 'withdraw-reg' });
+    expect(withdrawn.body).toEqual({
+      withdrawn: true, kind: 'REGISTRATION', registrationDraftId: 'registration-draft-1',
+    });
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/pr-registration-1')).toMatchObject({
+      status: 'WITHDRAWN', withdrawnBy: 'actor-a',
+    });
+    expect(h.db.documents.get('orgs/tenant-a/projects/project-a')).toMatchObject({
+      executiveReviewStatus: 'DUPLICATE_DISCARDED',
+    });
+    const restored = h.db.documents.get('orgs/tenant-a/projectRequestDrafts/registration-draft-1');
+    expect(restored).toMatchObject({
+      status: 'ACTIVE', draftRevision: 9,
+      payload: { name: '회수 대상 등록' },
+      submittedProjectId: null, submittedProjectRequestId: null, submittedOutboxId: null,
+    });
+    expect(restored.attachmentRefs).toHaveLength(1);
+    expect(restored.attachmentRefs[0].path).toContain('/project-registration-drafts/registration-draft-1/');
+  });
+
+  it('still rejects withdraw when nothing is pending for the project', async () => {
+    const h = harness();
+    await openedDraft(h, 'open-withdraw-none');
+    await expect(h.service.withdraw({ ...h.base, idempotencyKey: 'withdraw-none' }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'request_not_withdrawable' });
   });
 });

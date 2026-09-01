@@ -203,6 +203,7 @@ type PortalTimelineNode = {
   kind: 'weekly' | 'monthly' | 'monthly-executed' | 'project-end';
   label: string;
   statusLabel: string;
+  periodLabel?: string;
   tone: PortalTimelineTone;
   current: boolean;
 };
@@ -378,6 +379,7 @@ export function CashflowProjectSheet({
   onExecutiveApproverSaved,
   roleOverride,
   portalMode = false,
+  compact = false,
 }: {
   projectId: string;
   projectName?: string;
@@ -392,6 +394,7 @@ export function CashflowProjectSheet({
   }) => void;
   roleOverride?: UserRole | string;
   portalMode?: boolean;
+  compact?: boolean;
   initialViewMode?: 'projection' | 'actual' | 'compare';
   onUpdateWeeklySubmissionStatus?: (input: {
     projectId: string;
@@ -1660,7 +1663,7 @@ export function CashflowProjectSheet({
    */
   const executedCycleSteps = useMemo(() => {
     if (monthCoveredByRequest || !monthCloseRequest?.requestedAt) return [];
-    const status = String(monthCloseRequest?.status || '').toUpperCase();
+    const executedCycleApproved = cashflowPresentation?.monthClose.status === 'COMPLETED';
     return buildScheduleSteps({
       practitionerLabel: '결산 요청',
       approverLabel: '조직장 승인',
@@ -1668,11 +1671,11 @@ export function CashflowProjectSheet({
       practitionerDeadline: null,
       approverDeadline: null,
       practitionerDoneAt: monthCloseRequest.requestedAt,
-      approverDoneAt: ['APPROVED', 'REOPEN_REQUESTED'].includes(status) ? monthCloseRequest?.reviewedAt : null,
-      approverDone: ['APPROVED', 'REOPEN_REQUESTED'].includes(status),
+      approverDoneAt: executedCycleApproved ? cashflowPresentation?.monthClose.approvedAt : null,
+      approverDone: executedCycleApproved,
       nowIso: new Date().toISOString(),
     });
-  }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthCloseRequest?.status, monthCoveredByRequest]);
+  }, [cashflowPresentation?.monthClose, monthCloseRequest?.requestedAt, monthCoveredByRequest]);
 
   const portalTimelineNodes = useMemo<PortalTimelineNode[]>(() => {
     if (!portalMode) return [];
@@ -1684,6 +1687,7 @@ export function CashflowProjectSheet({
           kind: 'weekly',
           label: `${week.label} 주정산`,
           statusLabel: week.statusLabel || '확인 불가',
+          periodLabel: `${week.weekStart} ~ ${week.weekEnd}`,
           tone: week.surfaceTone,
           current: week.isCurrent,
         };
@@ -3286,7 +3290,7 @@ export function CashflowProjectSheet({
 
   function renderOperationsSummary() {
     return (
-      <div className="grid gap-2 md:grid-cols-3">
+      <div className={`grid gap-2 ${compact ? '' : 'md:grid-cols-3'}`}>
         {renderRateTile('Projection', opsSummary?.rates.projection)}
         {renderRateTile('Actual', opsSummary?.rates.actual)}
         <div className="min-w-[158px] rounded-md border border-border bg-accent px-3.5 py-3 shadow-none" title="JVM 누적 Projection-Actual 요약값">
@@ -3404,6 +3408,7 @@ export function CashflowProjectSheet({
                     <div className={`min-h-10 text-[12px] leading-4 ${portalTimelineTextClass(node.tone)}`}>
                       {node.label}
                       <div className="mt-0.5">{node.statusLabel}</div>
+                      {node.periodLabel ? <div className="mt-0.5 text-slate-500">{node.periodLabel}</div> : null}
                     </div>
                     <span className={`mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full border text-[12px] font-bold ${portalTimelineDotClass(node.tone)}`}>
                       {node.tone === 'closed' || node.tone === 'success' ? '✓' : node.tone === 'danger' ? '!' : node.tone === 'warning' ? '…' : '·'}
@@ -3447,7 +3452,7 @@ export function CashflowProjectSheet({
             </div>
           ) : null}
 
-          <div data-cashflow-portal-settlement-annotations className="mt-5 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+          <div data-cashflow-portal-settlement-annotations className={`mt-5 grid gap-3 border-t border-border pt-4 ${compact ? '' : 'sm:grid-cols-2'}`}>
             <div className="text-[12px] leading-5 text-muted-foreground">
               <div className={`font-semibold ${portalTimelineTextClass(currentPresentationWeek?.surfaceTone || 'neutral')}`}>
                 이번 주 주정산 · {currentPresentationWeek?.statusLabel || '확인 불가'}
@@ -3589,7 +3594,7 @@ export function CashflowProjectSheet({
           ) : null}
 
           {portalMode ? renderPortalSettlementPanel() : (
-          <section data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <section data-cashflow-settlement-actions className={`grid gap-px overflow-hidden rounded-md border border-border bg-border ${compact ? '' : 'md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'}`}>
               <div className="bg-card px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -3934,7 +3939,7 @@ export function CashflowProjectSheet({
               ))}
             </div>
           </div>
-          <div className="mb-2 grid gap-2 sm:grid-cols-3">
+          <div className={`mb-2 grid gap-2 ${compact ? '' : 'sm:grid-cols-3'}`}>
             <Input aria-label="실제 반영 기록 검색" value={cashflowEventQuery} onChange={(event) => setCashflowEventQuery(event.target.value)} placeholder="항목·담당자 검색" />
             <select aria-label="실제 반영 구분 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 구분</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
             <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].sort((left, right) => left.localeCompare(right)).map((month) => <option key={month} value={month}>{month}</option>)}</select>
@@ -4057,7 +4062,7 @@ export function CashflowProjectSheet({
           <strong>이전 형식의 월 결산입니다.</strong> 결산 당시 저장된 값은 읽을 수 있지만, 항목별 전년도 이월 근거와 전체 동결 시트는 보관되지 않았습니다. 수정이 필요하면 재오픈 승인 후 시트값을 다시 반영하고 재결산해 주세요.
         </div>
       ) : null}
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className={`grid gap-3 ${compact ? '' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
         {renderOperationsPanel()}
         <div ref={opsTimelineRef} className="min-w-0">{renderOpsTimeline()}</div>
       </section>
@@ -4432,7 +4437,7 @@ export function CashflowProjectSheet({
                   : 'Google Sheet는 조회 전용으로 연결되며, 시트 값 반영 버튼을 누를 때만 MYSCube 시트가 바뀝니다.'}
               </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className={`grid gap-2 ${compact ? '' : 'sm:grid-cols-3'}`}>
               {(cashflowSheetConfig ? [
                 ['1', '고정본 선택', '명시적으로 연동한 시트 고정본을 사용합니다.'],
                 ['2', '시트값 반영', '시트에서 사람이 확인한 최신값을 MYSCube 시트에 바로 반영합니다.'],

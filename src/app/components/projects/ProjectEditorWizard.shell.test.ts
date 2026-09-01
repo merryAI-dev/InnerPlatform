@@ -3,24 +3,28 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectEditorWizard.tsx'), 'utf8');
+// 폼 레이아웃 체계는 project-form-layout.tsx 로 승격됐다 - 골격 계약은 그 파일을 본다.
+const layoutSource = readFileSync(resolve(import.meta.dirname, 'project-form-layout.tsx'), 'utf8');
 const adminWizardSource = readFileSync(resolve(import.meta.dirname, 'ProjectWizard.tsx'), 'utf8');
 const portalRegisterSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectRegister.tsx'), 'utf8');
 const portalEditSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectEdit.tsx'), 'utf8');
 const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
-  it('lists the seven registration documents as one table and keeps every per-slot detail', () => {
-    // 표 머리글은 이제 FORM_LABEL_CLASS(12/600) 토큰을 쓴다. 흩어진 font-medium/text-[11px]
-    // 대신 라벨 역할 하나만 남기려고 바꿨고, 열 구성과 의미는 그대로다.
-    expect(source).toContain('<th scope="col" className={cn(\'w-10 px-3 py-2\', FORM_LABEL_CLASS)}>#</th>');
-    expect(source).toContain('첨부 상태');
+  it('lists the seven registration documents as a status checklist and keeps every per-slot detail', () => {
+    // 표(5열) 대신 상태 우선 체크리스트다: 행마다 아이콘이 먼저 말하고, 액션은 오른쪽 한 곳.
+    // 미첨부는 오류가 아니라 대기이므로 필수만 앰버, 선택은 슬레이트로 말한다.
+    expect(source).toContain("divide-y divide-slate-100 border-y border-slate-200");
+    expect(source).toContain('CircleCheck className="h-4 w-4 text-emerald-600"');
+    expect(source).toContain("unmet ? 'text-amber-500' : 'text-slate-300'");
     // Stacked cards hid whether a slot was still missing; each row now states it.
     expect(source).toContain("deferred ? '이후 제출(예외 처리)' : '미첨부'");
-    expect(source).toContain('const unmet = isLinkSlot ? false');
-    // Details that only existed inside the old card must survive in the row below.
-    expect(source).toContain('const hasDetail = Boolean(uploadError || previewError || contractLocked || contractSummary)');
+    expect(source).toContain('const unmet = !attached && !deferred && slot.number <= 3');
+    // Details that only existed inside the old card must survive in the row.
     expect(source).toContain('분석 요약');
     expect(source).toContain('기존 계약서는 관리자 화면에서만 제거할 수 있습니다.');
+    expect(source).toContain('산출내역서(견적서) 이후 제출(예외 처리)');
+    expect(source).toContain("placeholder=\"https://drive.google.com/...\"");
   });
 
   it('lets an upload in flight be cancelled and takes back one that already landed', () => {
@@ -179,7 +183,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('shows which account the sheet must be shared with', () => {
     expect(source).toContain('fetchParticipationSystemAccountViaBff(');
-    expect(source).toContain('에 보기 권한으로 공유해 주세요.');
+    // 명단 자동 갱신(참조 푸시)에는 편집 권한이 필요하다 - 보기 권한 안내는 되돌아오면 안 된다.
+    expect(source).toContain('에 편집자 권한으로 공유해 주세요.');
+    expect(source).not.toContain('보기 권한으로 공유');
   });
 
   it('does not judge the sheet again in the browser', () => {
@@ -199,12 +205,13 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('uses project operations terminology and exposes currency selection', () => {
-    expect(source).toContain('참여인력 (서류상·실제)');
+    expect(source).toContain('서류상 참여인력');
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
     expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
     // 라벨은 이제 ProjectFormRow 의 라벨 열이 그린다. 개별 <Label className="text-xs"> 는 사라졌다.
-    // 통화는 별도 폼 행이 아니라 계약금액 옆 열의 드롭다운이다. 금액과 떨어지면 단위가 멀어진다.
-    expect(source).not.toContain('<ProjectFormRow label="통화">');
+    // 통화는 사업 단위로 하나라 표 밖의 단독 행에서 고른다(2026-08-26 보람). 행마다 빈
+    // 통화 칸을 두면 표가 넓어지고, 합계 행의 드롭다운은 무엇의 단위인지 읽히지 않았다.
+    expect(source).toContain('<ProjectFormRow label="통화">');
     expect(source).toContain('aria-label="통화"');
     expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
   });
@@ -569,7 +576,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('never saves or submits a stale snapshot while an attachment mutation is in flight', () => {
-    expect(source).toContain('if (uploadInProgress || hasPendingRetryFile) return false;');
+    // 자동저장 가드는 렌더 시점 값이 아니라 ref 를 즉석에서 본다 - 대기 파일을 버리고
+    // 나가는 경로에서도 임시저장이 돼야 하기 때문이다.
+    expect(source).toContain('if (uploadInProgress || pendingRetryNow) return false;');
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 임시저장해 주세요.')");
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 최종 저장해 주세요.')");
     expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || (mode === 'portal-register' && !hasRequiredRegistrationDocuments)}");
@@ -618,28 +627,33 @@ describe('ProjectEditorWizard form skeleton contract', () => {
   const renderBody = source.slice(source.indexOf('function getProjectEditorAutosaveStorageKey'));
 
   it('routes every field through one row component instead of per-field markup', () => {
-    expect(source).toContain('function ProjectFormRow(');
-    expect(source).toContain('function ProjectFormSection(');
+    expect(layoutSource).toContain('export function ProjectFormRow(');
+    expect(layoutSource).toContain('export function ProjectFormSection(');
+    // 위저드는 정의하지 않고 가져다 쓴다 - 정의가 되살아나면 이중 출처다.
+    expect(source).not.toContain('function ProjectFormRow(');
+    expect(source).toContain("from './project-form-layout'");
     // 라벨·필수·부연·도움말·오류의 자리를 한 번만 정한다.
-    expect(source).toContain('hints?: ReactNode[];');
-    expect(source).toContain('errors?: string[];');
-    expect(source).toContain('lg:grid-cols-[168px_minmax(0,1fr)]');
+    expect(layoutSource).toContain('hints?: ReactNode[];');
+    expect(layoutSource).toContain('errors?: string[];');
+    expect(layoutSource).toContain('lg:grid-cols-[168px_minmax(0,1fr)]');
+    // 컨트롤 폭 통일점 - 개별 컨트롤 max-w 금지의 근거.
+    expect(layoutSource).toContain('max-w-xl');
     // 라벨 열이 고정폭이라 `*` 가 저절로 세로 정렬된다. 왼쪽 세로 마커는 두지 않는다.
     expect(source).not.toContain('border-l-4');
   });
 
   it('keeps type to four roles and spacing to three values', () => {
-    expect(source).toContain("const FORM_SECTION_CLASS = 'text-[14px] font-bold");
-    expect(source).toContain("const FORM_LABEL_CLASS = 'text-[12px] font-semibold");
-    expect(source).toContain("const FORM_VALUE_CLASS = 'text-[13px]'");
-    expect(source).toContain("const FORM_NUMERIC_VALUE_CLASS = 'text-[13px] tabular-nums'");
-    expect(source).toContain("const FORM_HINT_CLASS = 'text-[11px] font-normal");
+    expect(layoutSource).toContain("export const FORM_SECTION_CLASS = 'text-[14px] font-bold");
+    expect(layoutSource).toContain("export const FORM_LABEL_CLASS = 'text-[12px] font-semibold");
+    expect(layoutSource).toContain("export const FORM_VALUE_CLASS = 'text-[13px]'");
+    expect(layoutSource).toContain("export const FORM_NUMERIC_VALUE_CLASS = 'text-[13px] tabular-nums'");
+    expect(layoutSource).toContain("export const FORM_HINT_CLASS = 'text-[11px] font-normal");
     // text-xs 와 text-[12px] 는 같은 12px 를 두 이름으로 부르던 중복이었다. 이름을 하나로 모았다.
     expect(renderBody).not.toContain('text-xs');
     expect(renderBody).not.toContain('text-[10px]');
     expect(renderBody).not.toContain("'text-[12px]");
-    expect(source).toContain("const FORM_FIELD_STACK_CLASS = 'space-y-4'");
-    expect(source).toContain("const FORM_SECTION_STACK_CLASS = 'space-y-6'");
+    expect(layoutSource).toContain("export const FORM_FIELD_STACK_CLASS = 'space-y-4'");
+    expect(layoutSource).toContain("export const FORM_SECTION_STACK_CLASS = 'space-y-6'");
   });
 
   it('gives the accent colour exactly one meaning and keeps errors red', () => {
@@ -739,7 +753,7 @@ describe('ProjectEditorWizard safe exit contract', () => {
 // 사람이 그 칸을 영영 만나지 못한다(보람: "거기 넣으면 아무도 모른다").
 describe('참여율 시트 링크 자리', () => {
   it('참여인력 섹션 안에 있고 연동 결과 표보다 먼저 나온다', () => {
-    const sectionAt = source.indexOf('title="참여인력 (서류상·실제)"');
+    const sectionAt = source.indexOf('title="서류상 참여인력"');
     const linkAt = source.indexOf('label="참여율 시트 링크"');
     const teamListAt = source.indexOf('시트 링크를 넣고 연동하기를 누르면');
     expect(sectionAt).toBeGreaterThan(-1);

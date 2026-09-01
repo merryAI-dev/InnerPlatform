@@ -6,9 +6,12 @@ import {
   EmploymentChangeError,
   resolveAssignability,
   resolveCurrentEmployment,
+  resolveLeaveOrSeparation,
   resolveEmploymentAt,
   resolveSeparationDate,
   selectableAt,
+  deriveAge,
+  deriveYearsSinceDegree,
   type Person,
   type PersonEmployment,
 } from './person-employment';
@@ -26,6 +29,7 @@ function person(overrides: Partial<Person> = {}): Person {
     departmentSub: '',
     title: '실장/팀장',
     grade: '책임컨설턴트',
+    birthDate: '1990-03-15',
     workLocation: '',
     joinedAt: '2015-04-10',
     uid: 'uid-1',
@@ -235,5 +239,64 @@ describe('배정 후보 선별', () => {
 
   it('과거 시점으로 물으면 퇴사자도 후보다', () => {
     expect(selectableAt(people, '2025-06-01').map((item) => item.personId)).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+describe('deriveAge — 만 나이', () => {
+  it('생일이 지났으면 그해 나이, 안 지났으면 한 살 적다', () => {
+    expect(deriveAge('1990-03-15', '2026-03-15')).toBe(36);
+    expect(deriveAge('1990-03-15', '2026-03-14')).toBe(35);
+    expect(deriveAge('1990-12-31', '2026-01-01')).toBe(35);
+  });
+
+  it('생년월일이 없거나 형식이 아니거나 미래면 계산하지 않는다', () => {
+    expect(deriveAge('', '2026-03-15')).toBeNull();
+    expect(deriveAge(null, '2026-03-15')).toBeNull();
+    expect(deriveAge('1990-03', '2026-03-15')).toBeNull();
+    expect(deriveAge('2027-01-01', '2026-03-15')).toBeNull();
+  });
+});
+
+describe('deriveYearsSinceDegree — 학위 취득 후 경력', () => {
+  it('졸업증에 찍힌 해로부터 몇 해가 지났는지 센다 — KOICA 제안서가 보는 값이다', () => {
+    expect(deriveYearsSinceDegree('2017', '2026-08-27')).toBe(9);
+    expect(deriveYearsSinceDegree('2026', '2026-01-01')).toBe(0);
+  });
+
+  it('없거나 형식이 아니거나 미래 학위면 계산하지 않는다', () => {
+    expect(deriveYearsSinceDegree('', '2026-08-27')).toBeNull();
+    expect(deriveYearsSinceDegree(null, '2026-08-27')).toBeNull();
+    expect(deriveYearsSinceDegree('17', '2026-08-27')).toBeNull();
+    expect(deriveYearsSinceDegree('2030', '2026-08-27')).toBeNull();
+  });
+});
+
+describe('휴직·퇴사일', () => {
+  const base = (employments: unknown): Person => ({
+    personId: 'p1', name: '홍길동', nickname: '', email: '',
+    departmentTop: '', departmentMid: '', departmentSub: '', title: '', grade: '',
+    birthDate: '', workLocation: '', joinedAt: '2020-01-01', uid: null, employments,
+  } as unknown as Person);
+
+  it('휴직 중이면 그 계약이 시작된 날을 휴직일로 돌려준다', () => {
+    const person = base([
+      { type: 'FULL_TIME', state: 'WORKING', startDate: '2020-01-01', endDate: '2026-02-28' },
+      { type: 'FULL_TIME', state: 'PARENTAL_LEAVE', startDate: '2026-03-01', endDate: null },
+    ]);
+    expect(resolveLeaveOrSeparation(person, '2026-08-27')).toEqual({ kind: 'LEAVE', date: '2026-03-01' });
+  });
+
+  it('열린 계약이 없으면 마지막 종료일을 퇴사일로 돌려준다', () => {
+    const person = base([
+      { type: 'FULL_TIME', state: 'WORKING', startDate: '2020-01-01', endDate: '2026-05-31' },
+    ]);
+    expect(resolveLeaveOrSeparation(person, '2026-08-27')).toEqual({ kind: 'SEPARATED', date: '2026-05-31' });
+  });
+
+  it('정상 재직 중이면 보여 줄 날짜가 없다', () => {
+    const person = base([
+      { type: 'FULL_TIME', state: 'WORKING', startDate: '2020-01-01', endDate: null },
+    ]);
+    expect(resolveLeaveOrSeparation(person, '2026-08-27')).toBeNull();
   });
 });

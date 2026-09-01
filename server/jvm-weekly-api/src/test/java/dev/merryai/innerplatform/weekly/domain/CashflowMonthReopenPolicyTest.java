@@ -93,10 +93,11 @@ class CashflowMonthReopenPolicyTest {
     }
 
     @Test
-    void approvalOwnsNextStateAndRetreatsOnlyTheCanonicalCumulativeDataHorizon() {
-        CashflowMonthReopenPolicy.Facts facts = facts(
+    void approvalRestoresTheExactPreApprovalAuthorityAcrossACatchUpRange() {
+        CashflowMonthReopenPolicy.Facts facts = cumulativeFacts(
             true, "2026-08", "2026-07", 5,
-            true, CashflowMonthReopenPolicy.State.REOPEN_REQUESTED, 3, 1, 6, "requester-1"
+            true, CashflowMonthReopenPolicy.State.REOPEN_REQUESTED, 3, 1, 6, "requester-1",
+            true, "2026-06", "2026-05", "2026-06", "2026-07", "project-a-2026-08-r1"
         );
 
         CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decide(
@@ -113,10 +114,60 @@ class CashflowMonthReopenPolicyTest {
         assertThat(transition.dataYearMonth()).isEqualTo("2026-07");
         assertThat(transition.nextHeadState()).isEqualTo(CashflowMonthReopenPolicy.State.CLOSED);
         assertThat(transition.nextHeadRevision()).isEqualTo(6);
-        assertThat(transition.nextClosedThrough()).isEqualTo("2026-06");
-        assertThat(transition.nextSettlementMonth()).isEqualTo("2026-07");
+        assertThat(transition.nextClosedThrough()).isEqualTo("2026-05");
+        assertThat(transition.nextSettlementMonth()).isEqualTo("2026-06");
+        assertThat(transition.previousAuthorityExists()).isTrue();
+        assertThat(transition.affectedFromMonth()).isEqualTo("2026-06");
+        assertThat(transition.affectedThroughMonth()).isEqualTo("2026-07");
+        assertThat(transition.approvalVersionId()).isEqualTo("project-a-2026-08-r1");
         assertThat(transition.legacyRequesterMissing()).isFalse();
         assertThat(transition.updatesHeadAuthority()).isTrue();
+    }
+
+    @Test
+    void firstApprovalReopenProducesAnExplicitAuthorityTombstone() {
+        CashflowMonthReopenPolicy.Facts facts = cumulativeFacts(
+            true, "2026-08", "2026-07", 1,
+            true, CashflowMonthReopenPolicy.State.REOPEN_REQUESTED, 2, 0, 0, "requester-1",
+            false, "", "", "2026-01", "2026-07", "project-a-2026-08-r1"
+        );
+
+        CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decide(
+            facts,
+            "2026-08",
+            2,
+            CashflowMonthReopenPolicy.Decision.APPROVE
+        );
+
+        assertThat(transition.previousAuthorityExists()).isFalse();
+        assertThat(transition.nextHeadState()).isEqualTo(CashflowMonthReopenPolicy.State.OPEN);
+        assertThat(transition.nextHeadRevision()).isEqualTo(2);
+        assertThat(transition.nextClosedThrough()).isEmpty();
+        assertThat(transition.nextSettlementMonth()).isEmpty();
+    }
+
+    @Test
+    void legacyApprovalPreservesThePreCycleOneMonthRollbackWithoutV3Evidence() {
+        CashflowMonthReopenPolicy.Facts facts = facts(
+            true, "2026-07", "2026-06", 1,
+            true, CashflowMonthReopenPolicy.State.REOPEN_REQUESTED, 2, 0, 0, "requester-1"
+        );
+
+        CashflowMonthReopenPolicy.DecisionTransition transition = CashflowMonthReopenPolicy.decideLegacy(
+            facts,
+            "2026-07",
+            2,
+            CashflowMonthReopenPolicy.Decision.APPROVE
+        );
+
+        assertThat(transition.nextMonthState()).isEqualTo(CashflowMonthReopenPolicy.State.OPEN);
+        assertThat(transition.nextMonthRevision()).isEqualTo(3);
+        assertThat(transition.dataYearMonth()).isEqualTo("2026-06");
+        assertThat(transition.nextHeadState()).isEqualTo(CashflowMonthReopenPolicy.State.CLOSED);
+        assertThat(transition.nextHeadRevision()).isEqualTo(2);
+        assertThat(transition.nextClosedThrough()).isEqualTo("2026-05");
+        assertThat(transition.nextSettlementMonth()).isEqualTo("2026-06");
+        assertThat(transition.approvalVersionId()).isEmpty();
     }
 
     @Test
@@ -205,6 +256,44 @@ class CashflowMonthReopenPolicyTest {
             reopenCount,
             projectWarningCount,
             requestedByUid
+        );
+    }
+
+    private static CashflowMonthReopenPolicy.Facts cumulativeFacts(
+        boolean cumulative,
+        String settlementMonth,
+        String closedThrough,
+        long headRevision,
+        boolean monthExists,
+        CashflowMonthReopenPolicy.State monthState,
+        long monthRevision,
+        long reopenCount,
+        long projectWarningCount,
+        String requestedByUid,
+        boolean previousAuthorityExists,
+        String previousSettlementMonth,
+        String previousClosedThrough,
+        String affectedFromMonth,
+        String affectedThroughMonth,
+        String approvalVersionId
+    ) {
+        return new CashflowMonthReopenPolicy.Facts(
+            cumulative,
+            settlementMonth,
+            closedThrough,
+            headRevision,
+            monthExists,
+            monthState,
+            monthRevision,
+            reopenCount,
+            projectWarningCount,
+            requestedByUid,
+            previousAuthorityExists,
+            previousSettlementMonth,
+            previousClosedThrough,
+            affectedFromMonth,
+            affectedThroughMonth,
+            approvalVersionId
         );
     }
 

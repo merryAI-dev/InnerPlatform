@@ -15,6 +15,8 @@ const ADMIN_ENTRY_POINTS = [
 const PM_ENTRY_POINTS = [
   { label: '프로젝트 선택', to: '/portal/project-select' },
   { label: '프로젝트 등록 요청', to: '/portal/register-project' },
+  // 자기 인사정보를 넣는 자리. 프로젝트 일 못지않게 자주 찾는다.
+  { label: '마이페이지', to: '/portal/career-profile' },
 ];
 
 export function FeatureSearchPage() {

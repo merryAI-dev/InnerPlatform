@@ -46,6 +46,7 @@ import {
   readCashflowCumulativeCloseAuthority,
 } from '../cashflow-close-calendar.mjs';
 import {
+  cashflowSettlementYearMonthForRequest,
   cashflowMonthCloseRequestAuditPath,
   cashflowMonthCloseRequestPath,
   withdrawPendingCumulativeCloseRequest,
@@ -433,25 +434,49 @@ export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, 
   return isCurrent ? 'current' : 'default';
 }
 
-function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable) {
+function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable, settlementStatus) {
   if (!requestAvailable || readOptionalText(close?.status) === 'UNAVAILABLE') {
     return { statusLabel: '상태 재확인 필요', tone: 'danger' };
   }
   const requestStatus = readOptionalText(requestRecord?.status);
-  if (['PENDING', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)) {
-    return { statusLabel: '조직장 승인 대기', tone: 'warning' };
-  }
-  if (requestStatus === 'APPROVED' || (!requestRecord && readOptionalText(close?.status) === 'CLOSED')) {
-    return { statusLabel: '월 결산 완료', tone: 'success' };
-  }
   if (requestStatus === 'REOPEN_REQUESTED') return { statusLabel: '재오픈 승인 대기', tone: 'warning' };
   if (requestStatus === 'REOPENED') return { statusLabel: '재결산 필요', tone: 'warning' };
   if (requestStatus === 'REJECTED') return { statusLabel: '월 결산 반려', tone: 'danger' };
+  if (requestStatus === 'APPROVED') {
+    return {
+      status: 'COMPLETED',
+      statusLabel: '월 결산 완료',
+      tone: 'success',
+      approvedAt: readOptionalText(requestRecord?.reviewedAt),
+    };
+  }
+  const canonicalStatus = readOptionalText(settlementStatus?.status);
+  if (canonicalStatus === 'COMPLETED') {
+    return {
+      status: 'COMPLETED',
+      statusLabel: '월 결산 완료',
+      tone: 'success',
+      approvedAt: readOptionalText(settlementStatus?.approvedAt),
+    };
+  }
+  if (canonicalStatus === 'PENDING_APPROVAL') {
+    return { status: 'PENDING_APPROVAL', statusLabel: '조직장 승인 대기', tone: 'warning', approvedAt: '' };
+  }
+  if (canonicalStatus === 'WAITING_FOR_UPDATE') {
+    return { status: 'WAITING_FOR_UPDATE', statusLabel: '결산 전', tone: 'neutral', approvedAt: '' };
+  }
+  // canonical JVM 상태가 없는 기존 결산 요청만 호환한다. JVM 상태가 있으면 위 값이 항상 우선한다.
+  if (['PENDING', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)) {
+    return { statusLabel: '조직장 승인 대기', tone: 'warning' };
+  }
+  if (!requestRecord && readOptionalText(close?.status) === 'CLOSED') {
+    return { statusLabel: '월 결산 완료', tone: 'success' };
+  }
   return { statusLabel: '결산 전', tone: 'neutral' };
 }
 
 function buildCashflowMonthClosePresentation({
-  dashboard, close, requestRecord, requestAvailable, comparisonBoundary,
+  dashboard, close, requestRecord, requestAvailable, settlementStatus, comparisonBoundary,
 }) {
   const weeklyYear = readWeeklyYear(dashboard?.canonical?.weeklyYear);
   const annualYears = weeklyYear === null ? [] : annualYearsFor(weeklyYear);
@@ -565,7 +590,7 @@ function buildCashflowMonthClosePresentation({
       changed: comparisonCells.some((cell) => cell.difference !== null && cell.difference !== 0),
       periodLabel: `${periodStart} ~ ${effectiveAsOfWeek?.yearMonth} ${effectiveAsOfWeek?.weekNo}주차`,
     },
-    monthClose: cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable),
+    monthClose: cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable, settlementStatus),
     evidenceSource: 'DASHBOARD',
   };
 }
@@ -716,16 +741,6 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
       ? project.items
       : project?.settlementStatuses?.items;
     if (!projectId || !yearMonth || !Array.isArray(statusItems)) return;
-    const snapshot = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
-    const requestStatus = snapshot.exists ? readOptionalText(snapshot.data()?.status) : '';
-    // 요청 문서가 없으면 월 상태는 JVM 이 준 것을 그대로 둔다. 마감은 그것과 무관하게 붙인다.
-    const status = !snapshot.exists
-      ? null
-      : requestStatus === 'APPROVED'
-        ? 'COMPLETED'
-        : ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
-          ? 'PENDING_APPROVAL'
-          : 'WAITING_FOR_UPDATE';
     // 마감의 단일 소스는 JVM 이다 (CashflowWeekDeadline). JVM 이 보낸 값을 그대로 쓰고,
     // 아직 값을 보내지 않는 구버전 응답에만 parity 표 사본으로 채운다. 사본이 판정을
     // 이기기 시작하면 규칙이 조용히 갈린다 - 그래서 순서가 JVM 먼저다.
@@ -739,9 +754,7 @@ async function alignMonthSettlementStatus(db, tenantId, result) {
         || cashflowWeeklyApproverDeadlineAt(deadlineAt);
       return { ...item, deadlineAt, approverDeadlineAt };
     };
-    const alignedItems = statusItems
-      .map((item) => (status && item.period === 'MONTH' ? { ...item, status } : item))
-      .map(withDeadlines);
+    const alignedItems = statusItems.map(withDeadlines);
     if (Array.isArray(project?.items)) {
       project.items = alignedItems;
     } else {
@@ -2862,6 +2875,97 @@ function sheetFormulaProjectionActualSummary({ projectId, mirror, comparisonBoun
   };
 }
 
+function storedSheetFormulaProjectionActualSummary({ projectId, mirror, comparisonBoundary, yearMonth = '' }) {
+  if (mirror?.projectId !== projectId) return null;
+  const rawRows = mirror?.sheetFacts?.projectionActualDifferences;
+  if (!Array.isArray(rawRows) || rawRows.length === 0) return null;
+  const rows = rawRows.map((row) => {
+    const rowYearMonth = row?.yearMonth;
+    const rowWeekNo = row?.weekNo;
+    const rowAmount = row?.amount;
+    if (typeof rowYearMonth !== 'string'
+      || rowYearMonth.trim() !== rowYearMonth
+      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(rowYearMonth)
+      || typeof rowWeekNo !== 'number'
+      || !Number.isInteger(rowWeekNo)
+      || rowWeekNo < 1
+      || rowWeekNo > 5
+      || (rowAmount !== null
+        && (typeof rowAmount !== 'number' || !Number.isSafeInteger(rowAmount)))) return null;
+    return { yearMonth: rowYearMonth, weekNo: rowWeekNo, amount: rowAmount };
+  });
+  if (rows.some((row) => !row)) return null;
+  const keys = rows.map((row) => `${row.yearMonth}:${row.weekNo}`);
+  if (new Set(keys).size !== keys.length) return null;
+
+  const asOf = comparisonBoundary?.asOfWeek;
+  const latest = rows
+    .filter((row) => row.amount !== null
+      && (row.yearMonth < asOf?.yearMonth
+        || (row.yearMonth === asOf?.yearMonth && row.weekNo <= asOf?.weekNo)))
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
+    .at(-1);
+  if (!latest) return null;
+  const requestedMonth = yearMonth || latest.yearMonth;
+  const periods = ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].map((period) => {
+    if (period === 'MONTH') return { period, differenceAmount: latest.amount };
+    const weekNo = Number(period.slice(-1));
+    const value = rows.find((row) => row.yearMonth === requestedMonth && row.weekNo === weekNo);
+    return { period, differenceAmount: value?.amount ?? null };
+  });
+  const fromMonth = `${latest.yearMonth.slice(0, 4)}-01`;
+  const settlementMatches = latest.amount === 0;
+  return {
+    projectId,
+    source: 'SHEET_FORMULA',
+    sourceRevision: readOptionalText(mirror.sourceRevision),
+    fromMonth,
+    comparisonAsOfWeek: { yearMonth: latest.yearMonth, weekNo: latest.weekNo },
+    differenceAmount: latest.amount,
+    settlementDifferenceAmount: latest.amount,
+    settlementMatches,
+    display: {
+      periodLabel: `누적 ${fromMonth}~${latest.yearMonth} ${latest.weekNo}주차`,
+      statusLabel: settlementMatches ? '일치 · 100%' : '불일치',
+      statusTone: settlementMatches ? 'success' : 'danger',
+      differenceLabel: `차액 ${latest.amount.toLocaleString('ko-KR')}원`,
+    },
+    periods,
+  };
+}
+
+function storedMirrorCapturedAt(projectId, mirror) {
+  if (mirror?.projectId !== projectId) return null;
+  return validJvmInstant(mirror?.capturedAt) ? mirror.capturedAt : null;
+}
+
+async function readWeeklyOverviewMirrors({ db, tenantId, projectIds, comparisonBoundary, yearMonth }) {
+  if (!db?.doc || typeof db.getAll !== 'function') throw new Error('cashflow mirror batch store unavailable');
+  const refs = projectIds.map((projectId) => db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`));
+  const snapshots = await db.getAll(...refs, {
+    fieldMask: [
+      'projectId',
+      'weeklyYear',
+      'sourceRevision',
+      'capturedAt',
+      'sheetFacts.projectionActualDifferences',
+    ],
+  });
+  if (!Array.isArray(snapshots) || snapshots.length !== projectIds.length) {
+    throw new Error('cashflow mirror batch response invalid');
+  }
+  return new Map(projectIds.map((projectId, index) => {
+    const snapshot = snapshots[index];
+    const mirror = snapshot?.exists ? snapshot.data() || {} : null;
+    return [projectId, {
+      projectionActualSummary: storedSheetFormulaProjectionActualSummary({
+        projectId, mirror, comparisonBoundary, yearMonth,
+      }),
+      sheetCapturedAt: storedMirrorCapturedAt(projectId, mirror),
+    }];
+  }));
+}
+
 async function readSheetFormulaProjectionActualSummaries({ db, req, projectIds, comparisonBoundary, yearMonth, authMode, workspaceEmailDomain }) {
   const tenantId = readOptionalText(req.context?.tenantId);
   const results = await Promise.all(projectIds.map(async (projectId) => {
@@ -4351,6 +4455,11 @@ export function mountJvmWeeklyApiRoutes(app, {
           close: cumulativeClose,
           requestRecord: monthCloseRequest,
           requestAvailable: monthCloseRequestRead.available,
+          settlementStatus: readOptionalText(monthCloseRequest?.throughMonth)
+            && readOptionalText(source?.settlementStatuses?.yearMonth) === readOptionalText(monthCloseRequest?.throughMonth)
+            && Array.isArray(source?.settlementStatuses?.items)
+            ? source.settlementStatuses.items.find((item) => readOptionalText(item?.period) === 'MONTH')
+            : null,
           comparisonBoundary,
         });
         if (publicationStateUnavailable
@@ -4472,9 +4581,6 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (action === 'SUBMIT') {
       throw createHttpError(403, '실무자 포털에서 정산을 완료한 뒤에만 제출할 수 있습니다.', 'cashflow_settlement_submit_forbidden');
     }
-    if (period === 'MONTH') {
-      throw createHttpError(409, '월 결산은 저장된 결재 요청을 승인해 주세요.', 'cashflow_month_close_canonical_review_required');
-    }
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses/transition`,
@@ -4558,18 +4664,40 @@ export function mountJvmWeeklyApiRoutes(app, {
       mutation: false,
     }), { projectCount: projectIds.length });
     const alignedWeeklyResult = await alignMonthSettlementStatus(db, req.context.tenantId, weeklyResult);
+    let mirrorsByProjectId = new Map();
+    let mirrorReadFailed = false;
+    try {
+      mirrorsByProjectId = await trace.measure('mirror_overview', () => readWeeklyOverviewMirrors({
+        db,
+        tenantId: req.context.tenantId,
+        projectIds,
+        comparisonBoundary: resolveCashflowComparisonAsOf('', now()),
+        yearMonth,
+      }), { projectCount: projectIds.length });
+    } catch {
+      mirrorReadFailed = true;
+    }
     const combined = {
       ...alignedWeeklyResult,
-      version: '3',
+      version: '4',
       yearMonth,
       monthCloseTargetYearMonth,
       monthCloseTargetLabel: `${Number(monthCloseTargetYearMonth.slice(5, 7))}월`,
-      items: (Array.isArray(alignedWeeklyResult?.items) ? alignedWeeklyResult.items : []).map((item) => ({
-        ...item,
-        projectionActualSummary: null,
-      })),
+      items: (Array.isArray(alignedWeeklyResult?.items) ? alignedWeeklyResult.items : []).map((item) => {
+        const mirror = mirrorsByProjectId.get(readOptionalText(item?.projectId));
+        return {
+          ...item,
+          projectionActualSummary: mirror?.projectionActualSummary || null,
+          sheetCapturedAt: mirror?.sheetCapturedAt || null,
+        };
+      }),
       errors: [
-        ...(Array.isArray(alignedWeeklyResult?.errors) ? alignedWeeklyResult.errors : []),
+        ...(Array.isArray(alignedWeeklyResult?.errors)
+          ? alignedWeeklyResult.errors.filter((error) => readOptionalText(error?.code) !== 'SUMMARY_UNAVAILABLE')
+          : []),
+        ...(mirrorReadFailed
+          ? projectIds.map((projectId) => ({ projectId, code: 'SUMMARY_UNAVAILABLE' }))
+          : []),
       ],
     };
     trace.emit('response', {
@@ -4674,12 +4802,22 @@ export function mountJvmWeeklyApiRoutes(app, {
       { cashflowWrite: true },
     );
     void Promise.resolve().then(async () => {
-      const { requestedByName } = await readCashflowRequestPartyNames({
-        db,
-        tenantId: req.context.tenantId,
-        record: { requestedByUid: req.context.actorId },
-      });
-      notifyCashflowSlack(`*[MYSCube] 주정산 완료*\n프로젝트: ${projectId}\n대상: ${hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth} ${hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo}주차\n처리자: ${requestedByName || '미확인'}`);
+      const [projectSnapshot, { requestedByName }] = await Promise.all([
+        db.doc(`orgs/${req.context.tenantId}/projects/${projectId}`).get(),
+        readCashflowRequestPartyNames({
+          db,
+          tenantId: req.context.tenantId,
+          record: { requestedByUid: req.context.actorId },
+        }),
+      ]);
+      const project = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
+      const projectName = readOptionalText(project.name)
+        || readOptionalText(project.officialContractName)
+        || readOptionalText(project.projectCode)
+        || projectId;
+      const yearMonth = hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth;
+      const weekNo = hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo;
+      notifyCashflowSlack(`*[MYSCube] 주정산 완료*\n프로젝트명: ${projectName}\n대상: ${yearMonth} ${weekNo}주차\n처리자: ${requestedByName || '미확인'}`);
     }).catch(() => {});
     res.status(200).json(result);
   }));
@@ -5070,6 +5208,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   async function persistCumulativeMonthCloseRequest({ req, prepared, approverUid, expectedApproverUid, expectedProjectVersion }) {
     const yearMonth = readOptionalText(prepared.closeBody.yearMonth);
     const cumulativeMonths = cumulativeCloseMonths(yearMonth);
+    const settlementYearMonth = cumulativeMonths.at(-1);
     const requestId = `${prepared.rawProjectId}-${yearMonth}`;
     const sourceMonths = new Map((Array.isArray(prepared.cashflow?.readModel?.months) ? prepared.cashflow.readModel.months : [])
       .map((month) => [readOptionalText(month?.yearMonth), month]));
@@ -5126,7 +5265,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     };
     let preserveLegacyShape = false;
     return db.runTransaction(async (transaction) => {
-      const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${yearMonth}`);
+      const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${settlementYearMonth}`);
       const [projectSnapshot, approverSnapshot, requesterSnapshot, requestSnapshot, settlementStatusSnapshot] = await Promise.all([
         transaction.get(db.doc(`orgs/${req.context.tenantId}/projects/${prepared.rawProjectId}`)),
         transaction.get(db.doc(`orgs/${req.context.tenantId}/members/${approverUid}`)),
@@ -5279,7 +5418,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         transaction.set(settlementStatusRef, {
           tenantId: req.context.tenantId,
           projectId: prepared.rawProjectId,
-          yearMonth,
+          yearMonth: settlementYearMonth,
           periods: {
             ...settlementPeriods,
             MONTH: {
@@ -5984,7 +6123,8 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     const projectRef = db.doc(`orgs/${req.context.tenantId}/projects/${projectId}`);
     const reviewerRef = db.doc(`orgs/${req.context.tenantId}/members/${req.context.actorId}`);
-    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${projectId}-${initialRecord.yearMonth}`);
+    const settlementYearMonth = cashflowSettlementYearMonthForRequest(initialRecord);
+    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${projectId}-${settlementYearMonth}`);
     const reviewedAt = now().toISOString();
     const completeMonthSettlement = (transaction, snapshot) => {
       const status = snapshot.exists ? snapshot.data() || {} : {};
@@ -5993,7 +6133,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       transaction.set(settlementStatusRef, {
         tenantId: req.context.tenantId,
         projectId,
-        yearMonth: initialRecord.yearMonth,
+        yearMonth: settlementYearMonth,
         periods: {
           ...periods,
           MONTH: {

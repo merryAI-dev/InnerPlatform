@@ -1,0 +1,82 @@
+- generic [ref=e2]:
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - button "홈으로 이동" [ref=e27]:
+        - img "MYSCube" [ref=e29]
+      - button "빠른 검색... ⌘K" [ref=e31]:
+        - generic [ref=e35]: 빠른 검색...
+        - generic [ref=e36]: ⌘K
+      - navigation [ref=e37]:
+        - generic [ref=e38]:
+          - paragraph [ref=e39]: CEO
+          - link "통합 대시보드" [ref=e41] [cursor=pointer]:
+            - /url: /dashboard
+        - generic [ref=e48]:
+          - paragraph [ref=e49]: 관리자
+          - generic [ref=e50]:
+            - link "통합 대시보드" [ref=e51] [cursor=pointer]:
+              - /url: /projects
+            - link "프로젝트 등록/승인" [ref=e55] [cursor=pointer]:
+              - /url: /projects/migration-audit
+            - link "현금흐름 승인" [ref=e60] [cursor=pointer]:
+              - /url: /cashflow
+            - link "참여율 관리" [ref=e64] [cursor=pointer]:
+              - /url: /participation
+        - generic [ref=e68]:
+          - paragraph [ref=e69]: 경영기획실
+          - generic [ref=e70]:
+            - link "통합 관리" [ref=e71] [cursor=pointer]:
+              - /url: /cashflow/export
+            - link "프로젝트 코드 부여" [ref=e75] [cursor=pointer]:
+              - /url: /management-planning/project-codes
+        - generic [ref=e80]:
+          - paragraph [ref=e81]: AXR
+          - generic [ref=e82]:
+            - link "현금흐름 기간·마감 정책" [ref=e83] [cursor=pointer]:
+              - /url: /axr/cashflow-period-policy
+            - link "권한 관리" [ref=e87] [cursor=pointer]:
+              - /url: /users
+            - link "멤버DB" [ref=e101] [cursor=pointer]:
+              - /url: /settings?tab=members
+            - link "인력 명부" [ref=e115] [cursor=pointer]:
+              - /url: /people
+            - link "조직DB" [ref=e123] [cursor=pointer]:
+              - /url: /settings?tab=tenants
+      - generic [ref=e129]:
+        - button "mysc" [ref=e130] [cursor=pointer]
+        - generic [ref=e138]: 로컬
+        - button "라이트 모드 L" [ref=e141]:
+          - generic [ref=e148]: 라이트 모드
+          - generic [ref=e149]: L
+        - button "LAB 메뉴 보이기" [ref=e150]: LAB OFF
+        - generic [ref=e151]:
+          - generic [ref=e152]: 관
+          - generic [ref=e153]:
+            - paragraph [ref=e154]: 관리자
+            - paragraph [ref=e155]: admin
+          - button [ref=e156]
+        - button [ref=e160]
+    - generic [ref=e163]:
+      - banner [ref=e164]:
+        - navigation [ref=e166]:
+          - link [ref=e167] [cursor=pointer]:
+            - /url: /
+          - generic [ref=e171]: people
+        - generic [ref=e175]:
+          - generic [ref=e176]: 서버 연결
+          - button "로그아웃 없이 실무자 포털로 이동" [ref=e178]:
+            - generic [ref=e179]: 실무자 포털
+          - 'generic "현재 조직: mysc" [ref=e181]': mysc
+          - button "검색 열기" [ref=e183]
+          - button "단축키 열기" [ref=e184]
+          - button "알림 센터 열기" [ref=e185]
+          - generic [ref=e187] [cursor=pointer]: 관
+      - main [ref=e188]:
+        - generic [ref=e189]: 로딩 중…
+      - generic [ref=e192]:
+        - generic [ref=e193]:
+          - generic [ref=e194]: Firestore
+          - generic [ref=e197]: 0/0
+        - generic [ref=e201]: 2026.08.25 13:39
+  - button "맨 위로 스크롤"
+  - region "Notifications alt+T"

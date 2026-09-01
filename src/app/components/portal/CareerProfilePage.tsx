@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import {
-  User, GraduationCap, Briefcase, Award, Building2,
+  User, GraduationCap, Briefcase, Building2,
   Plus, Trash2, Edit2, Save, X, FileDown, Loader2,
   CalendarDays, Phone, Mail, BookOpen,
 } from 'lucide-react';
@@ -11,7 +11,11 @@ import { Label } from '../ui/label';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Textarea } from '../ui/textarea';
-import { useCareerProfile } from '../../data/career-profile-store';
+import { deriveAge, deriveTenure } from '../../platform/person-employment';
+import { useFirebase } from '../../lib/firebase-context';
+import { updateMyPersonProfileViaBff } from '../../lib/platform-bff-client';
+import { ProfessionalProfileEditor } from '../people/ProfessionalProfileEditor';
+import { useMyHrProfile } from './useMyHrProfile';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import { useTraining } from '../../data/training-store';
@@ -19,14 +23,9 @@ import {
   SETTLEMENT_SYSTEM_SHORT,
   TRAINING_CATEGORY_LABELS,
   ENROLLMENT_STATUS_LABELS,
-  type DegreeType,
-  type EducationEntry,
-  type WorkHistoryEntry,
-  type CertificationEntry,
 } from '../../data/types';
 import { toast } from 'sonner';
 
-const DEGREE_OPTIONS: DegreeType[] = ['학사', '석사', '박사', '전문학사', '수료', '기타'];
 
 // ── 섹션 헤더 ──
 
@@ -53,124 +52,137 @@ function SectionHeader({ icon: Icon, title, onAdd, addLabel }: {
 
 // ── 기본 정보 탭 ──
 
+/** 인사 명부에서 온 값 한 줄. 여기서 고치지 않으므로 입력칸이 아니라 읽는 줄로 둔다. */
+/**
+ * 그룹웨어 인사기록 표의 한 줄. 회색 라벨 칸과 값 칸을 세로선으로 가른다.
+ * 수정 모드에서는 열린 필드만 입력칸으로 바뀐다 - 회사가 관리하는 값은 그대로 글자다.
+ */
+function ProfileGridRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[130px_1fr] border-b border-slate-200 last:border-b-0">
+      <div className="flex items-center border-r border-slate-200 bg-slate-50 px-3 py-2.5 text-[12px] text-slate-600">
+        {label}
+      </div>
+      <div className="flex min-h-[41px] items-center px-3 py-1.5 text-[13px] text-slate-900">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * 사용자기본정보. 인력 명부(persons)가 단일 진실이다.
+ *
+ * 본인이 고칠 수 있는 것은 증빙이 필요 없는 값(닉네임·생년월일·근무지)뿐이다.
+ * 소속·직급·직책·입사일은 회사가 관리하고, 학력·어학·자격은 증빙과 함께 인사정보조회 탭에서 넣는다.
+ */
 function BasicInfoTab() {
-  const { myProfile, saveMyProfile, isLoading } = useCareerProfile();
+  const { data: hr, loading, error, reload } = useMyHrProfile();
   const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState({
-    nameKo: myProfile?.nameKo || authUser?.name || '',
-    nameEn: myProfile?.nameEn || '',
-    nameHanja: myProfile?.nameHanja || '',
-    birthDate: myProfile?.birthDate || '',
-    phone: myProfile?.phone || '',
-    officePhone: myProfile?.officePhone || '',
-    department: myProfile?.department || '',
-    title: myProfile?.title || '',
-    joinedAt: myProfile?.joinedAt || '',
-    bio: myProfile?.bio || '',
-  });
+  const [form, setForm] = useState({ nickname: '', birthDate: '', workLocation: '' });
+  const asOf = new Date().toISOString().slice(0, 10);
+  const person = hr?.person;
 
-  useEffect(() => {
-    if (myProfile) {
-      setDraft({
-        nameKo: myProfile.nameKo || authUser?.name || '',
-        nameEn: myProfile.nameEn || '',
-        nameHanja: myProfile.nameHanja || '',
-        birthDate: myProfile.birthDate || '',
-        phone: myProfile.phone || '',
-        officePhone: myProfile.officePhone || '',
-        department: myProfile.department || '',
-        title: myProfile.title || '',
-        joinedAt: myProfile.joinedAt || '',
-        bio: myProfile.bio || '',
-      });
-    }
-  }, [myProfile]);
+  const startEditing = () => {
+    setForm({
+      nickname: person?.nickname || '',
+      birthDate: (person?.birthDate || '').slice(0, 10),
+      workLocation: person?.workLocation || '',
+    });
+    setEditing(true);
+  };
 
-  const handleSave = async () => {
+  const save = async () => {
+    if (!authUser || saving) return;
     setSaving(true);
-    const ok = await saveMyProfile(draft);
-    setSaving(false);
-    if (ok) {
+    try {
+      await updateMyPersonProfileViaBff({
+        tenantId: orgId,
+        actor: authUser,
+        profile: {
+          nickname: form.nickname.trim(),
+          birthDate: form.birthDate || null,
+          workLocation: form.workLocation.trim(),
+        },
+      });
+      toast.success('기본정보를 저장했습니다.');
       setEditing(false);
-      toast.success('기본 정보가 저장되었습니다.');
+      reload();
+    } catch {
+      toast.error('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (isLoading) return <div className="py-8 text-center"><Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" /></div>;
+  if (loading) return <p className="py-8 text-center text-[12px] text-muted-foreground">인사정보를 불러오는 중…</p>;
+  if (error) return <p className="py-8 text-center text-[12px] text-rose-600" role="alert">{error}</p>;
+  if (hr && !hr.linked) {
+    return (
+      <div className="py-8 text-center">
+        <p className="text-[13px] text-muted-foreground">아직 인력 명부에 연결되지 않은 계정입니다.</p>
+        <p className="text-[12px] text-muted-foreground mt-1">인사 담당자에게 문의해 주세요.</p>
+      </div>
+    );
+  }
+
+  const age = person?.birthDate ? deriveAge(person.birthDate, asOf) : null;
+  const tenure = person?.joinedAt ? deriveTenure(person.joinedAt, asOf) : null;
+  const inputClass = 'h-8 w-full max-w-[280px] text-[13px]';
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[13px]" style={{ fontWeight: 600 }}>기본정보</h3>
         {editing ? (
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setEditing(false)} className="h-8 gap-1.5 text-[12px]">
-              <X className="w-3.5 h-3.5" /> 취소
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={() => setEditing(false)} disabled={saving}>
+              취소
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={saving} className="h-8 gap-1.5 text-[12px]">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} 저장
+            <Button size="sm" className="h-7 gap-1 text-[12px]" onClick={() => void save()} disabled={saving}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} 저장
             </Button>
           </div>
         ) : (
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)} className="h-8 gap-1.5 text-[12px]">
-            <Edit2 className="w-3.5 h-3.5" /> 편집
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-[12px]" onClick={startEditing}>
+            <Edit2 className="h-3.5 w-3.5" /> 수정
           </Button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {[
-          { label: '국문 성명', field: 'nameKo' as const },
-          { label: '영문 성명', field: 'nameEn' as const },
-          { label: '한자 성명', field: 'nameHanja' as const },
-        ].map(({ label, field }) => (
-          <div key={field}>
-            <Label className="text-[11px] text-muted-foreground mb-1.5 block">{label}</Label>
-            {editing ? (
-              <Input value={draft[field]} onChange={(e) => setDraft((p) => ({ ...p, [field]: e.target.value }))} className="h-9 text-[13px]" />
-            ) : (
-              <p className="text-[13px] py-1.5">{(myProfile as any)?.[field] || '—'}</p>
-            )}
-          </div>
-        ))}
+      <div className="rounded-md border border-slate-300 bg-white">
+        <ProfileGridRow label="이름">{person?.name || '미등록'}</ProfileGridRow>
+        <ProfileGridRow label="닉네임">
+          {editing ? (
+            <Input aria-label="닉네임" className={inputClass} value={form.nickname}
+              onChange={(event) => setForm({ ...form, nickname: event.target.value })} disabled={saving} />
+          ) : (person?.nickname || '미등록')}
+        </ProfileGridRow>
+        <ProfileGridRow label="생년월일">
+          {editing ? (
+            <Input aria-label="생년월일" type="date" className={inputClass} value={form.birthDate}
+              onChange={(event) => setForm({ ...form, birthDate: event.target.value })} disabled={saving} />
+          ) : (person?.birthDate ? `${person.birthDate}${age === null ? '' : ` (만 ${age}세)`}` : '미등록')}
+        </ProfileGridRow>
+        <ProfileGridRow label="근무지">
+          {editing ? (
+            <Input aria-label="근무지" className={inputClass} value={form.workLocation}
+              onChange={(event) => setForm({ ...form, workLocation: event.target.value })} disabled={saving} />
+          ) : (person?.workLocation || '미등록')}
+        </ProfileGridRow>
+        <ProfileGridRow label="대분류">{person?.departmentTop || '미등록'}</ProfileGridRow>
+        <ProfileGridRow label="중분류">{person?.departmentMid || '미등록'}</ProfileGridRow>
+        <ProfileGridRow label="직책">{person?.title || '미등록'}</ProfileGridRow>
+        <ProfileGridRow label="직급">{person?.grade || '미등록'}</ProfileGridRow>
+        <ProfileGridRow label="입사일">
+          {person?.joinedAt ? `${person.joinedAt}${tenure ? ` (${tenure.label})` : ''}` : '미등록'}
+        </ProfileGridRow>
+        <ProfileGridRow label="이메일">{person?.email || '미등록'}</ProfileGridRow>
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {[
-          { label: '생년월일', field: 'birthDate' as const, icon: CalendarDays, type: 'date' },
-          { label: '입사일', field: 'joinedAt' as const, icon: CalendarDays, type: 'date' },
-          { label: '핸드폰', field: 'phone' as const, icon: Phone, type: 'text' },
-          { label: '직장 전화', field: 'officePhone' as const, icon: Phone, type: 'text' },
-          { label: '부서', field: 'department' as const, icon: Building2, type: 'text' },
-          { label: '직책', field: 'title' as const, icon: Briefcase, type: 'text' },
-        ].map(({ label, field, icon: Icon, type }) => (
-          <div key={field}>
-            <Label className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1">
-              <Icon className="w-3 h-3" /> {label}
-            </Label>
-            {editing ? (
-              <Input type={type} value={draft[field]} onChange={(e) => setDraft((p) => ({ ...p, [field]: e.target.value }))} className="h-9 text-[13px]" />
-            ) : (
-              <p className="text-[13px] py-1.5">{(myProfile as any)?.[field] || '—'}</p>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <Label className="text-[11px] text-muted-foreground mb-1.5 block">간단 소개</Label>
-        {editing ? (
-          <Textarea
-            value={draft.bio}
-            onChange={(e) => setDraft((p) => ({ ...p, bio: e.target.value }))}
-            placeholder="본인을 간략히 소개해 주세요."
-            className="text-[13px] min-h-[80px]"
-          />
-        ) : (
-          <p className="text-[13px] py-1.5 text-muted-foreground leading-relaxed">{myProfile?.bio || '소개가 없습니다.'}</p>
-        )}
-      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        소속·직급·직책·입사일은 회사가 관리합니다. 다르게 등록되어 있으면 인사 담당자에게 알려 주세요.
+      </p>
     </div>
   );
 }
@@ -178,203 +190,118 @@ function BasicInfoTab() {
 // ── 학력/경력 탭 ──
 
 function EducationCareerTab() {
-  const {
-    myProfile,
-    addEducation, updateEducation, removeEducation,
-    addWorkHistory, removeWorkHistory,
-    addCertification, removeCertification,
-  } = useCareerProfile();
-
-  // 학력 신규 입력 폼
-  const [newEdu, setNewEdu] = useState({ school: '', major: '', degree: '학사' as DegreeType, startDate: '', endDate: '' });
-  const [showEduForm, setShowEduForm] = useState(false);
-
-  // 직장경력 신규 입력 폼
-  const [newWork, setNewWork] = useState({ company: '', title: '', description: '', startDate: '', endDate: '' });
-  const [showWorkForm, setShowWorkForm] = useState(false);
-
-  // 자격증 신규 입력 폼
-  const [newCert, setNewCert] = useState({ name: '', issuedAt: '', issuer: '' });
-  const [showCertForm, setShowCertForm] = useState(false);
-
-  const handleAddEducation = async () => {
-    if (!newEdu.school.trim()) { toast.error('학교명을 입력해 주세요.'); return; }
-    await addEducation(newEdu);
-    setNewEdu({ school: '', major: '', degree: '학사', startDate: '', endDate: '' });
-    setShowEduForm(false);
-  };
-
-  const handleAddWork = async () => {
-    if (!newWork.company.trim()) { toast.error('기업명을 입력해 주세요.'); return; }
-    await addWorkHistory(newWork);
-    setNewWork({ company: '', title: '', description: '', startDate: '', endDate: '' });
-    setShowWorkForm(false);
-  };
-
-  const handleAddCert = async () => {
-    if (!newCert.name.trim()) { toast.error('자격증명을 입력해 주세요.'); return; }
-    await addCertification(newCert);
-    setNewCert({ name: '', issuedAt: '', issuer: '' });
-    setShowCertForm(false);
-  };
+  const { data: hr, loading: hrLoading, error: hrError, reload } = useMyHrProfile();
+  const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
+  const [editorOpen, setEditorOpen] = useState(false);
 
   return (
     <div className="space-y-6">
-      {/* 학력 */}
+      {/* 학력·어학·자격은 인력 명부(인사정보)가 단일 진실이다. 본인이 증빙과 함께 직접 넣는다. */}
       <Card>
         <CardContent className="p-4">
-          <SectionHeader icon={GraduationCap} title="학력" onAdd={() => setShowEduForm(true)} />
-          {(myProfile?.education || []).length === 0 && !showEduForm && (
-            <p className="text-[12px] text-muted-foreground py-2">등록된 학력이 없습니다.</p>
-          )}
-          <div className="space-y-2">
-            {(myProfile?.education || []).map((edu) => (
-              <div key={edu.id} className="flex items-start justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
-                <div className="min-w-0">
-                  <p className="text-[13px]" style={{ fontWeight: 600 }}>{edu.school}</p>
-                  <p className="text-[12px] text-muted-foreground">{edu.major} · {edu.degree}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{edu.startDate} ~ {edu.endDate}</p>
-                </div>
-                <button onClick={() => removeEducation(edu.id)} className="text-muted-foreground hover:text-rose-500 ml-3 shrink-0">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GraduationCap className="w-4 h-4 text-muted-foreground" />
+              <h3 className="text-[13px]" style={{ fontWeight: 600 }}>학력 · 어학 · 자격</h3>
+            </div>
+            {hr?.linked && authUser ? (
+              <Button size="sm" variant="outline" className="h-7 gap-1 text-[12px]" onClick={() => setEditorOpen(true)}>
+                <Edit2 className="h-3.5 w-3.5" /> 입력·수정
+              </Button>
+            ) : null}
           </div>
-          {showEduForm && (
-            <div className="mt-3 p-3 border border-teal-200 dark:border-teal-800 rounded-lg space-y-2 bg-teal-50/20 dark:bg-teal-950/10">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="col-span-2">
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">학교명</Label>
-                  <Input value={newEdu.school} onChange={(e) => setNewEdu((p) => ({ ...p, school: e.target.value }))} placeholder="예: 한국외국어대학교" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">전공</Label>
-                  <Input value={newEdu.major} onChange={(e) => setNewEdu((p) => ({ ...p, major: e.target.value }))} placeholder="예: 국제학" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">학위</Label>
-                  <select value={newEdu.degree} onChange={(e) => setNewEdu((p) => ({ ...p, degree: e.target.value as DegreeType }))} className="h-8 w-full rounded-md border border-input bg-input-background px-2 text-[12px]">
-                    {DEGREE_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">입학 (YYYY-MM)</Label>
-                  <Input value={newEdu.startDate} onChange={(e) => setNewEdu((p) => ({ ...p, startDate: e.target.value }))} placeholder="2015-03" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">졸업 (YYYY-MM)</Label>
-                  <Input value={newEdu.endDate} onChange={(e) => setNewEdu((p) => ({ ...p, endDate: e.target.value }))} placeholder="2019-02 또는 재학중" className="h-8 text-[12px]" />
-                </div>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            증빙자료가 제출된 건에 한하여 인정됩니다. 각 항목에 증빙 파일을 함께 올려 주세요.
+          </p>
+
+          {hrLoading ? (
+            <p className="text-[12px] text-muted-foreground py-4">인사정보를 불러오는 중…</p>
+          ) : hrError ? (
+            <p className="text-[12px] text-rose-600 py-4" role="alert">{hrError}</p>
+          ) : hr && !hr.linked ? (
+            <p className="text-[12px] text-muted-foreground py-4">
+              아직 인력 명부에 연결되지 않은 계정입니다. 인사 담당자에게 문의해 주세요.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-4">
+              <div>
+                <p className="text-[11px] text-muted-foreground mb-1">학력</p>
+                {(hr?.profile?.educationRecords || []).length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground">등록된 학력이 없습니다.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(hr?.profile?.educationRecords || []).map((record, index) => {
+                      const row = record as Record<string, string | null>;
+                      const period = row.admissionYear || row.degreeYear
+                        ? `${row.admissionYear || '?'}~${row.degreeYear || '?'}`
+                        : '';
+                      return (
+                        <div key={`edu-${index}`} className="p-3 rounded-lg bg-muted/30 border border-border/50">
+                          <p className="text-[13px]" style={{ fontWeight: 600 }}>
+                            {[row.institutionName, row.major].filter(Boolean).join(' · ') || '학교 미입력'}
+                          </p>
+                          <p className="text-[12px] text-muted-foreground">
+                            {[row.attainmentCode, period].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2 justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setShowEduForm(false)} className="h-7 text-[11px]">취소</Button>
-                <Button size="sm" onClick={handleAddEducation} className="h-7 text-[11px]">추가</Button>
+
+              <div>
+                <p className="text-[11px] text-muted-foreground mb-1">어학</p>
+                {(hr?.profile?.englishEvidence || []).length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground">등록된 어학 성적이 없습니다.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(hr?.profile?.englishEvidence || []).map((record, index) => {
+                      const row = record as Record<string, string | null>;
+                      return (
+                        <div key={`lang-${index}`} className="p-3 rounded-lg bg-muted/30 border border-border/50">
+                          <p className="text-[13px]" style={{ fontWeight: 600 }}>
+                            {row.otherTestName || row.testCode} {row.resultValue}
+                          </p>
+                          {row.testedAt ? <p className="text-[12px] text-muted-foreground">{row.testedAt} 취득</p> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="text-[11px] text-muted-foreground mb-1">자격증</p>
+                {(hr?.profile?.certifications || []).length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground">등록된 자격증이 없습니다.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(hr?.profile?.certifications || []).map((cert) => (
+                      <div key={cert.key} className="p-3 rounded-lg bg-muted/30 border border-border/50">
+                        <p className="text-[13px]" style={{ fontWeight: 600 }}>{cert.label}</p>
+                        {cert.acquiredAt ? <p className="text-[12px] text-muted-foreground">{cert.acquiredAt} 취득</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* 직장경력 */}
-      <Card>
-        <CardContent className="p-4">
-          <SectionHeader icon={Briefcase} title="직장경력 (MYSC 이전)" onAdd={() => setShowWorkForm(true)} />
-          {(myProfile?.workHistory || []).length === 0 && !showWorkForm && (
-            <p className="text-[12px] text-muted-foreground py-2">등록된 경력이 없습니다.</p>
-          )}
-          <div className="space-y-2">
-            {(myProfile?.workHistory || []).map((wh) => (
-              <div key={wh.id} className="flex items-start justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
-                <div className="min-w-0">
-                  <p className="text-[13px]" style={{ fontWeight: 600 }}>{wh.company}</p>
-                  <p className="text-[12px] text-muted-foreground">{wh.title}</p>
-                  <p className="text-[12px] text-muted-foreground mt-0.5">{wh.description}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{wh.startDate} ~ {wh.endDate}</p>
-                </div>
-                <button onClick={() => removeWorkHistory(wh.id)} className="text-muted-foreground hover:text-rose-500 ml-3 shrink-0">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-          {showWorkForm && (
-            <div className="mt-3 p-3 border border-teal-200 dark:border-teal-800 rounded-lg space-y-2 bg-teal-50/20 dark:bg-teal-950/10">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">기업명</Label>
-                  <Input value={newWork.company} onChange={(e) => setNewWork((p) => ({ ...p, company: e.target.value }))} placeholder="예: KOICA" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">최종직위</Label>
-                  <Input value={newWork.title} onChange={(e) => setNewWork((p) => ({ ...p, title: e.target.value }))} placeholder="예: 인턴" className="h-8 text-[12px]" />
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">담당업무/주요프로젝트</Label>
-                  <Input value={newWork.description} onChange={(e) => setNewWork((p) => ({ ...p, description: e.target.value }))} placeholder="주요 업무 내용" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">시작 (YYYY-MM)</Label>
-                  <Input value={newWork.startDate} onChange={(e) => setNewWork((p) => ({ ...p, startDate: e.target.value }))} placeholder="2020-06" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">종료 (YYYY-MM)</Label>
-                  <Input value={newWork.endDate} onChange={(e) => setNewWork((p) => ({ ...p, endDate: e.target.value }))} placeholder="2021-02 또는 현재" className="h-8 text-[12px]" />
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setShowWorkForm(false)} className="h-7 text-[11px]">취소</Button>
-                <Button size="sm" onClick={handleAddWork} className="h-7 text-[11px]">추가</Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 자격증 */}
-      <Card>
-        <CardContent className="p-4">
-          <SectionHeader icon={Award} title="자격증" onAdd={() => setShowCertForm(true)} />
-          {(myProfile?.certifications || []).length === 0 && !showCertForm && (
-            <p className="text-[12px] text-muted-foreground py-2">등록된 자격증이 없습니다.</p>
-          )}
-          <div className="space-y-2">
-            {(myProfile?.certifications || []).map((cert) => (
-              <div key={cert.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
-                <div className="min-w-0">
-                  <p className="text-[13px]" style={{ fontWeight: 600 }}>{cert.name}</p>
-                  <p className="text-[12px] text-muted-foreground">{cert.issuer} · {cert.issuedAt}</p>
-                </div>
-                <button onClick={() => removeCertification(cert.id)} className="text-muted-foreground hover:text-rose-500 ml-3 shrink-0">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-          {showCertForm && (
-            <div className="mt-3 p-3 border border-teal-200 dark:border-teal-800 rounded-lg space-y-2 bg-teal-50/20 dark:bg-teal-950/10">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="col-span-2">
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">자격증명</Label>
-                  <Input value={newCert.name} onChange={(e) => setNewCert((p) => ({ ...p, name: e.target.value }))} placeholder="예: ODA 전문가 과정" className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">취득일</Label>
-                  <Input type="date" value={newCert.issuedAt} onChange={(e) => setNewCert((p) => ({ ...p, issuedAt: e.target.value }))} className="h-8 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">발행기관</Label>
-                  <Input value={newCert.issuer} onChange={(e) => setNewCert((p) => ({ ...p, issuer: e.target.value }))} placeholder="예: KOICA" className="h-8 text-[12px]" />
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setShowCertForm(false)} className="h-7 text-[11px]">취소</Button>
-                <Button size="sm" onClick={handleAddCert} className="h-7 text-[11px]">추가</Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {editorOpen && hr?.person && authUser ? (
+        <ProfessionalProfileEditor
+          tenantId={orgId}
+          actor={authUser}
+          personId={hr.person.personId}
+          personName={hr.person.name}
+          canWrite
+          onClose={() => { setEditorOpen(false); reload(); }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -488,78 +415,22 @@ function TrainingTab() {
 
 // ── 이력서 내보내기 ──
 
-function exportProfile(profile: ReturnType<typeof useCareerProfile>['myProfile'], name: string) {
-  if (!profile) return;
-  const lines: string[] = [
-    `# ${name} 이력서`,
-    '',
-    '## 가. 인적사항',
-    `| 항목 | 내용 |`,
-    `| --- | --- |`,
-    `| 성명 (국문) | ${profile.nameKo} |`,
-    `| 성명 (영문) | ${profile.nameEn || '—'} |`,
-    `| 생년월일 | ${profile.birthDate || '—'} |`,
-    `| 연락처 | ${profile.phone || '—'} |`,
-    `| 직책 | ${profile.title || '—'} |`,
-    `| 입사일 | ${profile.joinedAt || '—'} |`,
-    '',
-    '## 나. 학력',
-    '| 시작 | 종료 | 학교명 | 전공 | 학위 |',
-    '| --- | --- | --- | --- | --- |',
-    ...(profile.education || []).map((e) =>
-      `| ${e.startDate} | ${e.endDate} | ${e.school} | ${e.major} | ${e.degree} |`
-    ),
-    '',
-    '## 다. 직장경력',
-    '| 시작 | 종료 | 기업명 | 최종직위 | 담당업무 |',
-    '| --- | --- | --- | --- | --- |',
-    ...(profile.workHistory || []).map((w) =>
-      `| ${w.startDate} | ${w.endDate} | ${w.company} | ${w.title} | ${w.description} |`
-    ),
-    '',
-    '## 라. 자격증',
-    '| 자격증명 | 취득일 | 발행기관 |',
-    '| --- | --- | --- |',
-    ...(profile.certifications || []).map((c) =>
-      `| ${c.name} | ${c.issuedAt} | ${c.issuer} |`
-    ),
-  ];
-
-  const content = lines.join('\n');
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `이력서_${profile.nameKo}_${new Date().toISOString().slice(0, 10)}.md`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ── 메인 페이지 ──
-
 export function CareerProfilePage() {
-  const { myProfile } = useCareerProfile();
+  const { data: hr } = useMyHrProfile();
   const { user: authUser } = useAuth();
-  const displayName = myProfile?.nameKo || authUser?.name || '내 프로필';
+  const person = hr?.person;
+  const displayName = person?.name || authUser?.name || '내 프로필';
 
   return (
     <div className="p-5 max-w-[900px] mx-auto space-y-5">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-[18px]" style={{ fontWeight: 700 }}>내 경력 프로필</h1>
+          <h1 className="text-[18px]" style={{ fontWeight: 700 }}>마이페이지</h1>
           <p className="text-[13px] text-muted-foreground mt-0.5">
             사업 참여 이력과 사내 교육 이수 이력이 자동으로 반영됩니다.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => exportProfile(myProfile, displayName)}
-          className="h-8 gap-1.5 text-[12px]"
-        >
-          <FileDown className="w-3.5 h-3.5" /> 이력서 내보내기
-        </Button>
       </div>
 
       {/* 프로필 요약 카드 */}
@@ -571,11 +442,11 @@ export function CareerProfilePage() {
           <div className="min-w-0">
             <p className="text-[16px]" style={{ fontWeight: 700 }}>{displayName}</p>
             <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-              {myProfile?.title && (
-                <span className="text-[12px] text-muted-foreground">{myProfile.title}</span>
+              {person?.title && (
+                <span className="text-[12px] text-muted-foreground">{person.title}</span>
               )}
-              {myProfile?.department && (
-                <span className="text-[12px] text-muted-foreground">{myProfile.department}</span>
+              {person?.departmentTop && (
+                <span className="text-[12px] text-muted-foreground">{person.departmentTop}</span>
               )}
               {authUser?.email && (
                 <span className="text-[12px] text-muted-foreground flex items-center gap-1">

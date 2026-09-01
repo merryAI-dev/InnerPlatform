@@ -15,7 +15,9 @@ public record CashflowMonthDashboardSourceResponse(
     List<SectionError> sectionErrors,
     ActionCapability reopenRequest,
     OperationalCycle operationalCycle,
-    List<MonthSettlementCalendarItem> monthCloseCalendar
+    CashflowSettlementStatusesResponse settlementStatuses,
+    List<MonthSettlementCalendarItem> monthCloseCalendar,
+    CashflowWeeklyOverviewResponse.SettlementCycle settlementCycle
 ) {
     public CashflowMonthDashboardSourceResponse(
         CashflowMonthCloseResponse monthClose,
@@ -28,7 +30,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, cumulativeClose,
-            projectionActualSummary, blockers, List.of(), ActionCapability.unavailable(), null, List.of()
+            projectionActualSummary, blockers, List.of(), ActionCapability.unavailable(), null, null, List.of(), null
         );
     }
 
@@ -42,7 +44,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, cumulativeClose,
-            projectionActualSummary, List.of(), List.of(), ActionCapability.unavailable(), null, List.of()
+            projectionActualSummary, List.of(), List.of(), ActionCapability.unavailable(), null, null, List.of(), null
         );
     }
 
@@ -54,7 +56,7 @@ public record CashflowMonthDashboardSourceResponse(
     ) {
         this(
             monthClose, monthClose, null, cashflow, openingBalances, snapshotCompatibility, CumulativeClose.missing(),
-            null, List.of(), List.of(), ActionCapability.unavailable(), null, List.of()
+            null, List.of(), List.of(), ActionCapability.unavailable(), null, null, List.of(), null
         );
     }
 

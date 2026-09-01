@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, Users, Building2, Shield, Search, Save, Trash2,
+  Settings, Users, Building2, Network, Shield, Search, Save, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ROLE_META } from '../../platform/role-meta';
+import { OrganizationSettingsTab } from './OrganizationSettingsTab';
 import { useLocation, useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -25,7 +26,7 @@ import { MyscWordmark } from '../brand/MyscWordmark';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
-const PRIMARY_SETTINGS_TABS = ['members', 'tenants'] as const;
+const PRIMARY_SETTINGS_TABS = ['members', 'tenants', 'organizations'] as const;
 const PRIMARY_SETTINGS_TAB_SET = new Set<string>(PRIMARY_SETTINGS_TABS);
 
 export function SettingsPage() {
@@ -173,7 +174,19 @@ export function SettingsPage() {
           <TabsTrigger value="tenants" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Building2 className="w-3.5 h-3.5" /> 조직DB
           </TabsTrigger>
+          <TabsTrigger value="organizations" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            <Network className="w-3.5 h-3.5" /> 소속·직급
+          </TabsTrigger>
         </TabsList>
+
+        {/* 소속·직급: 인력 명부와 프로젝트 담당조직이 함께 뻗어 나오는 뿌리다. */}
+        <TabsContent value="organizations">
+          <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+            <CardContent className="p-4">
+              <OrganizationSettingsTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Members */}
         <TabsContent value="members">

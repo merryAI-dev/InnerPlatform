@@ -43,7 +43,11 @@ public record CloseCashflowMonthRequest(
     @Valid DeadlineSummary deadlineSummary,
     @Size(max = 160) String requestId,
     @PositiveOrZero long requestRevision,
-    @Pattern(regexp = "|sha256:[a-f0-9]{64}") String manifestHash
+    @Pattern(regexp = "|sha256:[a-f0-9]{64}") String manifestHash,
+    @Pattern(regexp = "|20\\d{2}-(0[1-9]|1[0-2])") String cycleYearMonth,
+    @Pattern(regexp = "|20\\d{2}-(0[1-9]|1[0-2])") String monthCloseTargetYearMonth,
+    @PositiveOrZero long expectedWorkflowRevision,
+    @Size(max = 1_000) String decisionReason
 ) {
     private static final List<String> MANAGEMENT_CHECK_IDS = List.of(
         "labor-transfer",
@@ -131,6 +135,9 @@ public record CloseCashflowMonthRequest(
         targetRevision = targetRevision == null ? "" : targetRevision.trim();
         requestId = requestId == null ? "" : requestId.trim();
         manifestHash = manifestHash == null ? "" : manifestHash.trim();
+        cycleYearMonth = cycleYearMonth == null ? "" : cycleYearMonth.trim();
+        monthCloseTargetYearMonth = monthCloseTargetYearMonth == null ? "" : monthCloseTargetYearMonth.trim();
+        decisionReason = decisionReason == null ? "" : decisionReason.trim();
         depositScheduleRows = depositScheduleRows == null ? List.of() : List.copyOf(depositScheduleRows);
         cells = cells == null ? List.of() : List.copyOf(cells);
         confirmations = confirmations == null ? List.of() : List.copyOf(confirmations);
@@ -158,7 +165,33 @@ public record CloseCashflowMonthRequest(
         this(
             idempotencyKey, sourceRevision, targetRevision, yearMonth, expectedRevision, expectedDraftRevision,
             humanReviewed, depositScheduleRows, cells, confirmations, managementChecks, managementConfirmations,
-            openingBalances, deadlineSummary, "", 0, ""
+            openingBalances, deadlineSummary, "", 0, "", "", "", 0, ""
+        );
+    }
+
+    public CloseCashflowMonthRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        long expectedRevision,
+        long expectedDraftRevision,
+        boolean humanReviewed,
+        List<DepositScheduleRow> depositScheduleRows,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        List<Confirmation> confirmations,
+        List<ManagementCheck> managementChecks,
+        List<ManagementConfirmation> managementConfirmations,
+        CashflowOpeningBalancesResponse openingBalances,
+        DeadlineSummary deadlineSummary,
+        String requestId,
+        long requestRevision,
+        String manifestHash
+    ) {
+        this(
+            idempotencyKey, sourceRevision, targetRevision, yearMonth, expectedRevision, expectedDraftRevision,
+            humanReviewed, depositScheduleRows, cells, confirmations, managementChecks, managementConfirmations,
+            openingBalances, deadlineSummary, requestId, requestRevision, manifestHash, "", "", 0, ""
         );
     }
 

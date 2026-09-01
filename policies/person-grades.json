@@ -1,0 +1,17 @@
+{
+  "catalogVersion": 2,
+  "comment": "MYSC 직급. 전사 재직자 현황 시트의 직급체계가 출처다. 직책(팀장·센터장 등)과 다른 축이며 직책은 persons.title 에 남는다. equivalentTitles 는 대외 문서에서 쓰는 일반직급 대응이라 화면 힌트로만 쓰고 저장하지 않는다. 경영기획실(재경)과 사내벤처는 별도 직급체계를 쓰므로 목록 밖 값도 저장할 수 있다.",
+  "grades": [
+    { "code": "INTERN_RESEARCHER", "label": "인턴", "rank": 10, "equivalentTitles": ["인턴연구원", "인턴사원"] },
+    { "code": "RESEARCHER", "label": "연구원", "rank": 20, "equivalentTitles": ["사원"] },
+    { "code": "SENIOR_RESEARCHER", "label": "선임연구원", "rank": 30, "equivalentTitles": ["대리"] },
+    { "code": "PRINCIPAL_RESEARCHER", "label": "책임연구원", "rank": 40, "equivalentTitles": ["대리", "과장"] },
+    { "code": "CONSULTANT", "label": "컨설턴트", "rank": 50, "equivalentTitles": ["과장"] },
+    { "code": "SENIOR_CONSULTANT", "label": "선임컨설턴트", "rank": 60, "equivalentTitles": ["과장", "차장"] },
+    { "code": "PRINCIPAL_CONSULTANT", "label": "책임컨설턴트", "rank": 70, "equivalentTitles": ["차장", "부장"] },
+    { "code": "EXECUTIVE_CONSULTANT", "label": "수석컨설턴트", "rank": 80, "equivalentTitles": ["부장", "상무", "전무"] },
+    { "code": "DIRECTOR", "label": "이사", "rank": 90, "equivalentTitles": [] },
+    { "code": "VICE_PRESIDENT", "label": "부대표", "rank": 100, "equivalentTitles": [] },
+    { "code": "CEO", "label": "대표이사", "rank": 110, "equivalentTitles": [] }
+  ]
+}

@@ -42,6 +42,31 @@ function createDb(seed = {}) {
     };
   }
 
+  function collection(collectionPath) {
+    const prefix = `${collectionPath}/`;
+    const state = { filters: [], limit: Infinity };
+    const query = {
+      where(field, op, value) {
+        if (op !== '==') throw new Error('mock collection only supports ==');
+        state.filters.push([field, value]);
+        return query;
+      },
+      limit(count) {
+        state.limit = count;
+        return query;
+      },
+      async get() {
+        const docs = [...documents.entries()]
+          .filter(([docPath]) => docPath.startsWith(prefix) && !docPath.slice(prefix.length).includes('/'))
+          .map(([docPath, value]) => ({ id: docPath.slice(prefix.length), data: () => clone(value) }))
+          .filter((docRef) => state.filters.every(([field, value]) => (docRef.data() || {})[field] === value))
+          .slice(0, state.limit);
+        return { docs };
+      },
+    };
+    return query;
+  }
+
   async function runAttempt(callback, commit) {
     const writes = [];
     const tx = {
@@ -69,6 +94,7 @@ function createDb(seed = {}) {
   return {
     documents,
     doc,
+    collection,
     retryNextTransaction(beforeSecondAttempt) {
       retryBeforeSecondAttempt = beforeSecondAttempt || (() => undefined);
     },
@@ -273,8 +299,9 @@ function validRegistrationV2Payload(overrides = {}) {
       supportAmount: true,
     },
     financialYears: [
-      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
-      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+      // 계약서 대조 확인 체크는 걷어냈다 - confirmed:false 인 채로도 제출이 통과해야 한다.
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: false },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: false },
     ],
     registrationConfirmations: {
       laborIncludesFourInsurance: true,
@@ -676,6 +703,68 @@ describe('project registration draft service', () => {
     })).resolves.toMatchObject({ status: 200 });
   });
 
+  it('lists only my active registration drafts, newest first', async () => {
+    const h = createHarness();
+    const row = (overrides) => ({
+      ownerUid: 'actor-a', ownerId: 'actor-a', tenantId: 'tenant-a',
+      resourceType: 'project-registration', draftRevision: 1, status: 'ACTIVE',
+      payload: { name: '' }, stepIndex: 2,
+      createdAt: '2026-08-20T00:00:00.000Z', updatedAt: '2026-08-20T00:00:00.000Z',
+      ...overrides,
+    });
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-old', row({
+      resourceId: 'draft-old', alias: '이어가던 것', payload: { name: '지난주 초안' }, updatedAt: '2026-08-20T09:00:00.000Z',
+    }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-new', row({
+      resourceId: 'draft-new', payload: { name: '' }, updatedAt: '2026-08-25T09:00:00.000Z',
+    }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-submitted', row({
+      resourceId: 'draft-submitted', status: 'SUBMITTED', updatedAt: '2026-08-26T09:00:00.000Z',
+    }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-other-user', row({
+      resourceId: 'draft-other-user', ownerUid: 'actor-b', ownerId: 'actor-b', updatedAt: '2026-08-26T09:00:00.000Z',
+    }));
+
+    const listed = await h.service.listMine({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-list',
+    });
+    expect(listed.drafts).toEqual([
+      { draftId: 'draft-new', alias: '', name: '', updatedAt: '2026-08-25T09:00:00.000Z', stepIndex: 2 },
+      { draftId: 'draft-old', alias: '이어가던 것', name: '지난주 초안', updatedAt: '2026-08-20T09:00:00.000Z', stepIndex: 2 },
+    ]);
+  });
+
+  it('soft-discards my draft, hides it from the list, and refuses submitted drafts', async () => {
+    const h = createHarness();
+    const row = (overrides) => ({
+      ownerUid: 'actor-a', ownerId: 'actor-a', tenantId: 'tenant-a',
+      resourceType: 'project-registration', draftRevision: 1, status: 'ACTIVE',
+      payload: { name: '' }, stepIndex: 0,
+      attachmentRefs: [{ documentKind: 'contract', path: 'orgs/tenant-a/project-registration-drafts/draft-x/a-contract.pdf', name: 'a.pdf', size: 3, contentType: 'application/pdf' }],
+      createdAt: '2026-08-20T00:00:00.000Z', updatedAt: '2026-08-20T00:00:00.000Z',
+      ...overrides,
+    });
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-x', row({ resourceId: 'draft-x' }));
+    h.db.documents.set('orgs/tenant-a/projectRequestDrafts/draft-done', row({ resourceId: 'draft-done', status: 'SUBMITTED' }));
+
+    const discarded = await h.service.discard({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-discard', draftId: 'draft-x',
+    });
+    expect(discarded.body).toEqual({ draftId: 'draft-x', status: 'DISCARDED' });
+    expect(h.db.documents.get('orgs/tenant-a/projectRequestDrafts/draft-x')).toMatchObject({ status: 'DISCARDED' });
+    const cleanup = [...h.db.documents.entries()].find(([path]) => path.startsWith('outbox/'));
+    expect(cleanup?.[1]?.payload?.paths).toEqual(['orgs/tenant-a/project-registration-drafts/draft-x/a-contract.pdf']);
+
+    const listed = await h.service.listMine({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-list-2',
+    });
+    expect(listed.drafts.some((draft) => draft.draftId === 'draft-x')).toBe(false);
+
+    await expect(h.service.discard({
+      tenantId: 'tenant-a', actorId: 'actor-a', actorDisplayName: 'Actor A', requestId: 'request-discard-2', draftId: 'draft-done',
+    })).rejects.toMatchObject({ code: 'draft_already_submitted' });
+  });
+
   it('atomically submits only the stored private draft and replays after releasing the lease', async () => {
     const memberPath = 'orgs/tenant-a/members/actor-a';
     const { db, service, base, auditChainService } = createHarness({
@@ -994,12 +1083,84 @@ describe('project registration draft service', () => {
 
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload).toMatchObject({
       registrationRequirementsVersion: 2,
-      financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
+      financialYears: [{ year: 2026, confirmed: false }, { year: 2027, confirmed: false }],
     });
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload)
       .not.toHaveProperty('groupwareName');
     expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs.map((item) => item.documentKind))
       .toEqual(documents.map(([documentKind]) => documentKind));
+  });
+
+  it('submits an open-ended contract (contractEndUndecided) with financial years up to the current year', async () => {
+    const { db, service, base } = createHarness();
+    const currentYear = new Date().getFullYear();
+    const years = Array.from({ length: currentYear - 2026 + 1 }, (_, offset) => ({
+      year: 2026 + offset,
+      contractAmount: offset === 0 ? 100_000 : 0,
+      salesVatAmount: offset === 0 ? 10_000 : 0,
+      totalRevenueAmount: offset === 0 ? 40_000 : 0,
+      totalActualCost: offset === 0 ? 25_000 : 0,
+      supportAmount: 0,
+      profitRate: offset === 0 ? 0.4 : 0,
+      confirmed: false,
+    }));
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-open-ended-create',
+      payload: validRegistrationV2Payload({
+        contractEnd: '',
+        contractEndUndecided: true,
+        financialYears: years,
+        contractAmount: 100_000,
+      }),
+    });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+    const submitted = await service.submit({
+      ...base,
+      idempotencyKey: 'idem-open-ended-submit',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    });
+    expect(submitted.status).toBe(201);
+    const request = db.documents.get('orgs/tenant-a/project_requests/project-request-1');
+    expect(request.payload).toMatchObject({ contractEnd: '', contractEndUndecided: true });
+    const project = [...db.documents.entries()].find(([path]) => path.includes('/projects/'))[1];
+    expect(project).toMatchObject({ contractEnd: '', contractEndUndecided: true });
+  });
+
+  it('still rejects a missing contract end without the open-ended flag, and both together', async () => {
+    const { db, service, base } = createHarness();
+    const missingEnd = await service.create({
+      ...base,
+      idempotencyKey: 'idem-missing-end-create',
+      payload: validRegistrationV2Payload({ contractEnd: '' }),
+    });
+    addRequiredRegistrationAttachments(db, missingEnd.body.draft.draftId);
+    await expect(service.submit({
+      ...base,
+      idempotencyKey: 'idem-missing-end-submit',
+      draftId: missingEnd.body.draft.draftId,
+      leaseId: missingEnd.body.lease.leaseId,
+      fence: missingEnd.body.lease.fence,
+      expectedDraftRevision: 0,
+    })).rejects.toMatchObject({ code: 'project_registration_invalid' });
+
+    const contradictory = await service.create({
+      ...base,
+      idempotencyKey: 'idem-contradictory-create',
+      payload: validRegistrationV2Payload({ contractEndUndecided: true }),
+    });
+    addRequiredRegistrationAttachments(db, contradictory.body.draft.draftId);
+    await expect(service.submit({
+      ...base,
+      idempotencyKey: 'idem-contradictory-submit',
+      draftId: contradictory.body.draft.draftId,
+      leaseId: contradictory.body.lease.leaseId,
+      fence: contradictory.body.lease.fence,
+      expectedDraftRevision: 0,
+    })).rejects.toMatchObject({ code: 'project_registration_invalid' });
   });
 
   it('allows optional RFP to be omitted when a legacy proposal exists', async () => {

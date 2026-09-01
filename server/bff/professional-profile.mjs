@@ -4,6 +4,12 @@ import { getProfessionalProfileCatalog } from './professional-profile-catalog.mj
 const PROFILE_SCHEMA_VERSION = 1;
 const PROFILE_SOURCE = 'PEOPLE_MANUAL';
 const TEXT_MAX_LENGTH = 80;
+// 증빙 경로는 사람이 쓰는 글자가 아니라 서버가 만든 저장 키다.
+// orgs/{tenant}/person-hr-evidence/{personId}/{evidenceId}-{파일명} 만 해도 80자를 넘는다.
+const EVIDENCE_PATH_MAX_LENGTH = 512;
+const EVIDENCE_NAME_MAX_LENGTH = 200;
+const EVIDENCE_CONTENT_TYPE_MAX_LENGTH = 128;
+const EVIDENCE_ROOT_SEGMENT = 'person-hr-evidence/';
 const ARRAY_LIMITS = Object.freeze({
   educationRecords: 10,
   englishEvidence: 10,
@@ -13,7 +19,9 @@ const ARRAY_LIMITS = Object.freeze({
 const catalog = getProfessionalProfileCatalog();
 const educationByCode = new Map(catalog.educationAttainments.map((entry) => [entry.code, entry]));
 const englishTestByCode = new Map(catalog.englishTests.map((entry) => [entry.code, entry]));
-const countryCodes = new Set(catalog.countryCodes);
+const educationRegionByCode = new Map(catalog.educationRegions.map((entry) => [entry.code, entry]));
+// 249개 ISO 국가 코드로 저장하던 시절의 값. 국내/해외 둘만 가리면 되므로 옮겨 읽는다.
+const ENGLISH_SPEAKING_COUNTRY_CODES = new Set(['US', 'GB', 'AU', 'CA', 'NZ', 'IE']);
 
 function invalid(field, message) {
   const error = new Error(`${field}: ${message}`);
@@ -30,15 +38,32 @@ function textLength(value) {
   return Array.from(value).length;
 }
 
-function optionalText(value, field) {
+function boundedText(value, field, max) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string') invalid(field, 'must be text');
   const normalized = value.trim();
   if (!normalized) return null;
-  if (textLength(normalized) > TEXT_MAX_LENGTH) {
-    invalid(field, `must be at most ${TEXT_MAX_LENGTH} characters`);
+  if (textLength(normalized) > max) {
+    invalid(field, `must be at most ${max} characters`);
   }
   return normalized;
+}
+
+function optionalText(value, field) {
+  return boundedText(value, field, TEXT_MAX_LENGTH);
+}
+
+/**
+ * 증빙 경로. 길이를 넉넉히 두는 대신 어디를 가리키는지는 좁힌다 —
+ * 증빙 보관함 밖을 가리키는 경로는 저장하지 않는다.
+ */
+function normalizeEvidencePath(value, field) {
+  const path = boundedText(value, field, EVIDENCE_PATH_MAX_LENGTH);
+  if (!path) return null;
+  if (!path.includes(EVIDENCE_ROOT_SEGMENT) || path.includes('..')) {
+    invalid(field, 'must point inside the person evidence store');
+  }
+  return path;
 }
 
 function requiredCode(value, field) {
@@ -55,12 +80,84 @@ function boundedArray(value, field) {
   return value;
 }
 
-function normalizeCountryCode(value, field) {
+/**
+ * 학교가 국내인지 해외인지. 영미권을 따로 가리는 것은 어학 능력을 함께 읽기 때문이다.
+ *
+ * 예전에는 249개 ISO 국가 코드로 저장했다. 그때 값이 들어오면 옮겨 읽는다 —
+ * 이미 적어 둔 학력이 저장 한 번에 사라지지 않게.
+ */
+function normalizeEducationRegion(value, field) {
   const normalized = optionalText(value, field);
   if (normalized === null) return null;
   const code = normalized.toUpperCase();
-  if (!countryCodes.has(code)) invalid(field, 'must be an ISO 3166-1 alpha-2 country code');
-  return code;
+  if (educationRegionByCode.has(code)) return code;
+  if (/^[A-Z]{2}$/.test(code)) {
+    if (code === 'KR') return 'DOMESTIC';
+    return ENGLISH_SPEAKING_COUNTRY_CODES.has(code) ? 'OVERSEAS_ENGLISH' : 'OVERSEAS_OTHER';
+  }
+  invalid(field, 'must be one of DOMESTIC, OVERSEAS_ENGLISH, OVERSEAS_OTHER');
+  return null;
+}
+
+
+/** 입학·학위취득 년도. 사람이 기억으로 적는 값이라 연도까지만 받는다. */
+function normalizeYear(value, field) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = typeof value === 'number' ? String(value) : value;
+  if (typeof text !== 'string' || !/^\d{4}$/.test(text.trim())) invalid(field, 'must be a 4-digit year');
+  const year = Number(text.trim());
+  if (year < 1900 || year > 2100) invalid(field, 'must be between 1900 and 2100');
+  return String(year);
+}
+
+/** 자격증 취득일·증빙 일자. 일 단위까지 기억하지 못하는 경우가 많아 YYYY-MM 으로 받는다. */
+function normalizeMonth(value, field) {
+  const normalized = optionalText(value, field);
+  if (normalized === null) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(normalized)) invalid(field, 'must use YYYY-MM');
+  return normalized;
+}
+
+
+/**
+ * 증빙 참조. 파일 자체는 스토리지에 있고 프로필에는 가리키는 표만 남는다.
+ * 경로(path)는 서버가 evidenceId 로 만든 값만 저장한다 - 브라우저가 준 경로는 쓰지 않는다.
+ */
+function normalizeEvidenceRef(value, field) {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) invalid(field, 'must be an object');
+  const evidenceId = optionalText(value.evidenceId, `${field}.evidenceId`);
+  const path = normalizeEvidencePath(value.path, `${field}.path`);
+  if (!evidenceId || !path) invalid(field, 'requires evidenceId and path');
+  const size = Number(value.size);
+  return {
+    evidenceId,
+    path,
+    name: boundedText(value.name, `${field}.name`, EVIDENCE_NAME_MAX_LENGTH) || evidenceId,
+    size: Number.isSafeInteger(size) && size >= 0 ? size : 0,
+    contentType: boundedText(value.contentType, `${field}.contentType`, EVIDENCE_CONTENT_TYPE_MAX_LENGTH) || 'application/octet-stream',
+    uploadedAt: optionalText(value.uploadedAt, `${field}.uploadedAt`),
+  };
+}
+
+/** 프로필 어디에든 붙어 있는 증빙 경로를 모은다. 저장할 때 사라진 파일을 지우는 데 쓴다. */
+export function collectProfileEvidencePaths(profile) {
+  if (!isRecord(profile)) return [];
+  const paths = [];
+  const push = (evidence) => {
+    const path = readEvidencePath(evidence);
+    if (path) paths.push(path);
+  };
+  (Array.isArray(profile.educationRecords) ? profile.educationRecords : []).forEach((record) => push(record?.evidence));
+  (Array.isArray(profile.englishEvidence) ? profile.englishEvidence : []).forEach((record) => push(record?.evidence));
+  (Array.isArray(profile.certifications) ? profile.certifications : []).forEach((record) => push(record?.evidence));
+  return [...new Set(paths)];
+}
+
+function readEvidencePath(evidence) {
+  return isRecord(evidence) && typeof evidence.path === 'string' && evidence.path.trim()
+    ? evidence.path.trim()
+    : '';
 }
 
 function normalizeEducationRecord(value, index) {
@@ -68,11 +165,19 @@ function normalizeEducationRecord(value, index) {
   if (!isRecord(value)) invalid(field, 'must be an object');
   const attainmentCode = requiredCode(value.attainmentCode, `${field}.attainmentCode`);
   if (!educationByCode.has(attainmentCode)) invalid(`${field}.attainmentCode`, 'is not in the catalog');
+  const admissionYear = normalizeYear(value.admissionYear, `${field}.admissionYear`);
+  const degreeYear = normalizeYear(value.degreeYear, `${field}.degreeYear`);
+  if (admissionYear && degreeYear && admissionYear > degreeYear) {
+    invalid(`${field}.degreeYear`, 'must not be earlier than admissionYear');
+  }
   return {
     attainmentCode,
     institutionName: optionalText(value.institutionName, `${field}.institutionName`),
-    countryCode: normalizeCountryCode(value.countryCode, `${field}.countryCode`),
+    regionCode: normalizeEducationRegion(value.regionCode ?? value.countryCode, `${field}.regionCode`),
     major: optionalText(value.major, `${field}.major`),
+    admissionYear,
+    degreeYear,
+    evidence: normalizeEvidenceRef(value.evidence, `${field}.evidence`),
   };
 }
 
@@ -139,6 +244,7 @@ function normalizeEnglishEvidence(value, index) {
     resultValue: normalizeEnglishResult(value.resultValue, scale, `${field}.resultValue`),
     otherTestName,
     testedAt: normalizeTestedAt(value.testedAt, `${field}.testedAt`),
+    evidence: normalizeEvidenceRef(value.evidence, `${field}.evidence`),
   };
 }
 
@@ -154,6 +260,8 @@ function normalizeCertification(value, index) {
   return {
     key: label.toLocaleLowerCase('ko-KR'),
     label,
+    acquiredAt: normalizeMonth(value.acquiredAt, `${field}.acquiredAt`),
+    evidence: normalizeEvidenceRef(value.evidence, `${field}.evidence`),
   };
 }
 
@@ -256,8 +364,11 @@ export function serializeProfessionalProfile(value) {
     educationRecords: profile.educationRecords.map((record) => ({
       attainmentCode: record.attainmentCode,
       institutionName: record.institutionName,
-      countryCode: record.countryCode,
+      regionCode: record.regionCode,
       major: record.major,
+      admissionYear: record.admissionYear,
+      degreeYear: record.degreeYear,
+      evidence: record.evidence,
     })),
     englishEvidence: profile.englishEvidence.map((evidence) => ({
       testCode: evidence.testCode,
@@ -265,10 +376,13 @@ export function serializeProfessionalProfile(value) {
       resultValue: evidence.resultValue,
       otherTestName: evidence.otherTestName,
       testedAt: evidence.testedAt,
+      evidence: evidence.evidence,
     })),
     certifications: profile.certifications.map((certification) => ({
       key: certification.key,
       label: certification.label,
+      acquiredAt: certification.acquiredAt,
+      evidence: certification.evidence,
     })),
     provenance: {
       source: profile.provenance.source,
@@ -279,10 +393,15 @@ export function serializeProfessionalProfile(value) {
   };
 }
 
+/**
+ * 최종학력 한 줄. 학교보다 **학과(전공)** 를 앞세운다 - 사람을 고를 때 무엇을 전공했는지가
+ * 어느 학교를 나왔는지보다 먼저 읽혀야 한다. 전공이 없으면 학교로 대신한다.
+ */
 function formatEducation(record) {
   if (!record) return '';
   const label = educationByCode.get(record.attainmentCode).label;
-  return record.institutionName ? `${label} · ${record.institutionName}` : label;
+  const detail = record.major || record.institutionName;
+  return detail ? `${label} · ${detail}` : label;
 }
 
 function formatEnglishEvidence(evidence) {
@@ -311,7 +430,7 @@ export function deriveProfessionalProfileFacts(value) {
     englishFacets.push(testCode);
   });
   const hasOverseasEducation = profile.educationRecords.some(
-    ({ countryCode }) => countryCode !== null && countryCode !== 'KR',
+    ({ regionCode }) => regionCode === 'OVERSEAS_ENGLISH' || regionCode === 'OVERSEAS_OTHER',
   );
   if (hasOverseasEducation) englishFacets.push('OVERSEAS_EDUCATION');
   if (englishFacets.length === 0) englishFacets.push('__MISSING__');
@@ -321,6 +440,11 @@ export function deriveProfessionalProfileFacts(value) {
 
   return {
     highestEducationCode: highestEducation?.attainmentCode ?? null,
+    // 학위취득년도는 졸업증에 찍힌 해다. KOICA 제안서가 '학위 취득 후 경력 몇 년'을 보므로
+    // 최고 학력의 취득년도를 따로 꺼내 둔다 - 화면이 학력 목록을 다시 뒤지지 않게.
+    highestDegreeYear: highestEducation?.degreeYear ?? null,
+    highestEducationInstitution: highestEducation?.institutionName ?? null,
+    highestEducationMajor: highestEducation?.major ?? null,
     englishFacets,
     highestEducationDisplayText: formatEducation(highestEducation),
     englishEvidenceDisplayText: englishDisplayParts.join(' · '),

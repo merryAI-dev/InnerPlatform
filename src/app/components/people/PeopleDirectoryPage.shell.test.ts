@@ -38,11 +38,29 @@ describe('PeopleDirectoryPage 근로형태 노출 계약', () => {
     expect(dialog).toContain('EMPLOYMENT_TYPE_LABELS');
   });
 
-  it('목록에는 이름·재직상태·소속·직급·입사일·근속만 둔다', () => {
+  /**
+   * 개인 정보를 앞에 모으고 회사 정보를 뒤로 몬다. 재직상태는 관리 뒤 맨 끝이다 —
+   * 사람을 찾을 때 먼저 읽는 것과 상태를 확인할 때 읽는 것이 다르기 때문이다.
+   */
+  it('열 순서를 개인 → 회사 → 관리 → 재직상태로 지킨다', () => {
     const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
-    ['이름', '재직상태', '소속', '직급', '입사일', '근속'].forEach((column) => {
-      expect(table).toContain(`>${column}</TableHead>`);
+    const order = [
+      '별명', '생년월일',
+      '입사일', '휴직·퇴사', '대분류', '중분류', '직책', '직급',
+      '최종학력', '학위취득', '어학능력', '자격증', '인사', '재직상태',
+    ];
+    const positions = order.map((column) => {
+      const at = table.indexOf(`>${column}</DataGridHeadCell>`);
+      expect(at, `${column} 열이 없습니다`).toBeGreaterThan(-1);
+      return at;
     });
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+  });
+
+  it('소속 표기는 조직 설정과 같은 말을 쓴다 — 대분류·중분류', () => {
+    expect(source).not.toContain('>소속 · 팀</DataGridHeadCell>');
+    expect(source).toContain('label="대분류"');
+    expect(source).toContain('label="중분류"');
   });
 });
 
@@ -107,13 +125,31 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
     expect(source).toContain('open={addOpen && directoryScopeLoaded}');
   });
 
-  it('읽기 capability가 있을 때만 사람별 전문 프로필 action/editor를 조립한다', () => {
-    expect(source).toContain('{canReadProfile ? (');
+  it('사람별 진입점은 인사정보 콘솔 하나이고, 학력 편집기는 거기서 이어 연다', () => {
+    // 계약 관리와 전문 프로필이 서로 다른 창이라 같은 사람을 두 번 열어야 했다.
+    expect(source).toContain('<PersonHrConsole');
+    expect(source).toContain('aria-label={`${person.name} 인사정보`}');
     expect(source).toContain('canReadProfile={scopedProfileCapabilities.read}');
-    expect(source).toContain('onOpenProfile={setProfilePerson}');
+    expect(source).toContain('canWriteProfile={scopedProfileCapabilities.write}');
+    expect(source).toContain('onEditProfessionalProfile={');
+    expect(source).toContain('onManageEmployment={');
     expect(source).toContain('profilePerson && scopedProfileCapabilities.read');
     expect(source).toContain('<ProfessionalProfileEditor');
-    expect(source).toContain('aria-label={`${person.name} 전문 프로필`}');
+    // 기본 정렬은 입사순이다 - 가나다순은 누가 오래 다녔는지를 못 읽게 한다.
+    expect(source).toContain('leftJoined.localeCompare(rightJoined)');
+    // 칸별 필터로 적정 대상을 좁힌다. 계산값(나이·근속·학위 후 경력)도 같은 기준일을 쓴다.
+    expect(source).toContain('filterPeopleRows(built, merged, asOf)');
+    expect(source).toContain('label="근속(년) 이상"');
+    expect(source).toContain('label="학위 후(년) 이상"');
+    expect(source).toContain('필터 초기화');
+    // 인사정보는 상세를 열지 않고 기본 목록에서도 보인다(권한 있을 때만).
+    expect(source).toContain('canReadProfile ? <>');
+    expect(source).toContain('person.hrSummary?.highestEducationDisplayText');
+    expect(source).toContain('deriveYearsSinceDegree(person.hrSummary.highestDegreeYear, asOf)');
+    expect(source).toContain('deriveAge(person.birthDate, asOf)');
+    // 직급과 직책은 다른 축이라 표에서도 칸을 나눈다.
+    expect(source).toContain('{person.grade || \'-\'}');
+    expect(source).toContain('{person.title || \'-\'}');
   });
 
   it('신규 등록은 쓰기 capability와 실제 입력이 있을 때만 프로필을 POST한다', () => {
@@ -129,5 +165,44 @@ describe('PeopleDirectoryPage 전문 프로필 조립 계약', () => {
   it('전문 프로필을 PersonRecord나 people 목록에 합치지 않는다', () => {
     expect(source).not.toContain('setPeople((prev) => prev.map((item) => ({ ...item, professionalProfile');
     expect(source).not.toContain('selected.professionalProfile');
+  });
+
+  /**
+   * 열이 18개다. 묶지 않으면 어디까지가 개인 정보이고 어디부터가 소속인지 매번 다시 읽어야 한다.
+   * 이름은 왼쪽에 붙여 둔다 - 가로로 밀었을 때 누구 행인지 잃지 않게.
+   */
+  it('열을 개인·소속·학력 묶음으로 얹고 이름을 왼쪽에 고정한다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    expect(table).toContain('<DataGridGroupCell span={2}>개인</DataGridGroupCell>');
+    expect(table).toContain('소속 · 직위</DataGridGroupCell>');
+    expect(table).toContain('<DataGridGroupCell span={4}>학력 · 자격</DataGridGroupCell>');
+    expect(table).toContain('<DataGridGroupCell rowSpan={2} sticky>이름</DataGridGroupCell>');
+    expect(table).toContain('<DataGridCell sticky>');
+  });
+
+  it('빈 표가 걸치는 칸 수를 손으로 세지 않는다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    // 열을 더하고 숫자 고치는 걸 잊으면 빈 상태가 한 칸 모자라게 걸쳐진다.
+    expect(table).toContain('const columnCount = canReadProfile ? 15 : 11;');
+  });
+
+  /**
+   * 연번과 체크칸은 걷어냈다. 열이 많아 가로 스크롤이 나던 표에서, 읽을 값이 아닌 칸이
+   * 자리를 먼저 먹고 있었다. 다중선택도 함께 걷어 죽은 코드를 남기지 않는다.
+   */
+  it('연번·체크칸·다중선택을 두지 않는다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    expect(table).not.toContain('>No</DataGridHeadCell>');
+    expect(table).not.toContain('type="checkbox"');
+    expect(source).not.toContain('selectedIds');
+    expect(source).not.toContain('applyBulkField');
+  });
+
+  it('계산된 값은 옆이 아니라 아래 줄로 내린다', () => {
+    const table = source.slice(source.indexOf('function PeopleTable'), source.indexOf('export function PeopleDirectoryPage'));
+    // 만 나이·근속·학위 후 경력을 같은 줄에 붙이면 칸이 넓어지고 표가 가로로 밀린다.
+    expect(table).toContain('<SubLine>만 {deriveAge(person.birthDate, asOf) ?? \'-\'}세</SubLine>');
+    expect(table).toContain('<SubLine>{tenure.label}</SubLine>');
+    expect(table).toContain('년차</SubLine>');
   });
 });

@@ -9,7 +9,8 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain('exportCashflowWorkbookViaBff');
     expect(source).toContain('startYearMonth: yearMonths[0]');
     expect(source).toContain('endYearMonth: yearMonths[yearMonths.length - 1]');
-    expect(source).toContain('BFF 서버의 최신 현금흐름 데이터');
+    expect(source).not.toContain('BFF 서버의 최신 현금흐름 데이터');
+    expect(source).not.toContain('생성 기준');
     expect(source).not.toContain('buildCashflowExportWorkbookSpec');
     expect(source).not.toContain('loadExcelJs');
     expect(source).toContain('projectIds: scope === \'selected\'');
@@ -28,19 +29,31 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain('sortBy,');
   });
 
-  it('shows the selected project status table without client-side financial differences', () => {
-    expect(source).toContain('buildCashflowExportProjectRows');
-    expect(source).toContain('weeksLoading');
-    expect(source).toContain('weeksLoadError');
+  it('shows the canonical two-week operations table without client-side financial differences', () => {
+    expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
+    expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
+    expect(source).toContain('resolveCashflowExportRecentWeeks');
+    expect(source).toContain('formatCashflowExecutiveApprover');
+    expect(source).toContain('formatCashflowManager');
+    expect(source).toContain('조직장');
+    expect(source).toContain('주정산 최근 2주');
+    expect(source).toContain('실무자 제출 완료');
+    expect(source).toContain('조직장 승인 완료');
+    expect(source).toContain('제출 전');
+    expect(source).toContain('승인 전');
+    expect(source).toContain('시트 불러온 시각');
     expect(source).toContain('Projection-Actual');
     expect(source).not.toContain('projectionActualInDifference');
     expect(source).not.toContain('projectionActualOutDifference');
-    expect(source).toContain('최근 업데이트');
     expect(source).toContain('사업 보기');
     expect(source).toContain('CashflowCanonicalSummary');
     expect(source).toContain('누적 Projection-Actual');
     expect(source).not.toContain('현재 주차 상세');
-    expect(source).toContain('onRetry={() => void canonicalSummaries.retry(row.id)}');
+    expect(source).not.toContain('useCashflowProjectionActualSummaries');
+    expect(source).not.toContain('buildCashflowExportProjectRows');
+    expect(source).not.toContain('확인 불가');
+    expect(source).not.toContain('다시 조회');
+    expect(source).not.toContain('주정산 기록 없음');
   });
 
   it('does not infer export readiness from the legacy weekly status collection', () => {
@@ -49,5 +62,21 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).not.toContain('업데이트된 사업');
     expect(source).not.toContain('미업데이트 사업');
     expect(source).not.toContain('최근 업데이트(Projection)');
+    expect(source).not.toContain('지난 목요일 자정');
+    expect(source).not.toContain('useCashflowWeeks');
+  });
+
+  it('does not request operations data before export permission is established', () => {
+    expect(source).toContain('!canExport || !bffEnabled');
+  });
+
+  it('keeps the export context while opening a project in a horizontal split view', () => {
+    expect(source).toContain("searchParams.get('project')");
+    expect(source).toContain('CashflowExportProjectPane');
+    expect(source).toContain('cashflow-export-split-layout');
+    expect(source).toContain('cashflow-export-primary-pane');
+    expect(source).toContain('grid grid-cols-2 gap-2');
+    expect(source).toContain('정산 정보에 저장된 통장 유형을 여러 개 함께 고릅니다.');
+    expect(source).not.toContain('navigate(`/cashflow/projects/');
   });
 });

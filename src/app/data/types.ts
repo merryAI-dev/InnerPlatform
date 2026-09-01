@@ -698,6 +698,7 @@ export interface Project {
   contractAmount: number;        // 총 사업비 금액(매출부가세 포함)
   contractStart: string;
   contractEnd: string;
+  contractEndUndecided?: boolean;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;      // 전용통장/운영통장
@@ -726,6 +727,7 @@ export interface Project {
   participantCondition: string;  // 참여기업 조건
   note?: string;                  // PM/관리자 참고 메모
   teamMembersDetailed?: ProjectTeamMemberAssignment[];
+  staffing?: ProjectStaffing;    // 실제 투입인력 (총괄·실무책임자·운영매니저·정산지원)
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
   projectPurpose?: string;
   totalRevenueAmount?: number;
@@ -888,6 +890,26 @@ export interface ProjectRequestContractAnalysis {
   };
 }
 
+/** 실제 투입인력 역할 슬롯. 인력 명부(persons) 스냅샷 - 참여율 시트와 독립인 책임 메타데이터다. */
+export interface ProjectStaffingSlot {
+  /** 인력 명부(orgs/{org}/persons) 문서 id. 명부 밖 인물은 담지 않는다. */
+  personId: string;
+  name: string;
+  nickname: string;
+}
+
+/** 실제 투입인력. 슬롯이 비어 있으면(null) "미정" 상태다 - 채용 전 자리를 허용한다. */
+export interface ProjectStaffing {
+  /** 총괄책임자 - 사업 최종 책임자 */
+  lead: ProjectStaffingSlot | null;
+  /** 실무책임자 (PM) */
+  pm: ProjectStaffingSlot | null;
+  /** 운영 매니저 (1인 이상, 가변) */
+  operators: ProjectStaffingSlot[];
+  /** 정산지원 - 도담/써니 중 택1, 해당 없으면 빈 문자열 */
+  settlementSupport: string;
+}
+
 export interface ProjectTeamMemberAssignment {
   /** 인력 명부(orgs/{org}/persons)의 SSOT 식별자 */
   personId?: string;
@@ -930,6 +952,7 @@ export interface ProjectRequestPayload {
   checkout?: ProjectCheckout;
   contractStart: string;
   contractEnd: string;
+  contractEndUndecided?: boolean;
   contractType?: string;
   settlementType: SettlementType;
   basis: Basis;
@@ -960,6 +983,7 @@ export interface ProjectRequestPayload {
   teamName: string;
   teamMembers: string;
   teamMembersDetailed?: ProjectTeamMemberAssignment[];
+  staffing?: ProjectStaffing;
   participantCondition: string;
   note: string;
   contractDocument: FileAttachment | null;
@@ -1569,54 +1593,10 @@ export interface MonthlyRollup {
 
 export type DegreeType = '학사' | '석사' | '박사' | '전문학사' | '수료' | '기타';
 
-export interface EducationEntry {
-  id: string;
-  school: string;       // 학교명
-  major: string;        // 전공
-  degree: DegreeType;
-  startDate: string;    // YYYY-MM
-  endDate: string;      // YYYY-MM or '재학중'
-}
-
-export interface WorkHistoryEntry {
-  id: string;
-  company: string;      // 기업명
-  title: string;        // 최종직위
-  description: string;  // 담당업무/주요프로젝트
-  startDate: string;    // YYYY-MM
-  endDate: string;      // YYYY-MM or '현재'
-}
-
-export interface CertificationEntry {
-  id: string;
-  name: string;         // 자격증명
-  issuedAt: string;     // YYYY-MM-DD
-  issuer: string;       // 발행기관
-}
-
 /**
  * 개인 경력 프로필 (Firestore: orgs/{orgId}/careerProfiles/{uid})
  * 참여경력(ParticipationEntry)과 사내교육(TrainingEnrollment)은 별도 컬렉션에서 join
  */
-export interface CareerProfile {
-  uid: string;
-  orgId: string;
-  nameKo: string;           // 국문 성명
-  nameEn?: string;          // 영문 성명
-  nameHanja?: string;       // 한자 성명
-  birthDate?: string;       // YYYY-MM-DD
-  phone?: string;           // 핸드폰
-  officePhone?: string;     // 직장 전화
-  department?: string;      // 부서
-  title?: string;           // 직책
-  joinedAt?: string;        // 입사일 YYYY-MM-DD
-  bio?: string;             // 간단 소개
-  education: EducationEntry[];
-  workHistory: WorkHistoryEntry[];
-  certifications: CertificationEntry[];
-  updatedAt: string;
-}
-
 // ── 사내 강의 (Internal Training) ──
 
 export type TrainingCategory = 'technical' | 'compliance' | 'soft-skills' | 'management' | 'language' | 'other';

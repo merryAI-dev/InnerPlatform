@@ -238,6 +238,21 @@ export function validatePeriodAgainstProject({ period, project } = {}) {
   const end = text(period?.end);
   const projectStart = text(project?.contractStart).slice(0, 7);
   const projectEnd = text(project?.contractEnd).slice(0, 7);
+  // 종료 기간 없음(무기한) 계약은 종료월 대조가 불가능하다. 시작월만 대조하고 경고로 안내한다.
+  if (project?.contractEndUndecided === true && MONTH_RE.test(projectStart) && !projectEnd) {
+    if (start !== projectStart) {
+      return issue(
+        'participation_period_mismatch',
+        `시트에 기입된 기간(${start}~${end})과 플랫폼 상의 계약 시작월(${projectStart})이 달라서 확인 부탁드립니다. 플랫폼 계약은 종료 기간 없음입니다.`,
+        { sheetPeriod: { start, end }, projectPeriod: { start: projectStart, end: '' } },
+      );
+    }
+    return issue(
+      'participation_period_open_ended',
+      `플랫폼 계약이 종료 기간 없음이라 시트 기간(${start}~${end})의 종료월 대조는 건너뛰었습니다.`,
+      { sheetPeriod: { start, end }, projectPeriod: { start: projectStart, end: '' } },
+    );
+  }
   if (!MONTH_RE.test(projectStart) || !MONTH_RE.test(projectEnd)) {
     return issue(
       'participation_project_period_missing',
@@ -247,7 +262,7 @@ export function validatePeriodAgainstProject({ period, project } = {}) {
   if (start !== projectStart || end !== projectEnd) {
     return issue(
       'participation_period_mismatch',
-      `시트 기간(${start}~${end})이 사업 계약 기간(${projectStart}~${projectEnd})과 다릅니다.`,
+      `시트에 기입된 인력별 참여 기간(${start}~${end})과 플랫폼 상의 계약 기간(${projectStart}~${projectEnd})이 달라서 확인 부탁드립니다.`,
       { sheetPeriod: { start, end }, projectPeriod: { start: projectStart, end: projectEnd } },
     );
   }
@@ -442,12 +457,18 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
   const parsed = parseParticipationSheet(sheet);
   const formatIssues = validateParticipationFormat(parsed);
   if (formatIssues.length) {
-    return { ok: false, blocking: formatIssues, parsed, rows: [], entries: [], missing: [], summary: null };
+    return { ok: false, blocking: formatIssues, warnings: [], parsed, rows: [], entries: [], missing: [], summary: null };
   }
+  // 기간 불일치는 막지 않고 경고한다 (2026-08-25 보람 결정 - 계약 문서 기간 규칙 개정).
+  // 막으면 "시트 먼저 vs 플랫폼 먼저" 순서 강제가 현장에서 오류만 가중시킨다. 값은
+  // YYYY-MM 키로 저장되므로 기간이 달라도 달이 어긋나지는 않는다 - 사용자가 인지하고
+  // 진행하는 것으로 충분하다. 단 플랫폼 계약 기간 자체가 없으면 대조가 불가능하므로 막는다.
+  const warnings = [];
   const periodIssue = validatePeriodAgainstProject({ period: parsed.period, project });
-  if (periodIssue) {
-    return { ok: false, blocking: [periodIssue], parsed, rows: [], entries: [], missing: [], summary: null };
+  if (periodIssue?.code === 'participation_project_period_missing') {
+    return { ok: false, blocking: [periodIssue], warnings, parsed, rows: [], entries: [], missing: [], summary: null };
   }
+  if (periodIssue) warnings.push(periodIssue);
 
   const rows = resolvePeopleIdentity({ rows: parsed.rows, people });
   const { errors, missing } = validateStintRows({ rows, months: parsed.months });
@@ -458,6 +479,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
   return {
     ok: blocking.length === 0,
     blocking,
+    warnings,
     parsed,
     rows,
     entries,
@@ -473,6 +495,7 @@ export function analyzeParticipationSheet({ sheet = {}, project = {}, people = [
       missingCount: missing.length,
       candidateCount: candidates.length,
       errorCount: blocking.length,
+      warningCount: warnings.length,
     },
   };
 }

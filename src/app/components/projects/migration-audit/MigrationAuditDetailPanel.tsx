@@ -25,6 +25,7 @@ import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Card, CardContent } from '../../ui/card';
 import { ContractDocumentPreview } from '../ContractDocumentPreview';
+import { FinancialYearsTable } from './FinancialYearsTable';
 
 interface MigrationAuditDetailPanelProps {
   record: MigrationAuditConsoleRecord | null;
@@ -64,15 +65,6 @@ function valueClass(value: string, missing = false) {
 
 function formatMoney(value?: number) {
   return Number.isFinite(value) ? `${Number(value).toLocaleString('ko-KR')}원` : '-';
-}
-
-function formatFinancialYears(years: NonNullable<ReturnType<typeof resolveProjectRequestPayload>>['financialYears'] = []) {
-  return (years || []).map((row) => {
-    const payment = row.paymentPlan
-      ? ` · 입금 선금 ${formatMoney(row.paymentPlan.contract)} / 중도금 ${formatMoney(row.paymentPlan.interim)} / 잔금 ${formatMoney(row.paymentPlan.final)}`
-      : '';
-    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
-  }).join('\n') || '-';
 }
 
 function ReviewSection({
@@ -332,8 +324,9 @@ export function MigrationAuditDetailPanel({
                 { label: '총수익', value: dossier.budget.totalRevenueAmountLabel },
                 { label: '총실비(원가)', value: formatMoney(totalActualCost) },
                 { label: '총지원금', value: dossier.budget.supportAmountLabel },
+                { label: '정산 시스템', value: dossier.contract.settlementSystemLabel },
+                { label: '인건비 정산 기준', value: dossier.contract.laborSettlementBasisLabel },
                 { label: '이자 반납 여부', value: interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-' },
-                { label: '연도별 계약/재무', value: formatFinancialYears(financialYears), wide: true },
                 { label: '입금 계획', value: dossier.budget.paymentPlanDesc, wide: true },
                 { label: '입금 분할', value: dossier.budget.paymentPlanSplitLabel, wide: true },
                 { label: '산출내역서(견적서)', value: quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-'), wide: true },
@@ -341,6 +334,12 @@ export function MigrationAuditDetailPanel({
                 { label: '발표자료(구글드라이브 링크)', value: registrationConfirmations?.presentationPptOriginal || '-', wide: true },
               ]}
             />
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-medium text-slate-500">연도별 계약/재무</p>
+              <div className="mt-2">
+                <FinancialYearsTable years={financialYears} />
+              </div>
+            </div>
           </ReviewSection>
 
           <ReviewSection
@@ -355,18 +354,19 @@ export function MigrationAuditDetailPanel({
                   <p className={`mt-1 text-[13px] font-semibold ${valueClass(dossier.people.teamName)}`}>{dossier.people.teamName}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-medium text-slate-500">팀원</p>
-                  {dossier.people.members.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {dossier.people.members.map((member) => (
-                        <Badge key={member} variant="outline" className="h-auto rounded-full px-3 py-1 text-[11px]">
-                          {member}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[12px] text-slate-500">팀원 정보 없음</p>
-                  )}
+                  <p className="text-[11px] font-medium text-slate-500">실제 투입인력</p>
+                  <p className="mt-1 text-[13px] font-medium text-slate-900">{dossier.people.staffingSummary}</p>
+                  <p className="mt-3 text-[11px] font-medium text-slate-500">서류상 참여인력</p>
+                  <p className="mt-1 text-[12px] leading-5 text-slate-700">
+                    {dossier.people.members.length > 0 ? `${dossier.people.members.length}명 등록됨 · ` : ''}
+                    월별 참여율 원본은 참여율 시트에서 확인해 주세요.
+                    {dossier.people.participationSheetLink ? (
+                      <>
+                        {' '}
+                        <a className="break-all text-blue-700 underline" href={dossier.people.participationSheetLink} target="_blank" rel="noreferrer">참여율 시트 열기</a>
+                      </>
+                    ) : ' (참여율 시트 링크 미등록)'}
+                  </p>
                 </div>
               </div>
             </div>

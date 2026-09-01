@@ -57,6 +57,7 @@ const protectedCollections = [
 const canonicalRootCollections = [
   'projects',
   'cashflow_weeks',
+  'cashflow_settlement_statuses',
   'weekly_submission_status',
   'transactions',
   'comments',
@@ -153,6 +154,26 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     }
     if (adminApp) await deleteApp(adminApp);
   }, 60_000);
+
+  /**
+   * 은퇴한 컬렉션. 포털 마이페이지가 인력 명부(persons)를 읽도록 바뀌면서 쓰지 않게 됐다.
+   * 규칙에서 그냥 지우면 catchall 의 canRead 가 걸려 조직 전체가 읽게 되므로 닫아 둔다.
+   */
+  it('careerProfiles: 본인도 남도 못 연다 — 은퇴한 경로다', async () => {
+    const owner = 'pm-member';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), `orgs/${tenantId}/careerProfiles/${owner}`), {
+        uid: owner, orgId: tenantId, nameKo: '본인', birthDate: '1990-01-01',
+      });
+    });
+
+    for (const actor of [owner, 'finance-member', 'admin-member']) {
+      const actorDb = testEnv.authenticatedContext(actor, { email: `${actor}@mysc.co.kr` }).firestore();
+      await assertFails(getDoc(doc(actorDb, `orgs/${tenantId}/careerProfiles/${owner}`)));
+      await assertFails(setDoc(doc(actorDb, `orgs/${tenantId}/careerProfiles/${owner}`), { uid: owner, hacked: true }));
+      await assertFails(getDocs(firestoreCollection(actorDb, `orgs/${tenantId}/careerProfiles`)));
+    }
+  });
 
   for (const collection of protectedCollections) {
     for (const actor of actors) {

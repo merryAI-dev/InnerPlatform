@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import {
   createPersonProfessionalProfileClient,
   type ProfessionalProfileCatalog,
+  type ProfessionalProfileEvidenceRef,
   type ProfessionalProfileEducationRecordInput,
   type ProfessionalProfileEnglishEvidenceInput,
   type ProfessionalProfileInput,
@@ -12,6 +13,7 @@ import {
 import type { ActorLike } from '../../lib/platform-bff-client';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { Badge } from '../ui/badge';
+import { EvidenceAttachment } from './EvidenceAttachment';
 import { Button } from '../ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -29,10 +31,17 @@ const MAX_ENGLISH_EVIDENCE = 10;
 const MAX_CERTIFICATIONS = 20;
 const EMPTY_OPTION = '__EMPTY_OPTION__';
 
+export interface ProfessionalProfileCertificationDraft {
+  label: string;
+  acquiredAt: string;
+  evidence?: ProfessionalProfileEvidenceRef | null;
+}
+
 export interface ProfessionalProfileDraft {
   educationRecords: ProfessionalProfileEducationRecordInput[];
   englishEvidence: ProfessionalProfileEnglishEvidenceInput[];
-  certificationText: string;
+  /** 취득일을 항목마다 받아야 해서 자유 텍스트가 아니라 행으로 관리한다. */
+  certifications: ProfessionalProfileCertificationDraft[];
 }
 
 export interface ProfessionalProfileSaveAttempt {
@@ -46,15 +55,7 @@ type EditorError = {
 };
 
 export function createEmptyProfessionalProfileDraft(): ProfessionalProfileDraft {
-  return { educationRecords: [], englishEvidence: [], certificationText: '' };
-}
-
-export function splitCertificationLabels(value: string): Array<{ label: string }> {
-  return value
-    .split(/[\n,]/)
-    .map((label) => label.trim())
-    .filter(Boolean)
-    .map((label) => ({ label }));
+  return { educationRecords: [], englishEvidence: [], certifications: [] };
 }
 
 export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft): ProfessionalProfileInput {
@@ -62,8 +63,11 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
     educationRecords: draft.educationRecords.map((record) => ({
       attainmentCode: record.attainmentCode,
       institutionName: record.institutionName?.trim() || null,
-      countryCode: record.countryCode?.trim() || null,
+      regionCode: record.regionCode?.trim() || null,
       major: record.major?.trim() || null,
+      admissionYear: record.admissionYear?.trim() || null,
+      degreeYear: record.degreeYear?.trim() || null,
+      evidence: record.evidence || null,
     })),
     englishEvidence: draft.englishEvidence.map((evidence) => ({
       testCode: evidence.testCode,
@@ -71,15 +75,22 @@ export function professionalProfileDraftToInput(draft: ProfessionalProfileDraft)
       resultValue: evidence.resultValue.trim(),
       otherTestName: evidence.otherTestName?.trim() || null,
       testedAt: evidence.testedAt?.trim() || null,
+      evidence: evidence.evidence || null,
     })),
-    certifications: splitCertificationLabels(draft.certificationText),
+    certifications: draft.certifications
+      .map((certification) => ({
+        label: certification.label.trim(),
+        acquiredAt: certification.acquiredAt.trim() || null,
+        evidence: certification.evidence || null,
+      }))
+      .filter((certification) => certification.label.length > 0),
   };
 }
 
 export function hasProfessionalProfileFacts(draft: ProfessionalProfileDraft): boolean {
   return draft.educationRecords.length > 0
     || draft.englishEvidence.length > 0
-    || splitCertificationLabels(draft.certificationText).length > 0;
+    || draft.certifications.some((certification) => certification.label.trim().length > 0);
 }
 
 export function resolveProfessionalProfileSaveAttempt(
@@ -104,9 +115,12 @@ export function resolveProfessionalProfileSaveAttempt(
 }
 
 function certificationDraftError(draft: ProfessionalProfileDraft): string | null {
-  const certifications = splitCertificationLabels(draft.certificationText);
-  if (certifications.length > MAX_CERTIFICATIONS) return '자격증은 최대 20개까지 입력할 수 있습니다.';
-  if (certifications.some(({ label }) => label.length > 80)) return '자격증 이름은 각각 80자 이내로 입력해 주세요.';
+  const filled = draft.certifications.filter((certification) => certification.label.trim().length > 0);
+  if (filled.length > MAX_CERTIFICATIONS) return '자격증은 최대 20개까지 입력할 수 있습니다.';
+  if (filled.some(({ label }) => label.trim().length > 80)) return '자격증 이름은 각각 80자 이내로 입력해 주세요.';
+  if (draft.certifications.some(({ acquiredAt }) => acquiredAt.trim() && !/^\d{4}-(0[1-9]|1[0-2])$/.test(acquiredAt.trim()))) {
+    return '자격증 취득일은 YYYY-MM 형식으로 입력해 주세요.';
+  }
   return null;
 }
 
@@ -114,7 +128,11 @@ function storedProfileToDraft(profile: StoredProfessionalProfile): ProfessionalP
   return {
     educationRecords: profile.educationRecords.map((record) => ({ ...record })),
     englishEvidence: profile.englishEvidence.map((evidence) => ({ ...evidence })),
-    certificationText: profile.certifications.map(({ label }) => label).join('\n'),
+    certifications: profile.certifications.map((certification) => ({
+      label: certification.label,
+      acquiredAt: certification.acquiredAt || '',
+      evidence: certification.evidence || null,
+    })),
   };
 }
 
@@ -143,7 +161,7 @@ function ProfileSectionHeader({
   return (
     <div className="flex items-center gap-2">
       <Icon className="h-4 w-4 text-slate-500" />
-      <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+      <h3 className="text-[15px] font-semibold text-slate-800">{title}</h3>
       <span className="text-[11px] tabular-nums text-slate-500">{count}/{limit}</span>
       {!readOnly ? (
         <Button
@@ -158,18 +176,18 @@ function ProfileSectionHeader({
   );
 }
 
-export function formatEnglishScaleLabel(scale: ProfessionalProfileCatalog['englishTests'][number]['scales'][number]): string {
-  return scale.label ?? scale.code;
-}
-
 function ProfessionalProfileFields({
-  catalog, draft, onChange, disabled, readOnly,
+  catalog, draft, onChange, disabled, readOnly, tenantId, actor, personId,
 }: {
   catalog: ProfessionalProfileCatalog;
   draft: ProfessionalProfileDraft;
   onChange: (next: ProfessionalProfileDraft) => void;
   disabled: boolean;
   readOnly: boolean;
+  tenantId: string;
+  actor: ActorLike;
+  /** 새 인력 등록처럼 아직 사람이 없으면 증빙은 등록 뒤에 붙인다. */
+  personId: string | null;
 }) {
   const addEducation = () => {
     const attainment = catalog.educationAttainments[0];
@@ -179,7 +197,7 @@ function ProfessionalProfileFields({
       educationRecords: [...draft.educationRecords, {
         attainmentCode: attainment.code,
         institutionName: null,
-        countryCode: null,
+        regionCode: null,
         major: null,
       }],
     });
@@ -219,7 +237,7 @@ function ProfessionalProfileFields({
     });
   };
 
-  const certificationCount = splitCertificationLabels(draft.certificationText).length;
+  const certificationCount = draft.certifications.filter((certification) => certification.label.trim()).length;
   const certificationError = certificationDraftError(draft);
 
   return (
@@ -231,18 +249,18 @@ function ProfessionalProfileFields({
           onAdd={addEducation} disabled={disabled} readOnly={readOnly}
         />
         {draft.educationRecords.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-slate-500">입력된 학력이 없습니다.</p>
+          <p className="rounded-lg border border-dashed px-3 py-3 text-[13px] text-slate-500">입력된 학력이 없습니다.</p>
         ) : draft.educationRecords.map((record, index) => (
-          <div key={`education-${index}`} className="rounded-lg border bg-slate-50/60 p-3">
-            <div className="grid gap-2.5 sm:grid-cols-2">
+          <div key={`education-${index}`} className="rounded-lg border bg-slate-50/60 p-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <div>
-                <Label className="text-[11px]" htmlFor={`education-attainment-${index}`}>학력 구분</Label>
+                <Label className="text-[13px]" htmlFor={`education-attainment-${index}`}>학력 구분</Label>
                 <Select
                   value={record.attainmentCode}
                   onValueChange={(value) => updateEducation(index, { attainmentCode: value })}
                   disabled={disabled || readOnly}
                 >
-                  <SelectTrigger id={`education-attainment-${index}`} className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id={`education-attainment-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {catalog.educationAttainments.map((attainment) => (
                       <SelectItem key={attainment.code} value={attainment.code}>{attainment.label}</SelectItem>
@@ -251,52 +269,81 @@ function ProfessionalProfileFields({
                 </Select>
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-institution-${index}`}>학교</Label>
+                <Label className="text-[13px]" htmlFor={`education-institution-${index}`}>학교</Label>
                 <Input
-                  id={`education-institution-${index}`} className="mt-1 h-9" maxLength={80}
+                  id={`education-institution-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                   value={record.institutionName || ''} disabled={disabled || readOnly}
                   placeholder="학교명"
                   onChange={(event) => updateEducation(index, { institutionName: event.target.value })}
                 />
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-country-${index}`}>국가</Label>
+                <Label className="text-[13px]" htmlFor={`education-region-${index}`}>구분</Label>
                 <Select
-                  value={record.countryCode || EMPTY_OPTION}
-                  onValueChange={(value) => updateEducation(index, { countryCode: value === EMPTY_OPTION ? null : value })}
+                  value={record.regionCode || EMPTY_OPTION}
+                  onValueChange={(value) => updateEducation(index, { regionCode: value === EMPTY_OPTION ? null : value })}
                   disabled={disabled || readOnly}
                 >
-                  <SelectTrigger id={`education-country-${index}`} className="mt-1 h-9"><SelectValue placeholder="국가 선택" /></SelectTrigger>
-                  <SelectContent className="max-h-72">
+                  <SelectTrigger id={`education-region-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue placeholder="국내·해외 선택" /></SelectTrigger>
+                  <SelectContent>
                     <SelectItem value={EMPTY_OPTION}>미입력</SelectItem>
-                    {catalog.countryCodes.map((countryCode) => (
-                      <SelectItem key={countryCode} value={countryCode}>{countryCode}</SelectItem>
+                    {catalog.educationRegions.map((region) => (
+                      <SelectItem key={region.code} value={region.code}>{region.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label className="text-[11px]" htmlFor={`education-major-${index}`}>전공</Label>
+                <Label className="text-[13px]" htmlFor={`education-major-${index}`}>전공</Label>
                 <Input
-                  id={`education-major-${index}`} className="mt-1 h-9" maxLength={80}
+                  id={`education-major-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                   value={record.major || ''} disabled={disabled || readOnly}
                   placeholder="전공명"
                   onChange={(event) => updateEducation(index, { major: event.target.value })}
                 />
               </div>
+              {/* 재학·수료·졸업 상태는 위 '학력 구분' 코드가 이미 담고 있다(석사 수료 등).
+                  여기서는 언제 다녔는지만 받는다. */}
+              <div>
+                <Label className="text-[13px]" htmlFor={`education-admission-${index}`}>입학년도</Label>
+                <Input
+                  id={`education-admission-${index}`} className="mt-1.5 h-10 tabular-nums text-[14px]" inputMode="numeric" maxLength={4}
+                  value={record.admissionYear || ''} disabled={disabled || readOnly}
+                  placeholder="예: 2015"
+                  onChange={(event) => updateEducation(index, { admissionYear: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                />
+              </div>
+              <div>
+                <Label className="text-[13px]" htmlFor={`education-degree-year-${index}`}>학위취득년도</Label>
+                <Input
+                  id={`education-degree-year-${index}`} className="mt-1.5 h-10 tabular-nums text-[14px]" inputMode="numeric" maxLength={4}
+                  value={record.degreeYear || ''} disabled={disabled || readOnly}
+                  placeholder="예: 2019"
+                  onChange={(event) => updateEducation(index, { degreeYear: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                />
+              </div>
             </div>
-            {!readOnly ? (
-              <Button
-                type="button" variant="ghost" size="sm" className="mt-2 h-7 gap-1 px-2 text-[11px] text-slate-500"
-                disabled={disabled}
-                onClick={() => onChange({
-                  ...draft,
-                  educationRecords: draft.educationRecords.filter((_, recordIndex) => recordIndex !== index),
-                })}
-              >
-                <Trash2 className="h-3 w-3" /> 이 학력 삭제
-              </Button>
-            ) : null}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              {personId ? (
+                <EvidenceAttachment
+                  tenantId={tenantId} actor={actor} personId={personId}
+                  label={`학력 ${index + 1}`} evidence={record.evidence} disabled={disabled} readOnly={readOnly}
+                  onChange={(evidence) => updateEducation(index, { evidence })}
+                />
+              ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
+              {!readOnly ? (
+                <Button
+                  type="button" variant="ghost" size="sm" className="h-8 gap-1 px-2.5 text-[12px] text-slate-500"
+                  disabled={disabled}
+                  onClick={() => onChange({
+                    ...draft,
+                    educationRecords: draft.educationRecords.filter((_, recordIndex) => recordIndex !== index),
+                  })}
+                >
+                  <Trash2 className="h-3 w-3" /> 이 학력 삭제
+                </Button>
+              ) : null}
+            </div>
           </div>
         ))}
       </section>
@@ -310,7 +357,7 @@ function ProfessionalProfileFields({
           onAdd={addEnglish} disabled={disabled} readOnly={readOnly}
         />
         {draft.englishEvidence.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-slate-500">입력된 영어 증빙이 없습니다.</p>
+          <p className="rounded-lg border border-dashed px-3 py-3 text-[13px] text-slate-500">입력된 영어 증빙이 없습니다.</p>
         ) : draft.englishEvidence.map((evidence, index) => {
           const selectedTest = catalog.englishTests.find(({ code }) => code === evidence.testCode)
             || catalog.englishTests[0];
@@ -318,10 +365,10 @@ function ProfessionalProfileFields({
             || selectedTest?.scales[0];
           const isFreeTextTest = selectedTest?.scales.some(({ resultType }) => resultType === 'TEXT') === true;
           return (
-            <div key={`english-${index}`} className="rounded-lg border bg-slate-50/60 p-3">
-              <div className="grid gap-2.5 sm:grid-cols-2">
+            <div key={`english-${index}`} className="rounded-lg border bg-slate-50/60 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-test-${index}`}>시험</Label>
+                  <Label className="text-[13px]" htmlFor={`english-test-${index}`}>시험</Label>
                   <Select
                     value={evidence.testCode}
                     disabled={disabled || readOnly}
@@ -335,7 +382,7 @@ function ProfessionalProfileFields({
                       });
                     }}
                   >
-                    <SelectTrigger id={`english-test-${index}`} className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id={`english-test-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {catalog.englishTests.map((test) => (
                         <SelectItem key={test.code} value={test.code}>{test.label}</SelectItem>
@@ -344,29 +391,14 @@ function ProfessionalProfileFields({
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-scale-${index}`}>점수 체계</Label>
-                  <Select
-                    value={evidence.scaleCode}
-                    disabled={disabled || readOnly}
-                    onValueChange={(value) => updateEnglish(index, { scaleCode: value, resultValue: '' })}
-                  >
-                    <SelectTrigger id={`english-scale-${index}`} className="mt-1 h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {selectedTest.scales.map((scale) => (
-                        <SelectItem key={scale.code} value={scale.code}>{formatEnglishScaleLabel(scale)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-[11px]" htmlFor={`english-result-${index}`}>결과</Label>
+                  <Label className="text-[13px]" htmlFor={`english-result-${index}`}>결과</Label>
                   {selectedScale?.resultType === 'GRADE' ? (
                     <Select
                       value={evidence.resultValue || EMPTY_OPTION}
                       disabled={disabled || readOnly}
                       onValueChange={(value) => updateEnglish(index, { resultValue: value === EMPTY_OPTION ? '' : value })}
                     >
-                      <SelectTrigger id={`english-result-${index}`} className="mt-1 h-9"><SelectValue placeholder="등급 선택" /></SelectTrigger>
+                      <SelectTrigger id={`english-result-${index}`} className="mt-1.5 h-10 text-[14px]"><SelectValue placeholder="등급 선택" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value={EMPTY_OPTION}>미입력</SelectItem>
                         {(selectedScale.allowedValues || []).map((value) => (
@@ -376,7 +408,7 @@ function ProfessionalProfileFields({
                     </Select>
                   ) : (
                     <Input
-                      id={`english-result-${index}`} className="mt-1 h-9" maxLength={80}
+                      id={`english-result-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                       type={selectedScale?.resultType === 'NUMBER' ? 'number' : 'text'}
                       min={selectedScale?.min} max={selectedScale?.max} step={selectedScale?.step}
                       value={evidence.resultValue} disabled={disabled || readOnly}
@@ -386,18 +418,18 @@ function ProfessionalProfileFields({
                   )}
                 </div>
                 <div>
-                  <Label className="text-[11px]" htmlFor={`english-tested-at-${index}`}>시험월</Label>
+                  <Label className="text-[13px]" htmlFor={`english-tested-at-${index}`}>시험월</Label>
                   <Input
-                    id={`english-tested-at-${index}`} className="mt-1 h-9" type="month"
+                    id={`english-tested-at-${index}`} className="mt-1.5 h-10 text-[14px]" type="month"
                     value={evidence.testedAt || ''} disabled={disabled || readOnly}
                     onChange={(event) => updateEnglish(index, { testedAt: event.target.value })}
                   />
                 </div>
                 {isFreeTextTest ? (
                   <div className="sm:col-span-2">
-                    <Label className="text-[11px]" htmlFor={`english-other-name-${index}`}>시험명</Label>
+                    <Label className="text-[13px]" htmlFor={`english-other-name-${index}`}>시험명</Label>
                     <Input
-                      id={`english-other-name-${index}`} className="mt-1 h-9" maxLength={80}
+                      id={`english-other-name-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
                       value={evidence.otherTestName || ''} disabled={disabled || readOnly}
                       placeholder="시험명을 입력해 주세요"
                       onChange={(event) => updateEnglish(index, { otherTestName: event.target.value })}
@@ -405,18 +437,27 @@ function ProfessionalProfileFields({
                   </div>
                 ) : null}
               </div>
-              {!readOnly ? (
-                <Button
-                  type="button" variant="ghost" size="sm" className="mt-2 h-7 gap-1 px-2 text-[11px] text-slate-500"
-                  disabled={disabled}
-                  onClick={() => onChange({
-                    ...draft,
-                    englishEvidence: draft.englishEvidence.filter((_, evidenceIndex) => evidenceIndex !== index),
-                  })}
-                >
-                  <Trash2 className="h-3 w-3" /> 이 증빙 삭제
-                </Button>
-              ) : null}
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                {personId ? (
+                  <EvidenceAttachment
+                    tenantId={tenantId} actor={actor} personId={personId}
+                    label={`어학 ${index + 1}`} evidence={evidence.evidence} disabled={disabled} readOnly={readOnly}
+                    onChange={(next) => updateEnglish(index, { evidence: next })}
+                  />
+                ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
+                {!readOnly ? (
+                  <Button
+                    type="button" variant="ghost" size="sm" className="h-8 gap-1 px-2.5 text-[12px] text-slate-500"
+                    disabled={disabled}
+                    onClick={() => onChange({
+                      ...draft,
+                      englishEvidence: draft.englishEvidence.filter((_, evidenceIndex) => evidenceIndex !== index),
+                    })}
+                  >
+                    <Trash2 className="h-3 w-3" /> 이 어학 삭제
+                  </Button>
+                ) : null}
+              </div>
             </div>
           );
         })}
@@ -427,24 +468,86 @@ function ProfessionalProfileFields({
       <section className="space-y-2" aria-label="자격증">
         <div className="flex items-center gap-2">
           <Award className="h-4 w-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-800">자격증</h3>
+          <h3 className="text-[15px] font-semibold text-slate-800">자격증</h3>
           <span className={`text-[11px] tabular-nums ${certificationError ? 'font-semibold text-rose-700' : 'text-slate-500'}`}>
             {certificationCount}/{MAX_CERTIFICATIONS}
           </span>
         </div>
-        <Label className="text-[11px]" htmlFor="professional-profile-certifications">자격증 이름</Label>
-        <Textarea
-          id="professional-profile-certifications"
-          value={draft.certificationText} disabled={disabled || readOnly}
-          maxLength={2000} rows={3} aria-invalid={!!certificationError}
-          aria-describedby="professional-profile-certifications-description"
-          placeholder="쉼표 또는 줄바꿈으로 구분해 주세요. 예: PMP, ODA 전문가"
-          onChange={(event) => onChange({ ...draft, certificationText: event.target.value })}
-        />
-        <p id="professional-profile-certifications-description" className={`text-[11px] ${certificationError ? 'text-rose-700' : 'text-slate-500'}`}>
+        {!readOnly ? (
+          <Button
+            type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]"
+            disabled={disabled || draft.certifications.length >= MAX_CERTIFICATIONS}
+            onClick={() => onChange({
+              ...draft,
+              certifications: [...draft.certifications, { label: '', acquiredAt: '', evidence: null }],
+            })}
+          >
+            <Plus className="h-3 w-3" /> 자격증 추가
+          </Button>
+        ) : null}
+        {draft.certifications.length === 0 ? (
+          <p className="rounded-lg border border-dashed px-3 py-3 text-[13px] text-slate-500">입력된 자격증이 없습니다.</p>
+        ) : draft.certifications.map((certification, index) => (
+          <div key={`certification-${index}`} className="grid gap-2.5 rounded-lg border bg-slate-50/60 p-3 sm:grid-cols-[minmax(0,1fr)_150px_auto] sm:items-end">
+            <div>
+              <Label className="text-[13px]" htmlFor={`certification-label-${index}`}>자격증 이름</Label>
+              <Input
+                id={`certification-label-${index}`} className="mt-1.5 h-10 text-[14px]" maxLength={80}
+                value={certification.label} disabled={disabled || readOnly}
+                placeholder="예: 정보처리기사"
+                onChange={(event) => onChange({
+                  ...draft,
+                  certifications: draft.certifications.map((item, itemIndex) => (
+                    itemIndex === index ? { ...item, label: event.target.value } : item
+                  )),
+                })}
+              />
+            </div>
+            <div>
+              <Label className="text-[13px]" htmlFor={`certification-acquired-${index}`}>취득일</Label>
+              <Input
+                id={`certification-acquired-${index}`} type="month" className="mt-1.5 h-10 tabular-nums text-[14px]"
+                value={certification.acquiredAt} disabled={disabled || readOnly}
+                onChange={(event) => onChange({
+                  ...draft,
+                  certifications: draft.certifications.map((item, itemIndex) => (
+                    itemIndex === index ? { ...item, acquiredAt: event.target.value } : item
+                  )),
+                })}
+              />
+            </div>
+            {!readOnly ? (
+              <Button
+                type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2 text-[11px] text-slate-500"
+                disabled={disabled} aria-label={`자격증 ${index + 1} 삭제`}
+                onClick={() => onChange({
+                  ...draft,
+                  certifications: draft.certifications.filter((_, itemIndex) => itemIndex !== index),
+                })}
+              >
+                <Trash2 className="h-3 w-3" /> 삭제
+              </Button>
+            ) : null}
+            <div className="sm:col-span-3">
+              {personId ? (
+                <EvidenceAttachment
+                  tenantId={tenantId} actor={actor} personId={personId}
+                  label={`자격증 ${index + 1}`} evidence={certification.evidence} disabled={disabled} readOnly={readOnly}
+                  onChange={(evidence) => onChange({
+                    ...draft,
+                    certifications: draft.certifications.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, evidence } : item
+                    )),
+                  })}
+                />
+              ) : <span className="text-[11px] text-slate-400">증빙은 인력을 등록한 뒤 붙일 수 있습니다.</span>}
+            </div>
+          </div>
+        ))}
+        <p className={`text-[11px] ${certificationError ? 'text-rose-700' : 'text-slate-500'}`}>
           {certificationError
             ? certificationError
-            : '대소문자와 중복 표기는 저장할 때 서버에서 하나로 정리됩니다.'}
+            : '증빙자료가 제출된 자격증만 적습니다. 같은 이름은 저장할 때 하나로 정리됩니다.'}
         </p>
       </section>
     </div>
@@ -522,7 +625,7 @@ export function ProfessionalProfileEditor({
       if (controller.signal.aborted || !aliveRef.current || currentScopeRef.current !== scopeKey) return;
       setError({
         kind: 'load',
-        message: resolveApiErrorMessage(loadError, '전문 프로필을 불러오지 못했습니다.'),
+        message: resolveApiErrorMessage(loadError, '인사정보를 불러오지 못했습니다.'),
       });
       setLoading(false);
     });
@@ -555,7 +658,7 @@ export function ProfessionalProfileEditor({
       if (controller.signal.aborted || !aliveRef.current || currentScopeRef.current !== reloadScope) return;
       setError({
         kind: 'load',
-        message: resolveApiErrorMessage(loadError, '최신 전문 프로필을 불러오지 못했습니다.'),
+        message: resolveApiErrorMessage(loadError, '최신 인사정보를 불러오지 못했습니다.'),
       });
     } finally {
       if (!controller.signal.aborted && aliveRef.current && currentScopeRef.current === reloadScope) setLoading(false);
@@ -595,7 +698,7 @@ export function ProfessionalProfileEditor({
       setDraft(storedProfileToDraft(canonical.profile));
       setExpectedRevision(canonical.revision);
       saveAttemptRef.current = null;
-      toast.success(`${personName}님의 전문 프로필을 저장했습니다.`);
+      toast.success(`${personName}님의 인사정보를 저장했습니다.`);
     } catch (saveError: unknown) {
       if (!aliveRef.current
         || currentScopeRef.current !== saveScope
@@ -608,7 +711,7 @@ export function ProfessionalProfileEditor({
       } else {
         setError({
           kind: 'save',
-          message: resolveApiErrorMessage(saveError, '전문 프로필을 저장하지 못했습니다. 입력값을 확인해 주세요.'),
+          message: resolveApiErrorMessage(saveError, '인사정보를 저장하지 못했습니다. 입력값을 확인해 주세요.'),
         });
       }
     } finally {
@@ -624,16 +727,16 @@ export function ProfessionalProfileEditor({
   return (
     <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent
-        className="flex max-h-[90vh] max-w-[820px] flex-col overflow-hidden"
+        className="flex max-h-[94vh] w-[96vw] max-w-[1360px] flex-col overflow-hidden sm:max-w-[1360px]"
         onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }}
         onPointerDownOutside={(event) => { if (saving) event.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
-            <GraduationCap className="h-4 w-4" /> {personName} — 전문 프로필
+            <GraduationCap className="h-4 w-4" /> {personName} — 학력·어학·자격
           </DialogTitle>
           <DialogDescription>
-            학력·영어 증빙·자격증을 인력 명부에 저장합니다. 참여인력 대시보드는 이 값을 그대로 조회합니다.
+            학력·어학·자격을 인력 명부에 저장합니다. 인사정보조회가 이 값을 그대로 읽습니다.
           </DialogDescription>
         </DialogHeader>
 
@@ -654,11 +757,12 @@ export function ProfessionalProfileEditor({
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6 py-1">
           {loading || !catalog || !scopeLoaded ? (
-            <div className="py-12 text-center text-sm text-slate-500">전문 프로필을 불러오는 중…</div>
+            <div className="py-12 text-center text-[15px] text-slate-500">인사정보를 불러오는 중…</div>
           ) : (
             <ProfessionalProfileFields
               catalog={catalog} draft={draft} onChange={setDraft}
               disabled={saving} readOnly={!canWrite}
+              tenantId={tenantId} actor={actor} personId={personId}
             />
           )}
         </div>
@@ -670,7 +774,7 @@ export function ProfessionalProfileEditor({
               type="button" size="sm" onClick={() => void save()}
               disabled={loading || saving || !catalog || loadedScopeRef.current !== scopeKey || !!certificationDraftError(draft)}
             >
-              {saving ? '저장 중…' : '전문 프로필 저장'}
+              {saving ? '저장 중…' : '저장'}
             </Button>
           ) : null}
         </div>
@@ -709,7 +813,7 @@ export function NewPersonProfessionalProfileFields({
       setLoading(false);
     }).catch((loadError: unknown) => {
       if (controller.signal.aborted) return;
-      setError(resolveApiErrorMessage(loadError, '전문 프로필 입력 기준을 불러오지 못했습니다.'));
+      setError(resolveApiErrorMessage(loadError, '인사정보 입력 기준을 불러오지 못했습니다.'));
       setLoading(false);
     });
     return () => controller.abort();
@@ -722,9 +826,9 @@ export function NewPersonProfessionalProfileFields({
   };
 
   return (
-    <section className="space-y-3 rounded-xl border bg-slate-50/40 p-4" aria-label="신규 인력 전문 프로필">
+    <section className="space-y-3 rounded-xl border bg-slate-50/40 p-4" aria-label="신규 인력 인사정보">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">전문 프로필 <span className="font-normal text-slate-500">(선택)</span></h3>
+        <h3 className="text-[15px] font-semibold text-slate-800">인사정보 <span className="font-normal text-slate-500">(선택)</span></h3>
         <p className="mt-0.5 text-[11px] text-slate-500">입력한 경우에만 인력 등록과 함께 저장됩니다.</p>
       </div>
       {error ? (
@@ -744,6 +848,7 @@ export function NewPersonProfessionalProfileFields({
         <ProfessionalProfileFields
           catalog={catalog} draft={draft} onChange={updateDraft}
           disabled={disabled} readOnly={false}
+          tenantId={tenantId} actor={actor} personId={null}
         />
       )}
     </section>

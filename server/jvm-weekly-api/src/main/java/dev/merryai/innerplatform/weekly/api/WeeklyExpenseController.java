@@ -75,7 +75,12 @@ public class WeeklyExpenseController {
 
     @GetMapping("/health")
     public Map<String, Object> health() {
-        return Map.of("ok", true, "service", "jvm-weekly-api", "runtime", "spring-boot");
+        return Map.of(
+            "ok", true,
+            "service", "jvm-weekly-api",
+            "runtime", "spring-boot",
+            "capabilities", List.of("settlement-cycle-v1")
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/save-draft")
@@ -483,10 +488,67 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/{projectId}/settlement-cycle/submit")
+    public CashflowSettlementCycleCommandResponse submitCashflowSettlementCycle(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody SubmitCashflowSettlementCycleRequest request
+    ) {
+        return commandService.submitCashflowSettlementCycle(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/settlement-cycle/transition")
+    public CashflowSettlementCycleCommandResponse transitionCashflowSettlementCycle(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody TransitionCashflowSettlementCycleRequest request
+    ) {
+        return commandService.transitionCashflowSettlementCycle(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/settlement-cycle/cancel-active")
+    public CashflowSettlementCycleCommandResponse cancelCashflowSettlementCycle(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody CancelCashflowSettlementCycleRequest request
+    ) {
+        return commandService.cancelCashflowSettlementCycle(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/settlement-cycle/migrate-head-v2")
+    public CashflowSettlementCycleHeadMigrationResponse migrateCashflowSettlementCycleHeadV2(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody MigrateCashflowSettlementCycleHeadV2Request request
+    ) {
+        return commandService.migrateCashflowSettlementCycleHeadV2(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
     @GetMapping("/cashflow/{projectId}/month-close/dashboard-source")
     public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
         @PathVariable String projectId,
         @RequestParam("yearMonth") String yearMonth,
+        @RequestParam(value = "settlementCycle", defaultValue = "false") boolean settlementCycle,
         @RequestHeader("x-tenant-id") String tenantId,
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
@@ -503,13 +565,20 @@ public class WeeklyExpenseController {
         requestId = requestId == null ? "" : requestId.trim();
         CashflowMonthDashboardQueryService.Result result;
         try {
-            result = dashboardQueryService.read(tenantId, projectId, yearMonth, requestId);
+            result = settlementCycle
+                ? dashboardQueryService.readSettlementCycle(tenantId, projectId, yearMonth, requestId)
+                : dashboardQueryService.read(tenantId, projectId, yearMonth, requestId);
         } catch (CashflowMonthDashboardQueryService.UnstableRead error) {
             throw new WeeklyExpenseConflictException(
                 "현금흐름 원장이 조회 중 변경되었습니다. 화면을 새로고침한 뒤 다시 시도해 주세요."
             );
         }
-        return dashboardSourceResponse(result, yearMonth);
+        String dashboardYearMonth = settlementCycle
+            ? YearMonth.parse(yearMonth).minusMonths(1).toString()
+            : yearMonth;
+        return dashboardSourceResponse(
+            result, yearMonth, dashboardYearMonth, actor, settlementCycle
+        );
     }
 
     public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
@@ -521,13 +590,30 @@ public class WeeklyExpenseController {
         String actorEmail
     ) {
         return readCashflowMonthDashboardSource(
-            projectId, yearMonth, tenantId, actorId, actorRole, actorEmail, null
+            projectId, yearMonth, false, tenantId, actorId, actorRole, actorEmail, null
+        );
+    }
+
+    CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
+        String projectId,
+        String yearMonth,
+        boolean settlementCycle,
+        String tenantId,
+        String actorId,
+        String actorRole,
+        String actorEmail
+    ) {
+        return readCashflowMonthDashboardSource(
+            projectId, yearMonth, settlementCycle, tenantId, actorId, actorRole, actorEmail, null
         );
     }
 
     private CashflowMonthDashboardSourceResponse dashboardSourceResponse(
         CashflowMonthDashboardQueryService.Result result,
-        String yearMonth
+        String yearMonth,
+        String dashboardYearMonth,
+        TrustedActorContext actor,
+        boolean settlementCycle
     ) {
         String operationalStatus = result.operationalStatus();
         CashflowMonthCloseResponse latestRun = CashflowMonthCloseResponse.fromState(
@@ -554,6 +640,12 @@ public class WeeklyExpenseController {
                 authority.head().headRevision()
             )
             : CashflowMonthDashboardSourceResponse.CumulativeClose.unavailable(authority.availability());
+        CashflowMonthDashboardSourceResponse.OperationalCycle cycle = operationalCycle(
+            yearMonth, operationalStatus, latestRun
+        );
+        CashflowSettlementStatusesResponse settlementStatuses = commandService.readCashflowSettlementStatuses(
+            actor, result.latestRun().projectId(), cycle.targetYearMonth()
+        );
         return new CashflowMonthDashboardSourceResponse(
             monthClose,
             latestRun,
@@ -566,7 +658,7 @@ public class WeeklyExpenseController {
                 result.monthStatusIssueCode()
             ),
             result.source() == null ? null : buildCashflowSnapshot(result.latestRun().projectId(), result.source()),
-            openingBalancesResponse(result.openingBalances(), yearMonth),
+            openingBalancesResponse(result.openingBalances(), dashboardYearMonth),
             new CashflowMonthDashboardSourceResponse.SnapshotCompatibility(
                 result.snapshotCompatibility().status(),
                 result.snapshotCompatibility().missingEvidence()
@@ -587,8 +679,14 @@ public class WeeklyExpenseController {
                 result.reopenRequest().enabled(),
                 result.reopenRequest().reasonCode()
             ),
-            operationalCycle(yearMonth, operationalStatus, latestRun),
-            monthCloseCalendar(yearMonth)
+            cycle,
+            settlementStatuses,
+            monthCloseCalendar(dashboardYearMonth),
+            settlementCycle
+                ? commandService.readCashflowSettlementCycle(
+                    actor, result.latestRun().projectId(), yearMonth
+                )
+                : null
         );
     }
 
@@ -610,9 +708,9 @@ public class WeeklyExpenseController {
     }
 
     private static List<CashflowMonthDashboardSourceResponse.MonthSettlementCalendarItem> monthCloseCalendar(
-        String yearMonth
+        String dashboardYearMonth
     ) {
-        YearMonth selectedYear = YearMonth.parse(yearMonth).withMonth(1);
+        YearMonth selectedYear = YearMonth.parse(dashboardYearMonth).withMonth(1);
         return java.util.stream.IntStream.range(0, 12)
             .mapToObj(selectedYear::plusMonths)
             .map(targetMonth -> new CashflowMonthDashboardSourceResponse.MonthSettlementCalendarItem(
@@ -823,7 +921,9 @@ public class WeeklyExpenseController {
             projectId,
             httpRequest.getHeader("x-data-project-id"),
             new CashflowMonthReopenCommands.RequestReopen(
-                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason()
+                request.idempotencyKey(), request.yearMonth(), request.expectedRevision(), request.reason(),
+                request.requestId(), request.cycleYearMonth(), request.monthCloseTargetYearMonth(),
+                request.evidenceRevision(), request.manifestHash(), request.expectedWorkflowRevision()
             )
         );
     }
@@ -844,7 +944,9 @@ public class WeeklyExpenseController {
             httpRequest.getHeader("x-data-project-id"),
             new CashflowMonthReopenCommands.DecideReopen(
                 request.idempotencyKey(), request.yearMonth(), request.expectedRevision(),
-                request.decision(), request.reason()
+                request.decision(), request.reason(), request.requestId(), request.cycleYearMonth(),
+                request.monthCloseTargetYearMonth(), request.evidenceRevision(), request.manifestHash(),
+                request.expectedWorkflowRevision()
             )
         );
     }

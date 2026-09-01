@@ -34,6 +34,8 @@ export interface Person {
   departmentSub: string;
   title: string;
   grade: string;
+  /** 생년월일 (YYYY-MM-DD). 만 나이는 저장하지 않고 조회 시 계산한다. */
+  birthDate: string;
   workLocation: string;
   /** 최초 입사일 — 근속 계산의 기준 */
   joinedAt: string | null;
@@ -126,10 +128,59 @@ export function resolveSeparationDate(person: Person): string | null {
     .at(-1) || null;
 }
 
+/**
+ * 명부에서 한 칸으로 보여 줄 휴직·퇴사일.
+ *
+ * 휴직은 그 계약이 시작된 날이고, 퇴사는 마지막 계약이 끝난 날이다. 두 값은 성격이 다르므로
+ * 라벨을 함께 돌려준다 — 날짜만 보여 주면 휴직인지 퇴사인지 읽는 사람이 알 수 없다.
+ */
+export function resolveLeaveOrSeparation(
+  person: Person,
+  today: string,
+): { kind: 'LEAVE' | 'SEPARATED'; date: string } | null {
+  const current = resolveCurrentEmployment(person, today);
+  if (!current) {
+    const separated = resolveSeparationDate(person);
+    return separated ? { kind: 'SEPARATED', date: separated } : null;
+  }
+  if (current.state === 'ON_LEAVE' || current.state === 'PARENTAL_LEAVE') {
+    return { kind: 'LEAVE', date: current.startDate };
+  }
+  return null;
+}
+
 export interface Tenure {
   months: number;
   years: number;
   label: string;
+}
+
+/**
+ * 만 나이. 근속과 같은 이유로 저장하지 않는다 — 생년월일만 있으면 언제 기준으로든
+ * 다시 계산되고, 해가 바뀌어도 화면이 저절로 맞다.
+ */
+export function deriveAge(birthDate: string | null | undefined, asOf: string): number | null {
+  const birth = String(birthDate || '').slice(0, 10);
+  if (!isIsoDate(birth) || !isIsoDate(asOf) || birth > asOf) return null;
+  const [by, bm, bd] = birth.split('-').map(Number);
+  const [ay, am, ad] = asOf.split('-').map(Number);
+  const beforeBirthday = am < bm || (am === bm && ad < bd);
+  return Math.max(0, ay - by - (beforeBirthday ? 1 : 0));
+}
+
+/**
+ * 학위 취득 후 몇 해가 지났는지.
+ *
+ * KOICA 제안서는 '학위 취득일로부터 몇 년 경력' 을 본다. 학위취득년도(졸업증에 찍힌 해)만
+ * 있으면 언제 기준으로든 다시 계산되므로 만 나이·근속과 같은 방식으로 저장하지 않는다.
+ * 해 단위로만 적힌 값이라 연 단위로 센다.
+ */
+export function deriveYearsSinceDegree(degreeYear: string | null | undefined, asOf: string): number | null {
+  const year = Number(String(degreeYear || '').trim());
+  if (!Number.isInteger(year) || year < 1900 || year > 2100) return null;
+  const asOfYear = Number(String(asOf || '').slice(0, 4));
+  if (!Number.isInteger(asOfYear) || asOfYear < year) return null;
+  return asOfYear - year;
 }
 
 /** 근속. joinedAt 만 있으면 언제 기준으로든 다시 계산된다 — 저장값이 낡아도 화면은 정확하다. */

@@ -2,7 +2,6 @@ import {
   asyncHandler, assertActorPermissionAllowed, assertActorRoleAllowed, createHttpError, createMutatingRoute, ROUTE_ROLES, readOptionalText,
 } from '../bff-utils.mjs';
 import { buildParticipationDashboardSnapshot, buildProjectParticipationSnapshot, selectParticipationDashboardYear } from '../participation-dashboard.mjs';
-import { getProfessionalProfileCatalog } from '../professional-profile.mjs';
 import {
   PARTICIPATION_RULE_SETTLEMENT_SYSTEM_CODES,
   resolveParticipationSettlementSystem,
@@ -15,7 +14,6 @@ import {
 } from '../participation-sheet-ranges.mjs';
 
 const PROFILE_READ_PERMISSION = 'person:professional_profile:read';
-const PROFILE_FILTER_KEYS = ['education', 'englishEvidence', 'certification'];
 const PROFILE_MISSING = '__MISSING__';
 const PROFILE_FILTER_VALUE_MAX_LENGTH = 80;
 const CERTIFICATION_FILTER_MAX_COUNT = 20;
@@ -24,24 +22,7 @@ function invalidProfessionalProfileFilter(message) {
   return createHttpError(400, message, 'invalid_professional_profile_filter');
 }
 
-function actorCanReadProfessionalProfiles(rbacPolicy, req) {
-  try {
-    assertActorPermissionAllowed(
-      rbacPolicy,
-      req,
-      PROFILE_READ_PERMISSION,
-      'read participation professional profiles',
-    );
-    return true;
-  } catch (error) {
-    if (error?.statusCode === 403) return false;
-    throw error;
-  }
-}
 
-function hasProfessionalProfileQuery(query) {
-  return PROFILE_FILTER_KEYS.some((key) => Object.hasOwn(query || {}, key));
-}
 
 function profileQueryValues(value, label) {
   if (value === undefined) return [];
@@ -68,35 +49,6 @@ function singleProfileQueryValue(value, label) {
   return values[0] || null;
 }
 
-function parseProfessionalProfileFilters(query, catalog) {
-  const education = singleProfileQueryValue(query?.education, '최종학력');
-  const englishEvidence = singleProfileQueryValue(query?.englishEvidence, '영어 증빙');
-  const certificationValues = profileQueryValues(query?.certification, '자격증');
-  if (certificationValues.length > CERTIFICATION_FILTER_MAX_COUNT) {
-    throw invalidProfessionalProfileFilter('자격증 필터는 최대 20개까지 선택할 수 있습니다.');
-  }
-  const certifications = [...new Set(certificationValues)];
-
-  const educationCodes = new Set([
-    ...catalog.educationAttainments.map(({ code }) => code),
-    PROFILE_MISSING,
-  ]);
-  const englishCodes = new Set([
-    ...catalog.englishTests.map(({ code }) => code),
-    'OVERSEAS_EDUCATION',
-    PROFILE_MISSING,
-  ]);
-  if (education && !educationCodes.has(education)) {
-    throw invalidProfessionalProfileFilter('알 수 없는 최종학력 필터입니다.');
-  }
-  if (englishEvidence && !englishCodes.has(englishEvidence)) {
-    throw invalidProfessionalProfileFilter('알 수 없는 영어 증빙 필터입니다.');
-  }
-  if (certifications.includes(PROFILE_MISSING) && certifications.length > 1) {
-    throw invalidProfessionalProfileFilter('자격증 미입력과 다른 자격증을 함께 선택할 수 없습니다.');
-  }
-  return { education, englishEvidence, certifications };
-}
 
 function preventParticipationDashboardCaching(_req, res, next) {
   res.setHeader('Cache-Control', 'private, no-store');
@@ -169,6 +121,7 @@ function participationPreviewBody(analysis, extra = {}) {
     ok: analysis.ok,
     summary: analysis.summary,
     blocking: analysis.blocking,
+    warnings: analysis.warnings || [],
     months: analysis.parsed.months,
     rows: analysis.rows.map((row) => ({
       rowIndex: row.rowIndex,
@@ -193,23 +146,9 @@ export function mountParticipationDashboardRoutes(app, {
   now,
   googleSheetsService,
   idempotencyService,
-  rbacPolicy,
-  professionalProfileCatalog = getProfessionalProfileCatalog(),
 } = {}) {
   app.get('/api/v1/participation-dashboard', preventParticipationDashboardCaching, asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read participation dashboard');
-    const professionalProfileAccess = actorCanReadProfessionalProfiles(rbacPolicy, req);
-    const profileQueryRequested = hasProfessionalProfileQuery(req.query);
-    if (profileQueryRequested && !professionalProfileAccess) {
-      throw createHttpError(
-        403,
-        '전문 프로필 필터를 사용할 권한이 없습니다.',
-        'profile_filter_forbidden',
-      );
-    }
-    const profileFilters = professionalProfileAccess
-      ? parseProfessionalProfileFilters(req.query, professionalProfileCatalog)
-      : { education: null, englishEvidence: null, certifications: [] };
     if (!db) throw createHttpError(503, '참여율 대시보드를 읽을 수 없습니다.', 'firestore_unconfigured');
     const tenantId = readOptionalText(req.context?.tenantId);
     if (!tenantId) throw createHttpError(400, 'tenantId is required.', 'tenant_required');
@@ -227,11 +166,7 @@ export function mountParticipationDashboardRoutes(app, {
       generatedAt: new Date().toISOString(),
     });
     res.status(200).json({
-      ...selectParticipationDashboardYear(snapshot, req.query.year, req.query.ruleId, {
-        professionalProfileAccess,
-        professionalProfileCatalog,
-        ...profileFilters,
-      }),
+      ...selectParticipationDashboardYear(snapshot, req.query.year, req.query.ruleId),
       projects: projectsSnap.docs.map((doc) => {
         const project = doc.data() || {};
         return { id: doc.id, name: readOptionalText(project.name) || doc.id, clientOrg: readOptionalText(project.clientOrg) };
@@ -347,6 +282,7 @@ export function mountParticipationDashboardRoutes(app, {
       project: {
         contractStart: readOptionalText(req.query?.contractStart),
         contractEnd: readOptionalText(req.query?.contractEnd),
+        contractEndUndecided: readOptionalText(req.query?.contractEndUndecided) === '1',
       },
       people: peopleSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
       tenantId,

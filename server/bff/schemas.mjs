@@ -15,19 +15,40 @@ export const projectRegistrationDraftCreateSchema = z.object({
   stepIndex: z.number().int().nonnegative().optional().default(0),
 }).strict();
 
+export const projectRegistrationDraftAliasSchema = z.object({
+  alias: z.string().max(60),
+}).strict();
+
 export const projectRegistrationDraftPatchSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
   payload: z.unknown(),
   stepIndex: z.number().int().nonnegative().optional(),
 }).strict();
 
-export const projectRegistrationDraftAttachmentSchema = z.object({
+// 내용은 둘 중 하나로 온다: 작은 파일은 base64 인라인, 큰 파일은 서명 URL 로 스토리지에
+// 직접 올린 뒤 그 경로(storagePath). Vercel 요청 본문 4.5MB 한도 때문에 큰 파일은
+// 인라인으로 올 수 없다.
+const projectDraftAttachmentBaseSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
   documentKind: z.enum(PROJECT_REGISTRATION_DOCUMENT_KINDS),
   fileName: NON_EMPTY_STRING.max(300),
   mimeType: NON_EMPTY_STRING.max(200),
   fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
-  contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH),
+  contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH).optional(),
+  storagePath: NON_EMPTY_STRING.max(1024).optional(),
+}).strict();
+const exactlyOneContent = (value) => Boolean(value.contentBase64) !== Boolean(value.storagePath);
+const exactlyOneContentMessage = { message: 'contentBase64 또는 storagePath 중 정확히 하나가 필요합니다.' };
+
+export const projectRegistrationDraftAttachmentSchema = projectDraftAttachmentBaseSchema
+  .refine(exactlyOneContent, exactlyOneContentMessage);
+
+/** 서명 URL 발급 요청. 내용 없이 이름·종류·크기만 미리 검증한다. */
+export const projectRegistrationDraftAttachmentUploadUrlSchema = z.object({
+  documentKind: z.enum(PROJECT_REGISTRATION_DOCUMENT_KINDS),
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
 }).strict();
 
 export const projectDraftAttachmentDeleteSchema = z.object({
@@ -46,7 +67,11 @@ export const projectInfoDraftPatchSchema = z.object({
   stepIndex: z.number().int().nonnegative().optional(),
 }).strict();
 
-export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachmentSchema.extend({
+export const projectInfoDraftAttachmentSchema = projectDraftAttachmentBaseSchema.extend({
+  documentKind: z.enum(PROJECT_INFO_DOCUMENT_KINDS),
+}).refine(exactlyOneContent, exactlyOneContentMessage);
+
+export const projectInfoDraftAttachmentUploadUrlSchema = projectRegistrationDraftAttachmentUploadUrlSchema.extend({
   documentKind: z.enum(PROJECT_INFO_DOCUMENT_KINDS),
 });
 
@@ -441,11 +466,25 @@ export const personEmploymentSchema = z.object({
 
 const PROFESSIONAL_PROFILE_TEXT = z.string().max(80);
 
+const professionalProfileEvidenceSchema = z.object({
+  evidenceId: PROFESSIONAL_PROFILE_TEXT,
+  path: z.string().trim().min(1).max(500),
+  name: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  size: z.number().int().nonnegative().optional(),
+  contentType: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  uploadedAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+}).strict();
+
 const professionalProfileEducationRecordSchema = z.object({
   attainmentCode: PROFESSIONAL_PROFILE_TEXT,
   institutionName: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  regionCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  // 249개 ISO 국가 코드로 저장하던 시절의 값. 받아서 국내/해외로 옮겨 읽는다.
   countryCode: PROFESSIONAL_PROFILE_TEXT.nullish(),
   major: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  admissionYear: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  degreeYear: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  evidence: professionalProfileEvidenceSchema.nullish(),
 }).strict();
 
 const professionalProfileEnglishEvidenceSchema = z.object({
@@ -454,16 +493,25 @@ const professionalProfileEnglishEvidenceSchema = z.object({
   resultValue: PROFESSIONAL_PROFILE_TEXT,
   otherTestName: PROFESSIONAL_PROFILE_TEXT.nullish(),
   testedAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  evidence: professionalProfileEvidenceSchema.nullish(),
 }).strict();
 
 const professionalProfileCertificationSchema = z.object({
   label: PROFESSIONAL_PROFILE_TEXT,
+  acquiredAt: PROFESSIONAL_PROFILE_TEXT.nullish(),
+  evidence: professionalProfileEvidenceSchema.nullish(),
 }).strict();
 
 export const professionalProfileInputSchema = z.object({
   educationRecords: z.array(professionalProfileEducationRecordSchema).max(10).optional(),
   englishEvidence: z.array(professionalProfileEnglishEvidenceSchema).max(10).optional(),
   certifications: z.array(professionalProfileCertificationSchema).max(20).optional(),
+}).strict();
+
+export const personHrEvidenceUploadUrlSchema = z.object({
+  fileName: z.string().trim().min(1).max(200),
+  mimeType: z.string().trim().min(1).max(150),
+  fileSize: z.number().int().positive().max(20 * 1024 * 1024),
 }).strict();
 
 export const personProfessionalProfilePutSchema = z.object({
@@ -482,6 +530,7 @@ export const personCreateSchema = z.object({
   title: z.string().trim().max(100).optional(),
   grade: z.string().trim().max(100).optional(),
   workLocation: z.string().trim().max(100).optional(),
+  birthDate: ISO_DATE_STRING.nullish(),
   note: z.string().trim().max(500).optional(),
   employment: z.object({
     type: EMPLOYMENT_TYPE,
@@ -493,6 +542,16 @@ export const personCreateSchema = z.object({
   professionalProfile: professionalProfileInputSchema.optional(),
 }).strict();
 
+/**
+ * 본인이 마이페이지에서 고치는 값. 증빙이 필요 없는 것만 둔다 -
+ * 소속·직급·직책·입사일은 회사가 관리하고, 학력·어학·자격은 증빙과 함께 전문 프로필로 들어간다.
+ */
+export const personSelfProfileSchema = z.object({
+  nickname: z.string().trim().max(100).optional(),
+  birthDate: ISO_DATE_STRING.nullish(),
+  workLocation: z.string().trim().max(100).optional(),
+}).strict();
+
 export const personProfileSchema = z.object({
   nickname: z.string().trim().max(100).optional(),
   email: z.string().trim().max(200).optional(),
@@ -502,6 +561,7 @@ export const personProfileSchema = z.object({
   title: z.string().trim().max(100).optional(),
   grade: z.string().trim().max(100).optional(),
   workLocation: z.string().trim().max(100).optional(),
+  birthDate: ISO_DATE_STRING.nullish(),
   note: z.string().trim().max(500).optional(),
 }).strict();
 

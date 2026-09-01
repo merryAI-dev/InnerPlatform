@@ -12,6 +12,8 @@ import type { ProjectStatus } from '../data/types';
 export function deriveProjectStatusFromContractPeriod(input: {
   contractStart: string;
   contractEnd: string;
+  /** 종료 기간 없음(무기한 계약). 날짜 경과로 완료 전환을 하지 않는다. */
+  contractEndUndecided?: boolean;
   currentStatus: ProjectStatus;
   today: string;
 }): ProjectStatus {
@@ -21,6 +23,10 @@ export function deriveProjectStatusFromContractPeriod(input: {
   const start = String(input.contractStart || '').slice(0, 10);
   const end = String(input.contractEnd || '').slice(0, 10);
   const today = String(input.today || '').slice(0, 10);
+  if (input.contractEndUndecided === true && !end) {
+    if (!isDate(start) || !isDate(today)) return input.currentStatus;
+    return today < start ? 'CONTRACT_PENDING' : 'IN_PROGRESS';
+  }
   if (!isDate(start) || !isDate(end) || !isDate(today)) return input.currentStatus;
   if (start > end) return input.currentStatus;
 

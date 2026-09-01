@@ -850,7 +850,12 @@ function assertRegistrationFinancials(payload, type) {
   if (type !== 'I1') {
     const contractStart = readOptionalText(payload.contractStart);
     const contractEnd = readOptionalText(payload.contractEnd);
-    if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+    // 종료 기간 없음(무기한)은 명시 플래그가 있을 때만 - 종료일이 함께 오면 모순이라 거부한다.
+    if (payload.contractEndUndecided === true) {
+      if (!isRealIsoDate(contractStart) || contractEnd) {
+        invalidRegistration('Project registration contract dates are invalid');
+      }
+    } else if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
       invalidRegistration('Project registration contract dates are invalid');
     }
   }
@@ -1342,11 +1347,19 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
 
   const contractStart = readOptionalText(payload.contractStart);
   const contractEnd = readOptionalText(payload.contractEnd);
-  if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+  const contractEndUndecided = payload.contractEndUndecided === true;
+  if (contractEndUndecided) {
+    if (!isRealIsoDate(contractStart) || contractEnd) {
+      invalidRegistration('Project registration v2 contract dates are invalid');
+    }
+  } else if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
     invalidRegistration('Project registration v2 contract dates are invalid');
   }
   const startYear = Number(contractStart.slice(0, 4));
-  const endYear = Number(contractEnd.slice(0, 4));
+  // 종료 기간 없음이면 재무 계획은 시작연도~현재 연도까지를 요구한다.
+  const endYear = contractEndUndecided
+    ? Math.max(startYear, new Date().getFullYear())
+    : Number(contractEnd.slice(0, 4));
   if (endYear - startYear > 20) {
     invalidRegistration('Project registration financialYears are invalid');
   }
@@ -1380,9 +1393,8 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
       if (typeof row.profitRate !== 'number' || !Number.isFinite(row.profitRate) || row.profitRate < 0 || row.profitRate > 1) {
         invalidRegistration(`Project registration financialYears.${year}.profitRate must be between 0 and 1`);
       }
-      if (row.confirmed !== true) {
-        invalidRegistration(`Project registration financialYears.${year} requires human confirmation`);
-      }
+      // 계약서 대조 확인 체크는 위저드에서 걷어냈다(2b62f0a9). 서버가 confirmed 를 계속
+      // 요구하면 모든 신규 등록이 영구히 막히므로 요구하지 않는다. 필드 자체는 이력용으로 남는다.
       rows.set(year, row);
     }
     for (let year = startYear; year <= endYear; year += 1) {
@@ -1491,6 +1503,31 @@ function assertTrustedProjectInfoDocumentReferences(
   }
 }
 
+
+/** 실제 투입인력 정규화. personId 없는 슬롯은 미정(null) - 명부 밖 인물은 담지 않는다. */
+function normalizeProjectStaffingForWrite(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const slot = (input) => {
+    if (!input || typeof input !== 'object') return null;
+    const personId = readOptionalText(input.personId);
+    if (!personId) return null;
+    return {
+      personId,
+      name: readOptionalText(input.name),
+      nickname: readOptionalText(input.nickname),
+    };
+  };
+  const operators = (Array.isArray(source.operators) ? source.operators : [])
+    .map((item) => slot(item))
+    .filter(Boolean);
+  return {
+    lead: slot(source.lead),
+    pm: slot(source.pm),
+    operators,
+    settlementSupport: readOptionalText(source.settlementSupport),
+  };
+}
+
 function assertRegistrationPayload(payload, { participationSheetLinkRequired = true } = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     invalidRegistration('Project registration payload is invalid');
@@ -1589,6 +1626,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     clientOrg: readOptionalText(payload.clientOrg),
     businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
     participationSheetLink: readOptionalText(payload.participationSheetLink) || undefined,
+    staffing: normalizeProjectStaffingForWrite(payload.staffing),
     department: normalizeProjectOrganizationLabel(payload.department),
     groupwareName: readOptionalText(payload.groupwareName) || undefined,
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
@@ -1607,6 +1645,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     checkout: normalizeProjectCheckout(payload.checkout, settlementDetailsEnabled),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
+    contractEndUndecided: payload.contractEndUndecided === true ? true : undefined,
     contractType: normalizeProjectContractType(payload.contractType),
     settlementType,
     basis,
@@ -1772,6 +1811,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     clientOrg: pickText('clientOrg'),
     businessManagementGoogleFolderLink: pickText('businessManagementGoogleFolderLink'),
     participationSheetLink: pickText('participationSheetLink'),
+    staffing: normalizeProjectStaffingForWrite(pickValue('staffing')),
     department: pickText('department'),
     groupwareName: pickText('groupwareName'),
     currency: normalizeProjectCurrency(pickText('currency')),
@@ -1788,6 +1828,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     checkout: pickValue('checkout'),
     contractStart: pickText('contractStart'),
     contractEnd: pickText('contractEnd'),
+    contractEndUndecided: pickValue('contractEndUndecided') === true ? true : undefined,
     contractType: normalizeProjectContractType(pickText('contractType')),
     settlementType,
     basis: Number(pickValue('registrationRequirementsVersion')) === 2 || settlementDetailsEnabled ? basis : 'NONE',
@@ -1933,6 +1974,9 @@ function buildProjectPatchFromChangeRequestPayloadInternal(payload = {}, current
     clientOrg: readOptionalText(payload.clientOrg),
     businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
     participationSheetLink: readOptionalText(payload.participationSheetLink) || undefined,
+    staffing: Object.hasOwn(payload, 'staffing')
+      ? normalizeProjectStaffingForWrite(payload.staffing)
+      : (currentProject.staffing || undefined),
     department: resolveProjectDepartmentFromPayload(payload, currentProject),
     cic: resolveProjectCicFromPayload(payload, currentProject),
     groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(currentProject.groupwareName) || undefined,
@@ -1954,6 +1998,9 @@ function buildProjectPatchFromChangeRequestPayloadInternal(payload = {}, current
     checkout: normalizeProjectCheckout(payload.checkout, settlementDetailsEnabled),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
+    contractEndUndecided: Object.hasOwn(payload, 'contractEndUndecided')
+      ? (payload.contractEndUndecided === true ? true : undefined)
+      : (currentProject.contractEndUndecided === true ? true : undefined),
     contractType: normalizeProjectContractType(payload.contractType),
     settlementType,
     basis: registrationVersion === 2 || settlementDetailsEnabled ? basis : 'NONE',
@@ -2026,8 +2073,13 @@ const PROJECT_INFO_CHANGE_LABELS = {
   participationSheetLink: '참여율 시트 링크',
   department: '담당조직(CIC)',
   type: '프로젝트 유형',
+  status: '프로젝트 진행 상태',
+  phase: '프로젝트 구분',
+  groupwareName: '그룹웨어명',
+  contractType: '계약서 유형',
   contractStart: '계약 시작일',
   contractEnd: '계약 종료일',
+  contractEndUndecided: '종료 기간 없음',
   currency: '통화',
   contractAmount: '계약금액',
   salesVatAmount: '총매출부가세',
@@ -2038,13 +2090,17 @@ const PROJECT_INFO_CHANGE_LABELS = {
   basis: '정산 기준',
   accountType: '통장 유형',
   settlementSystem: '정산 시스템',
+  settlementSystemOther: '기타 정산 시스템',
+  settlementGuide: '정산 가이드',
   laborSettlementBasis: '인건비 정산 기준',
   laborTransferPlan: 'MYSC 인건비 이관 계획',
   fundInputMode: '자금 입력 방식',
   registeredByName: '사업 담당자',
   executiveApproverName: '최종 결재자 지정 (사업총괄)',
   teamName: '사내기업팀',
-  teamMembersDetailed: '참여인력 (서류상·실제)',
+  teamMembersDetailed: '서류상 참여인력',
+  staffing: '실제 투입인력',
+  participantCondition: '참여 조건',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
   finalPaymentExpectedWeek: '최종 입금 예상 주차',
@@ -2078,15 +2134,15 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'participationSheetLink',
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
   'totalRevenueAmount', 'totalActualCost', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
-  'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
-  'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
+  'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd', 'contractEndUndecided',
+  'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem', 'settlementSystemOther',
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
   'paymentExpectedMonths', 'finalPaymentExpectedWeek', 'interestRefundPolicy', 'quoteSubmissionDeferred',
   'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'executiveApproverId', 'executiveApproverName', 'executiveApproverEmail',
   'managerId', 'managerName', 'teamName', 'teamMembers',
-  'teamMembersDetailed', 'participantCondition', 'note', 'contractDocument',
+  'teamMembersDetailed', 'staffing', 'participantCondition', 'note', 'contractDocument',
   'customerBusinessRegistrationDocument', 'quoteDocument', 'proposalDocument',
   'proposalWordOriginalDocument', 'proposalPptOriginalDocument',
   'presentationPptOriginalDocument', 'rfpRequestEvidenceDocument',
@@ -2096,6 +2152,7 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
 
 function projectInfoChangeValue(value) {
   if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'boolean') return value ? '예' : '아니오';
   if (typeof value === 'object') {
     if (readOptionalText(value?.name)) return readOptionalText(value.name);
     return JSON.stringify(value);
@@ -2103,10 +2160,22 @@ function projectInfoChangeValue(value) {
   return String(value);
 }
 
+function projectStaffingChangeValue(value) {
+  const staffing = normalizeProjectStaffingForWrite(value);
+  const slotLabel = (slot) => (slot ? (slot.nickname || slot.name || slot.personId) : '미정');
+  return [
+    `총괄 ${slotLabel(staffing.lead)}`,
+    `실무 ${slotLabel(staffing.pm)}`,
+    `운영 ${staffing.operators.length ? staffing.operators.map((slot) => slot.nickname || slot.name || slot.personId).join('·') : '미정'}`,
+    `정산지원 ${staffing.settlementSupport || '해당 없음'}`,
+  ].join(' / ');
+}
+
 function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
   return Object.entries(PROJECT_INFO_CHANGE_LABELS).flatMap(([key, label]) => {
-    const before = projectInfoChangeValue(beforeSnapshot[key]);
-    const after = projectInfoChangeValue(proposedSnapshot[key]);
+    const format = key === 'staffing' ? projectStaffingChangeValue : projectInfoChangeValue;
+    const before = format(beforeSnapshot[key]);
+    const after = format(proposedSnapshot[key]);
     return before === after ? [] : [{ key, label, before, after }];
   });
 }

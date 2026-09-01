@@ -3,8 +3,8 @@ import {
   asyncHandler, createMutatingRoute, assertActorRoleAllowed, assertActorPermissionAllowed,
   ROUTE_ROLES, createHttpError, encryptAuditEmail,
 } from '../bff-utils.mjs';
-import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema } from '../schemas.mjs';
-import { normalizeProfessionalProfileInput } from '../professional-profile.mjs';
+import { parseWithSchema, personCreateSchema, personEmploymentSchema, personProfileSchema, personSelfProfileSchema } from '../schemas.mjs';
+import { deriveProfessionalProfileFacts, normalizeProfessionalProfileInput, serializeProfessionalProfile } from '../professional-profile.mjs';
 import { buildRequestFingerprint } from '../utils.mjs';
 
 /**
@@ -92,6 +92,36 @@ function readPerson(snapshot) {
   return { ...data, employments: Array.isArray(data.employments) ? data.employments : [] };
 }
 
+/**
+ * 명부 목록에 실을 인사 요약. 원문(학교·전공 외 나머지 학력 이력, 점수, 시험월)은 싣지 않고
+ * 화면이 바로 읽을 값만 만든다. 권한이 없으면 아예 만들지 않는다.
+ */
+function personHrSummary(person) {
+  try {
+    const facts = deriveProfessionalProfileFacts(person?.professionalProfile);
+    return {
+      highestEducationDisplayText: facts.highestEducationDisplayText || '',
+      highestDegreeYear: facts.highestDegreeYear || '',
+      highestEducationCode: facts.highestEducationCode || '',
+      highestEducationInstitution: facts.highestEducationInstitution || '',
+      highestEducationMajor: facts.highestEducationMajor || '',
+      englishEvidenceDisplayText: facts.englishEvidenceDisplayText || '',
+      certificationsDisplayText: facts.certificationsDisplayText || '',
+    };
+  } catch {
+    // 한 사람의 깨진 프로필이 명부 전체를 무너뜨리면 안 된다. 그 사람만 빈 요약으로 둔다.
+    return {
+      highestEducationDisplayText: '',
+      highestDegreeYear: '',
+      highestEducationCode: '',
+      highestEducationInstitution: '',
+      highestEducationMajor: '',
+      englishEvidenceDisplayText: '',
+      certificationsDisplayText: '',
+    };
+  }
+}
+
 function serializePersonDirectoryItem(person) {
   return {
     personId: person.personId,
@@ -103,6 +133,7 @@ function serializePersonDirectoryItem(person) {
     departmentSub: person.departmentSub || '',
     title: person.title || '',
     grade: person.grade || '',
+    birthDate: person.birthDate || '',
     workLocation: person.workLocation || '',
     joinedAt: person.joinedAt || '',
     uid: person.uid || null,
@@ -208,6 +239,7 @@ function buildPersonCreateDocument({ parsed, normalizedProfile, includesProfile 
     departmentSub: parsed.departmentSub || '',
     title: parsed.title || '',
     grade: parsed.grade || '',
+    birthDate: parsed.birthDate || '',
     workLocation: parsed.workLocation || '',
     note: parsed.note || '',
     joinedAt: employment.startDate,
@@ -238,24 +270,46 @@ function buildPersonCreateDocument({ parsed, normalizedProfile, includesProfile 
 export function mountPersonRoutes(app, {
   db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy,
 }) {
+  /**
+   * 내 인사정보. 남의 것은 못 보고 자기 것만 본다 - 본인 데이터라 별도 권한을 요구하지 않는다.
+   * 인사 담당자가 남의 것을 보는 경로(person:professional_profile:read)와는 다른 문이다.
+   */
+  app.get('/api/v1/persons/me/hr-profile', preventPersonCaching, asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    if (!actorId) throw createHttpError(400, 'actorId is required', 'actor_required');
+    const snap = await db.collection(`orgs/${tenantId}/persons`).where('uid', '==', actorId).limit(2).get();
+    const doc = snap.docs[0];
+    if (!doc) {
+      // 명부에 아직 연결되지 않은 계정이다. 빈 화면 대신 왜 비어 있는지 알려야 한다.
+      res.status(200).json({ linked: false, person: null, profile: null });
+      return;
+    }
+    const person = readPerson(doc);
+    const stored = doc.data()?.professionalProfile;
+    res.status(200).json({
+      linked: true,
+      person: serializePersonDirectoryItem(person),
+      profile: serializeProfessionalProfile(stored),
+    });
+  }));
+
   app.get('/api/v1/persons', preventPersonCaching, asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read the people directory');
     const { tenantId } = req.context;
     const snap = await db.collection(`orgs/${tenantId}/persons`).get();
+    const canReadProfile = actorCanUseProfile(rbacPolicy, req, 'person:professional_profile:read');
     const items = snap.docs
-      .map((doc) => readPerson(doc))
-      .filter(Boolean)
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'))
-      .map(serializePersonDirectoryItem);
+      .map((doc) => ({ raw: doc.data() || {}, person: readPerson(doc) }))
+      .filter(({ person }) => Boolean(person))
+      .sort((a, b) => String(a.person.name || '').localeCompare(String(b.person.name || ''), 'ko'))
+      .map(({ raw, person }) => (canReadProfile
+        ? { ...serializePersonDirectoryItem(person), hrSummary: personHrSummary(raw) }
+        : serializePersonDirectoryItem(person)));
     res.status(200).json({
       items,
       total: items.length,
       capabilities: {
-        professionalProfileRead: actorCanUseProfile(
-          rbacPolicy,
-          req,
-          'person:professional_profile:read',
-        ),
+        professionalProfileRead: canReadProfile,
         professionalProfileWrite: actorCanUseProfile(
           rbacPolicy,
           req,
@@ -468,6 +522,45 @@ export function mountPersonRoutes(app, {
     });
 
     return { status: 200, body: { personId, employments: result.after, updatedAt: timestamp } };
+  }));
+
+  /**
+   * 본인 기본정보 수정. 대상은 경로가 아니라 로그인 계정의 uid 로 정한다 -
+   * 남의 personId 를 넣어도 자기 문서만 바뀐다. 필드는 증빙이 필요 없는 것만 연다.
+   */
+  app.patch('/api/v1/persons/me/profile', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    if (!actorId) throw createHttpError(400, 'actorId is required', 'actor_required');
+    const parsed = parseWithSchema(personSelfProfileSchema, req.body, 'Invalid self profile payload');
+    if (Object.keys(parsed).length === 0) {
+      throw createHttpError(400, '고칠 값이 없습니다.', 'empty_self_profile_patch');
+    }
+    const timestamp = now();
+
+    const snap = await db.collection(`orgs/${tenantId}/persons`).where('uid', '==', actorId).limit(2).get();
+    const doc = snap.docs[0];
+    if (!doc) {
+      throw createHttpError(404, '아직 인력 명부에 연결되지 않은 계정입니다.', 'person_not_linked');
+    }
+    const personId = doc.id;
+    await db.doc(`orgs/${tenantId}/persons/${personId}`)
+      .set({ ...parsed, updatedAt: timestamp, updatedBy: actorId }, { merge: true });
+
+    await auditChainService.append({
+      tenantId,
+      entityType: 'person',
+      entityId: personId,
+      action: 'SELF_PROFILE_UPDATE',
+      actorId,
+      actorRole,
+      actorEmailEnc: await encryptAuditEmail(piiProtector, actorEmail),
+      requestId,
+      details: `본인 기본정보 수정: ${Object.keys(parsed).join(', ')}`,
+      metadata: { source: 'portal_self', fields: Object.keys(parsed) },
+      timestamp,
+    });
+
+    return { status: 200, body: { personId, updatedAt: timestamp } };
   }));
 
   app.patch('/api/v1/persons/:personId', createMutatingRoute(idempotencyService, async (req) => {

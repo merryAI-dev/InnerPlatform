@@ -23,10 +23,29 @@ public final class CashflowMonthReopenCommands {
         String idempotencyKey,
         String yearMonth,
         long expectedRevision,
-        String reason
+        String reason,
+        String requestId,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
+        long evidenceRevision,
+        String manifestHash,
+        long expectedWorkflowRevision
     ) {
         public RequestReopen {
             reason = reason == null ? "" : reason.trim();
+            requestId = normalized(requestId);
+            cycleYearMonth = normalized(cycleYearMonth);
+            monthCloseTargetYearMonth = normalized(monthCloseTargetYearMonth);
+            manifestHash = normalized(manifestHash);
+        }
+
+        public RequestReopen(
+            String idempotencyKey,
+            String yearMonth,
+            long expectedRevision,
+            String reason
+        ) {
+            this(idempotencyKey, yearMonth, expectedRevision, reason, "", "", "", 0, "", 0);
         }
     }
 
@@ -35,11 +54,35 @@ public final class CashflowMonthReopenCommands {
         String yearMonth,
         long expectedRevision,
         String decision,
-        String reason
+        String reason,
+        String requestId,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
+        long evidenceRevision,
+        String manifestHash,
+        long expectedWorkflowRevision
     ) {
         public DecideReopen {
             decision = decision == null ? "" : decision.trim().toUpperCase(Locale.ROOT);
             reason = reason == null ? "" : reason.trim();
+            requestId = normalized(requestId);
+            cycleYearMonth = normalized(cycleYearMonth);
+            monthCloseTargetYearMonth = normalized(monthCloseTargetYearMonth);
+            manifestHash = normalized(manifestHash);
         }
+
+        public DecideReopen(
+            String idempotencyKey,
+            String yearMonth,
+            long expectedRevision,
+            String decision,
+            String reason
+        ) {
+            this(idempotencyKey, yearMonth, expectedRevision, decision, reason, "", "", "", 0, "", 0);
+        }
+    }
+
+    private static String normalized(String value) {
+        return value == null ? "" : value.trim();
     }
 }

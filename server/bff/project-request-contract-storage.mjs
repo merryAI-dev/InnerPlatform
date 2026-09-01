@@ -118,6 +118,50 @@ export function createProjectRequestContractStorageService(options = {}) {
       };
     },
 
+    /**
+     * 브라우저가 스토리지에 직접 올릴 서명 URL(10분, PUT). Vercel 서버리스의 요청 본문
+     * 4.5MB 한도를 우회하는 유일한 정석 경로다 - 큰 파일은 BFF 를 거치지 않고 올라오고,
+     * 등록 시점에 BFF 가 스토리지에서 내용을 검증한다.
+     */
+    async createIncomingUploadUrl(input) {
+      const tenantId = requireStoragePathSegment(input?.tenantId, 'tenantId');
+      const draftId = requireStoragePathSegment(input?.draftId, 'draftId');
+      const fileName = normalizeSafeFileName(input?.fileName);
+      const mimeType = readOptionalText(input?.mimeType) || 'application/octet-stream';
+      const path = `${draftAttachmentPrefix(tenantId, draftId)}incoming/${randomUUID()}-${fileName}`;
+      const expiresAtMs = Date.now() + (10 * 60 * 1000);
+      const [uploadUrl] = await bucket.file(path).getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        expires: expiresAtMs,
+        contentType: mimeType,
+      });
+      return { path, uploadUrl, expiresAt: new Date(expiresAtMs).toISOString() };
+    },
+
+    /** 직접 업로드된 파일을 읽는다. 이 드래프트의 incoming/ 밑이 아니면 거부 - 경로는 신뢰하지 않는다. */
+    async readIncomingUpload(input) {
+      const tenantId = requireStoragePathSegment(input?.tenantId, 'tenantId');
+      const draftId = requireStoragePathSegment(input?.draftId, 'draftId');
+      const path = readOptionalText(input?.path);
+      const prefix = `${draftAttachmentPrefix(tenantId, draftId)}incoming/`;
+      if (!path || !path.startsWith(prefix) || path.includes('..')) {
+        throw new Error('Incoming upload path is invalid');
+      }
+      const file = bucket.file(path);
+      const [buffer] = await file.download();
+      return { path, buffer };
+    },
+
+    async deleteIncomingUpload(input) {
+      const tenantId = requireStoragePathSegment(input?.tenantId, 'tenantId');
+      const draftId = requireStoragePathSegment(input?.draftId, 'draftId');
+      const path = readOptionalText(input?.path);
+      const prefix = `${draftAttachmentPrefix(tenantId, draftId)}incoming/`;
+      if (!path || !path.startsWith(prefix)) return;
+      await bucket.file(path).delete({ ignoreNotFound: true });
+    },
+
     async uploadDraftAttachment(input) {
       const tenantId = requireStoragePathSegment(input?.tenantId, 'tenantId');
       const draftId = requireStoragePathSegment(input?.draftId, 'draftId');

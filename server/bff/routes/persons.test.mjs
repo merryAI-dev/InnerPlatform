@@ -182,7 +182,23 @@ function createApp({
   };
 
   const db = {
-    collection: (path) => ({ get: async () => ({ docs: collectionDocs(`${path}/`) }) }),
+    collection: (path) => {
+      const state = { filters: [], limit: Infinity };
+      const query = {
+        where(field, op, value) {
+          if (op !== '==') throw new Error('mock collection only supports ==');
+          state.filters.push([field, value]);
+          return query;
+        },
+        limit(count) { state.limit = count; return query; },
+        get: async () => ({
+          docs: collectionDocs(`${path}/`)
+            .filter((doc) => state.filters.every(([field, value]) => (doc.data() || {})[field] === value))
+            .slice(0, state.limit),
+        }),
+      };
+      return query;
+    },
     doc: (path) => ({
       __path: path,
       path,
@@ -293,6 +309,104 @@ describe('라우트 — 인력 명부', () => {
     expect(response.body.items.map((item) => item.name)).toEqual(['강감찬', '홍길동']);
   });
 
+  it('내 인사정보는 uid 로 자기 것만 찾고, 명부에 없으면 왜 비었는지 알린다', async () => {
+    const documents = {
+      'orgs/tenant-a/persons/person-me': {
+        personId: 'person-me', name: '변민욱', nickname: '보람', uid: 'actor-a',
+        grade: '책임연구원', joinedAt: '2025-04-02', birthDate: '1996-12-20',
+        employments: [], note: 'PERSON_NOTE_SECRET',
+        professionalProfile: {
+          schemaVersion: 1,
+          educationRecords: [{ attainmentCode: 'MASTER_GRADUATED', institutionName: 'Sussex', countryCode: 'GB', major: '개발학', admissionYear: '2015', degreeYear: '2017', evidence: null }],
+          englishEvidence: [],
+          certifications: [{ key: 'pmp', label: 'PMP', acquiredAt: '2019-05', evidence: null }],
+          provenance: { source: 'PEOPLE_MANUAL', revision: 1, updatedAt: '2026-08-27T00:00:00.000Z', updatedBy: 'actor-b' },
+        },
+      },
+      'orgs/tenant-a/persons/person-other': {
+        personId: 'person-other', name: '남', uid: 'actor-z', employments: [],
+        professionalProfile: {
+          schemaVersion: 1, educationRecords: [], englishEvidence: [],
+          certifications: [{ key: 'other-secret', label: 'OTHER_SECRET', acquiredAt: null, evidence: null }],
+          provenance: { source: 'PEOPLE_MANUAL', revision: 1, updatedAt: null, updatedBy: null },
+        },
+      },
+    };
+
+    // 권한이 낮은 역할도 자기 것은 본다 - 본인 데이터라 별도 권한을 요구하지 않는다.
+    const { app } = createApp({ role: 'viewer', documents });
+    const mine = await request(app).get('/api/v1/persons/me/hr-profile');
+    expect(mine.status).toBe(200);
+    expect(mine.body.linked).toBe(true);
+    expect(mine.body.person).toMatchObject({ personId: 'person-me', grade: '책임연구원', birthDate: '1996-12-20' });
+    expect(mine.body.profile.certifications).toEqual([
+      { key: 'pmp', label: 'PMP', acquiredAt: '2019-05', evidence: null },
+    ]);
+    // 남의 인사정보도, 명부 내부 메모도 섞이지 않는다.
+    expect(JSON.stringify(mine.body)).not.toContain('OTHER_SECRET');
+    expect(JSON.stringify(mine.body)).not.toContain('PERSON_NOTE_SECRET');
+
+    // uid 가 명부에 없는 계정은 빈 화면 대신 왜 비었는지 알 수 있어야 한다.
+    const { app: unlinkedApp } = createApp({ role: 'viewer', documents: {} });
+    const unlinked = await request(unlinkedApp).get('/api/v1/persons/me/hr-profile');
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.body).toEqual({ linked: false, person: null, profile: null });
+  });
+
+  /**
+   * 마이페이지에서 본인이 고치는 값. 대상은 경로가 아니라 로그인 계정의 uid 로 정해진다 -
+   * 남의 personId 를 넣을 자리 자체가 없다.
+   */
+  it('본인 기본정보만 고치고, 회사가 관리하는 값은 열지 않는다', async () => {
+    const documents = {
+      'orgs/tenant-a/persons/person-me': {
+        personId: 'person-me', name: '변민욱', nickname: '옛닉', uid: 'actor-a',
+        grade: '책임연구원', departmentTop: '대표이사실', joinedAt: '2025-04-02', employments: [],
+      },
+      'orgs/tenant-a/persons/person-other': {
+        personId: 'person-other', name: '남', nickname: '남닉', uid: 'actor-z', employments: [],
+      },
+    };
+    const { app, store } = createApp({ role: 'viewer', documents });
+
+    const saved = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-1' })
+      .send({ nickname: '새닉', birthDate: '1996-12-20', workLocation: '성수' });
+
+    expect(saved.status).toBe(200);
+    expect(saved.body.personId).toBe('person-me');
+    expect(store['orgs/tenant-a/persons/person-me']).toMatchObject({
+      nickname: '새닉', birthDate: '1996-12-20', workLocation: '성수',
+    });
+    // 남의 문서는 그대로다.
+    expect(store['orgs/tenant-a/persons/person-other'].nickname).toBe('남닉');
+    // 회사가 관리하는 값은 스키마가 막는다.
+    expect(store['orgs/tenant-a/persons/person-me'].grade).toBe('책임연구원');
+
+    const forbidden = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-2' })
+      .send({ grade: '대표이사' });
+    expect(forbidden.status).toBe(400);
+
+    const empty = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-3' })
+      .send({});
+    expect(empty.status).toBe(400);
+  });
+
+  it('명부에 연결되지 않은 계정은 본인 기본정보를 고칠 수 없다', async () => {
+    const { app } = createApp({ role: 'viewer', documents: {} });
+    const response = await request(app)
+      .patch('/api/v1/persons/me/profile')
+      .set({ 'idempotency-key': 'self-profile-unlinked' })
+      .send({ nickname: '아무개' });
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe('person_not_linked');
+  });
+
   it('목록은 명시적 allowlist만 반환하고 전문 프로필 원문은 전역 store에 흘리지 않는다', async () => {
     const { app } = createApp({ documents: {
       'orgs/tenant-a/persons/person-a': {
@@ -324,9 +438,20 @@ describe('라우트 — 인력 명부', () => {
       professionalProfileRead: true,
       professionalProfileWrite: true,
     });
+    // 깨진 프로필(학력 구분 없음)이 들어 있어도 목록은 살아 있어야 한다 - 그 사람만 빈 요약이 된다.
     expect(response.body.items[0]).toEqual({
       personId: 'person-a',
       name: '김정태',
+      birthDate: '',
+      hrSummary: {
+        highestEducationDisplayText: '',
+        highestDegreeYear: '',
+        highestEducationCode: '',
+        highestEducationInstitution: '',
+        highestEducationMajor: '',
+        englishEvidenceDisplayText: '',
+        certificationsDisplayText: '',
+      },
       nickname: '정태',
       email: 'jt@example.com',
       departmentTop: '임팩트사업부',

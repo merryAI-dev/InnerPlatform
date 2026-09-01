@@ -37,6 +37,12 @@ service firebase.storage {
       allow read, write: if false;
     }
 
+    // 인사정보 증빙(졸업증명서·성적표·자격증 사본)은 민감 개인정보다.
+    // 조직 구성원 누구나 읽는 catch-all 에서 빼고 BFF 권한 검사로만 오간다.
+    match /orgs/{orgId}/person-hr-evidence/{allPaths=**} {
+      allow read, write: if false;
+    }
+
     // ── 테넌트 스코프 스토리지 경로: orgs/{orgId}/** ──
     // Firebase 로그인과 해당 org의 canonical 멤버십을 함께 확인한다.
     // status가 없는 과거 문서만 호환하고, status가 있으면 ACTIVE만 허용한다.
@@ -44,10 +50,12 @@ service firebase.storage {
       allow read: if collection != 'business-cards'
         && collection != 'project-registration-drafts'
         && collection != 'project-registration-documents'
+        && collection != 'person-hr-evidence'
         && hasActiveCanonicalMembership(orgId);
       allow write: if collection != 'business-cards'
         && collection != 'project-registration-drafts'
         && collection != 'project-registration-documents'
+        && collection != 'person-hr-evidence'
         && hasActiveCanonicalMembership(orgId);
     }
 

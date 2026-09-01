@@ -6,10 +6,15 @@ import dev.merryai.innerplatform.weekly.domain.CashflowCumulativeCloseHead;
 import dev.merryai.innerplatform.weekly.domain.CashflowLedgerSource;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthCloseState;
 import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenPolicy;
+import dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy;
 import dev.merryai.innerplatform.weekly.domain.CashflowOpeningBalance;
 import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
+import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
+import dev.merryai.innerplatform.weekly.api.CancelCashflowSettlementCycleRequest;
+import dev.merryai.innerplatform.weekly.api.SubmitCashflowSettlementCycleRequest;
+import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
@@ -262,6 +267,68 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
     ) {
     }
 
+    record CashflowSettlementCycleRecord(
+        String projectId,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
+        List<CashflowSettlementStatusRecord> weeklySettlements,
+        CashflowSettlementStatusRecord monthSettlement,
+        CashflowSettlementCyclePolicy.Projection projection,
+        CashflowSettlementCycleAuthority authority
+    ) {
+        public CashflowSettlementCycleRecord(
+            String projectId,
+            String cycleYearMonth,
+            String monthCloseTargetYearMonth,
+            List<CashflowSettlementStatusRecord> weeklySettlements,
+            CashflowSettlementStatusRecord monthSettlement,
+            CashflowSettlementCyclePolicy.Projection projection
+        ) {
+            this(
+                projectId, cycleYearMonth, monthCloseTargetYearMonth, weeklySettlements,
+                monthSettlement, projection,
+                new CashflowSettlementCycleAuthority(false, false, false, false, false, false)
+            );
+        }
+    }
+
+    record CashflowSettlementCycleAuthority(
+        boolean legacyReadOnly,
+        boolean activeMember,
+        boolean projectWriter,
+        boolean currentApprover,
+        boolean requester,
+        boolean recoveryAdmin
+    ) {
+    }
+
+    record CashflowSettlementCycleCommandState(
+        String projectId,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
+        String requestId,
+        String businessState,
+        long workflowRevision,
+        long evidenceRevision,
+        String manifestHash,
+        String submittedAt,
+        String submittedByUid,
+        String approverUid,
+        String decidedAt,
+        String decidedByUid,
+        String reason
+    ) {
+    }
+
+    record CashflowSettlementCycleHeadMigrationState(
+        String projectId,
+        String closedThrough,
+        String cycleYearMonth,
+        String approvalVersionId,
+        long headRevision
+    ) {
+    }
+
     default <T> T runCommandTransaction(Callable<T> action) {
         try {
             return action.call();
@@ -357,6 +424,63 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         String yearMonth
     ) {
         return Map.of();
+    }
+
+    default Map<String, CashflowSettlementCycleRecord> findCashflowSettlementCyclesBatch(
+        TrustedActorContext actor,
+        List<String> projectIds,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth
+    ) {
+        return Map.of();
+    }
+
+    default CashflowSettlementCycleCommandState submitCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        SubmitCashflowSettlementCycleRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_cycle_backend_unavailable",
+            "Cashflow settlement cycle submission requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSettlementCycleCommandState transitionCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        TransitionCashflowSettlementCycleRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_cycle_backend_unavailable",
+            "Cashflow settlement cycle transition requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSettlementCycleCommandState cancelCashflowSettlementCycle(
+        TrustedActorContext actor,
+        String projectId,
+        CancelCashflowSettlementCycleRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_cycle_backend_unavailable",
+            "Cashflow settlement cycle recovery requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSettlementCycleHeadMigrationState migrateCashflowSettlementCycleHeadV2(
+        TrustedActorContext actor,
+        String projectId,
+        MigrateCashflowSettlementCycleHeadV2Request request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_cycle_migration_backend_unavailable",
+            "Cashflow settlement cycle migration requires the Firestore transaction backend."
+        );
     }
 
     default CashflowSettlementStatusRecord transitionCashflowSettlementStatus(

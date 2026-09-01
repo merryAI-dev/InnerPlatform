@@ -63,11 +63,6 @@ export interface ParticipationDashboardMember {
   months: ParticipationDashboardMonth[];
   projects?: ParticipationDashboardProject[];
   warnings: Array<{ yearMonth: string; rate: number }>;
-  profileSummary?: {
-    highestEducationDisplayText: string;
-    englishEvidenceDisplayText: string;
-    certificationsDisplayText: string;
-  };
 }
 
 export interface ParticipationDashboardProfileFilterOption {
@@ -99,17 +94,6 @@ export interface ParticipationDashboardSnapshot {
   unlinkedEntryCount: number;
   filterOptions: { clientOrgs: string[]; settlementSystems: Array<{ value: string; label: string; projectCount?: number }> };
   projects: Array<{ id: string; name: string; clientOrg: string }>;
-  professionalProfileAccess?: boolean;
-  selectedProfileFilters?: {
-    education: string | null;
-    englishEvidence: string | null;
-    certifications: string[];
-  };
-  profileFilterOptions?: {
-    education: ParticipationDashboardProfileFilterOption[];
-    englishEvidence: ParticipationDashboardProfileFilterOption[];
-    certifications: ParticipationDashboardProfileFilterOption[];
-  };
 }
 
 /** 참여율 시트 검증 결과. 읽기 전용이라 무엇도 바뀌지 않는다. */
@@ -131,6 +115,8 @@ export interface ParticipationSheetPreview {
     errorCount: number;
   } | null;
   blocking: Array<{ code: string; message: string; rowIndex?: number; month?: string }>;
+  /** 막지는 않지만 사용자가 인지해야 하는 것들 - 기간 불일치 등. 구버전 응답엔 없다. */
+  warnings?: Array<{ code: string; message: string }>;
   months: string[];
   rows: Array<{
     rowIndex: number;
@@ -1586,8 +1572,10 @@ export interface CashflowMonthClosePresentation {
     periodLabel: string;
   };
   monthClose: {
+    status?: CashflowSettlementStatus;
     statusLabel: string;
     tone: 'danger' | 'warning' | 'success' | 'neutral';
+    approvedAt?: string;
   };
   evidenceSource: 'DASHBOARD';
 }
@@ -1740,7 +1728,7 @@ export interface CashflowProjectionActualSummaryBatch {
 }
 
 export interface CashflowWeeklyOverviewResult {
-  version: string;
+  version: '4';
   yearMonth: string;
   monthCloseTargetYearMonth: string;
   monthCloseTargetLabel: string;
@@ -1748,6 +1736,7 @@ export interface CashflowWeeklyOverviewResult {
     projectId: string;
     settlementStatuses: CashflowSettlementStatusesResult | null;
     projectionActualSummary: CashflowProjectionActualSummary | null;
+    sheetCapturedAt: string | null;
   }>;
   errors: Array<{
     projectId: string;
@@ -2204,20 +2193,12 @@ export async function fetchParticipationDashboardViaBff(params: {
   actor: ActorLike;
   year?: string;
   ruleId?: string;
-  education?: string;
-  englishEvidence?: string;
-  certifications?: string[];
   signal?: AbortSignal;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationDashboardSnapshot> {
   const query = new URLSearchParams();
   if (/^\d{4}$/.test(params.year || '')) query.set('year', params.year || '');
   if (params.ruleId) query.set('ruleId', params.ruleId);
-  if (params.education) query.set('education', params.education);
-  if (params.englishEvidence) query.set('englishEvidence', params.englishEvidence);
-  for (const certification of params.certifications || []) {
-    if (certification) query.append('certification', certification);
-  }
   const response = await resolveClient(params.client).get<ParticipationDashboardSnapshot>(
     `/api/v1/participation-dashboard${query.size ? `?${query}` : ''}`,
     {
@@ -2282,6 +2263,7 @@ export async function previewParticipationSheetByLinkViaBff(params: {
   sheetLink: string;
   contractStart: string;
   contractEnd: string;
+  contractEndUndecided?: boolean;
   projectId?: string;
   client?: PlatformApiClientLike;
 }): Promise<ParticipationSheetPreview> {
@@ -2296,6 +2278,7 @@ export async function previewParticipationSheetByLinkViaBff(params: {
     sheetLink: params.sheetLink,
     contractStart: params.contractStart,
     contractEnd: params.contractEnd,
+    ...(params.contractEndUndecided ? { contractEndUndecided: '1' } : {}),
     ...(params.projectId ? { projectId: params.projectId } : {}),
   });
   const response = await resolveClient(params.client).get<ParticipationSheetPreview>(
@@ -2724,6 +2707,87 @@ export async function fetchPersonsViaBff(params: {
   return response.data;
 }
 
+export interface MyHrProfileResponse {
+  linked: boolean;
+  person: PersonRecord | null;
+  profile: {
+    educationRecords: Array<Record<string, unknown>>;
+    englishEvidence: Array<Record<string, unknown>>;
+    certifications: Array<{ key: string; label: string; acquiredAt: string | null }>;
+  } | null;
+}
+
+/** 내 인사정보. 남의 것은 못 보고 자기 것만 본다 - 인사 담당자 조회 경로와 다른 문이다. */
+export async function fetchMyHrProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  signal?: AbortSignal;
+  client?: PlatformApiClientLike;
+}): Promise<MyHrProfileResponse> {
+  const response = await resolveClient(params.client).get<MyHrProfileResponse>(
+    '/api/v1/persons/me/hr-profile',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      signal: params.signal,
+      timeoutMs: 10000,
+    },
+  );
+  return response.data;
+}
+
+/** 인적사항 수정. 계약 이력과 달리 사람이 적는 값이라 부분 갱신(merge)으로 보낸다. */
+/** 본인 기본정보 수정. 대상은 서버가 로그인 계정의 uid 로 정한다. */
+export async function updateMyPersonProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  profile: { nickname?: string; birthDate?: string | null; workLocation?: string };
+  client?: PlatformApiClientLike;
+}): Promise<{ personId: string; updatedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.patch<{ personId: string; updatedAt: string }>(
+    '/api/v1/persons/me/profile',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.profile,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export async function updatePersonProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  personId: string;
+  profile: {
+    nickname?: string;
+    email?: string;
+    departmentTop?: string;
+    departmentMid?: string;
+    departmentSub?: string;
+    title?: string;
+    grade?: string;
+    workLocation?: string;
+    birthDate?: string | null;
+    note?: string;
+  };
+  client?: PlatformApiClientLike;
+}): Promise<{ personId: string; updatedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.patch<{ personId: string; updatedAt: string }>(
+    `/api/v1/persons/${encodeURIComponent(params.personId)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.profile,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
 export async function changePersonEmploymentViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -2815,11 +2879,23 @@ export interface PersonRecord {
   departmentSub: string;
   title: string;
   grade: string;
+  /** 생년월일 (YYYY-MM-DD). 만 나이는 저장하지 않고 조회 시 계산한다. */
+  birthDate: string;
   workLocation: string;
   joinedAt: string | null;
   employments: PersonEmploymentRecord[];
   uid: string | null;
   note?: string;
+  /** 인사정보 읽기 권한이 있을 때만 실린다. 원문이 아니라 화면이 바로 읽을 요약이다. */
+  hrSummary?: {
+    highestEducationDisplayText: string;
+    highestDegreeYear: string;
+    highestEducationCode: string;
+    highestEducationInstitution: string;
+    highestEducationMajor: string;
+    englishEvidenceDisplayText: string;
+    certificationsDisplayText: string;
+  };
 }
 
 export async function provisionProjectEvidenceDriveRootViaBff(params: {
@@ -3634,26 +3710,6 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
   action: 'SUBMIT' | 'APPROVE';
   client?: PlatformApiClientLike;
 }): Promise<CashflowSettlementStatusesResult> {
-  if (params.period === 'MONTH' && params.action === 'APPROVE') {
-    const request = await fetchCurrentCashflowMonthCloseRequestViaBff(params);
-    if (!request || request.status !== 'PENDING') {
-      throw new Error('승인할 월 결산 요청을 찾을 수 없습니다.');
-    }
-    if ((request.reviewWarnings ?? []).length > 0) {
-      throw new Error('확인이 필요한 월 결산 항목이 있습니다. 해당 항목을 정리한 뒤 다시 승인해 주세요.');
-    }
-    await approveCashflowMonthCloseUntilLedgerClosed({
-      ...params,
-      requestId: request.requestId,
-      payload: {
-        decision: 'APPROVE',
-        expectedRevision: request.revision,
-        expectedManifestHash: request.manifestHash,
-      },
-      idempotencyKey: `cashflow-settlement:${request.requestId}:r${request.revision}:approve`,
-    });
-    return fetchCashflowSettlementStatusesViaBff(params);
-  }
   const response = await resolveClient(params.client).post<CashflowSettlementStatusesResult>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/settlement-statuses/transition`,
     {
@@ -3731,15 +3787,71 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
   const result = response.data;
   const requestedIds = new Set(params.projectIds);
   const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
-  if (typeof result?.version !== 'string'
+  const periods = new Set(['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5']);
+  const statuses = new Set(['WAITING_FOR_UPDATE', 'PENDING_APPROVAL', 'COMPLETED']);
+  const validInstant = (value: unknown) => typeof value === 'string'
+    && value.trim() === value
+    && /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value));
+  const validSummary = (summary: CashflowProjectionActualSummary | null, projectId: string) => {
+    if (summary === null) return true;
+    const periodKeys = Array.isArray(summary?.periods) ? summary.periods.map((period) => period?.period) : [];
+    return summary?.projectId === projectId
+      && summary.source === 'SHEET_FORMULA'
+      && typeof summary.sourceRevision === 'string'
+      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(summary.fromMonth)
+      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(summary.comparisonAsOfWeek?.yearMonth)
+      && Number.isInteger(summary.comparisonAsOfWeek?.weekNo)
+      && summary.comparisonAsOfWeek.weekNo >= 1
+      && summary.comparisonAsOfWeek.weekNo <= 5
+      && Number.isSafeInteger(summary.differenceAmount)
+      && Number.isSafeInteger(summary.settlementDifferenceAmount)
+      && typeof summary.settlementMatches === 'boolean'
+      && typeof summary.display?.periodLabel === 'string'
+      && typeof summary.display.statusLabel === 'string'
+      && ['success', 'danger'].includes(summary.display.statusTone)
+      && typeof summary.display.differenceLabel === 'string'
+      && Array.isArray(summary.periods)
+      && summary.periods.every((period) => periods.has(period?.period)
+        && (period?.differenceAmount === null || Number.isSafeInteger(period?.differenceAmount)))
+      && new Set(periodKeys).size === periodKeys.length;
+  };
+  const validSettlement = (settlement: CashflowSettlementStatusesResult | null, projectId: string) => {
+    if (settlement === null) return true;
+    const periodKeys = Array.isArray(settlement?.items) ? settlement.items.map((item) => item?.period) : [];
+    return settlement?.projectId === projectId
+      && settlement.yearMonth === params.yearMonth
+      && Array.isArray(settlement.items)
+      && settlement.items.every((item) => periods.has(item?.period)
+        && statuses.has(item?.status)
+        && typeof item?.submittedAt === 'string'
+        && typeof item?.submittedBy === 'string'
+        && typeof item?.approvedAt === 'string'
+        && typeof item?.approvedBy === 'string'
+        && Number.isSafeInteger(item?.revision)
+        && item.revision >= 0
+        && (item?.deadlineAt == null || typeof item.deadlineAt === 'string')
+        && (item?.approverDeadlineAt == null || typeof item.approverDeadlineAt === 'string'))
+      && new Set(periodKeys).size === periodKeys.length;
+  };
+  const errorKeys = Array.isArray(result?.errors)
+    ? result.errors.map((error) => `${error?.projectId}:${error?.code}`)
+    : [];
+  if (result?.version !== '4'
     || result?.yearMonth !== params.yearMonth
+    || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(result?.monthCloseTargetYearMonth || '')
+    || typeof result?.monthCloseTargetLabel !== 'string'
     || !Array.isArray(result?.items)
     || itemIds.length !== params.projectIds.length
     || itemIds.some((projectId) => !requestedIds.has(projectId))
     || new Set(itemIds).size !== itemIds.length
+    || result.items.some((item) => !validSettlement(item?.settlementStatuses, item?.projectId)
+      || !validSummary(item?.projectionActualSummary, item?.projectId)
+      || (item?.sheetCapturedAt !== null && !validInstant(item?.sheetCapturedAt)))
     || !Array.isArray(result?.errors)
     || result.errors.some((error) => !requestedIds.has(error?.projectId)
-      || !['STATUS_UNAVAILABLE', 'SUMMARY_UNAVAILABLE'].includes(error?.code))) {
+      || !['STATUS_UNAVAILABLE', 'SUMMARY_UNAVAILABLE'].includes(error?.code))
+    || new Set(errorKeys).size !== errorKeys.length) {
     throw new Error('현금흐름 현황 응답이 올바르지 않습니다.');
   }
   return result;

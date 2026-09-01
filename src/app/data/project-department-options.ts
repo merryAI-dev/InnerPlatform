@@ -12,6 +12,7 @@ export const PROJECT_DEPARTMENT_OPTIONS = [
   'CI그룹',
   'AXR팀',
   'DXR팀',
+  'EXR팀',
 ] as const;
 
 export type ProjectDepartmentOption = (typeof PROJECT_DEPARTMENT_OPTIONS)[number];
