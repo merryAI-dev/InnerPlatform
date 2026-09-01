@@ -50,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -1752,7 +1753,7 @@ class WeeklyExpenseControllerTest {
         when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026))
             .thenReturn(dashboardSource);
         when(dashboardPersistence.findCashflowLedgerSource(
-            "tenant-month-dashboard", "project-month-dashboard", 2026, "2023-01", "2026-08"
+            eq("tenant-month-dashboard"), eq("project-month-dashboard"), eq(2026), eq("2023-01"), anyString()
         )).thenReturn(dashboardSource);
         Map<String, String> completeAnnualStates = new LinkedHashMap<>();
         CashflowLineCatalog.ALL_LINES.forEach(line -> completeAnnualStates.put(line, "EMPTY"));
@@ -1820,7 +1821,7 @@ class WeeklyExpenseControllerTest {
         verify(dashboardPersistence)
             .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard", 2026);
         verify(dashboardPersistence).findCashflowLedgerSource(
-            "tenant-month-dashboard", "project-month-dashboard", 2026, "2023-01", "2026-08"
+            eq("tenant-month-dashboard"), eq("project-month-dashboard"), eq(2026), eq("2023-01"), anyString()
         );
     }
 
@@ -2137,7 +2138,7 @@ class WeeklyExpenseControllerTest {
                 .thenReturn(2026);
             CashflowLedgerSource ledgerSource = new CashflowLedgerSource(List.of(), List.of());
             when(dashboardPersistence.findCashflowLedgerSource(
-                "tenant-authority-read", "project-authority-read", 2026, "2023-01", "2026-08"
+                eq("tenant-authority-read"), eq("project-authority-read"), eq(2026), eq("2023-01"), anyString()
             )).thenReturn(ledgerSource);
             when(dashboardPersistence.findCashflowOpeningBalance("tenant-authority-read", "project-authority-read", 2026))
                 .thenReturn(new CashflowOpeningBalance(
@@ -2220,7 +2221,7 @@ class WeeklyExpenseControllerTest {
             when(dashboardPersistence.findCashflowLedgerSource(tenantId, projectId, 2026))
                 .thenReturn(ledgerSource);
             when(dashboardPersistence.findCashflowLedgerSource(
-                tenantId, projectId, 2026, "2023-01", "2026-08"
+                eq(tenantId), eq(projectId), eq(2026), eq("2023-01"), anyString()
             )).thenReturn(ledgerSource);
             when(dashboardPersistence.findCashflowOpeningBalance(tenantId, projectId, 2026))
                 .thenReturn(new CashflowOpeningBalance(
@@ -2253,7 +2254,7 @@ class WeeklyExpenseControllerTest {
                 case "openingBalances" -> when(dashboardPersistence.findCashflowOpeningBalance(tenantId, projectId, 2026))
                     .thenThrow(technicalFailure);
                 case "projectionActualSummary" -> when(dashboardPersistence.findCashflowLedgerSource(
-                    tenantId, projectId, 2026, "2023-01", "2026-08"
+                    eq(tenantId), eq(projectId), eq(2026), eq("2023-01"), anyString()
                 )).thenThrow(technicalFailure);
                 default -> throw new IllegalStateException("Unexpected fixture section " + failedSection);
             }
