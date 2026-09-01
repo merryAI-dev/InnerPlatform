@@ -487,6 +487,7 @@ function sanitizeBankStatementSheet(sheet: BankStatementSheet): BankStatementShe
 interface PortalState {
   isRegistered: boolean;
   isLoading: boolean;
+  isProjectCatalogReady: boolean;
   portalUser: PortalUser | null;
   activeProjectId: string;
   members: OrgMember[];
@@ -733,6 +734,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [budgetTreeV2, setBudgetTreeV2] = useState<BudgetTreeV2 | null>(null);
   const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
   const [projectCatalogLoading, setProjectCatalogLoading] = useState(false);
+  const [isProjectCatalogReady, setIsProjectCatalogReady] = useState(false);
   const [projectScopeLoading, setProjectScopeLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const projectCatalogUnsubsRef = useRef<Unsubscribe[]>([]);
@@ -1055,6 +1057,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) {
       setProjectsIfChanged([]);
       setProjectCatalogLoading(false);
+      setIsProjectCatalogReady(false);
       return () => {
         cancelled = true;
       };
@@ -1063,6 +1066,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (isDevHarnessUser) {
       setProjectsIfChanged(PROJECTS.filter((project) => assignedProjectIds.includes(project.id)));
       setProjectCatalogLoading(false);
+      setIsProjectCatalogReady(true);
       return () => {
         cancelled = true;
       };
@@ -1071,12 +1075,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (!firestoreEnabled || !db) {
       setProjectsIfChanged([]);
       setProjectCatalogLoading(false);
+      setIsProjectCatalogReady(true);
       return () => {
         cancelled = true;
       };
     }
 
     setProjectCatalogLoading(true);
+    setIsProjectCatalogReady(false);
     const handleProjectsResult = (docs: Array<{ id: string; data(): unknown }>) => {
       const map = new Map<string, Project>();
       docs.forEach((docItem) => {
@@ -1089,6 +1095,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       );
       setProjectsIfChanged(nextProjects);
       ifActive(() => setProjectCatalogLoading(false));
+      ifActive(() => setIsProjectCatalogReady(true));
     };
     const handleProjectsError = (err: unknown) => {
       reportError(err, {
@@ -1106,6 +1113,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         },
       });
       ifActive(() => setProjectCatalogLoading(false));
+      ifActive(() => setIsProjectCatalogReady(true));
     };
     const projectsQuery = query(collection(db, getOrgCollectionPath(orgId, 'projects')), limit(500));
     if (livePortalMode) {
@@ -3933,6 +3941,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const value: PortalState & PortalActions = {
     isRegistered: !!portalUser,
     isLoading: projectCatalogLoading || projectScopeLoading || isMemberLoading,
+    isProjectCatalogReady,
     portalUser,
     activeProjectId,
     members,

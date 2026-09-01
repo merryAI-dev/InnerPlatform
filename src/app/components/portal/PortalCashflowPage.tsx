@@ -8,6 +8,8 @@ import {
 export function PortalCashflowPage() {
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const {
+    isLoading,
+    isProjectCatalogReady,
     activeProjectId,
     members,
     portalUser,
@@ -19,6 +21,14 @@ export function PortalCashflowPage() {
   // `/portal/cashflow` is the session-entry URL; an explicit route ID always wins.
   const projectId = resolvePortalProjectResourceId(routeProjectId, activeProjectId);
   const project = projects.find((candidate) => candidate.id === projectId);
+
+  if (!projectId && (isLoading || !isProjectCatalogReady)) {
+    return (
+      <div className="flex min-h-[240px] items-center justify-center px-6 text-sm text-muted-foreground">
+        프로젝트 목록을 불러오는 중...
+      </div>
+    );
+  }
 
   if (!projectId) {
     return <Navigate to="/portal/project-select" replace />;
