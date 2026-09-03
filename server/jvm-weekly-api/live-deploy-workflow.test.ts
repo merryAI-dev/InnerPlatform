@@ -7,6 +7,10 @@ const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/jvm-production-deploy.yml'),
   'utf8',
 );
+const settlementCycleVerifier = resolve(
+  process.cwd(),
+  'scripts/verify-cashflow-settlement-cycle-projection.mjs',
+);
 
 function extractShellFunction(text: string, name: string) {
   const lines = text.split('\n');
@@ -57,20 +61,22 @@ function runJsonAssertion(
   });
 }
 
-function runTextFunction(text: string, functionName: string, value: string) {
-  const functionSource = extractShellFunction(text, functionName);
-  return spawnSync('bash', ['-c', [
-    'set -euo pipefail',
-    functionSource,
-    `${functionName} "$1"`,
-  ].join('\n'), 'text-function', value], { encoding: 'utf8' });
-}
-
 function runJqAssertion(expression: string, value: unknown, env: Record<string, string>) {
   return spawnSync('jq', ['-e', expression], {
     input: JSON.stringify(value),
     encoding: 'utf8',
     env: { ...process.env, ...env },
+  });
+}
+
+function runSettlementCycleVerifier(
+  value: unknown,
+  projectId = 'project-a',
+  cycleYearMonth = '2026-09',
+) {
+  return spawnSync(process.execPath, [settlementCycleVerifier, projectId, cycleYearMonth], {
+    input: JSON.stringify(value),
+    encoding: 'utf8',
   });
 }
 
@@ -160,8 +166,7 @@ describe('JVM production deploy workflow', () => {
     expect(workflow).not.toContain('gcloud builds submit');
     expect(workflow).toContain('.capabilities | index("settlement-cycle-v1") != null');
     expect(workflow).toContain('yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true');
-    expect(workflow).toContain('.settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH');
-    expect(workflow).toContain('(.settlementCycle.health | type == "string" and length > 0)');
+    expect(workflow).toContain('node scripts/verify-cashflow-settlement-cycle-projection.mjs');
     expect(workflow.lastIndexOf('- name: Verify canonical service after promotion'))
       .toBeGreaterThan(workflow.indexOf('- name: Promote verified candidate'));
     expect(workflow).toContain('id: canonical_canary');
@@ -225,39 +230,7 @@ describe('JVM production deploy workflow', () => {
     expect(extractStepIf(promoteStep)).toBeNull();
   });
 
-  it('validates canonical settlement identity, vocabulary, and state-gated capability shape before and after promotion', () => {
-    const candidateStep = extractNamedStep(workflow, 'Verify candidate against legacy live read');
-    const canonicalStep = extractNamedStep(workflow, 'Verify canonical service after promotion');
-    const candidateAssertion = extractShellFunction(candidateStep, 'assert_canonical_settlement_cycle');
-    const canonicalAssertion = extractShellFunction(canonicalStep, 'assert_canonical_settlement_cycle');
-    const candidatePreviousMonth = extractShellFunction(candidateStep, 'previous_year_month');
-    const canonicalPreviousMonth = extractShellFunction(canonicalStep, 'previous_year_month');
-    expect(canonicalAssertion).toBe(candidateAssertion);
-    expect(canonicalPreviousMonth).toBe(candidatePreviousMonth);
-    expect(candidateStep).toContain(
-      'assert_canonical_settlement_cycle <<< "${candidate_cycle_item}" >/dev/null',
-    );
-    expect(candidateStep).toContain(
-      'assert_canonical_settlement_cycle <<< "${candidate_cycle_dashboard}" >/dev/null',
-    );
-    expect(canonicalStep).toContain(
-      'assert_canonical_settlement_cycle <<< "${canonical_cycle_dashboard}" >/dev/null',
-    );
-    for (const step of [candidateStep, canonicalStep]) {
-      expect(step).toContain(
-        'EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH="$(previous_year_month "${CASHFLOW_YEAR_MONTH}")"',
-      );
-    }
-    expect(runTextFunction(candidateStep, 'previous_year_month', '2026-09')).toMatchObject({
-      status: 0,
-      stdout: '2026-08\n',
-    });
-    expect(runTextFunction(candidateStep, 'previous_year_month', '2027-01')).toMatchObject({
-      status: 0,
-      stdout: '2026-12\n',
-    });
-    expect(runTextFunction(candidateStep, 'previous_year_month', '2026-13').status).not.toBe(0);
-
+  it('executes the checked-in settlement-cycle projection verifier', () => {
     const commandNames = [
       'SUBMIT_MONTH_CLOSE',
       'WITHDRAW_MONTH_CLOSE',
@@ -268,95 +241,241 @@ describe('JVM production deploy workflow', () => {
       'REJECT_MONTH_REOPEN',
       'CANCEL_ACTIVE_CYCLE',
     ];
-    const allDeniedCapabilities = Object.fromEntries(commandNames.map((command) => [
-      command,
-      { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
-    ]));
-    const submitted = {
+    const submittedCapabilities = {
+      SUBMIT_MONTH_CLOSE: { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      WITHDRAW_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_REQUESTER' },
+      APPROVE_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+      REJECT_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+      REQUEST_MONTH_REOPEN: { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      APPROVE_MONTH_REOPEN: { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      REJECT_MONTH_REOPEN: { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      CANCEL_ACTIVE_CYCLE: { allowed: false, reasonCode: 'RECOVERY_ADMIN_REQUIRED' },
+    };
+    const submittedCycle = {
+      cycleYearMonth: '2026-09',
+      weeklyYearMonth: '2026-09',
+      monthCloseTargetYearMonth: '2026-08',
+      businessState: 'SUBMITTED',
+      health: 'OK',
+      workflowRevision: 1,
+      provenance: null,
+      supersededAttempt: null,
+      commandCapabilities: submittedCapabilities,
+    };
+    const submittedItem = {
+      projectId: 'project-a',
+      settlementCycle: submittedCycle,
+    };
+    const submittedDashboard = {
+      monthClose: { projectId: 'project-a', yearMonth: '2026-09' },
       settlementCycle: {
-        cycleYearMonth: '2026-09',
-        weeklyYearMonth: '2026-09',
-        monthCloseTargetYearMonth: '2026-08',
-        businessState: 'SUBMITTED',
-        health: 'OK',
-        commandCapabilities: allDeniedCapabilities,
+        ...submittedCycle,
+        commandCapabilities: Object.fromEntries(
+          Object.entries(submittedCapabilities).reverse(),
+        ),
       },
     };
-    const env = {
-      CASHFLOW_YEAR_MONTH: '2026-09',
-      EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH: '2026-08',
+    const itemResult = runSettlementCycleVerifier(submittedItem);
+    const dashboardResult = runSettlementCycleVerifier(submittedDashboard);
+
+    expect(itemResult).toMatchObject({ status: 0, stderr: '' });
+    expect(dashboardResult).toMatchObject({ status: 0, stderr: '' });
+    expect(JSON.parse(itemResult.stdout)).toEqual(submittedCycle);
+    expect(dashboardResult.stdout).toBe(itemResult.stdout);
+
+    const provenance = {
+      affectedFromMonth: '2023-01',
+      affectedThroughMonth: '2026-08',
+      closedByCycleYearMonth: '2026-09',
+      approvalVersionId: 'project-a-2026-09-r1',
+      requestId: 'project-a-2026-09',
+      ledgerRevision: 1,
+      rootHash: `sha256:${'a'.repeat(64)}`,
     };
-    for (const step of [candidateStep, canonicalStep]) {
-      expect(runJsonAssertion(step, 'assert_canonical_settlement_cycle', submitted, env).status).toBe(0);
-      expect(runJsonAssertion(step, 'assert_canonical_settlement_cycle', {
-        settlementCycle: {
-          ...submitted.settlementCycle,
-          commandCapabilities: {
-            ...allDeniedCapabilities,
-            APPROVE_MONTH_CLOSE: { allowed: true, reasonCode: '' },
-          },
-        },
-      }, env).status).toBe(0);
-    }
-    expect(runJsonAssertion(candidateStep, 'assert_canonical_settlement_cycle', {
+    const lockedCycle = {
+      ...submittedCycle,
+      businessState: 'LOCKED',
+      workflowRevision: 2,
+      provenance,
+      commandCapabilities: Object.fromEntries(commandNames.map((command) => [
+        command,
+        command === 'REQUEST_MONTH_REOPEN'
+          ? { allowed: false, reasonCode: 'PROJECT_WRITE_FORBIDDEN' }
+          : { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      ])),
+    };
+    expect(runSettlementCycleVerifier({
+      projectId: 'project-a',
+      settlementCycle: lockedCycle,
+    }).status).toBe(0);
+    expect(runSettlementCycleVerifier({
+      projectId: 'project-a',
+      settlementCycle: { ...lockedCycle, supersededAttempt: 'REJECTED' },
+    }).status).toBe(0);
+    const reopenRequestedCycle = {
+      ...lockedCycle,
+      businessState: 'REOPEN_REQUESTED',
+      workflowRevision: 3,
+      commandCapabilities: Object.fromEntries(commandNames.map((command) => [
+        command,
+        command === 'APPROVE_MONTH_REOPEN'
+          ? { allowed: true, reasonCode: '' }
+          : command === 'REJECT_MONTH_REOPEN'
+            ? { allowed: false, reasonCode: 'REOPEN_DECISION_FORBIDDEN' }
+            : { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      ])),
+    };
+    expect(runSettlementCycleVerifier({
+      projectId: 'project-a',
+      settlementCycle: reopenRequestedCycle,
+    }).status).toBe(0);
+    expect(runSettlementCycleVerifier({
+      projectId: 'project-a',
       settlementCycle: {
-        ...submitted.settlementCycle,
-        businessState: 'LOCKED',
+        ...submittedCycle,
+        cycleYearMonth: '2027-01',
+        weeklyYearMonth: '2027-01',
+        monthCloseTargetYearMonth: '2026-12',
+      },
+    }, 'project-a', '2027-01').status).toBe(0);
+
+    for (const sabotage of [
+      { ...submittedCycle, businessState: 'BANANA' },
+      { ...submittedCycle, businessState: 'INCONSISTENT' },
+      { ...submittedCycle, businessState: 'PENDING_APPROVAL' },
+      { ...submittedCycle, businessState: 'APPROVED' },
+      Object.fromEntries(
+        Object.entries(submittedCycle).filter(([key]) => key !== 'workflowRevision'),
+      ),
+      { ...submittedCycle, workflowRevision: -1 },
+      { ...submittedCycle, workflowRevision: 1.5 },
+      { ...submittedCycle, health: 'RECONCILING' },
+      { ...submittedCycle, cycleYearMonth: '2026-08' },
+      { ...submittedCycle, weeklyYearMonth: '2026-08' },
+      { ...submittedCycle, monthCloseTargetYearMonth: '2026-09' },
+      {
+        ...submittedCycle,
         commandCapabilities: {
-          ...allDeniedCapabilities,
+          ...submittedCapabilities,
+          APPROVE_MONTH_CLOSE: { allowed: false, reasonCode: 'GARBAGE' },
+        },
+      },
+      {
+        ...submittedCycle,
+        commandCapabilities: Object.fromEntries(commandNames.map((command) => [
+          command,
+          { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+        ])),
+      },
+      { ...submittedCycle, provenance },
+      { ...submittedCycle, supersededAttempt: 'APPROVED' },
+      { ...submittedCycle, supersededAttempt: 'REJECTED' },
+      { ...lockedCycle, provenance: { ...provenance, requestId: 'project-a-2026-08' } },
+      { ...lockedCycle, provenance: { ...provenance, affectedThroughMonth: '2026-07' } },
+      { ...lockedCycle, provenance: { ...provenance, affectedFromMonth: '2026-09' } },
+      { ...lockedCycle, provenance: { ...provenance, closedByCycleYearMonth: '2026-08' } },
+      { ...lockedCycle, provenance: { ...provenance, ledgerRevision: 0 } },
+      { ...lockedCycle, provenance: { ...provenance, approvalVersionId: '../unsafe' } },
+      { ...lockedCycle, provenance: { ...provenance, rootHash: 'sha256:not-a-digest' } },
+      { ...lockedCycle, provenance: null },
+      {
+        ...submittedCycle,
+        commandCapabilities: Object.fromEntries(
+          Object.entries(submittedCapabilities)
+            .filter(([command]) => command !== 'CANCEL_ACTIVE_CYCLE'),
+        ),
+      },
+      {
+        ...submittedCycle,
+        commandCapabilities: {
+          ...submittedCapabilities,
+          EXTRA_COMMAND: { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+        },
+      },
+      {
+        ...submittedCycle,
+        commandCapabilities: {
+          ...submittedCapabilities,
+          APPROVE_MONTH_CLOSE: { allowed: 'yes', reasonCode: '' },
+        },
+      },
+      {
+        ...submittedCycle,
+        commandCapabilities: {
+          ...submittedCapabilities,
+          APPROVE_MONTH_CLOSE: { allowed: true, reasonCode: 'NOT_CURRENT_APPROVER' },
+        },
+      },
+      {
+        ...submittedCycle,
+        commandCapabilities: {
+          ...submittedCapabilities,
           REQUEST_MONTH_REOPEN: { allowed: true, reasonCode: '' },
         },
       },
-    }, env).status).toBe(0);
-
-    for (const sabotage of [
-      { settlementCycle: { ...submitted.settlementCycle, businessState: 'PENDING_APPROVAL' } },
-      { settlementCycle: { ...submitted.settlementCycle, businessState: 'APPROVED' } },
-      { settlementCycle: { ...submitted.settlementCycle, monthCloseTargetYearMonth: '2026-09' } },
       {
-        settlementCycle: {
-          ...submitted.settlementCycle,
-          commandCapabilities: Object.fromEntries(
-            Object.entries(allDeniedCapabilities).filter(([command]) => command !== 'CANCEL_ACTIVE_CYCLE'),
-          ),
-        },
-      },
-      {
-        settlementCycle: {
-          ...submitted.settlementCycle,
-          commandCapabilities: {
-            ...allDeniedCapabilities,
-            REQUEST_MONTH_REOPEN: { allowed: true, reasonCode: '' },
-          },
-        },
-      },
-      {
-        settlementCycle: {
-          ...submitted.settlementCycle,
-          businessState: 'LOCKED',
-          commandCapabilities: {
-            ...allDeniedCapabilities,
-            APPROVE_MONTH_CLOSE: { allowed: true, reasonCode: '' },
-          },
-        },
-      },
-      {
-        settlementCycle: {
-          ...submitted.settlementCycle,
-          commandCapabilities: {
-            ...allDeniedCapabilities,
-            APPROVE_MONTH_CLOSE: { allowed: 'yes', reasonCode: '' },
-          },
+        ...submittedCycle,
+        commandCapabilities: {
+          ...submittedCapabilities,
+          REQUEST_MONTH_REOPEN: { allowed: false, reasonCode: 'PROJECT_WRITE_FORBIDDEN' },
         },
       },
     ]) {
-      expect(runJsonAssertion(
-        candidateStep,
-        'assert_canonical_settlement_cycle',
-        sabotage,
-        env,
-      ).status).not.toBe(0);
+      expect(runSettlementCycleVerifier({
+        projectId: 'project-a',
+        settlementCycle: sabotage,
+      }).status).not.toBe(0);
     }
+    expect(runSettlementCycleVerifier(submittedItem, 'project-a', '2026-13').status).not.toBe(0);
+    expect(runSettlementCycleVerifier({
+      ...submittedItem,
+      projectId: 'project-b',
+    }).status).not.toBe(0);
+    expect(runSettlementCycleVerifier({
+      ...submittedDashboard,
+      monthClose: { projectId: 'project-b', yearMonth: '2026-09' },
+    }).status).not.toBe(0);
+    expect(runSettlementCycleVerifier({
+      ...submittedDashboard,
+      monthClose: { projectId: 'project-a', yearMonth: '2026-08' },
+    }).status).not.toBe(0);
+    const conciseFailure = runSettlementCycleVerifier({
+      projectId: 'project-a',
+      settlementCycle: { ...submittedCycle, businessState: 'BANANA' },
+    });
+    expect(conciseFailure.stderr).toMatch(/^settlement-cycle projection invalid: [^\n]+\n$/);
+
+    const mismatchedDashboard = runSettlementCycleVerifier({
+      ...submittedDashboard,
+      settlementCycle: { ...submittedDashboard.settlementCycle, workflowRevision: 2 },
+    });
+    expect(mismatchedDashboard.status).toBe(0);
+    expect(mismatchedDashboard.stdout).not.toBe(itemResult.stdout);
+  }, 15_000);
+
+  it('wires the same checked-in settlement verifier before and after promotion', () => {
+    const candidateStep = extractNamedStep(workflow, 'Verify candidate against legacy live read');
+    const canonicalStep = extractNamedStep(workflow, 'Verify canonical service after promotion');
+    const verifierCommand = 'node scripts/verify-cashflow-settlement-cycle-projection.mjs';
+    expect(candidateStep.match(new RegExp(verifierCommand, 'g'))).toHaveLength(2);
+    expect(canonicalStep.match(new RegExp(verifierCommand, 'g'))).toHaveLength(1);
+    expect(candidateStep).toMatch(
+      /candidate_cycle_item_projection="\$\(node scripts\/verify-cashflow-settlement-cycle-projection\.mjs[\s\S]+?<<< "\$\{candidate_cycle_item\}"\)"/,
+    );
+    expect(candidateStep).toMatch(
+      /candidate_cycle_dashboard_projection="\$\(node scripts\/verify-cashflow-settlement-cycle-projection\.mjs[\s\S]+?<<< "\$\{candidate_cycle_dashboard\}"\)"/,
+    );
+    expect(candidateStep).toContain(
+      'test "${candidate_cycle_item_projection}" = "${candidate_cycle_dashboard_projection}"',
+    );
+    expect(canonicalStep).toMatch(
+      /node scripts\/verify-cashflow-settlement-cycle-projection\.mjs[\s\S]+?<<< "\$\{canonical_cycle_dashboard\}" >\/dev\/null/,
+    );
+    expect(candidateStep).not.toContain('assert_canonical_settlement_cycle()');
+    expect(canonicalStep).not.toContain('assert_canonical_settlement_cycle()');
+    expect(candidateStep).not.toContain('previous_year_month()');
+    expect(canonicalStep).not.toContain('previous_year_month()');
+
   });
 
   it('auto-deploys only a green main commit whose JVM sources actually changed', () => {
@@ -371,7 +490,9 @@ describe('JVM production deploy workflow', () => {
     expect(workflow).toContain('skipping superseded');
     expect(workflow).toContain("if: needs.preflight.outputs.proceed == 'true'");
     // JVM 소스가 바뀐 커밋일 때만. 무변경 재배포는 Cloud Run 롤아웃 위험만 반복한다.
-    expect(workflow).toContain('JVM_SOURCE_PATHS: server/jvm-weekly-api');
+    expect(workflow).toContain(
+      'JVM_SOURCE_PATHS: server/jvm-weekly-api scripts/verify-cashflow-settlement-cycle-projection.mjs',
+    );
     expect(workflow).toContain('git diff --quiet "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}');
     // min-instances 1 은 같은 인스턴스를 계속 살려둔다. 행이 걸리면 liveness probe 가
     // 죽여서 교체해야 한다 - 이게 없으면 행 걸린 인스턴스가 장애를 영구 보존한다.
