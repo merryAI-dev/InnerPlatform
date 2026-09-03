@@ -521,6 +521,70 @@ jobs:
           test -n "${CASHFLOW_ACTOR_UID}"
           test -n "${SERVICE_URL}"
 
+          previous_year_month() {
+            local value="$1"
+            [[ "${value}" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])$ ]] || return 1
+            local year="${value%%-*}"
+            local month="${value##*-}"
+            if [ "${month}" = "01" ]; then
+              printf '%04d-12\n' "$((10#${year} - 1))"
+            else
+              printf '%04d-%02d\n' "$((10#${year}))" "$((10#${month} - 1))"
+            fi
+          }
+
+          EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH="$(previous_year_month "${CASHFLOW_YEAR_MONTH}")"
+          export EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH
+
+          assert_canonical_settlement_cycle() {
+            jq -e '
+              def canonical_business_states:
+                ["NOT_REQUESTED", "SUBMITTED", "LOCKED", "REOPEN_REQUESTED", "REOPENED",
+                 "REJECTED", "WITHDRAWN", "INCONSISTENT"];
+              def canonical_commands:
+                ["SUBMIT_MONTH_CLOSE", "WITHDRAW_MONTH_CLOSE", "APPROVE_MONTH_CLOSE",
+                 "REJECT_MONTH_CLOSE", "REQUEST_MONTH_REOPEN", "APPROVE_MONTH_REOPEN",
+                 "REJECT_MONTH_REOPEN", "CANCEL_ACTIVE_CYCLE"];
+              def state_eligible_commands($state):
+                if ($state == "NOT_REQUESTED" or $state == "REJECTED" or $state == "WITHDRAWN") then
+                  ["SUBMIT_MONTH_CLOSE"]
+                elif $state == "SUBMITTED" then
+                  ["WITHDRAW_MONTH_CLOSE", "APPROVE_MONTH_CLOSE", "REJECT_MONTH_CLOSE",
+                   "CANCEL_ACTIVE_CYCLE"]
+                elif $state == "LOCKED" then
+                  ["REQUEST_MONTH_REOPEN"]
+                elif $state == "REOPEN_REQUESTED" then
+                  ["APPROVE_MONTH_REOPEN", "REJECT_MONTH_REOPEN"]
+                elif $state == "REOPENED" then
+                  ["SUBMIT_MONTH_CLOSE", "CANCEL_ACTIVE_CYCLE"]
+                else
+                  []
+                end;
+              .settlementCycle as $cycle
+              | ($cycle | type) == "object"
+                and (canonical_business_states | index($cycle.businessState) != null)
+                and $cycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
+                and $cycle.weeklyYearMonth == env.CASHFLOW_YEAR_MONTH
+                and $cycle.monthCloseTargetYearMonth == env.EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH
+                and ($cycle.health | type == "string" and length > 0)
+                and ($cycle.commandCapabilities | type) == "object"
+                and (($cycle.commandCapabilities | keys | sort) == (canonical_commands | sort))
+                and ($cycle.commandCapabilities | to_entries | all(
+                  .key as $command
+                  | .value as $capability
+                  | ($capability | type) == "object"
+                    and (($capability | keys | sort) == ["allowed", "reasonCode"])
+                    and ($capability.allowed | type) == "boolean"
+                    and ($capability.reasonCode | type) == "string"
+                    and (if $capability.allowed
+                         then $capability.reasonCode == ""
+                         else ($capability.reasonCode | length) > 0
+                         end)
+                    and ((state_eligible_commands($cycle.businessState) | index($command)) != null
+                         or $capability.allowed == false)
+                ))'
+          }
+
           read_jvm() {
             local base_url="$1"
             local path="$2"
@@ -630,12 +694,19 @@ jobs:
                 | select(.period == "MONTH")] | length == 1)' \
             <<< "${candidate_cycle_weekly_overview}" >/dev/null
 
-          read_jvm "${CANDIDATE_URL}" \
-            "/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
-            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+          candidate_cycle_item="$(jq -e -c '
+            [.items[]? | select(.projectId == env.CASHFLOW_PROJECT_ID)]
+            | if length == 1 then .[0] else error("canonical project item is missing or duplicated") end
+          ' <<< "${candidate_cycle_weekly_overview}")"
+          assert_canonical_settlement_cycle <<< "${candidate_cycle_item}" >/dev/null
+
+          candidate_cycle_dashboard="$(read_jvm "${CANDIDATE_URL}" \
+            "/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true")"
+          jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
                 and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
-                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
-                 and (.settlementCycle.health | type == "string" and length > 0)' >/dev/null
+                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH' \
+            <<< "${candidate_cycle_dashboard}" >/dev/null
+          assert_canonical_settlement_cycle <<< "${candidate_cycle_dashboard}" >/dev/null
 
       - name: Apply explicitly approved settlement head migrations
         if: needs.preflight.outputs.apply_migrations == 'true'
@@ -699,22 +770,89 @@ jobs:
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
+          set -euo pipefail
+
+          previous_year_month() {
+            local value="$1"
+            [[ "${value}" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])$ ]] || return 1
+            local year="${value%%-*}"
+            local month="${value##*-}"
+            if [ "${month}" = "01" ]; then
+              printf '%04d-12\n' "$((10#${year} - 1))"
+            else
+              printf '%04d-%02d\n' "$((10#${year}))" "$((10#${month} - 1))"
+            fi
+          }
+
+          EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH="$(previous_year_month "${CASHFLOW_YEAR_MONTH}")"
+          export EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH
+
+          assert_canonical_settlement_cycle() {
+            jq -e '
+              def canonical_business_states:
+                ["NOT_REQUESTED", "SUBMITTED", "LOCKED", "REOPEN_REQUESTED", "REOPENED",
+                 "REJECTED", "WITHDRAWN", "INCONSISTENT"];
+              def canonical_commands:
+                ["SUBMIT_MONTH_CLOSE", "WITHDRAW_MONTH_CLOSE", "APPROVE_MONTH_CLOSE",
+                 "REJECT_MONTH_CLOSE", "REQUEST_MONTH_REOPEN", "APPROVE_MONTH_REOPEN",
+                 "REJECT_MONTH_REOPEN", "CANCEL_ACTIVE_CYCLE"];
+              def state_eligible_commands($state):
+                if ($state == "NOT_REQUESTED" or $state == "REJECTED" or $state == "WITHDRAWN") then
+                  ["SUBMIT_MONTH_CLOSE"]
+                elif $state == "SUBMITTED" then
+                  ["WITHDRAW_MONTH_CLOSE", "APPROVE_MONTH_CLOSE", "REJECT_MONTH_CLOSE",
+                   "CANCEL_ACTIVE_CYCLE"]
+                elif $state == "LOCKED" then
+                  ["REQUEST_MONTH_REOPEN"]
+                elif $state == "REOPEN_REQUESTED" then
+                  ["APPROVE_MONTH_REOPEN", "REJECT_MONTH_REOPEN"]
+                elif $state == "REOPENED" then
+                  ["SUBMIT_MONTH_CLOSE", "CANCEL_ACTIVE_CYCLE"]
+                else
+                  []
+                end;
+              .settlementCycle as $cycle
+              | ($cycle | type) == "object"
+                and (canonical_business_states | index($cycle.businessState) != null)
+                and $cycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
+                and $cycle.weeklyYearMonth == env.CASHFLOW_YEAR_MONTH
+                and $cycle.monthCloseTargetYearMonth == env.EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH
+                and ($cycle.health | type == "string" and length > 0)
+                and ($cycle.commandCapabilities | type) == "object"
+                and (($cycle.commandCapabilities | keys | sort) == (canonical_commands | sort))
+                and ($cycle.commandCapabilities | to_entries | all(
+                  .key as $command
+                  | .value as $capability
+                  | ($capability | type) == "object"
+                    and (($capability | keys | sort) == ["allowed", "reasonCode"])
+                    and ($capability.allowed | type) == "boolean"
+                    and ($capability.reasonCode | type) == "string"
+                    and (if $capability.allowed
+                         then $capability.reasonCode == ""
+                         else ($capability.reasonCode | length) > 0
+                         end)
+                    and ((state_eligible_commands($cycle.businessState) | index($command)) != null
+                         or $capability.allowed == false)
+                ))'
+          }
+
           canonical_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${canonical_url}/api/v1/health" \
             | jq -e '.ok == true and .service == "jvm-weekly-api" and (.capabilities | index("settlement-cycle-v1") != null)' >/dev/null
-          curl --fail --silent --show-error \
+          canonical_cycle_dashboard="$(curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
             -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
             -H 'x-actor-role: ADMIN' \
-            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true" \
-            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
+            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true")"
+          jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
                 and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
-                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH
-                and (.settlementCycle.health | type == "string" and length > 0)' >/dev/null
+                and .settlementCycle.cycleYearMonth == env.CASHFLOW_YEAR_MONTH' \
+            <<< "${canonical_cycle_dashboard}" >/dev/null
+          assert_canonical_settlement_cycle <<< "${canonical_cycle_dashboard}" >/dev/null
 
       # update-traffic 이 서버에 반영된 뒤 CLI 응답만 유실될 수 있다. step outcome만 믿지 않고
       # 실제 traffic을 다시 읽어 성공이면 candidate 100%, 실패면 이전 revision 100%를 강제한다.

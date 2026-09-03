@@ -57,6 +57,15 @@ function runJsonAssertion(
   });
 }
 
+function runTextFunction(text: string, functionName: string, value: string) {
+  const functionSource = extractShellFunction(text, functionName);
+  return spawnSync('bash', ['-c', [
+    'set -euo pipefail',
+    functionSource,
+    `${functionName} "$1"`,
+  ].join('\n'), 'text-function', value], { encoding: 'utf8' });
+}
+
 function runJqAssertion(expression: string, value: unknown, env: Record<string, string>) {
   return spawnSync('jq', ['-e', expression], {
     input: JSON.stringify(value),
@@ -214,6 +223,140 @@ describe('JVM production deploy workflow', () => {
       .toBe("needs.preflight.outputs.apply_migrations == 'true'");
     expect(inventoryStep).toContain('--verify-cutover');
     expect(extractStepIf(promoteStep)).toBeNull();
+  });
+
+  it('validates canonical settlement identity, vocabulary, and state-gated capability shape before and after promotion', () => {
+    const candidateStep = extractNamedStep(workflow, 'Verify candidate against legacy live read');
+    const canonicalStep = extractNamedStep(workflow, 'Verify canonical service after promotion');
+    const candidateAssertion = extractShellFunction(candidateStep, 'assert_canonical_settlement_cycle');
+    const canonicalAssertion = extractShellFunction(canonicalStep, 'assert_canonical_settlement_cycle');
+    const candidatePreviousMonth = extractShellFunction(candidateStep, 'previous_year_month');
+    const canonicalPreviousMonth = extractShellFunction(canonicalStep, 'previous_year_month');
+    expect(canonicalAssertion).toBe(candidateAssertion);
+    expect(canonicalPreviousMonth).toBe(candidatePreviousMonth);
+    expect(candidateStep).toContain(
+      'assert_canonical_settlement_cycle <<< "${candidate_cycle_item}" >/dev/null',
+    );
+    expect(candidateStep).toContain(
+      'assert_canonical_settlement_cycle <<< "${candidate_cycle_dashboard}" >/dev/null',
+    );
+    expect(canonicalStep).toContain(
+      'assert_canonical_settlement_cycle <<< "${canonical_cycle_dashboard}" >/dev/null',
+    );
+    for (const step of [candidateStep, canonicalStep]) {
+      expect(step).toContain(
+        'EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH="$(previous_year_month "${CASHFLOW_YEAR_MONTH}")"',
+      );
+    }
+    expect(runTextFunction(candidateStep, 'previous_year_month', '2026-09')).toMatchObject({
+      status: 0,
+      stdout: '2026-08\n',
+    });
+    expect(runTextFunction(candidateStep, 'previous_year_month', '2027-01')).toMatchObject({
+      status: 0,
+      stdout: '2026-12\n',
+    });
+    expect(runTextFunction(candidateStep, 'previous_year_month', '2026-13').status).not.toBe(0);
+
+    const commandNames = [
+      'SUBMIT_MONTH_CLOSE',
+      'WITHDRAW_MONTH_CLOSE',
+      'APPROVE_MONTH_CLOSE',
+      'REJECT_MONTH_CLOSE',
+      'REQUEST_MONTH_REOPEN',
+      'APPROVE_MONTH_REOPEN',
+      'REJECT_MONTH_REOPEN',
+      'CANCEL_ACTIVE_CYCLE',
+    ];
+    const allDeniedCapabilities = Object.fromEntries(commandNames.map((command) => [
+      command,
+      { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+    ]));
+    const submitted = {
+      settlementCycle: {
+        cycleYearMonth: '2026-09',
+        weeklyYearMonth: '2026-09',
+        monthCloseTargetYearMonth: '2026-08',
+        businessState: 'SUBMITTED',
+        health: 'OK',
+        commandCapabilities: allDeniedCapabilities,
+      },
+    };
+    const env = {
+      CASHFLOW_YEAR_MONTH: '2026-09',
+      EXPECTED_MONTH_CLOSE_TARGET_YEAR_MONTH: '2026-08',
+    };
+    for (const step of [candidateStep, canonicalStep]) {
+      expect(runJsonAssertion(step, 'assert_canonical_settlement_cycle', submitted, env).status).toBe(0);
+      expect(runJsonAssertion(step, 'assert_canonical_settlement_cycle', {
+        settlementCycle: {
+          ...submitted.settlementCycle,
+          commandCapabilities: {
+            ...allDeniedCapabilities,
+            APPROVE_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+          },
+        },
+      }, env).status).toBe(0);
+    }
+    expect(runJsonAssertion(candidateStep, 'assert_canonical_settlement_cycle', {
+      settlementCycle: {
+        ...submitted.settlementCycle,
+        businessState: 'LOCKED',
+        commandCapabilities: {
+          ...allDeniedCapabilities,
+          REQUEST_MONTH_REOPEN: { allowed: true, reasonCode: '' },
+        },
+      },
+    }, env).status).toBe(0);
+
+    for (const sabotage of [
+      { settlementCycle: { ...submitted.settlementCycle, businessState: 'PENDING_APPROVAL' } },
+      { settlementCycle: { ...submitted.settlementCycle, businessState: 'APPROVED' } },
+      { settlementCycle: { ...submitted.settlementCycle, monthCloseTargetYearMonth: '2026-09' } },
+      {
+        settlementCycle: {
+          ...submitted.settlementCycle,
+          commandCapabilities: Object.fromEntries(
+            Object.entries(allDeniedCapabilities).filter(([command]) => command !== 'CANCEL_ACTIVE_CYCLE'),
+          ),
+        },
+      },
+      {
+        settlementCycle: {
+          ...submitted.settlementCycle,
+          commandCapabilities: {
+            ...allDeniedCapabilities,
+            REQUEST_MONTH_REOPEN: { allowed: true, reasonCode: '' },
+          },
+        },
+      },
+      {
+        settlementCycle: {
+          ...submitted.settlementCycle,
+          businessState: 'LOCKED',
+          commandCapabilities: {
+            ...allDeniedCapabilities,
+            APPROVE_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+          },
+        },
+      },
+      {
+        settlementCycle: {
+          ...submitted.settlementCycle,
+          commandCapabilities: {
+            ...allDeniedCapabilities,
+            APPROVE_MONTH_CLOSE: { allowed: 'yes', reasonCode: '' },
+          },
+        },
+      },
+    ]) {
+      expect(runJsonAssertion(
+        candidateStep,
+        'assert_canonical_settlement_cycle',
+        sabotage,
+        env,
+      ).status).not.toBe(0);
+    }
   });
 
   it('auto-deploys only a green main commit whose JVM sources actually changed', () => {
