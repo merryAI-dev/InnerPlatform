@@ -72,6 +72,36 @@ describe('cashflow settlement split-release boundary', () => {
     });
   });
 
+  it('classifies only the exact settlement projection verifier as JVM-only support', () => {
+    const jvmPath = 'server/jvm-weekly-api/src/main/java/example/Settlement.java';
+    const verifierPath = 'scripts/verify-cashflow-settlement-cycle-projection.mjs';
+    expect(classifyCashflowSettlementProductionRelease([
+      jvmPath,
+      verifierPath,
+    ])).toEqual({
+      releaseMode: 'jvm_only',
+      jvm: [jvmPath],
+      bffFrontendCutover: [],
+      unexpectedPaths: [],
+    });
+
+    const unexpectedPaths = [
+      'scripts/verify-cashflow-settlement-cycle-projection.ts',
+      'scripts/verify-cashflow-settlement-cycle-projection.mjs.backup',
+      'scripts/verify-cashflow-settlement-cycle-projection.mjs/child',
+      'scripts/verify-cashflow-settlement-cycle-projections.mjs',
+    ];
+    expect(classifyCashflowSettlementProductionRelease([
+      jvmPath,
+      ...unexpectedPaths,
+    ])).toEqual({
+      releaseMode: 'web',
+      jvm: [jvmPath],
+      bffFrontendCutover: [],
+      unexpectedPaths,
+    });
+  });
+
   it('does not broaden JVM-only support around the Vercel identity helper paths', () => {
     const unexpectedPaths = [
       'scripts/verify-vercel-deployment-identity.ts',

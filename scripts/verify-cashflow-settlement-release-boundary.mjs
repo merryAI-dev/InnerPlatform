@@ -32,6 +32,7 @@ const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
   'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
   'scripts/extract_jvm_command_roles.mjs',
   'scripts/verify-cashflow-settlement-candidate.mjs',
+  'scripts/verify-cashflow-settlement-cycle-projection.mjs',
   'scripts/verify-vercel-deployment-identity.mjs',
   'scripts/verify-cashflow-settlement-release-boundary.mjs',
   'server/bff/cashflow-settlement-cycle-rollout.integration.test.ts',
