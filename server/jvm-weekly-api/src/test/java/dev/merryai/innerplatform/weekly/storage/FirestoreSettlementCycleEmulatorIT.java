@@ -123,6 +123,28 @@ class FirestoreSettlementCycleEmulatorIT {
             0,
             Map.of("stage-v1", "submit-v1")
         );
+        Map<String, Object> previousCycle = new LinkedHashMap<>();
+        previousCycle.put("tenantId", harness.tenantId());
+        previousCycle.put("projectId", harness.projectId());
+        previousCycle.put("yearMonth", targetYearMonth);
+        previousCycle.put("periods", Map.of(
+            "MONTH", Map.of("status", "COMPLETED", "revision", 2L)
+        ));
+        Map<String, Object> currentCycle = new LinkedHashMap<>();
+        currentCycle.put("tenantId", harness.tenantId());
+        currentCycle.put("projectId", harness.projectId());
+        currentCycle.put("yearMonth", cycleYearMonth);
+        currentCycle.put("periods", Map.of(
+            "WEEK_2", Map.of("status", "COMPLETED", "revision", 2L)
+        ));
+        seedDocuments(Map.of(
+            harness.settlementPath(targetYearMonth), previousCycle,
+            harness.settlementPath(cycleYearMonth), currentCycle
+        ));
+        Map<String, Object> previousCycleBeforeSubmit = document(harness.settlementPath(targetYearMonth));
+        Map<String, Object> currentWeekBeforeSubmit = nestedMap(nestedMap(
+            document(harness.settlementPath(cycleYearMonth)).get("periods")
+        ).get("WEEK_2"));
 
         CashflowSettlementCycleCommandResponse submitted = transaction(harness, () ->
             harness.service().submitCashflowSettlementCycle(
@@ -131,14 +153,17 @@ class FirestoreSettlementCycleEmulatorIT {
             )
         );
 
-        assertThat(submitted.businessState()).isEqualTo("PENDING_APPROVAL");
+        assertThat(submitted.businessState()).isEqualTo("SUBMITTED");
         assertThat(submitted.workflowRevision()).isEqualTo(1);
         assertThat(document(harness.requestPath())).containsEntry("status", "PENDING_APPROVAL");
         assertThat(document(harness.coordinatorPath()))
             .containsEntry("activeRequestId", firstEvidence.requestId())
             .containsEntry("activeState", "PENDING_APPROVAL")
             .containsEntry("workflowRevision", 1L);
-        assertPeriod(harness, targetYearMonth, "MONTH", "PENDING_APPROVAL");
+        assertPeriod(harness, cycleYearMonth, "MONTH", "SUBMITTED");
+        assertThat(document(harness.settlementPath(targetYearMonth))).isEqualTo(previousCycleBeforeSubmit);
+        assertThat(nestedMap(nestedMap(document(harness.settlementPath(cycleYearMonth)).get("periods"))
+            .get("WEEK_2"))).isEqualTo(currentWeekBeforeSubmit);
         assertCommandArtifacts(harness, WeeklyExpenseCommandService.SUBMIT_CASHFLOW_SETTLEMENT_CYCLE_COMMAND, 1);
 
         CashflowMonthCloseResponse firstApproval = transaction(harness, () ->
@@ -157,7 +182,8 @@ class FirestoreSettlementCycleEmulatorIT {
         assertThat(document(harness.coordinatorPath()))
             .containsEntry("activeState", "INACTIVE")
             .containsEntry("workflowRevision", 2L);
-        assertPeriod(harness, targetYearMonth, "MONTH", "COMPLETED");
+        assertPeriod(harness, cycleYearMonth, "MONTH", "LOCKED");
+        assertThat(document(harness.settlementPath(targetYearMonth))).isEqualTo(previousCycleBeforeSubmit);
 
         String firstVersionId = harness.projectId() + "-" + cycleYearMonth + "-r1";
         Map<String, Object> firstLedger = document(harness.monthlyClosePath());
@@ -345,7 +371,8 @@ class FirestoreSettlementCycleEmulatorIT {
                     .containsEntry("approvalVersionId", firstVersionId);
             }
         }
-        assertPeriod(harness, targetYearMonth, "MONTH", "WAITING_FOR_UPDATE");
+        assertPeriod(harness, cycleYearMonth, "MONTH", "WAITING_FOR_UPDATE");
+        assertPeriod(harness, targetYearMonth, "MONTH", "COMPLETED");
         assertThat(projectDocuments(harness, "cashflow_weekly_update_completion_versions"))
             .hasSize(44 * 5);
 
@@ -371,6 +398,10 @@ class FirestoreSettlementCycleEmulatorIT {
         List<Attempt> concurrentAttempts = concurrentSubmit(harness, resubmitA, resubmitB);
 
         assertThat(concurrentAttempts.stream().filter(Attempt::succeeded).toList()).hasSize(1);
+        assertThat(concurrentAttempts.stream()
+            .filter(Attempt::succeeded)
+            .map(attempt -> attempt.response().businessState()))
+            .containsExactly("SUBMITTED");
         List<Throwable> concurrentFailures = concurrentAttempts.stream()
             .filter(attempt -> !attempt.succeeded())
             .map(attempt -> rootCause(attempt.failure()))
@@ -425,6 +456,8 @@ class FirestoreSettlementCycleEmulatorIT {
             .containsEntry("closedThrough", targetYearMonth)
             .containsEntry("settlementMonth", cycleYearMonth)
             .containsEntry("revision", 3L);
+        assertPeriod(harness, cycleYearMonth, "MONTH", "LOCKED");
+        assertPeriod(harness, cycleYearMonth, "WEEK_2", "COMPLETED");
         assertPeriod(harness, targetYearMonth, "MONTH", "COMPLETED");
 
         Map<String, Map<String, Map<String, Object>>> beforeReplay = projectState(harness);

@@ -1860,7 +1860,7 @@ class WeeklyExpenseControllerTest {
         ));
         WeeklyExpensePersistence.CashflowSettlementStatusRecord completed =
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
-                "MONTH", "COMPLETED", "2026-08-20T02:51:00Z", "pm-1",
+                "MONTH", "LOCKED", "2026-08-20T02:51:00Z", "pm-1",
                 "2026-08-25T06:45:00Z", "head-1", 2
             );
         when(dashboardPersistence.findCashflowSettlementStatuses(
@@ -1872,7 +1872,7 @@ class WeeklyExpenseControllerTest {
             "project-cycle-dashboard", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
                 "project-cycle-dashboard", "2026-08", "2026-07", List.of(), completed,
                 new CashflowSettlementCyclePolicy.Projection(
-                    CashflowSettlementCyclePolicy.BusinessState.APPROVED,
+                    CashflowSettlementCyclePolicy.BusinessState.LOCKED,
                     CashflowSettlementCyclePolicy.Health.OK,
                     2,
                     new CashflowSettlementCyclePolicy.ApprovalProvenance(
@@ -1893,7 +1893,7 @@ class WeeklyExpenseControllerTest {
 
         JsonNode json = objectMapper.valueToTree(response);
         assertThat(json.path("settlementCycle").path("businessState").asText())
-            .isEqualTo("APPROVED");
+            .isEqualTo("LOCKED");
         assertThat(json.path("settlementCycle").path("provenance").path("requestId").asText())
             .isEqualTo("project-cycle-dashboard-2026-08");
         verify(dashboardPersistence).findCashflowSettlementCyclesBatch(

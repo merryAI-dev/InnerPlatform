@@ -58,12 +58,12 @@ class CashflowWeeklyOverviewServiceTest {
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord("WEEK_5", "PENDING_APPROVAL", "", "", "", "", 1);
         WeeklyExpensePersistence.CashflowSettlementStatusRecord completedJuly =
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
-                "MONTH", "COMPLETED", "2026-08-11T01:00:00Z", "PM A",
+                "MONTH", "LOCKED", "2026-08-11T01:00:00Z", "PM A",
                 "2026-08-14T01:00:00Z", "Head A", 2
             );
         WeeklyExpensePersistence.CashflowSettlementStatusRecord pendingJuly =
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
-                "MONTH", "PENDING_APPROVAL", "2026-08-12T01:00:00Z", "PM B", "", "", 1
+                "MONTH", "SUBMITTED", "2026-08-12T01:00:00Z", "PM B", "", "", 1
             );
         when(persistence.findCashflowSettlementCyclesBatch(
             ACTOR, projectIds, "2026-08", "2026-07"
@@ -71,7 +71,7 @@ class CashflowWeeklyOverviewServiceTest {
             "project-a", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
                 "project-a", "2026-08", "2026-07", List.of(completedJuly, completedWeek), completedJuly,
                 new CashflowSettlementCyclePolicy.Projection(
-                    CashflowSettlementCyclePolicy.BusinessState.APPROVED,
+                    CashflowSettlementCyclePolicy.BusinessState.LOCKED,
                     CashflowSettlementCyclePolicy.Health.OK,
                     2,
                     new CashflowSettlementCyclePolicy.ApprovalProvenance(
@@ -87,7 +87,7 @@ class CashflowWeeklyOverviewServiceTest {
             "project-b", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
                 "project-b", "2026-08", "2026-07", List.of(pendingJuly, pendingWeek), pendingJuly,
                 new CashflowSettlementCyclePolicy.Projection(
-                    CashflowSettlementCyclePolicy.BusinessState.PENDING_APPROVAL,
+                    CashflowSettlementCyclePolicy.BusinessState.SUBMITTED,
                     CashflowSettlementCyclePolicy.Health.OK,
                     1,
                     null,
@@ -115,7 +115,7 @@ class CashflowWeeklyOverviewServiceTest {
                 CashflowSettlementStatusesResponse.Item::status
             )
             .containsExactly(
-                org.assertj.core.groups.Tuple.tuple("MONTH", "COMPLETED"),
+                org.assertj.core.groups.Tuple.tuple("MONTH", "LOCKED"),
                 org.assertj.core.groups.Tuple.tuple("WEEK_5", "COMPLETED")
             );
         assertThat(response.items().get(1).settlementStatuses().items())
@@ -124,14 +124,14 @@ class CashflowWeeklyOverviewServiceTest {
                 CashflowSettlementStatusesResponse.Item::status
             )
             .containsExactly(
-                org.assertj.core.groups.Tuple.tuple("MONTH", "PENDING_APPROVAL"),
+                org.assertj.core.groups.Tuple.tuple("MONTH", "SUBMITTED"),
                 org.assertj.core.groups.Tuple.tuple("WEEK_5", "PENDING_APPROVAL")
             );
         assertThat(response.items().get(0).settlementCycle().monthCloseTargetYearMonth()).isEqualTo("2026-07");
-        assertThat(response.items().get(0).settlementCycle().businessState()).isEqualTo("APPROVED");
+        assertThat(response.items().get(0).settlementCycle().businessState()).isEqualTo("LOCKED");
         assertThat(response.items().get(0).settlementCycle().monthCloseSettlement().approvedAt())
             .isEqualTo("2026-08-14T01:00:00Z");
-        assertThat(response.items().get(1).settlementCycle().businessState()).isEqualTo("PENDING_APPROVAL");
+        assertThat(response.items().get(1).settlementCycle().businessState()).isEqualTo("SUBMITTED");
         assertThat(response.items().get(0).settlementCycle().commandCapabilities()
             .get("REQUEST_MONTH_REOPEN").allowed()).isTrue();
         assertThat(response.items().get(0).settlementCycle().commandCapabilities()

@@ -518,14 +518,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 actor, projectIds, cycleYearMonth, monthCloseTargetYearMonth
             ));
         }
-        List<DocumentReference> refs = new ArrayList<>(1 + projectIds.size() * 7);
+        List<DocumentReference> refs = new ArrayList<>(1 + projectIds.size() * 6);
         refs.add(db.document("orgs/" + tenantId + "/members/" + actor.id()));
         for (String projectId : projectIds) {
             refs.add(db.document(
                 "orgs/" + tenantId + "/cashflow_month_close_requests/" + projectId + "-" + cycleYearMonth
             ));
             refs.add(db.document(monthlyClosePath(tenantId, projectId, cycleYearMonth)));
-            refs.add(settlementStatusRef(tenantId, projectId, monthCloseTargetYearMonth));
             refs.add(settlementStatusRef(tenantId, projectId, cycleYearMonth));
             refs.add(db.document(cumulativeCloseHeadPath(tenantId, projectId)));
             refs.add(cashflowSettlementCycleCoordinatorRef(tenantId, projectId));
@@ -540,19 +539,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         YearMonth targetMonth = YearMonth.parse(monthCloseTargetYearMonth);
         for (int index = 0; index < projectIds.size(); index += 1) {
             String projectId = projectIds.get(index);
-            int offset = 1 + index * 7;
+            int offset = 1 + index * 6;
             DocumentSnapshot requestSnapshot = snapshots.get(offset);
             DocumentSnapshot closeSnapshot = snapshots.get(offset + 1);
             DocumentSnapshot settlementSnapshot = snapshots.get(offset + 2);
-            DocumentSnapshot weeklySettlementSnapshot = snapshots.get(offset + 3);
-            DocumentSnapshot headSnapshot = snapshots.get(offset + 4);
-            DocumentSnapshot coordinatorSnapshot = snapshots.get(offset + 5);
-            DocumentSnapshot projectSnapshot = snapshots.get(offset + 6);
+            DocumentSnapshot headSnapshot = snapshots.get(offset + 3);
+            DocumentSnapshot coordinatorSnapshot = snapshots.get(offset + 4);
+            DocumentSnapshot projectSnapshot = snapshots.get(offset + 5);
             Map<String, Object> request = requestSnapshot.exists() ? data(requestSnapshot) : Map.of();
             Map<String, Object> close = closeSnapshot.exists() ? data(closeSnapshot) : Map.of();
             Map<String, Object> settlement = settlementSnapshot.exists() ? data(settlementSnapshot) : Map.of();
-            Map<String, Object> weeklySettlement = weeklySettlementSnapshot.exists()
-                ? data(weeklySettlementSnapshot) : Map.of();
             Map<String, Object> head = headSnapshot.exists() ? data(headSnapshot) : Map.of();
             Map<String, Object> project = projectSnapshot.exists() ? data(projectSnapshot) : Map.of();
             boolean invalid = !settlementCycleRequestScopeMatches(
@@ -560,9 +556,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ) || !settlementCycleLedgerScopeMatches(
                 close, closeSnapshot.exists(), tenantId, projectId, cycleYearMonth
             ) || !settlementCycleStatusScopeMatches(
-                settlement, settlementSnapshot.exists(), tenantId, projectId, monthCloseTargetYearMonth
-            ) || !settlementCycleStatusScopeMatches(
-                weeklySettlement, weeklySettlementSnapshot.exists(), tenantId, projectId, cycleYearMonth
+                settlement, settlementSnapshot.exists(), tenantId, projectId, cycleYearMonth
             );
             SettlementCycleHeadProjection headProjection = settlementCycleHeadProjection(
                 head, headSnapshot.exists(), tenantId, projectId, targetMonth
@@ -583,7 +577,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 );
             invalid = invalid || coordinatorProjection.invalid();
             SettlementCycleReadDocuments documents = new SettlementCycleReadDocuments(
-                requestSnapshot.exists(), request, close, settlement, weeklySettlement, project,
+                requestSnapshot.exists(), request, close, settlement, project,
                 headProjection.headClaimsTargetClosed(), headProjection.range(),
                 coordinatorProjection.workflowRevision(), invalid
             );
@@ -625,13 +619,21 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             SettlementCycleReadDocuments documents = documentsByProject.get(projectId);
             Map<String, Object> request = documents.request();
             Map<String, Object> close = documents.close();
-            List<CashflowSettlementStatusRecord> weeklySettlements = settlementStatusRecords(
-                documents.weeklySettlement()
+            List<CashflowSettlementStatusRecord> weeklySettlements = new ArrayList<>(
+                settlementStatusRecords(documents.settlement())
             );
             Map<String, Object> month = nestedMap(nestedMap(documents.settlement().get("periods")).get("MONTH"));
+            CashflowSettlementStatusRecord storedMonth = settlementStatusRecord("MONTH", month);
+            CashflowSettlementStatusRecord canonicalMonth = new CashflowSettlementStatusRecord(
+                storedMonth.period(),
+                CashflowSettlementCyclePolicy.canonicalMonthStatus(storedMonth.status()),
+                storedMonth.submittedAt(), storedMonth.submittedBy(), storedMonth.approvedAt(),
+                storedMonth.approvedBy(), storedMonth.revision()
+            );
+            weeklySettlements.set(0, canonicalMonth);
+            weeklySettlements = List.copyOf(weeklySettlements);
             CashflowSettlementStatusRecord monthSettlement = documents.exactRequestExists()
-                ? settlementStatusRecord("MONTH", month)
-                : null;
+                ? canonicalMonth : null;
             CashflowSettlementCyclePolicy.ApprovalProvenance provenance = settlementCycleApprovalProvenance(
                 tenantId, projectId, documents.range(), provenanceByProject.get(projectId)
             );
@@ -646,7 +648,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     ledgerStatus, settlementStatus, documents.headClaimsTargetClosed(), provenance
                 )
             );
-            if (projection.businessState() == CashflowSettlementCyclePolicy.BusinessState.APPROVED
+            if (projection.businessState() == CashflowSettlementCyclePolicy.BusinessState.LOCKED
                 && (!documents.exactRequestExists() || !projection.supersededAttempt().isBlank())) {
                 monthSettlement = null;
             }
@@ -1094,7 +1096,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             "orgs/" + actor.tenantId() + "/members/" + request.expectedApproverUid()
         );
         DocumentReference settlementRef = settlementStatusRef(
-            actor.tenantId(), projectId, request.monthCloseTargetYearMonth()
+            actor.tenantId(), projectId, identity.cycleYearMonth()
         );
         DocumentSnapshot stageSnapshot = get(stageRef);
         DocumentSnapshot existingRequestSnapshot = get(requestRef);
@@ -1201,7 +1203,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ? new LinkedHashMap<>(data(settlementSnapshot)) : new LinkedHashMap<>();
         requireSettlementScope(
             settlement, settlementSnapshot.exists(), actor.tenantId(), projectId,
-            request.monthCloseTargetYearMonth()
+            identity.cycleYearMonth()
         );
         Map<String, Object> periods = nestedMap(settlement.get("periods"));
         Map<String, Object> currentMonth = nestedMap(periods.get("MONTH"));
@@ -1210,7 +1212,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Cashflow month settlement is already active.");
         }
         periods.put("MONTH", Map.of(
-            "status", "PENDING_APPROVAL",
+            "status", "SUBMITTED",
             "revision", Math.addExact(longValue(currentMonth.get("revision"), 0), 1),
             "submittedAt", submittedAt.toString(),
             "submittedBy", actor.id(),
@@ -1219,11 +1221,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         ));
         settlement.put("tenantId", actor.tenantId());
         settlement.put("projectId", projectId);
-        settlement.put("yearMonth", request.monthCloseTargetYearMonth());
+        settlement.put("yearMonth", identity.cycleYearMonth());
         settlement.put("periods", periods);
         settlement.put("updatedAt", submittedAt.toString());
         replaceDocument(settlementRef, settlement);
-        return settlementCycleCommandState(canonicalRequest, "PENDING_APPROVAL", "", "", "");
+        return settlementCycleCommandState(canonicalRequest, "SUBMITTED", "", "", "");
     }
 
     @Override
@@ -1244,7 +1246,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         );
         DocumentReference coordinatorRef = cashflowSettlementCycleCoordinatorRef(actor.tenantId(), projectId);
         DocumentReference settlementRef = settlementStatusRef(
-            actor.tenantId(), projectId, request.monthCloseTargetYearMonth()
+            actor.tenantId(), projectId, identity.cycleYearMonth()
         );
         DocumentSnapshot requestSnapshot = get(requestRef);
         DocumentSnapshot coordinatorSnapshot = get(coordinatorRef);
@@ -1299,11 +1301,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ? new LinkedHashMap<>(data(settlementSnapshot)) : new LinkedHashMap<>();
         requireSettlementScope(
             settlement, settlementSnapshot.exists(), actor.tenantId(), projectId,
-            request.monthCloseTargetYearMonth()
+            identity.cycleYearMonth()
         );
         Map<String, Object> periods = nestedMap(settlement.get("periods"));
         Map<String, Object> month = nestedMap(periods.get("MONTH"));
-        if (!"PENDING_APPROVAL".equals(text(month.get("status"), ""))) {
+        if (!"SUBMITTED".equals(CashflowSettlementCyclePolicy.canonicalMonthStatus(
+            text(month.get("status"), "")
+        ))) {
             throw new WeeklyExpenseConflictException("Cashflow month settlement changed.");
         }
         Map<String, Object> reset = new LinkedHashMap<>();
@@ -1316,7 +1320,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         periods.put("MONTH", reset);
         settlement.put("tenantId", actor.tenantId());
         settlement.put("projectId", projectId);
-        settlement.put("yearMonth", request.monthCloseTargetYearMonth());
+        settlement.put("yearMonth", identity.cycleYearMonth());
         settlement.put("periods", periods);
         settlement.put("updatedAt", decidedAt.toString());
         replaceDocument(settlementRef, settlement);
@@ -1346,7 +1350,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             actor.tenantId(), projectId
         );
         DocumentReference settlementRef = settlementStatusRef(
-            actor.tenantId(), projectId, request.monthCloseTargetYearMonth()
+            actor.tenantId(), projectId, identity.cycleYearMonth()
         );
         DocumentSnapshot requestSnapshot = get(requestRef);
         DocumentSnapshot coordinatorSnapshot = get(coordinatorRef);
@@ -1385,13 +1389,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> settlement = new LinkedHashMap<>(data(settlementSnapshot));
         requireSettlementScope(
             settlement, true, actor.tenantId(), projectId,
-            request.monthCloseTargetYearMonth()
+            identity.cycleYearMonth()
         );
         Map<String, Object> periods = nestedMap(settlement.get("periods"));
         Map<String, Object> month = nestedMap(periods.get("MONTH"));
         String expectedMonthStatus = "PENDING_APPROVAL".equals(currentStatus)
-            ? "PENDING_APPROVAL" : "WAITING_FOR_UPDATE";
-        if (!expectedMonthStatus.equals(text(month.get("status"), ""))) {
+            ? "SUBMITTED" : "WAITING_FOR_UPDATE";
+        if (!expectedMonthStatus.equals(CashflowSettlementCyclePolicy.canonicalMonthStatus(
+            text(month.get("status"), "")
+        ))) {
             throw new WeeklyExpenseConflictException(
                 "Cashflow settlement cycle month state changed before recovery."
             );
@@ -2886,7 +2892,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> periods = nestedMap(settlement.get("periods"));
         Map<String, Object> currentMonth = nestedMap(periods.get("MONTH"));
         Map<String, Object> completedMonth = new LinkedHashMap<>(currentMonth);
-        completedMonth.put("status", "COMPLETED");
+        completedMonth.put("status", "LOCKED");
         completedMonth.put("revision", Math.addExact(longValue(currentMonth.get("revision"), 0), 1));
         completedMonth.put("approvedAt", approvedAt.toString());
         completedMonth.put("approvedBy", actor.id());
@@ -2894,7 +2900,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         settlement.put("periods", periods);
         settlement.put("updatedAt", approvedAt.toString());
         replaceDocument(settlementStatusRef(
-            actor.tenantId(), projectId, request.monthCloseTargetYearMonth()
+            actor.tenantId(), projectId,
+            CashflowSettlementCyclePolicy.identity(request.cycleYearMonth()).cycleYearMonth()
         ), settlement);
     }
 
@@ -3794,7 +3801,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         );
         DocumentReference coordinatorRef = cashflowSettlementCycleCoordinatorRef(actor.tenantId(), projectId);
         DocumentReference settlementRef = settlementStatusRef(
-            actor.tenantId(), projectId, context.monthCloseTargetYearMonth()
+            actor.tenantId(), projectId, identity.cycleYearMonth()
         );
         DocumentSnapshot requestSnapshot = get(requestRef);
         DocumentSnapshot coordinatorSnapshot = get(coordinatorRef);
@@ -3835,10 +3842,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Map<String, Object> settlement = data(settlementSnapshot);
         requireSettlementScope(
-            settlement, true, actor.tenantId(), projectId, context.monthCloseTargetYearMonth()
+            settlement, true, actor.tenantId(), projectId, identity.cycleYearMonth()
         );
         Map<String, Object> month = nestedMap(nestedMap(settlement.get("periods")).get("MONTH"));
-        if (!expectedMonthStatus.equals(text(month.get("status"), ""))) {
+        if (!expectedMonthStatus.equals(CashflowSettlementCyclePolicy.canonicalMonthStatus(
+            text(month.get("status"), "")
+        ))) {
             throw new WeeklyExpenseConflictException("Cashflow settlement cycle month state changed.");
         }
         return new SettlementCycleReopenState(
@@ -3913,7 +3922,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> current = data(snapshot);
         SettlementCycleReopenState cycle = settlementCycle.present()
             ? requireSettlementCycleReopenState(
-                actor, projectId, transition.yearMonth(), settlementCycle, "APPROVED", "COMPLETED"
+                actor, projectId, transition.yearMonth(), settlementCycle, "APPROVED", "LOCKED"
             )
             : SettlementCycleReopenState.none();
         Instant now = clock.instant();
@@ -3997,7 +4006,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         SettlementCycleReopenState cycle = settlementCycle.present()
             ? requireSettlementCycleReopenState(
                 actor, projectId, transition.yearMonth(), settlementCycle,
-                "REOPEN_REQUESTED", "COMPLETED"
+                "REOPEN_REQUESTED", "LOCKED"
             )
             : SettlementCycleReopenState.none();
         Map<String, Object> cumulativeHead = transition.updatesHeadAuthority()
@@ -4034,7 +4043,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         );
         Map<DocumentReference, Map<String, Object>> settlementResets = transition.updatesHeadAuthority()
             ? prepareSettlementReopenWrites(
-                actor, projectId, affectedMonths, transition.dataYearMonth(), reason, now
+                actor, projectId, affectedMonths, settlementCycle.cycleYearMonth(), reason, now
             )
             : Map.of();
         Map<String, Object> decision = new LinkedHashMap<>();
@@ -5727,6 +5736,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Cashflow settlement cycle identity is incomplete.");
         }
         String cycleYearMonth = settlementCycle ? request.cycleYearMonth() : request.yearMonth();
+        CashflowSettlementCyclePolicy.Identity settlementIdentity = settlementCycle
+            ? CashflowSettlementCyclePolicy.identity(cycleYearMonth) : null;
+        if (settlementCycle && !settlementIdentity.monthCloseTargetYearMonth().equals(
+            request.monthCloseTargetYearMonth()
+        )) {
+            throw new WeeklyExpenseConflictException("Cashflow settlement cycle identity is invalid.");
+        }
         String headerStatus = text(header.get("status"), "");
         long headerEvidenceRevision = longValue(
             header.get(settlementCycle ? "evidenceRevision" : "revision"), -1
@@ -5835,18 +5851,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 currentCoordinator, request.requestId(), request.expectedWorkflowRevision()
             );
             DocumentSnapshot settlementSnapshot = get(settlementStatusRef(
-                actor.tenantId(), projectId, request.monthCloseTargetYearMonth()
+                actor.tenantId(), projectId, settlementIdentity.cycleYearMonth()
             ));
             if (!settlementSnapshot.exists()) {
                 throw new WeeklyExpenseConflictException("Cashflow settlement cycle month status does not exist.");
             }
             settlementStatus = data(settlementSnapshot);
             requireSettlementScope(
-                settlementStatus, true, actor.tenantId(), projectId, request.monthCloseTargetYearMonth()
+                settlementStatus, true, actor.tenantId(), projectId, settlementIdentity.cycleYearMonth()
             );
-            if (!"PENDING_APPROVAL".equals(text(
+            if (!"SUBMITTED".equals(CashflowSettlementCyclePolicy.canonicalMonthStatus(text(
                 nestedMap(nestedMap(settlementStatus.get("periods")).get("MONTH")).get("status"), ""
-            ))) {
+            )))) {
                 throw new WeeklyExpenseConflictException("Cashflow settlement cycle month status changed.");
             }
         }
@@ -6127,7 +6143,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> request,
         Map<String, Object> close,
         Map<String, Object> settlement,
-        Map<String, Object> weeklySettlement,
         Map<String, Object> project,
         boolean headClaimsTargetClosed,
         Map<String, Object> range,

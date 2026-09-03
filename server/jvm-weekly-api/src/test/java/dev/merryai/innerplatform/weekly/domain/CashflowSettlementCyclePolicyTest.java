@@ -22,9 +22,12 @@ class CashflowSettlementCyclePolicyTest {
         assertThat(resolve("", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("NOT_REQUESTED");
         assertThat(resolve("", "CLOSED", "COMPLETED")).isEqualTo("APPROVED");
         assertThat(resolve("PENDING", "OPEN", "PENDING_APPROVAL")).isEqualTo("PENDING_APPROVAL");
+        assertThat(resolve("PENDING", "OPEN", "SUBMITTED")).isEqualTo("PENDING_APPROVAL");
         assertThat(resolve("APPROVING", "OPEN", "PENDING_APPROVAL")).isEqualTo("APPROVING");
         assertThat(resolve("APPROVED", "CLOSED", "COMPLETED")).isEqualTo("APPROVED");
+        assertThat(resolve("APPROVED", "CLOSED", "LOCKED")).isEqualTo("APPROVED");
         assertThat(resolve("REOPEN_REQUESTED", "REOPEN_REQUESTED", "COMPLETED")).isEqualTo("REOPEN_REQUESTED");
+        assertThat(resolve("REOPEN_REQUESTED", "REOPEN_REQUESTED", "LOCKED")).isEqualTo("REOPEN_REQUESTED");
         assertThat(resolve("REOPENED", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("REOPENED");
         assertThat(resolve("REJECTED", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("REJECTED");
         assertThat(resolve("WITHDRAWN", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("WITHDRAWN");
@@ -62,7 +65,7 @@ class CashflowSettlementCyclePolicyTest {
             )
         );
 
-        assertThat(projection.businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
+        assertThat(projection.businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
         assertThat(projection.health()).isEqualTo(CashflowSettlementCyclePolicy.Health.OK);
         assertThat(projection.provenance()).isEqualTo(provenance);
         assertThat(projection.supersededAttempt()).isEmpty();
@@ -91,7 +94,7 @@ class CashflowSettlementCyclePolicyTest {
                 )
             );
 
-            assertThat(projection.businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
+            assertThat(projection.businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
             assertThat(projection.workflowRevision()).isEqualTo(4);
             assertThat(projection.supersededAttempt()).isEqualTo(attempt);
         }
@@ -99,18 +102,27 @@ class CashflowSettlementCyclePolicyTest {
 
     @Test
     void canonicalRequestStatesRequireMatchingLedgerSettlementAndApprovalEvidence() {
-        assertThat(project("PENDING", 2, "OPEN", "PENDING_APPROVAL", false, null).businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.PENDING_APPROVAL);
-        assertThat(project("APPROVED", 3, "CLOSED", "COMPLETED", true,
+        assertThat(project("PENDING", 2, "OPEN", "SUBMITTED", false, null).businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.SUBMITTED);
+        assertThat(project("APPROVED", 3, "CLOSED", "LOCKED", true,
             provenance("2026-08", "2026-08", "2026-09", "approval-v3", "project-a-2026-09")).businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
-        assertThat(project("APPROVED", 3, "CLOSED", "COMPLETED", true, null).businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
+        assertThat(project("APPROVED", 3, "CLOSED", "LOCKED", true, null).businessState())
             .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
-        assertThat(project("REOPEN_REQUESTED", 4, "REOPEN_REQUESTED", "COMPLETED", true,
+        assertThat(project("REOPEN_REQUESTED", 4, "REOPEN_REQUESTED", "LOCKED", true,
             provenance("2026-08", "2026-08", "2026-09", "approval-v3", "project-a-2026-09")).businessState())
             .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.REOPEN_REQUESTED);
         assertThat(project("REOPENED", 5, "OPEN", "WAITING_FOR_UPDATE", false, null).businessState())
             .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.REOPENED);
+    }
+
+    @Test
+    void historicalMonthStatesProjectToTheCanonicalBusinessVocabularyWithoutMutation() {
+        assertThat(project("PENDING", 2, "OPEN", "PENDING_APPROVAL", false, null)
+            .businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.SUBMITTED);
+        assertThat(project("APPROVED", 3, "CLOSED", "COMPLETED", true,
+            provenance("2026-08", "2026-08", "2026-09", "approval-v3", "project-a-2026-09"))
+            .businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
     }
 
     @Test
@@ -123,14 +135,14 @@ class CashflowSettlementCyclePolicyTest {
                 null,
                 ""
             ));
-        assertThat(project("APPROVING", 2, "OPEN", "PENDING_APPROVAL", false, null).businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.PENDING_APPROVAL);
-        assertThat(project("APPROVING", 2, "OPEN", "PENDING_APPROVAL", false, null).health())
+        assertThat(project("APPROVING", 2, "OPEN", "SUBMITTED", false, null).businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.SUBMITTED);
+        assertThat(project("APPROVING", 2, "OPEN", "SUBMITTED", false, null).health())
             .isEqualTo(CashflowSettlementCyclePolicy.Health.RECONCILING);
-        assertThat(project("UNCERTAIN", 2, "CLOSED", "COMPLETED", true,
+        assertThat(project("UNCERTAIN", 2, "CLOSED", "LOCKED", true,
             provenance("2026-08", "2026-08", "2026-09", "approval-v3", "project-a-2026-09")).businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
-        assertThat(project("UNCERTAIN", 2, "CLOSED", "COMPLETED", true,
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
+        assertThat(project("UNCERTAIN", 2, "CLOSED", "LOCKED", true,
             provenance("2026-08", "2026-08", "2026-09", "approval-v3", "project-a-2026-09")).health())
             .isEqualTo(CashflowSettlementCyclePolicy.Health.RECONCILING);
     }
@@ -138,7 +150,7 @@ class CashflowSettlementCyclePolicyTest {
     @Test
     void commandCapabilitiesAreOwnedByTheCanonicalProjectionAndActorAuthority() {
         CashflowSettlementCyclePolicy.Projection pending = project(
-            "PENDING", 2, "OPEN", "PENDING_APPROVAL", false, null
+            "PENDING", 2, "OPEN", "SUBMITTED", false, null
         );
         Map<CashflowSettlementCyclePolicy.Command, CashflowSettlementCyclePolicy.CommandCapability>
             requesterCapabilities = CashflowSettlementCyclePolicy.commandCapabilities(
@@ -172,7 +184,7 @@ class CashflowSettlementCyclePolicyTest {
         ))).containsExactly(CashflowSettlementCyclePolicy.Command.SUBMIT_MONTH_CLOSE);
 
         assertThat(allowedCommands(capabilityFacts(
-            CashflowSettlementCyclePolicy.BusinessState.APPROVED, true, true, false, false, false
+            CashflowSettlementCyclePolicy.BusinessState.LOCKED, true, true, false, false, false
         ))).containsExactly(CashflowSettlementCyclePolicy.Command.REQUEST_MONTH_REOPEN);
 
         assertThat(allowedCommands(capabilityFacts(
@@ -193,7 +205,7 @@ class CashflowSettlementCyclePolicyTest {
     @Test
     void legacyUnhealthyOrInactiveReadsFailClosedForEveryCommand() {
         CashflowSettlementCyclePolicy.Projection approved = new CashflowSettlementCyclePolicy.Projection(
-            CashflowSettlementCyclePolicy.BusinessState.APPROVED,
+            CashflowSettlementCyclePolicy.BusinessState.LOCKED,
             CashflowSettlementCyclePolicy.Health.OK,
             3,
             provenance("2026-08", "2026-08", "2026-09", "approval-v3", "project-a-2026-09"),

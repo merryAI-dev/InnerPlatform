@@ -39,25 +39,25 @@ public final class CashflowSettlementCyclePolicy {
     public static Lifecycle resolveMonthCloseLifecycle(MonthCloseFacts facts) {
         String request = facts.requestStatus();
         String ledger = facts.ledgerStatus();
-        String settlement = facts.settlementStatus();
+        String settlement = canonicalMonthStatus(facts.settlementStatus());
 
         if (request.isBlank()) {
             if ("OPEN".equals(ledger) && "WAITING_FOR_UPDATE".equals(settlement)) {
                 return Lifecycle.NOT_REQUESTED;
             }
-            if ("CLOSED".equals(ledger) && "COMPLETED".equals(settlement)) {
+            if ("CLOSED".equals(ledger) && "LOCKED".equals(settlement)) {
                 return Lifecycle.APPROVED;
             }
             return Lifecycle.INCONSISTENT;
         }
         return switch (request) {
-            case "PENDING" -> matches(ledger, settlement, "OPEN", "PENDING_APPROVAL")
+            case "PENDING" -> matches(ledger, settlement, "OPEN", "SUBMITTED")
                 ? Lifecycle.PENDING_APPROVAL : Lifecycle.INCONSISTENT;
-            case "APPROVING" -> matches(ledger, settlement, "OPEN", "PENDING_APPROVAL")
+            case "APPROVING" -> matches(ledger, settlement, "OPEN", "SUBMITTED")
                 ? Lifecycle.APPROVING : Lifecycle.INCONSISTENT;
-            case "APPROVED" -> matches(ledger, settlement, "CLOSED", "COMPLETED")
+            case "APPROVED" -> matches(ledger, settlement, "CLOSED", "LOCKED")
                 ? Lifecycle.APPROVED : Lifecycle.INCONSISTENT;
-            case "REOPEN_REQUESTED" -> matches(ledger, settlement, "REOPEN_REQUESTED", "COMPLETED")
+            case "REOPEN_REQUESTED" -> matches(ledger, settlement, "REOPEN_REQUESTED", "LOCKED")
                 ? Lifecycle.REOPEN_REQUESTED : Lifecycle.INCONSISTENT;
             case "REOPENED" -> matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
                 ? Lifecycle.REOPENED : Lifecycle.INCONSISTENT;
@@ -73,7 +73,7 @@ public final class CashflowSettlementCyclePolicy {
     public static Projection project(ProjectionFacts facts) {
         String request = normalized(facts.requestStatus()).toUpperCase(Locale.ROOT);
         String ledger = normalized(facts.ledgerStatus()).toUpperCase(Locale.ROOT);
-        String settlement = normalized(facts.settlementStatus()).toUpperCase(Locale.ROOT);
+        String settlement = canonicalMonthStatus(facts.settlementStatus());
         ApprovalProvenance provenance = validProvenance(facts.provenance()) ? facts.provenance() : null;
         Health health = switch (request) {
             case "BUILDING", "APPROVING", "UNCERTAIN" -> Health.RECONCILING;
@@ -96,13 +96,13 @@ public final class CashflowSettlementCyclePolicy {
 
         if ("APPROVING".equals(request) || "UNCERTAIN".equals(request)) {
             if (provenance != null && facts.headClaimsTargetClosed()
-                && matches(ledger, settlement, "CLOSED", "COMPLETED")) {
+                && matches(ledger, settlement, "CLOSED", "LOCKED")) {
                 return approved(facts.workflowRevision(), health, provenance, "");
             }
             if (provenance == null && !facts.headClaimsTargetClosed()
-                && matches(ledger, settlement, "OPEN", "PENDING_APPROVAL")) {
+                && matches(ledger, settlement, "OPEN", "SUBMITTED")) {
                 return new Projection(
-                    BusinessState.PENDING_APPROVAL, health, facts.workflowRevision(), null, ""
+                    BusinessState.SUBMITTED, health, facts.workflowRevision(), null, ""
                 );
             }
             return inconsistent(facts.workflowRevision(), health);
@@ -115,17 +115,17 @@ public final class CashflowSettlementCyclePolicy {
         return switch (request) {
             case "PENDING", "PENDING_APPROVAL" ->
                 provenance == null && !facts.headClaimsTargetClosed()
-                    && matches(ledger, settlement, "OPEN", "PENDING_APPROVAL")
-                    ? new Projection(BusinessState.PENDING_APPROVAL, health, facts.workflowRevision(), null, "")
+                    && matches(ledger, settlement, "OPEN", "SUBMITTED")
+                    ? new Projection(BusinessState.SUBMITTED, health, facts.workflowRevision(), null, "")
                     : inconsistent(facts.workflowRevision(), health);
             case "APPROVED" ->
                 provenance != null && facts.headClaimsTargetClosed()
-                    && matches(ledger, settlement, "CLOSED", "COMPLETED")
+                    && matches(ledger, settlement, "CLOSED", "LOCKED")
                     ? approved(facts.workflowRevision(), health, provenance, "")
                     : inconsistent(facts.workflowRevision(), health);
             case "REOPEN_REQUESTED" ->
                 provenance != null && facts.headClaimsTargetClosed()
-                    && matches(ledger, settlement, "REOPEN_REQUESTED", "COMPLETED")
+                    && matches(ledger, settlement, "REOPEN_REQUESTED", "LOCKED")
                     ? new Projection(
                         BusinessState.REOPEN_REQUESTED, health, facts.workflowRevision(), provenance, ""
                     )
@@ -167,20 +167,20 @@ public final class CashflowSettlementCyclePolicy {
             facts.projectWriter(), "PROJECT_WRITE_FORBIDDEN"
         ));
         capabilities.put(Command.WITHDRAW_MONTH_CLOSE, capability(
-            state == BusinessState.PENDING_APPROVAL,
+            state == BusinessState.SUBMITTED,
             facts.projectWriter() && facts.requester(),
             facts.projectWriter() ? "NOT_REQUESTER" : "PROJECT_WRITE_FORBIDDEN"
         ));
         capabilities.put(Command.APPROVE_MONTH_CLOSE, capability(
-            state == BusinessState.PENDING_APPROVAL,
+            state == BusinessState.SUBMITTED,
             facts.currentApprover(), "NOT_CURRENT_APPROVER"
         ));
         capabilities.put(Command.REJECT_MONTH_CLOSE, capability(
-            state == BusinessState.PENDING_APPROVAL,
+            state == BusinessState.SUBMITTED,
             facts.currentApprover(), "NOT_CURRENT_APPROVER"
         ));
         capabilities.put(Command.REQUEST_MONTH_REOPEN, capability(
-            state == BusinessState.APPROVED,
+            state == BusinessState.LOCKED,
             facts.projectWriter(), "PROJECT_WRITE_FORBIDDEN"
         ));
         boolean reopenDecisionAuthority = facts.currentApprover() || facts.recoveryAdmin();
@@ -193,7 +193,7 @@ public final class CashflowSettlementCyclePolicy {
             reopenDecisionAuthority, "REOPEN_DECISION_FORBIDDEN"
         ));
         capabilities.put(Command.CANCEL_ACTIVE_CYCLE, capability(
-            state == BusinessState.PENDING_APPROVAL || state == BusinessState.REOPENED,
+            state == BusinessState.SUBMITTED || state == BusinessState.REOPENED,
             facts.recoveryAdmin(), "RECOVERY_ADMIN_REQUIRED"
         ));
         return Collections.unmodifiableMap(capabilities);
@@ -230,7 +230,7 @@ public final class CashflowSettlementCyclePolicy {
         String supersededAttempt
     ) {
         return new Projection(
-            BusinessState.APPROVED,
+            BusinessState.LOCKED,
             health,
             workflowRevision,
             provenance,
@@ -263,6 +263,14 @@ public final class CashflowSettlementCyclePolicy {
 
     private static boolean matches(String ledger, String settlement, String expectedLedger, String expectedSettlement) {
         return expectedLedger.equals(ledger) && expectedSettlement.equals(settlement);
+    }
+
+    public static String canonicalMonthStatus(String value) {
+        return switch (normalized(value).toUpperCase(Locale.ROOT)) {
+            case "PENDING_APPROVAL", "SUBMITTED" -> "SUBMITTED";
+            case "COMPLETED", "LOCKED" -> "LOCKED";
+            default -> normalized(value).toUpperCase(Locale.ROOT);
+        };
     }
 
     private static String normalized(String value) {
@@ -354,8 +362,8 @@ public final class CashflowSettlementCyclePolicy {
 
     public enum BusinessState {
         NOT_REQUESTED,
-        PENDING_APPROVAL,
-        APPROVED,
+        SUBMITTED,
+        LOCKED,
         REOPEN_REQUESTED,
         REOPENED,
         REJECTED,
