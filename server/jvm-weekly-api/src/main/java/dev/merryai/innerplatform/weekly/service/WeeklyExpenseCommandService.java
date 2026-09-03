@@ -245,6 +245,7 @@ public class WeeklyExpenseCommandService {
         return settlementStatusesResponse(
             projectId,
             yearMonth,
+            yearMonth,
             persistence.findCashflowSettlementStatuses(actor.tenantId(), projectId, yearMonth)
         );
     }
@@ -306,7 +307,12 @@ public class WeeklyExpenseCommandService {
                     projectId, CashflowSettlementStatusesBatchResponse.STATUS_UNAVAILABLE
                 ));
             } else {
-                items.add(settlementStatusesResponse(projectId, request.yearMonth(), records));
+                items.add(settlementStatusesResponse(
+                    projectId,
+                    request.yearMonth(),
+                    request.yearMonth(),
+                    records
+                ));
             }
         }
         return new CashflowSettlementStatusesBatchResponse(items, errors);
@@ -317,6 +323,7 @@ public class WeeklyExpenseCommandService {
         String projectId,
         TransitionCashflowSettlementStatusRequest request
     ) {
+        CashflowSettlementCyclePolicy.requireWeeklyTransitionPeriod(request.period());
         if ("APPROVE".equals(request.action())) {
             requireCashflowMonthClosePermission(CLOSE_CASHFLOW_MONTH_COMMAND, actor, projectId);
         } else {
@@ -331,6 +338,7 @@ public class WeeklyExpenseCommandService {
         records.replaceAll(record -> record.period().equals(updated.period()) ? updated : record);
         return settlementStatusesResponse(
             projectId,
+            request.yearMonth(),
             request.yearMonth(),
             records
         );
@@ -573,14 +581,6 @@ public class WeeklyExpenseCommandService {
 
     private CashflowSettlementStatusesResponse settlementStatusesResponse(
         String projectId,
-        String yearMonth,
-        List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records
-    ) {
-        return settlementStatusesResponse(projectId, yearMonth, yearMonth, records);
-    }
-
-    private CashflowSettlementStatusesResponse settlementStatusesResponse(
-        String projectId,
         String weeklyYearMonth,
         String monthYearMonth,
         List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records
@@ -794,7 +794,12 @@ public class WeeklyExpenseCommandService {
                     projectId, CashflowWeeklyOverviewResponse.STATUS_UNAVAILABLE
                 ));
             } else {
-                statuses = settlementStatusesResponse(projectId, request.yearMonth(), records);
+                statuses = settlementStatusesResponse(
+                    projectId,
+                    request.yearMonth(),
+                    request.yearMonth(),
+                    records
+                );
             }
             CashflowLedgerSource source = sourcesByProject.get(projectId);
             CashflowProjectionActualSummaryBatchResponse.Item summary = null;

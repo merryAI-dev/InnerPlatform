@@ -374,7 +374,7 @@ function monthDashboardSource(
   monthClose,
   cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months: [] } },
   openingBalances = {
-    selectedYear: Number(String(monthClose.yearMonth || '2026-01').slice(0, 4)),
+    selectedYear: Number(previousMonthOf(monthClose.yearMonth || '2026-01').slice(0, 4)),
     projection: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
     actual: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
   },
@@ -403,11 +403,10 @@ function monthDashboardSource(
   },
 ) {
   const liveCurrent = monthClose.status === 'OPEN' || snapshotCompatibility.status === 'LIVE_AMENDED';
-  const monthCloseCalendar = monthCloseCalendarFor(monthClose.yearMonth);
   const cycleYearMonth = monthClose.yearMonth;
   const targetYearMonth = previousMonthOf(cycleYearMonth);
-  const targetCalendar = monthCloseCalendarFor(targetYearMonth)
-    .find((entry) => entry.yearMonth === targetYearMonth);
+  const monthCloseCalendar = monthCloseCalendarFor(targetYearMonth);
+  const targetCalendar = monthCloseCalendar.find((entry) => entry.yearMonth === targetYearMonth);
   const settlementMonth = {
     period: 'MONTH', status: 'WAITING_FOR_UPDATE',
     submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
@@ -965,6 +964,59 @@ async function createCumulativeMonthCloseFixture({
   return { requester, approver, created };
 }
 
+function canonicalCycleMonthCloseFixture(cycleYearMonth = '2026-09') {
+  const targetYearMonth = previousMonthOf(cycleYearMonth);
+  const requestId = `project-a-${cycleYearMonth}`;
+  const source = fullMonthCloseSource({ yearMonth: targetYearMonth });
+  const monthClose = {
+    ok: true, projectId: 'project-a', yearMonth: cycleYearMonth, status: 'OPEN', revision: 0,
+    reopenCount: 0, projectWarningCount: 0, snapshot: {},
+  };
+  let dashboard = monthDashboardSource(monthClose);
+  const submitBodies = [];
+  const fetchImpl = vi.fn(async (url, init = {}) => {
+    if (url.includes('/month-close/dashboard-source')) {
+      if (!url.includes('settlementCycle=true')) throw new Error('canonical settlement-cycle read was not requested');
+      return new Response(JSON.stringify(structuredClone(dashboard)), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.endsWith('/settlement-cycle/submit') && init.method === 'POST') {
+      const submitted = JSON.parse(init.body);
+      const stage = source.documents.get(
+        `orgs/tenant-a/cashflow_month_close_requests/${requestId}/stages/${submitted.stageId}`,
+      );
+      if (stage?.cycleYearMonth !== cycleYearMonth || stage?.throughMonth !== targetYearMonth) {
+        throw new Error('canonical settlement-cycle evidence was not staged');
+      }
+      submitBodies.push(submitted);
+      const canonicalRequest = canonicalMonthCloseRequest(cycleYearMonth, 'PENDING_APPROVAL', {
+        revision: submitted.evidenceRevision,
+        evidenceRevision: submitted.evidenceRevision,
+        workflowRevision: 1,
+        manifestHash: submitted.manifestHash,
+        requestedAt: `${cycleYearMonth}-10T02:00:00Z`,
+      });
+      delete canonicalRequest.ledgerRevision;
+      source.documents.set(`orgs/tenant-a/cashflow_month_close_requests/${requestId}`, canonicalRequest);
+      dashboard = withCanonicalSubmittedCycle(monthDashboardSource(monthClose));
+      return new Response(JSON.stringify({
+        ok: true, commandName: 'cashflowSettlementCycle.submit', projectId: 'project-a',
+        cycleYearMonth, monthCloseTargetYearMonth: targetYearMonth, requestId,
+        businessState: 'SUBMITTED', workflowRevision: 1,
+        evidenceRevision: submitted.evidenceRevision, manifestHash: submitted.manifestHash,
+        submittedAt: `${cycleYearMonth}-10T01:00:00Z`, submittedByUid: 'pm-1', approverUid: 'finance-1',
+        decidedAt: '', decidedByUid: '', reason: '', auditId: 'settlement-cycle-submit-1',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected JVM request: ${url}`);
+  });
+  const { app } = createApp(fetchImpl, createIdempotencyService(), {
+    actorId: 'pm-1', actorRole: 'pm',
+  }, { env: runtimeEnv, db: source.db, now: () => new Date(`${cycleYearMonth}-10T00:00:00Z`) });
+  return { app, source, submitBodies };
+}
+
 describe('JVM weekly API BFF proxy', () => {
   it('proxies the lightweight month and weekly settlement status flow', async () => {
     const canonical = canonicalSettlementStatuses();
@@ -1069,27 +1121,51 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('proxies MONTH approval through the same JVM status transition as weekly approval', async () => {
-    const canonical = {
-      projectId: 'project-a', yearMonth: '2026-08',
-      items: [{ period: 'MONTH', status: 'COMPLETED' }],
-    };
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
-      status: 200, headers: { 'content-type': 'application/json' },
-    }));
+  it('rejects MONTH at the generic settlement transition boundary without calling JVM', async () => {
+    const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'admin' }, { env: runtimeEnv });
 
     await request(app)
       .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
       .send({ yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' })
-      .expect(200, canonical);
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses/transition',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' }),
-      }),
-    );
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('MONTH_REQUIRES_CLOSE_WORKFLOW'));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['2026-09', '2026-08', '2026-09-10', '2026-09-10T15:00:00.000Z', '2026-09-30T15:00:00.000Z'],
+    ['2027-01', '2026-12', '2027-01-10', '2027-01-10T15:00:00.000Z', '2027-01-31T15:00:00.000Z'],
+  ])('keeps the %s cycle deadlines through request, stage, JVM save, and canonical reread', async (
+    cycleYearMonth, targetYearMonth, closeDeadline, closeDeadlineAt, approverDeadlineAt,
+  ) => {
+    const { app, source, submitBodies } = canonicalCycleMonthCloseFixture(cycleYearMonth);
+    const before = await request(app).get(`/api/v1/cashflow/project-a/month-close?yearMonth=${cycleYearMonth}`).expect(200);
+    const deadlines = { closeDeadline, closeDeadlineAt, approverDeadlineAt };
+    expect(before.body).toMatchObject(deadlines);
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'submit-cycle-target-1')
+      .send({
+        contractVersion: 'cashflow-cumulative-close-v2', yearMonth: cycleYearMonth,
+        expectedRevision: before.body.revision, expectedWorkflowRevision: before.body.settlementCycle.workflowRevision,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
+        expectedOpeningBalances: before.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: before.body.dashboard.managementChecks },
+      })
+      .expect(202)
+      .expect((response) => expect(response.body).toMatchObject({
+        status: 'PENDING_APPROVAL', requestedAt: `${cycleYearMonth}-10T02:00:00Z`,
+      }));
+    expect(submitBodies).toEqual([expect.objectContaining({
+      cycleYearMonth, monthCloseTargetYearMonth: targetYearMonth, expectedWorkflowRevision: 0,
+    })]);
+
+    const after = await request(app).get(`/api/v1/cashflow/project-a/month-close?yearMonth=${cycleYearMonth}`).expect(200);
+    expect(after.body).toMatchObject({
+      ...deadlines, targetYearMonth, settlementCycle: { businessState: 'SUBMITTED' },
+    });
   });
 
   it('reads up to 100 project settlement statuses with one JVM batch request', async () => {

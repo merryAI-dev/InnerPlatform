@@ -224,34 +224,25 @@ class CashflowSettlementStatusDeadlineServiceTest {
     }
 
     @Test
-    void preservesTheLegacyMonthApproveAtTheServiceBoundaryUntilTheAtomicBffCutover() {
+    void rejectsMonthAtTheSharedTransitionBoundaryBeforeAuthorizationOrPersistence() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
         WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
             persistence, authorization, new ObjectMapper(), false, "live"
         );
-        WeeklyExpensePersistence.CashflowSettlementStatusRecord pending =
-            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
-                "MONTH", "PENDING_APPROVAL", "", "", "", "", 1
-            );
-        when(persistence.requireCashflowMonthClosePermission(ACTOR, "project-a")).thenReturn("admin");
-        when(persistence.findCashflowSettlementStatuses("tenant-a", "project-a", "2026-08"))
-            .thenReturn(List.of(pending));
-        when(persistence.transitionCashflowSettlementStatus(
-            ACTOR, "project-a", "2026-08", "MONTH", "APPROVE"
-        )).thenReturn(record("MONTH"));
 
-        CashflowSettlementStatusesResponse response = service.transitionCashflowSettlementStatus(
+        assertThatThrownBy(() -> service.transitionCashflowSettlementStatus(
             ACTOR,
             "project-a",
             new TransitionCashflowSettlementStatusRequest("2026-08", "MONTH", "APPROVE")
+        )).isInstanceOfSatisfying(
+            CashflowSettlementCyclePolicy.Violation.class,
+            error -> assertThat(error.reason())
+                .isEqualTo(CashflowSettlementCyclePolicy.ViolationReason.MONTH_REQUIRES_CLOSE_WORKFLOW)
         );
 
-        assertThat(response.items()).extracting(
-            CashflowSettlementStatusesResponse.Item::period,
-            CashflowSettlementStatusesResponse.Item::status
-        ).containsExactly(org.assertj.core.groups.Tuple.tuple("MONTH", "COMPLETED"));
-        verify(persistence).transitionCashflowSettlementStatus(
+        verify(persistence, never()).requireCashflowMonthClosePermission(ACTOR, "project-a");
+        verify(persistence, never()).transitionCashflowSettlementStatus(
             ACTOR, "project-a", "2026-08", "MONTH", "APPROVE"
         );
     }
