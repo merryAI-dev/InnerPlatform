@@ -4,17 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesResponse;
 import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementStatusRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
-import dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -60,34 +57,7 @@ class CashflowSettlementStatusDeadlineServiceTest {
     }
 
     @Test
-    void rejectsTheGenericMonthTransitionBeforeAnyPersistenceAccess() {
-        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
-        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
-        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
-            persistence, authorization, new ObjectMapper(), false, "live"
-        );
-        when(persistence.requireCashflowMonthClosePermission(ACTOR, "project-a")).thenReturn("admin");
-        when(persistence.findCashflowSettlementStatuses("tenant-a", "project-a", "2026-08"))
-            .thenReturn(List.of(record("MONTH")));
-        when(persistence.transitionCashflowSettlementStatus(
-            ACTOR, "project-a", "2026-08", "MONTH", "APPROVE"
-        )).thenReturn(record("MONTH"));
-
-        assertThatThrownBy(() -> service.transitionCashflowSettlementStatus(
-            ACTOR,
-            "project-a",
-            new TransitionCashflowSettlementStatusRequest("2026-08", "MONTH", "APPROVE")
-        ))
-            .isInstanceOf(IllegalArgumentException.class)
-            .isInstanceOfSatisfying(CashflowSettlementCyclePolicy.Violation.class, error ->
-                assertThat(error.reason()).isEqualTo(
-                    CashflowSettlementCyclePolicy.ViolationReason.MONTH_REQUIRES_CLOSE_WORKFLOW
-                ));
-        verifyNoInteractions(persistence, authorization);
-    }
-
-    @Test
-    void keepsTheGenericWeeklyTransitionOnTheExistingServicePath() {
+    void preservesTheLegacyMonthApproveAtTheServiceBoundaryUntilTheAtomicBffCutover() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
         WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
@@ -95,28 +65,27 @@ class CashflowSettlementStatusDeadlineServiceTest {
         );
         WeeklyExpensePersistence.CashflowSettlementStatusRecord pending =
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
-                "WEEK_1", "PENDING_APPROVAL", "", "", "", "", 1
+                "MONTH", "PENDING_APPROVAL", "", "", "", "", 1
             );
-        WeeklyExpensePersistence.CashflowSettlementStatusRecord completed = record("WEEK_1");
         when(persistence.requireCashflowMonthClosePermission(ACTOR, "project-a")).thenReturn("admin");
         when(persistence.findCashflowSettlementStatuses("tenant-a", "project-a", "2026-08"))
             .thenReturn(List.of(pending));
         when(persistence.transitionCashflowSettlementStatus(
-            ACTOR, "project-a", "2026-08", "WEEK_1", "APPROVE"
-        )).thenReturn(completed);
+            ACTOR, "project-a", "2026-08", "MONTH", "APPROVE"
+        )).thenReturn(record("MONTH"));
 
         CashflowSettlementStatusesResponse response = service.transitionCashflowSettlementStatus(
             ACTOR,
             "project-a",
-            new TransitionCashflowSettlementStatusRequest("2026-08", "WEEK_1", "APPROVE")
+            new TransitionCashflowSettlementStatusRequest("2026-08", "MONTH", "APPROVE")
         );
 
         assertThat(response.items()).extracting(
             CashflowSettlementStatusesResponse.Item::period,
             CashflowSettlementStatusesResponse.Item::status
-        ).containsExactly(org.assertj.core.groups.Tuple.tuple("WEEK_1", "COMPLETED"));
+        ).containsExactly(org.assertj.core.groups.Tuple.tuple("MONTH", "COMPLETED"));
         verify(persistence).transitionCashflowSettlementStatus(
-            ACTOR, "project-a", "2026-08", "WEEK_1", "APPROVE"
+            ACTOR, "project-a", "2026-08", "MONTH", "APPROVE"
         );
     }
 }

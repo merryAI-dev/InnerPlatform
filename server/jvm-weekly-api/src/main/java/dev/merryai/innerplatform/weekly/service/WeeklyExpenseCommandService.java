@@ -255,7 +255,6 @@ public class WeeklyExpenseCommandService {
         String projectId,
         TransitionCashflowSettlementStatusRequest request
     ) {
-        CashflowSettlementCyclePolicy.requireWeeklyTransitionPeriod(request.period());
         if ("APPROVE".equals(request.action())) {
             requireCashflowMonthClosePermission(CLOSE_CASHFLOW_MONTH_COMMAND, actor, projectId);
         } else {

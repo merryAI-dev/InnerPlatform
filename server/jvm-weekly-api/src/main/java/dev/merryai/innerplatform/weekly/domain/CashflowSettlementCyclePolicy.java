@@ -395,7 +395,7 @@ public final class CashflowSettlementCyclePolicy {
         MONTH_REQUIRES_CLOSE_WORKFLOW
     }
 
-    public static final class Violation extends IllegalArgumentException {
+    public static final class Violation extends RuntimeException {
         private final ViolationReason reason;
 
         private Violation(ViolationReason reason) {
