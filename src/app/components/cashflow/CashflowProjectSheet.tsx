@@ -2159,6 +2159,10 @@ export function CashflowProjectSheet({
     if (reopenAction !== 'request' && !canReviewReopen) {
       return;
     }
+    const expectedRevision = monthCloseRequest.ledgerRevision;
+    if (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0) {
+      return;
+    }
 
     const mutationScope = captureMonthCloseMutationScope('reopen');
     setMonthCloseBusy(true);
@@ -2167,7 +2171,7 @@ export function CashflowProjectSheet({
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
       if (!isCurrentMonthCloseMutation(mutationScope, monthCloseRequest)) return;
-      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${monthCloseRequest.requestId}:${monthCloseRequest.revision}`;
+      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${monthCloseRequest.requestId}:${expectedRevision}`;
       const result = reopenAction === 'request'
         ? await requestCashflowMonthReopenViaBff({
             tenantId: orgId,
@@ -2176,7 +2180,7 @@ export function CashflowProjectSheet({
             payload: {
               requestId: monthCloseRequest.requestId,
               yearMonth: monthCloseRequest.yearMonth,
-              expectedRevision: monthCloseRequest.revision,
+              expectedRevision,
               reason,
             },
             idempotencyKey,
@@ -2188,7 +2192,7 @@ export function CashflowProjectSheet({
             payload: {
               requestId: monthCloseRequest.requestId,
               yearMonth: monthCloseRequest.yearMonth,
-              expectedRevision: monthCloseRequest.revision,
+              expectedRevision,
               decision: reopenAction === 'approve' ? 'APPROVE' : 'REJECT',
               reason,
             },

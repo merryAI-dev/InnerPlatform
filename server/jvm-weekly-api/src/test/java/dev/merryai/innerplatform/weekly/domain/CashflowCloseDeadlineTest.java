@@ -9,11 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-/**
- * PARITY TABLE — BFF server/bff/cashflow-close-deadline.test.mjs 와 같은 표다.
- * 한쪽 규칙을 고치면 다른 쪽 표가 깨지도록 의도적으로 중복해 둔 것이므로,
- * 값이 달라져야 한다면 반드시 두 파일을 함께 고쳐라.
- */
 class CashflowCloseDeadlineTest {
 
     @ParameterizedTest
@@ -26,7 +21,7 @@ class CashflowCloseDeadlineTest {
         "2027-12, 2028-01-10",
         "2024-02, 2024-03-10",
     })
-    void targetMonthDeadlineMatchesTheBffTable(String yearMonth, String expected) {
+    void calculatesTargetMonthDeadlineAcrossCalendarBoundaries(String yearMonth, String expected) {
         assertThat(CashflowCloseDeadline.forTargetMonth(YearMonth.parse(yearMonth)))
             .isEqualTo(LocalDate.parse(expected));
     }

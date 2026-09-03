@@ -21,7 +21,6 @@ describe('cashflow section error presentation', () => {
     ['monthCloseRequest', '월 결산 승인 요청'],
     ['monthCloseApproverLock', '조직장 변경 잠금'],
     ['monthCloseActionAccess', '현금흐름 작업 권한'],
-    ['monthCloseReopenCapability', '월 결산 재오픈 가능 여부'],
   ])('owns the Korean label for %s', (section, label) => {
     expect(jvmWeeklyApiModule.cashflowSectionErrorLabel?.(section)).toBe(label);
   });
@@ -180,7 +179,7 @@ function monthCloseCalendarFor(yearMonth) {
       yearMonth: `${year}-${String(month).padStart(2, '0')}`,
       closeDeadline: `${nextYear}-${String(nextMonth).padStart(2, '0')}-10`,
       closeDeadlineAt: isoAtKstMidnight(11),
-      approverDeadlineAt: isoAtKstMidnight(14),
+      approverDeadlineAt: new Date(Date.UTC(year, month + 1, 1) - 9 * 60 * 60 * 1000).toISOString(),
     };
   });
 }
@@ -190,6 +189,185 @@ function previousMonthOf(yearMonth) {
   const month = Number(String(yearMonth).slice(5, 7));
   const previous = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
   return `${previous.year}-${String(previous.month).padStart(2, '0')}`;
+}
+
+const settlementCycleCommands = [
+  'SUBMIT_MONTH_CLOSE',
+  'WITHDRAW_MONTH_CLOSE',
+  'APPROVE_MONTH_CLOSE',
+  'REJECT_MONTH_CLOSE',
+  'REQUEST_MONTH_REOPEN',
+  'APPROVE_MONTH_REOPEN',
+  'REJECT_MONTH_REOPEN',
+  'CANCEL_ACTIVE_CYCLE',
+];
+
+function deniedSettlementCycleCapabilities(reasonCode = 'BUSINESS_STATE_NOT_ELIGIBLE') {
+  return Object.fromEntries(settlementCycleCommands.map((command) => [
+    command,
+    { allowed: false, reasonCode },
+  ]));
+}
+
+function canonicalSettlementCycle(overrides = {}) {
+  return {
+    cycleYearMonth: '2026-08',
+    weeklyYearMonth: '2026-08',
+    monthCloseTargetYearMonth: '2026-07',
+    businessState: 'NOT_REQUESTED',
+    health: 'OK',
+    workflowRevision: 0,
+    monthCloseSettlement: null,
+    provenance: null,
+    supersededAttempt: null,
+    commandCapabilities: {
+      ...deniedSettlementCycleCapabilities(),
+      SUBMIT_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+    },
+    ...overrides,
+  };
+}
+
+function canonicalMonthCloseRequest(cycleYearMonth, status = 'PENDING_APPROVAL', overrides = {}) {
+  return {
+    documentType: 'REQUEST',
+    contractVersion: 'cashflow-cumulative-close-v2',
+    requestId: `project-a-${cycleYearMonth}`,
+    tenantId: 'tenant-a',
+    projectId: 'project-a',
+    yearMonth: cycleYearMonth,
+    cycleYearMonth,
+    monthCloseTargetYearMonth: previousMonthOf(cycleYearMonth),
+    throughMonth: previousMonthOf(cycleYearMonth),
+    status,
+    revision: 1,
+    evidenceRevision: 1,
+    ledgerRevision: 1,
+    workflowRevision: 1,
+    manifestHash: `sha256:${'b'.repeat(64)}`,
+    requestedByUid: 'pm-1',
+    approverUid: 'finance-1',
+    ...overrides,
+  };
+}
+
+function withCanonicalCycle(source, {
+  businessState,
+  covered = false,
+  approvedAt = '',
+  approvedBy = '',
+  supersededAttempt = null,
+}) {
+  const cycleYearMonth = source.settlementCycle.cycleYearMonth;
+  const targetYearMonth = previousMonthOf(cycleYearMonth);
+  const calendar = source.monthCloseCalendar.find((item) => item.yearMonth === targetYearMonth);
+  const status = businessState === 'SUBMITTED'
+    ? 'SUBMITTED' : covered ? 'WAITING_FOR_UPDATE' : 'LOCKED';
+  const month = {
+    period: 'MONTH', status, revision: covered ? 4 : businessState === 'SUBMITTED' ? 1 : 2,
+    submittedAt: status === 'WAITING_FOR_UPDATE' ? '' : `${cycleYearMonth}-11T01:00:00Z`,
+    submittedBy: status === 'WAITING_FOR_UPDATE' ? '' : 'pm-1',
+    approvedAt: status === 'LOCKED' ? approvedAt || `${cycleYearMonth}-12T01:00:00Z` : '',
+    approvedBy: status === 'LOCKED' ? approvedBy || 'finance-1' : '',
+    deadlineAt: calendar.closeDeadlineAt, approverDeadlineAt: calendar.approverDeadlineAt,
+  };
+  source.settlementCycle = canonicalSettlementCycle({
+    cycleYearMonth,
+    weeklyYearMonth: cycleYearMonth,
+    monthCloseTargetYearMonth: targetYearMonth,
+    businessState,
+    workflowRevision: covered ? 5 : businessState === 'SUBMITTED' ? 1 : 2,
+    monthCloseSettlement: covered ? null : month,
+    provenance: businessState === 'LOCKED' ? {
+      affectedFromMonth: covered ? targetYearMonth : '2023-01',
+      affectedThroughMonth: covered ? '2026-09' : targetYearMonth,
+      closedByCycleYearMonth: covered ? '2026-10' : cycleYearMonth,
+      approvalVersionId: covered ? 'approval-v5' : 'approval-v2',
+      requestId: covered ? 'project-a-2026-10' : `project-a-${cycleYearMonth}`,
+      ledgerRevision: covered ? 5 : 2,
+      rootHash: `sha256:${(covered ? 'f' : 'a').repeat(64)}`,
+    } : null,
+    supersededAttempt,
+    commandCapabilities: {
+      ...deniedSettlementCycleCapabilities(),
+      ...(businessState === 'SUBMITTED' ? {
+        WITHDRAW_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+        APPROVE_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+        REJECT_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+        CANCEL_ACTIVE_CYCLE: { allowed: false, reasonCode: 'RECOVERY_ADMIN_REQUIRED' },
+      } : { REQUEST_MONTH_REOPEN: { allowed: true, reasonCode: '' } }),
+    },
+  });
+  source.settlementStatuses = {
+    projectId: source.monthClose.projectId,
+    yearMonth: cycleYearMonth,
+    items: [month, ...source.settlementStatuses.items.filter((item) => item.period !== 'MONTH')],
+  };
+  return source;
+}
+
+const withCanonicalSubmittedCycle = (source) => withCanonicalCycle(source, {
+  businessState: 'SUBMITTED',
+});
+const withCanonicalLockedCycle = (source, overrides = {}) => withCanonicalCycle(source, {
+  businessState: 'LOCKED', ...overrides,
+});
+const withCanonicalCoveredLockedCycle = (source, supersededAttempt = 'REJECTED') => (
+  withCanonicalCycle(source, { businessState: 'LOCKED', covered: true, supersededAttempt })
+);
+
+function submittedMonthSettlement() {
+  return {
+    period: 'MONTH', status: 'SUBMITTED',
+    submittedAt: '2026-08-11T01:00:00Z', submittedBy: 'pm-1',
+    approvedAt: '', approvedBy: '', revision: 1,
+    deadlineAt: '2026-08-10T15:00:00Z',
+    approverDeadlineAt: '2026-08-31T15:00:00Z',
+  };
+}
+
+function canonicalSettlementStatuses(projectId = 'project-a') {
+  return {
+    projectId,
+    yearMonth: '2026-08',
+    items: [
+      submittedMonthSettlement(),
+      ...Array.from({ length: 5 }, (_, index) => ({
+        period: `WEEK_${index + 1}`,
+        status: index === 0 ? 'PENDING_APPROVAL' : 'WAITING_FOR_UPDATE',
+        submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+        deadlineAt: `2026-08-${String([2, 6, 13, 20, 27][index]).padStart(2, '0')}T15:00:00Z`,
+        approverDeadlineAt: `2026-08-${String([3, 7, 14, 21, 28][index]).padStart(2, '0')}T04:00:00Z`,
+      })),
+    ],
+  };
+}
+
+function canonicalWeeklyOverviewResponse() {
+  const settlementStatuses = canonicalSettlementStatuses();
+  const month = settlementStatuses.items[0];
+  return {
+    version: '2',
+    yearMonth: '2026-08',
+    items: [{
+      projectId: 'project-a',
+      settlementStatuses,
+      projectionActualSummary: null,
+      settlementCycle: canonicalSettlementCycle({
+        businessState: 'SUBMITTED',
+        workflowRevision: 1,
+        monthCloseSettlement: month,
+        commandCapabilities: {
+          ...deniedSettlementCycleCapabilities(),
+          WITHDRAW_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+          APPROVE_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+          REJECT_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+          CANCEL_ACTIVE_CYCLE: { allowed: false, reasonCode: 'RECOVERY_ADMIN_REQUIRED' },
+        },
+      }),
+    }],
+    errors: [],
+  };
 }
 
 function monthDashboardSource(
@@ -226,6 +404,16 @@ function monthDashboardSource(
 ) {
   const liveCurrent = monthClose.status === 'OPEN' || snapshotCompatibility.status === 'LIVE_AMENDED';
   const monthCloseCalendar = monthCloseCalendarFor(monthClose.yearMonth);
+  const cycleYearMonth = monthClose.yearMonth;
+  const targetYearMonth = previousMonthOf(cycleYearMonth);
+  const targetCalendar = monthCloseCalendarFor(targetYearMonth)
+    .find((entry) => entry.yearMonth === targetYearMonth);
+  const settlementMonth = {
+    period: 'MONTH', status: 'WAITING_FOR_UPDATE',
+    submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+    deadlineAt: targetCalendar.closeDeadlineAt,
+    approverDeadlineAt: targetCalendar.approverDeadlineAt,
+  };
   return {
     monthClose,
     latestRun: monthClose,
@@ -242,10 +430,28 @@ function monthDashboardSource(
     snapshotCompatibility,
     cumulativeClose,
     reopenRequest,
+    settlementStatuses: {
+      projectId: monthClose.projectId,
+      yearMonth: cycleYearMonth,
+      items: [
+        settlementMonth,
+        ...Array.from({ length: 5 }, (_, index) => ({
+          period: `WEEK_${index + 1}`, status: 'WAITING_FOR_UPDATE',
+          submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+          deadlineAt: `${cycleYearMonth}-01T15:00:00Z`,
+          approverDeadlineAt: `${cycleYearMonth}-02T04:00:00Z`,
+        })),
+      ],
+    },
+    settlementCycle: canonicalSettlementCycle({
+      cycleYearMonth,
+      weeklyYearMonth: cycleYearMonth,
+      monthCloseTargetYearMonth: targetYearMonth,
+    }),
     operationalCycle: {
-      cycleYearMonth: monthClose.yearMonth,
-      targetYearMonth: previousMonthOf(monthClose.yearMonth),
-      closeDeadline: `${monthClose.yearMonth}-10`,
+      cycleYearMonth,
+      targetYearMonth,
+      closeDeadline: `${cycleYearMonth}-10`,
       closeEligible: monthClose.status === 'OPEN',
       late: false,
     },
@@ -334,6 +540,7 @@ function memoryDoc(documents, path) {
 function fullMonthCloseSource({
   mirrorStatus = 'FRESH', controlMatches = true, calculationMismatch = false,
   contractAmount = 1000, explicitZero = false, explicitEmpty = false,
+  yearMonth = '2026-06', additionalYearMonths = [],
 } = {}) {
   const monthCloseRequestQueries = [];
   const sourceRevision = `sha256:${'c'.repeat(64)}`;
@@ -346,7 +553,7 @@ function fullMonthCloseSource({
         const zero = explicitZero && mode === 'projection' && weekNo === 1 && lineId === 'SALES_IN';
         const empty = explicitEmpty && mode === 'projection' && weekNo === 1 && lineId === 'BANK_INTEREST_IN';
         cells.push({
-          mode, yearMonth: '2026-06', weekNo, lineId, direction: cashflowLineIds.indexOf(lineId) < 7 ? 'IN' : 'OUT',
+          mode, yearMonth, weekNo, lineId, direction: cashflowLineIds.indexOf(lineId) < 7 ? 'IN' : 'OUT',
           state: empty ? 'EMPTY' : zero ? 'ZERO' : 'VALUE',
           amount: empty ? null : zero ? 0 : (mode === 'projection' ? 10 : 5),
         });
@@ -356,14 +563,14 @@ function fullMonthCloseSource({
   }
   const depositScheduleRows = Array.from({ length: 5 }, (_, index) => ({
     weekNo: index + 1,
-    taxInvoiceIssuedDate: `2026-06-${String(index + 1).padStart(2, '0')}`,
-    expectedDepositDate: `2026-06-${String(index + 6).padStart(2, '0')}`,
+    taxInvoiceIssuedDate: `${yearMonth}-${String(index + 1).padStart(2, '0')}`,
+    expectedDepositDate: `${yearMonth}-${String(index + 6).padStart(2, '0')}`,
     expectedDepositAmount: (index + 1) * 1000,
     actualDepositDate: '', actualDepositAmount: null,
     actualSource: 'NOT_APPLICABLE', decision: 'CONFIRMED',
   }));
   const closeInput = {
-    yearMonth: '2026-06', sourceRevision, targetRevision,
+    yearMonth, sourceRevision, targetRevision,
     humanReviewed: true,
     depositScheduleRows,
     cells: cells.map(({ lineId, state, yearMonth: _yearMonth, direction: _direction, ...cell }) => ({
@@ -380,7 +587,7 @@ function fullMonthCloseSource({
       settlementStatus: { sourceCell: 'B4', value: '정산진행' },
     },
     depositScheduleRows: depositScheduleRows.map((row) => ({
-      yearMonth: '2026-06', weekNo: row.weekNo,
+      yearMonth, weekNo: row.weekNo,
       taxInvoiceIssuedDate: row.taxInvoiceIssuedDate,
       expectedDepositDate: row.expectedDepositDate,
       expectedDepositAmount: row.expectedDepositAmount,
@@ -394,7 +601,7 @@ function fullMonthCloseSource({
     },
     weeklyCalculationChecks: Array.from({ length: 10 }, (_, index) => ({
       mode: index < 5 ? 'projection' : 'actual',
-      yearMonth: '2026-06',
+      yearMonth,
       weekNo: (index % 5) + 1,
       sourceCells: {},
       matches: calculationMismatch && index === 0
@@ -402,10 +609,27 @@ function fullMonthCloseSource({
         : { depositTotal: true, withdrawalTotal: true, balance: true },
     })),
     projectionActualDifferences: Array.from({ length: 5 }, (_, index) => ({
-      yearMonth: '2026-06', weekNo: index + 1, amount: index === 4 ? -43_962_826 : 0, sourceCell: `A${11 + index}`,
+      yearMonth, weekNo: index + 1, amount: index === 4 ? -43_962_826 : 0, sourceCell: `A${11 + index}`,
     })),
     issues: [],
   };
+  const mirrorCells = [
+    ...cells,
+    ...additionalYearMonths.flatMap((additionalYearMonth) => (
+      cells.map((cell) => ({ ...cell, yearMonth: additionalYearMonth }))
+    )),
+  ];
+  for (const additionalYearMonth of additionalYearMonths) {
+    sheetFacts.depositScheduleRows.push(...sheetFacts.depositScheduleRows
+      .filter((row) => row.yearMonth === yearMonth)
+      .map((row) => ({ ...row, yearMonth: additionalYearMonth })));
+    sheetFacts.weeklyCalculationChecks.push(...sheetFacts.weeklyCalculationChecks
+      .filter((check) => check.yearMonth === yearMonth)
+      .map((check) => ({ ...check, yearMonth: additionalYearMonth })));
+    sheetFacts.projectionActualDifferences.push(...sheetFacts.projectionActualDifferences
+      .filter((difference) => difference.yearMonth === yearMonth)
+      .map((difference) => ({ ...difference, yearMonth: additionalYearMonth })));
+  }
   const draftId = `v1_${Buffer.from(JSON.stringify(['cashflow', 'project-a', 'pm-1']), 'utf8').toString('base64url')}`;
   const documents = new Map([
     ACTOR_MEMBER_ENTRY,
@@ -426,8 +650,8 @@ function fullMonthCloseSource({
       projectId: 'project-a', status: mirrorStatus, sourceRevision, appliedSourceRevision: sourceRevision, targetRevisionAtFetch: targetRevision,
       weeklyYear: 2026,
       spreadsheetId: 'spreadsheet-a', spreadsheetTitle: '2026 사업비 관리 시트', selectedSheetName: 'cashflow(사용내역 연동)',
-      yearMonths: ['2026-06'], capturedAt: '2026-07-01T00:00:00.000Z', configRevision: `sha256:${'e'.repeat(64)}`,
-      cells, sheetFacts,
+      yearMonths: [yearMonth, ...additionalYearMonths], capturedAt: '2026-07-01T00:00:00.000Z', configRevision: `sha256:${'e'.repeat(64)}`,
+      cells: mirrorCells, sheetFacts,
     }],
   ]);
   for (const year of [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]) {
@@ -743,11 +967,7 @@ async function createCumulativeMonthCloseFixture({
 
 describe('JVM weekly API BFF proxy', () => {
   it('proxies the lightweight month and weekly settlement status flow', async () => {
-    const canonical = {
-      projectId: 'project-a',
-      yearMonth: '2026-08',
-      items: [{ period: 'MONTH', status: 'PENDING_APPROVAL', revision: 1 }],
-    };
+    const canonical = canonicalSettlementStatuses();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
@@ -763,7 +983,7 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08',
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08&settlementCycle=true',
       expect.objectContaining({ method: 'GET' }),
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -778,12 +998,12 @@ describe('JVM weekly API BFF proxy', () => {
     // 값을 보내지 않는 구버전 응답에만 채운다. 일부러 사본과 다른 값을 JVM 이 보내게 해서
     // 어느 쪽이 이기는지 고정한다 - 사본이 이기면 규칙이 조용히 갈린다.
     const source = fullMonthCloseSource();
-    const settlement = {
-      projectId: 'project-a', yearMonth: '2026-08',
-      items: [{
-        period: 'WEEK_1', status: 'COMPLETED',
-        deadlineAt: '2026-08-01T15:00:00.000Z', approverDeadlineAt: '2026-08-02T04:00:00.000Z',
-      }],
+    const settlement = canonicalSettlementStatuses();
+    settlement.items[1] = {
+      ...settlement.items[1],
+      status: 'COMPLETED',
+      deadlineAt: '2026-08-01T15:00:00.000Z',
+      approverDeadlineAt: '2026-08-02T04:00:00.000Z',
     };
     const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(
       init.method === 'POST' ? { items: [structuredClone(settlement)], errors: [] } : structuredClone(settlement),
@@ -800,18 +1020,19 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
-  it('preserves the JVM MONTH status even when a month-close request is pending', async () => {
+  it('uses the canonical JVM MONTH status without aligning from a BFF request document', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
       requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08', status: 'PENDING',
     });
-    const settlement = {
-      projectId: 'project-a', yearMonth: '2026-08',
-      items: [{
-        period: 'MONTH', status: 'COMPLETED',
-        deadlineAt: '2026-09-10T15:00:00.000Z', approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-      }, { period: 'WEEK_1', status: 'COMPLETED' }],
+    const settlement = canonicalSettlementStatuses();
+    settlement.items[0] = {
+      ...settlement.items[0],
+      status: 'LOCKED',
+      approvedAt: '2026-08-12T01:00:00Z',
+      approvedBy: 'finance-1',
     };
+    settlement.items[1] = { ...settlement.items[1], status: 'COMPLETED' };
     const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(
       init.method === 'POST' ? { items: [structuredClone(settlement)], errors: [] } : structuredClone(settlement),
     ), { status: 200, headers: { 'content-type': 'application/json' } }));
@@ -821,32 +1042,18 @@ describe('JVM weekly API BFF proxy', () => {
       .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
       .expect(200)
       .expect((response) => {
-        // 진행 바용 마감이 함께 실린다(표시 전용). 2026-08 은 1일이 토요일이라 1주차에 목요일이 없고,
-        // 그 주 마지막 날(8/2) 다음날 0시 KST 가 마감이다 - JVM financeWeekDeadline 과 같은 표.
-        expect(response.body.items).toEqual([
-          {
-            period: 'MONTH',
-            status: 'COMPLETED',
-            deadlineAt: '2026-09-10T15:00:00.000Z',
-            approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-          },
-          {
-            period: 'WEEK_1',
-            status: 'COMPLETED',
-            deadlineAt: '2026-08-02T15:00:00.000Z',
-            approverDeadlineAt: '2026-08-03T04:00:00.000Z',
-          },
-        ]);
+        expect(response.body.items).toEqual(expect.arrayContaining([
+          expect.objectContaining({ period: 'MONTH', status: 'LOCKED' }),
+          expect.objectContaining({ period: 'WEEK_1', status: 'COMPLETED' }),
+        ]));
       });
     await request(app)
       .post('/api/v1/cashflow/settlement-statuses/batch')
       .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
       .expect(200)
-      .expect((response) => expect(response.body.items[0].items[0]).toEqual({
+      .expect((response) => expect(response.body.items[0].items[0]).toMatchObject({
         period: 'MONTH',
-        status: 'COMPLETED',
-        deadlineAt: '2026-09-10T15:00:00.000Z',
-        approverDeadlineAt: '2026-09-13T15:00:00.000Z',
+        status: 'LOCKED',
       }));
   });
 
@@ -888,8 +1095,8 @@ describe('JVM weekly API BFF proxy', () => {
   it('reads up to 100 project settlement statuses with one JVM batch request', async () => {
     const projectIds = Array.from({ length: 100 }, (_, index) => `project-${index + 1}`);
     const canonical = {
-      items: [{ projectId: 'project-1', yearMonth: '2026-08', items: [] }],
-      errors: [{ projectId: 'project-2', code: 'STATUS_UNAVAILABLE' }],
+      items: [canonicalSettlementStatuses('project-1')],
+      errors: projectIds.slice(1).map((projectId) => ({ projectId, code: 'STATUS_UNAVAILABLE' })),
     };
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
@@ -903,9 +1110,30 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith(
-      'http://jvm-weekly.local/api/v1/cashflow/settlement-statuses/batch',
+      'http://jvm-weekly.local/api/v1/cashflow/settlement-statuses/batch?settlementCycle=true',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
     );
+  });
+
+  it('fails canonical single and batch settlement reads closed on malformed coverage', async () => {
+    const malformedSingle = canonicalSettlementStatuses();
+    malformedSingle.items = malformedSingle.items.filter((item) => item.period !== 'WEEK_3');
+    const missingBatchProject = {
+      items: [canonicalSettlementStatuses('project-a')],
+      errors: [],
+    };
+    const fetchImpl = vi.fn(async (url) => new Response(JSON.stringify(
+      String(url).includes('/batch') ? missingBatchProject : malformedSingle
+    ), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
+      .expect(502);
+    await request(app)
+      .post('/api/v1/cashflow/settlement-statuses/batch')
+      .send({ projectIds: ['project-a', 'project-b'], yearMonth: '2026-08' })
+      .expect(502);
   });
 
   it('rejects invalid settlement scopes before calling JVMP', async () => {
@@ -960,26 +1188,135 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('opts into the canonical JVM weekly overview and publishes only BFF v5', async () => {
+    const source = fullMonthCloseSource();
+    const canonical = canonicalWeeklyOverviewResponse();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+    });
+
+    const response = await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      version: '5',
+      yearMonth: '2026-08',
+      items: [{
+        projectId: 'project-a',
+        settlementStatuses: {
+          yearMonth: '2026-08',
+        },
+        settlementCycle: {
+          cycleYearMonth: '2026-08',
+          monthCloseTargetYearMonth: '2026-07',
+          businessState: 'SUBMITTED',
+        },
+      }],
+    });
+    expect(response.body.items[0].settlementStatuses.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ period: 'MONTH', status: 'SUBMITTED' }),
+      expect.objectContaining({ period: 'WEEK_1', status: 'PENDING_APPROVAL' }),
+    ]));
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://jvm-weekly.local/api/v1/cashflow/weekly-overview',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          projectIds: ['project-a'], yearMonth: '2026-08', settlementCycle: true,
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    ['legacy JVM version', (canonical) => { canonical.version = '1'; }],
+    ['missing cycle', (canonical) => { delete canonical.items[0].settlementCycle; }],
+    ['foreign cycle', (canonical) => { canonical.items[0].settlementCycle.cycleYearMonth = '2026-09'; }],
+    ['duplicate cycle item', (canonical) => { canonical.items.push({ ...canonical.items[0] }); }],
+    ['legacy MONTH state', (canonical) => {
+      canonical.items[0].settlementCycle.businessState = 'PENDING_APPROVAL';
+      canonical.items[0].settlementCycle.monthCloseSettlement.status = 'PENDING_APPROVAL';
+    }],
+    ['split-brain target-key MONTH status', (canonical) => {
+      canonical.items[0].settlementStatuses.items[0] = {
+        ...canonical.items[0].settlementStatuses.items[0],
+        status: 'COMPLETED',
+      };
+    }],
+    ['split-brain MONTH deadline', (canonical) => {
+      canonical.items[0].settlementStatuses.items[0] = {
+        ...canonical.items[0].settlementStatuses.items[0],
+        deadlineAt: '2026-09-10T15:00:00Z',
+      };
+    }],
+    ['missing WEEK_3', (canonical) => {
+      canonical.items[0].settlementStatuses.items = canonical.items[0].settlementStatuses.items
+        .filter((item) => item.period !== 'WEEK_3');
+    }],
+    ['malformed WEEK fields', (canonical) => {
+      canonical.items[0].settlementStatuses.items[1].submittedAt = {};
+      canonical.items[0].settlementStatuses.items[1].deadlineAt = [];
+    }],
+    ['whitespace-normalized cycle identity', (canonical) => {
+      canonical.items[0].settlementStatuses.projectId = ' project-a ';
+    }],
+    ['whitespace-normalized item identity', (canonical) => {
+      canonical.items[0].projectId = ' project-a ';
+    }],
+    ['STATUS_UNAVAILABLE error', (canonical) => {
+      canonical.errors = [{ projectId: 'project-a', code: 'STATUS_UNAVAILABLE' }];
+    }],
+    ['MONTH_CLOSE_UNAVAILABLE error', (canonical) => {
+      canonical.errors = [{ projectId: 'project-a', code: 'MONTH_CLOSE_UNAVAILABLE' }];
+    }],
+    ['unknown upstream error', (canonical) => {
+      canonical.errors = [{ projectId: 'project-a', code: 'UNKNOWN' }];
+    }],
+    ['foreign upstream error', (canonical) => {
+      canonical.errors = [{ projectId: 'project-b', code: 'SUMMARY_UNAVAILABLE' }];
+    }],
+    ['duplicate upstream error', (canonical) => {
+      canonical.errors = [
+        { projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' },
+        { projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' },
+      ];
+    }],
+    ['malformed upstream errors', (canonical) => { canonical.errors = null; }],
+  ])('fails the weekly overview closed for a %s', async (_label, mutate) => {
+    const canonical = canonicalWeeklyOverviewResponse();
+    mutate(canonical);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: fullMonthCloseSource().db,
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/weekly-overview')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(502);
+  });
+
   it('reads one 61-project weekly overview and exposes its monthly status as the previous-month close', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `project-${index + 1}`);
     const source = fullMonthCloseSource();
-    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-1-2026-08', {
-      requestId: 'project-1-2026-08', projectId: 'project-1', yearMonth: '2026-08', status: 'PENDING',
-    });
+    const canonicalItem = canonicalWeeklyOverviewResponse().items[0];
     const canonical = {
-      version: '1',
+      version: '2',
       yearMonth: '2026-08',
-      items: [{
-        projectId: 'project-1',
-        settlementStatuses: {
-          projectId: 'project-1', yearMonth: '2026-08',
-          items: [{
-            period: 'MONTH', status: 'COMPLETED',
-            deadlineAt: '2026-09-10T15:00:00.000Z', approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-          }, { period: 'WEEK_1', status: 'COMPLETED' }],
-        },
-        projectionActualSummary: null,
-      }],
+      items: projectIds.map((projectId) => ({
+        ...structuredClone(canonicalItem),
+        projectId,
+        settlementStatuses: { ...structuredClone(canonicalItem.settlementStatuses), projectId },
+      })),
       errors: [],
     };
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
@@ -995,21 +1332,21 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ projectIds, yearMonth: '2026-08' })
       .expect(200);
 
-    expect(response.body).toMatchObject({ version: '4', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월' });
-    expect(response.body.items[0].settlementStatuses.items).toEqual([
-      {
+    expect(response.body).toMatchObject({ version: '5', yearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월' });
+    expect(response.body.items[0].settlementStatuses.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
         period: 'MONTH',
-        status: 'COMPLETED',
-        deadlineAt: '2026-09-10T15:00:00.000Z',
-        approverDeadlineAt: '2026-09-13T15:00:00.000Z',
-      },
-      {
+        status: 'SUBMITTED',
+        deadlineAt: '2026-08-10T15:00:00Z',
+        approverDeadlineAt: '2026-08-31T15:00:00Z',
+      }),
+      expect.objectContaining({
         period: 'WEEK_1',
-        status: 'COMPLETED',
-        deadlineAt: '2026-08-02T15:00:00.000Z',
-        approverDeadlineAt: '2026-08-03T04:00:00.000Z',
-      },
-    ]);
+        status: 'PENDING_APPROVAL',
+        deadlineAt: '2026-08-02T15:00:00Z',
+        approverDeadlineAt: '2026-08-03T04:00:00Z',
+      }),
+    ]));
     expect(response.body.errors).toEqual([]);
     expect(getAll).toHaveBeenCalledTimes(1);
     expect(getAll.mock.calls[0]).toHaveLength(62);
@@ -1026,7 +1363,9 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://jvm-weekly.local/api/v1/cashflow/weekly-overview',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
+      expect.objectContaining({
+        method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08', settlementCycle: true }),
+      }),
     );
   });
 
@@ -1044,19 +1383,8 @@ describe('JVM weekly API BFF proxy', () => {
       { yearMonth: '2027-01', weekNo: 1, amount: 999, sourceCell: 'D14' },
     ];
     const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
-    const canonical = {
-      version: '1',
-      yearMonth: '2026-08',
-      items: [{
-        projectId: 'project-a',
-        settlementStatuses: { projectId: 'project-a', yearMonth: '2026-08', items: [] },
-        projectionActualSummary: null,
-      }],
-      errors: [
-        { projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' },
-        { projectId: 'project-a', code: 'STATUS_UNAVAILABLE' },
-      ],
-    };
+    const canonical = canonicalWeeklyOverviewResponse();
+    canonical.errors = [{ projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' }];
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
@@ -1072,7 +1400,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200);
 
     expect(overview.body).toMatchObject({
-      version: '4',
+      version: '5',
       items: [{
         projectId: 'project-a',
         sheetCapturedAt: '2026-08-25T07:48:00.000Z',
@@ -1093,7 +1421,7 @@ describe('JVM weekly API BFF proxy', () => {
           ]),
         },
       }],
-      errors: [{ projectId: 'project-a', code: 'STATUS_UNAVAILABLE' }],
+      errors: [],
     });
     expect(getAll).toHaveBeenCalledTimes(1);
 
@@ -1139,15 +1467,7 @@ describe('JVM weekly API BFF proxy', () => {
     mirror.capturedAt = '2026-08-25T07:48:00.000Z';
     mutateMirror(mirror, source);
     const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
-    const canonical = {
-      version: '1', yearMonth: '2026-08',
-      items: [{
-        projectId: 'project-a',
-        settlementStatuses: { projectId: 'project-a', yearMonth: '2026-08', items: [] },
-        projectionActualSummary: null,
-      }],
-      errors: [],
-    };
+    const canonical = canonicalWeeklyOverviewResponse();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
@@ -1170,17 +1490,13 @@ describe('JVM weekly API BFF proxy', () => {
   it('keeps weekly statuses when the mirror batch read fails', async () => {
     const source = fullMonthCloseSource();
     const getAll = vi.fn(async () => { throw new Error('mirror read unavailable'); });
-    const canonical = {
-      version: '1', yearMonth: '2026-08',
-      items: [{
-        projectId: 'project-a',
-        settlementStatuses: {
-          projectId: 'project-a', yearMonth: '2026-08',
-          items: [{ period: 'WEEK_4', status: 'COMPLETED' }],
-        },
-        projectionActualSummary: null,
-      }],
-      errors: [],
+    const canonical = canonicalWeeklyOverviewResponse();
+    const week4Index = canonical.items[0].settlementStatuses.items
+      .findIndex((item) => item.period === 'WEEK_4');
+    canonical.items[0].settlementStatuses.items[week4Index] = {
+      period: 'WEEK_4', status: 'COMPLETED',
+      submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+      deadlineAt: '2026-08-20T15:00:00Z', approverDeadlineAt: '2026-08-21T04:00:00Z',
     };
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
@@ -1196,10 +1512,12 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(response.body.items[0]).toMatchObject({
       projectId: 'project-a',
-      settlementStatuses: { items: [{ period: 'WEEK_4', status: 'COMPLETED' }] },
       projectionActualSummary: null,
       sheetCapturedAt: null,
     });
+    expect(response.body.items[0].settlementStatuses.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ period: 'WEEK_4', status: 'COMPLETED' }),
+    ]));
     expect(response.body.errors).toEqual([{ projectId: 'project-a', code: 'SUMMARY_UNAVAILABLE' }]);
   });
 
@@ -1211,14 +1529,7 @@ describe('JVM weekly API BFF proxy', () => {
       { yearMonth: '2026-08', weekNo: 4, amount: 77 },
     ];
     const getAll = vi.fn(async (...args) => Promise.all(args.slice(0, -1).map((ref) => ref.get())));
-    const canonical = {
-      version: '1', yearMonth: '2026-08',
-      items: [{
-        projectId: 'project-a',
-        settlementStatuses: { projectId: 'project-a', yearMonth: '2026-08', items: [] },
-        projectionActualSummary: null,
-      }], errors: [],
-    };
+    const canonical = canonicalWeeklyOverviewResponse();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
@@ -1404,6 +1715,151 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
+  it('reads the portal dashboard from the exact canonical cycle without scanning legacy requests', async () => {
+    const source = fullMonthCloseSource();
+    const dashboard = monthDashboardSource({
+      ok: true,
+      projectId: 'project-a',
+      yearMonth: '2026-08',
+      status: 'OPEN',
+      revision: 0,
+      evaluatedBusinessDate: '2026-08-27',
+    });
+    dashboard.settlementCycle = canonicalSettlementCycle();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(dashboard), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+    });
+
+    const response = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(200);
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/month-close/dashboard-source?yearMonth=2026-08&settlementCycle=true',
+    );
+    expect(source.monthCloseRequestQueries)
+      .not.toContainEqual({ kind: 'limit', count: 100 });
+    expect(response.body.settlementCycle).toMatchObject({
+      cycleYearMonth: '2026-08',
+      weeklyYearMonth: '2026-08',
+      monthCloseTargetYearMonth: '2026-07',
+      businessState: 'NOT_REQUESTED',
+    });
+    expect(response.body.monthState).toBeNull();
+  });
+
+  it('uses the target month calendar when a portal cycle crosses a year boundary', async () => {
+    const dashboard = monthDashboardSource(
+      {
+        ok: true,
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        status: 'OPEN',
+        revision: 0,
+        evaluatedBusinessDate: '2026-01-03',
+      },
+      undefined,
+      {
+        selectedYear: 2025,
+        projection: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
+        actual: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
+      },
+    );
+    dashboard.monthCloseCalendar = monthCloseCalendarFor('2025-12');
+    dashboard.settlementCycle = canonicalSettlementCycle({
+      cycleYearMonth: '2026-01',
+      weeklyYearMonth: '2026-01',
+      monthCloseTargetYearMonth: '2025-12',
+    });
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(dashboard), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: fullMonthCloseSource().db,
+    });
+
+    const response = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-01')
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      cycleYearMonth: '2026-01',
+      targetYearMonth: '2025-12',
+      closeDeadline: '2026-01-10',
+      closeDeadlineAt: '2026-01-10T15:00:00.000Z',
+      approverDeadlineAt: '2026-01-31T15:00:00.000Z',
+    });
+  });
+
+  it('aligns a submitted portal cycle to its exact cycle-keyed request', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
+      ...canonicalMonthCloseRequest('2026-08'),
+    });
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-07', {
+      requestId: 'project-a-2026-07', projectId: 'project-a', yearMonth: '2026-07',
+      throughMonth: '2026-07', status: 'APPROVED',
+    });
+    const dashboard = monthDashboardSource({
+      ok: true,
+      projectId: 'project-a',
+      yearMonth: '2026-08',
+      status: 'OPEN',
+      revision: 0,
+      evaluatedBusinessDate: '2026-08-27',
+    });
+    const canonicalItem = canonicalWeeklyOverviewResponse().items[0];
+    dashboard.settlementCycle = canonicalItem.settlementCycle;
+    dashboard.settlementStatuses = canonicalItem.settlementStatuses;
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(dashboard), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+    });
+
+    const response = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(200);
+
+    expect(response.body.settlementCycle.businessState).toBe('SUBMITTED');
+    expect(response.body.monthState).toMatchObject({
+      requestId: 'project-a-2026-08',
+      cycleYearMonth: '2026-08',
+      throughMonth: '2026-07',
+      status: 'PENDING_APPROVAL',
+    });
+  });
+
+  it('fails the portal dashboard closed for a foreign canonical cycle', async () => {
+    const dashboard = monthDashboardSource({
+      ok: true,
+      projectId: 'project-a',
+      yearMonth: '2026-08',
+      status: 'OPEN',
+      revision: 0,
+      evaluatedBusinessDate: '2026-08-27',
+    });
+    dashboard.settlementCycle = canonicalSettlementCycle({ cycleYearMonth: '2026-09' });
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(dashboard), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: fullMonthCloseSource().db,
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .expect(502);
+  });
+
   it('reads a cashflow month-close through the JVM with the requested yearMonth', async () => {
     const performanceEvents = [];
     const fetchImpl = vi.fn(async () => ({
@@ -1435,7 +1891,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(2);
     expect(fetchImpl.mock.calls[0][0]).toBe(
-      'http://jvm-weekly.local/api/v1/cashflow/project-a/month-close/dashboard-source?yearMonth=2026-06',
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/month-close/dashboard-source?yearMonth=2026-06&settlementCycle=true',
     );
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
     expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
@@ -1454,19 +1910,19 @@ describe('JVM weekly API BFF proxy', () => {
   it('publishes the server-owned 2026 board, status joins, and comparison presentation', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08', status: 'PENDING',
+      ...canonicalMonthCloseRequest('2026-08'),
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(monthDashboardSource(
+      text: async () => JSON.stringify(withCanonicalSubmittedCycle(monthDashboardSource(
         { ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0 },
         undefined,
         undefined,
         undefined,
         undefined,
         closedCumulativeAuthority('2026-07'),
-      )),
+      ))),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv,
@@ -1538,35 +1994,24 @@ describe('JVM weekly API BFF proxy', () => {
   it('unifies canonical and approved workflow status for an executed-cycle approval', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
-      requestId: 'project-a-2026-08',
-      projectId: 'project-a',
-      yearMonth: '2026-08',
-      throughMonth: '2026-07',
-      status: 'PENDING',
+      ...canonicalMonthCloseRequest('2026-08', 'APPROVED', {
+        approvalVersionId: 'approval-v2',
+        ledgerRevision: 2,
+        manifestHash: `sha256:${'a'.repeat(64)}`,
+      }),
       requestedAt: '2026-08-20T02:51:00.000Z',
     });
-    const canonicalSettlementStatuses = {
-      projectId: 'project-a',
-      yearMonth: '2026-07',
-      items: [{
-          period: 'MONTH',
-          status: 'COMPLETED',
-          approvedAt: '2026-08-25T06:45:00.000Z',
-          approvedBy: 'finance-1',
-          revision: 2,
-      }],
-    };
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ...monthDashboardSource(
+      text: async () => JSON.stringify(withCanonicalLockedCycle(monthDashboardSource(
         { ok: true, projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN', revision: 0 },
         undefined,
         undefined,
         undefined,
         undefined,
         closedCumulativeAuthority('2026-07'),
-      ), settlementStatuses: canonicalSettlementStatuses }),
+      ), { approvedAt: '2026-08-25T06:45:00.000Z' })),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv,
@@ -1586,36 +2031,118 @@ describe('JVM weekly API BFF proxy', () => {
         });
       });
 
-    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
-      ...source.documents.get('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08'),
-      status: 'APPROVED',
-      reviewedAt: '2026-08-25T06:45:00.000Z',
+  });
+
+  it('uses a later cumulative close authority without moving the queried target month', async () => {
+    const source = fullMonthCloseSource({ yearMonth: '2026-08' });
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-09', {
+      ...canonicalMonthCloseRequest('2026-09', 'REJECTED', {
+        revision: 4,
+        evidenceRevision: 4,
+        workflowRevision: 4,
+      }),
     });
-    canonicalSettlementStatuses.items[0] = {
-      period: 'MONTH', status: 'WAITING_FOR_UPDATE', approvedAt: '', approvedBy: '', revision: 0,
-    };
-    await request(app)
-      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
-      .expect(200)
-      .expect((response) => {
-        expect(response.body.presentation.monthClose).toEqual({
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-10', {
+      ...canonicalMonthCloseRequest('2026-10', 'APPROVED', {
+        approvalVersionId: 'approval-v5',
+        ledgerRevision: 5,
+        manifestHash: `sha256:${'f'.repeat(64)}`,
+        revision: 5,
+        evidenceRevision: 5,
+        workflowRevision: 5,
+        reviewedAt: '2026-10-20T06:45:00.000Z',
+      }),
+    });
+    const dashboard = withCanonicalCoveredLockedCycle(monthDashboardSource(
+      {
+        ok: true,
+        projectId: 'project-a',
+        yearMonth: '2026-09',
+        status: 'OPEN',
+        revision: 0,
+        evaluatedBusinessDate: '2026-09-20',
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      closedCumulativeAuthority('2026-09', 5),
+    ));
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(dashboard), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+      now: () => new Date('2026-09-20T07:00:00.000Z'),
+    });
+
+    const response = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-09')
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      cycleYearMonth: '2026-09',
+      targetYearMonth: '2026-08',
+      monthState: {
+        requestId: 'project-a-2026-10',
+        cycleYearMonth: '2026-10',
+        throughMonth: '2026-09',
+        status: 'APPROVED',
+      },
+      presentation: {
+        monthClose: {
           status: 'COMPLETED',
           statusLabel: '월 결산 완료',
-          tone: 'success',
-          approvedAt: '2026-08-25T06:45:00.000Z',
-        });
-      });
+          approvedAt: '2026-10-20T06:45:00.000Z',
+        },
+      },
+      actions: { requestMonthReopen: { enabled: true } },
+    });
 
-    source.documents.delete('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08');
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-10', {
+      ...canonicalMonthCloseRequest('2026-10', 'REOPEN_REQUESTED', {
+        approvalVersionId: 'approval-v5',
+        ledgerRevision: 6,
+        manifestHash: `sha256:${'f'.repeat(64)}`,
+        revision: 5,
+        evidenceRevision: 5,
+        workflowRevision: 6,
+        reviewedAt: '2026-10-20T06:45:00.000Z',
+      }),
+    });
+    dashboard.settlementCycle = {
+      ...dashboard.settlementCycle,
+      businessState: 'REOPEN_REQUESTED',
+      workflowRevision: 6,
+      commandCapabilities: {
+        ...deniedSettlementCycleCapabilities(),
+        APPROVE_MONTH_REOPEN: { allowed: false, reasonCode: 'REOPEN_DECISION_FORBIDDEN' },
+        REJECT_MONTH_REOPEN: { allowed: false, reasonCode: 'REOPEN_DECISION_FORBIDDEN' },
+      },
+    };
+
     await request(app)
-      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-09')
       .expect(200)
-      .expect((response) => {
-        expect(response.body.presentation.monthClose).toEqual({
-          statusLabel: '결산 전',
-          tone: 'neutral',
-        });
-      });
+      .expect((reopenResponse) => expect(reopenResponse.body).toMatchObject({
+        cycleYearMonth: '2026-09',
+        targetYearMonth: '2026-08',
+        monthState: {
+          requestId: 'project-a-2026-10',
+          cycleYearMonth: '2026-10',
+          throughMonth: '2026-09',
+          status: 'REOPEN_REQUESTED',
+          revision: 5,
+          ledgerRevision: 6,
+        },
+        settlementCycle: {
+          businessState: 'REOPEN_REQUESTED',
+          monthCloseSettlement: null,
+          supersededAttempt: 'REJECTED',
+        },
+        actions: { requestMonthReopen: { enabled: false } },
+      }));
   });
 
   it('uses the JVM evaluated business date across dashboard, compliance, and presentation at KST midnight', async () => {
@@ -1861,7 +2388,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('keeps Sheet and ledger sections when the OPEN project metadata read fails', async () => {
-    const fixture = fullMonthCloseSource();
+    const fixture = fullMonthCloseSource({ yearMonth: '2026-05' });
     const projectPath = 'orgs/tenant-a/projects/project-a';
     const readDoc = fixture.db.doc;
     fixture.db.doc = (path) => path === projectPath
@@ -1983,7 +2510,7 @@ describe('JVM weekly API BFF proxy', () => {
     blockerCode,
     sectionLabel,
   ) => {
-    const fixture = fullMonthCloseSource();
+    const fixture = fullMonthCloseSource({ yearMonth: '2026-05' });
     const jvmSource = monthDashboardSource({
       ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
     });
@@ -2192,7 +2719,7 @@ describe('JVM weekly API BFF proxy', () => {
     blockerCode,
     sectionCode,
   ) => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ yearMonth: '2026-05' });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -2327,7 +2854,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('requires migration when close history exists without cumulative authority', async () => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ yearMonth: '2026-05' });
     source.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-05', {
       projectId: 'project-a', yearMonth: '2026-05', status: 'CLOSED',
     });
@@ -2424,7 +2951,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('publishes the server-owned cumulative close scope and pinned sheet source for 2026-08', async () => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ yearMonth: '2026-07' });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -2485,13 +3012,20 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('publishes mutation-parity action decisions instead of making the client infer roles and request states', async () => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ yearMonth: '2026-05' });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(monthDashboardSource({
-        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
-      })),
+      text: async () => {
+        const dashboardSource = monthDashboardSource({
+          ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        });
+        return JSON.stringify(
+          source.documents.has('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06')
+            ? withCanonicalSubmittedCycle(dashboardSource)
+            : dashboardSource,
+        );
+      },
     }));
     const routeOptions = {
       env: runtimeEnv,
@@ -2543,9 +3077,8 @@ describe('JVM weekly API BFF proxy', () => {
     source.documents.delete('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-05');
 
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-06', tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-06',
-      fromMonth: '2023-01', throughMonth: '2026-05', status: 'PENDING', revision: 1,
+      ...canonicalMonthCloseRequest('2026-06'),
+      fromMonth: '2023-01', throughMonth: '2026-05', revision: 1,
       manifestHash: `sha256:${'1'.repeat(64)}`, requestedByUid: 'pm-1', approverUid: 'finance-1',
       monthCount: 41, weekCount: 205, cellCount: 6560,
     });
@@ -2581,12 +3114,14 @@ describe('JVM weekly API BFF proxy', () => {
     source.documents.set('orgs/tenant-a/members/admin-1', {
       uid: 'admin-1', status: 'INACTIVE', role: 'admin', projectIds: ['project-a'],
     });
+    const dashboard = monthDashboardSource({
+      ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+    });
+    dashboard.settlementCycle.commandCapabilities = deniedSettlementCycleCapabilities('ACTOR_INACTIVE');
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(monthDashboardSource({
-        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
-      })),
+      text: async () => JSON.stringify(dashboard),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'admin-1', actorRole: 'admin', actorEmail: 'admin@example.com',
@@ -2604,71 +3139,19 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
-  it('does not offer withdrawal for a legacy pending request without the cumulative contract', async () => {
-    const source = fullMonthCloseSource();
-    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
-      requestId: 'project-a-2026-06', tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-06',
-      status: 'PENDING', revision: 1, manifestHash: `sha256:${'1'.repeat(64)}`,
-      requestedByUid: 'pm-1', approverUid: 'finance-1',
-    });
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(monthDashboardSource({
-        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
-      })),
-    }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
-      env: runtimeEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z'),
-    });
-
-    await request(app)
-      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
-      .expect(200)
-      .expect((response) => expect(response.body.actions.withdrawMonthClose.enabled).toBe(false));
-  });
-
-  it('does not promise reopen from historical approval without canonical JVM eligibility', async () => {
-    const source = fullMonthCloseSource();
-    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-06', tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-06',
-      status: 'APPROVED', revision: 1, manifestHash: `sha256:${'1'.repeat(64)}`,
-      requestedByUid: 'pm-1', approverUid: 'finance-1',
-    });
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(monthDashboardSource({
-        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1,
-        snapshot: {},
-      })),
-    }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
-      env: runtimeEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z'),
-    });
-
-    await request(app)
-      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
-      .expect(200)
-      .expect((response) => expect(response.body.actions.requestMonthReopen).toMatchObject({
-        enabled: false,
-        guide: expect.stringContaining('승인 완료된 최신 월 결산'),
-      }));
-  });
-
   it('enables reopen only when the JVM Domain capability allows the approved close', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-06', tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-06',
-      status: 'APPROVED', revision: 1, manifestHash: `sha256:${'1'.repeat(64)}`,
-      requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-06', 'APPROVED', {
+        approvalVersionId: 'approval-v2',
+        ledgerRevision: 2,
+        manifestHash: `sha256:${'a'.repeat(64)}`,
+      }),
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(monthDashboardSource(
+      text: async () => JSON.stringify(withCanonicalLockedCycle(monthDashboardSource(
         {
           ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1,
           snapshot: {},
@@ -2678,8 +3161,7 @@ describe('JVM weekly API BFF proxy', () => {
         undefined,
         undefined,
         undefined,
-        { enabled: true, reasonCode: '' },
-      )),
+      ))),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z'),
@@ -2694,19 +3176,23 @@ describe('JVM weekly API BFF proxy', () => {
       }));
   });
 
-  it('keeps the dashboard readable and closes only reopen when the JVM capability is missing', async () => {
+  it('keeps the dashboard readable when the canonical JVM denies reopen for this actor', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-06', tenantId: 'tenant-a', projectId: 'project-a', yearMonth: '2026-06',
-      status: 'APPROVED', revision: 1, manifestHash: `sha256:${'1'.repeat(64)}`,
-      requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-06', 'APPROVED', {
+        approvalVersionId: 'approval-v2',
+        ledgerRevision: 2,
+        manifestHash: `sha256:${'a'.repeat(64)}`,
+      }),
     });
-    const sourceBody = monthDashboardSource({
+    const sourceBody = withCanonicalLockedCycle(monthDashboardSource({
       ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1,
       snapshot: {},
-    });
-    delete sourceBody.reopenRequest;
+    }));
+    sourceBody.settlementCycle.commandCapabilities.REQUEST_MONTH_REOPEN = {
+      allowed: false,
+      reasonCode: 'PROJECT_WRITE_FORBIDDEN',
+    };
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -2723,18 +3209,13 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard).toBeTruthy();
         expect(response.body.actions.requestMonthReopen).toMatchObject({
           enabled: false,
-          guide: expect.stringContaining('다시 불러온 뒤'),
+          guide: expect.stringContaining('승인 완료된 최신 월 결산'),
         });
-        expect(response.body.sectionErrors).toContainEqual(expect.objectContaining({
-          section: 'monthCloseReopenCapability',
-          code: 'cashflow_month_reopen_capability_unavailable',
-          label: '월 결산 재오픈 가능 여부',
-        }));
       });
   });
 
   it('keeps the dashboard readable but fails request-dependent actions closed when the request store is unavailable', async () => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ yearMonth: '2026-05' });
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06';
     const db = {
       ...source.db,
@@ -2745,9 +3226,9 @@ describe('JVM weekly API BFF proxy', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(monthDashboardSource({
+      text: async () => JSON.stringify(withCanonicalSubmittedCycle(monthDashboardSource({
         ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
-      })),
+      }))),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv, db, now: () => new Date('2026-07-10T00:00:00.000Z'),
@@ -3750,7 +4231,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('composes the open-month dashboard from the pinned sheet, project, and JVM state without a private draft', async () => {
-    const { db, sourceRevision, targetRevision } = fullMonthCloseSource();
+    const { db, sourceRevision, targetRevision } = fullMonthCloseSource({ yearMonth: '2026-05' });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -3923,7 +4404,7 @@ describe('JVM weekly API BFF proxy', () => {
       ok: true,
       status: 200,
       text: async () => JSON.stringify(monthDashboardSource({
-        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        ok: true, projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN', revision: 0,
         reopenCount: 0, projectWarningCount: 0, snapshot: {},
       })),
     }));
@@ -3941,7 +4422,7 @@ describe('JVM weekly API BFF proxy', () => {
     });
 
     await request(app)
-      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-07')
       .expect(200)
       .expect((response) => {
         expect(response.body.dashboard.summary).toMatchObject({
@@ -5198,7 +5679,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('ignores obsolete private-draft confirmations when reading an open month', async () => {
-    const { db, documents } = fullMonthCloseSource();
+    const { db, documents } = fullMonthCloseSource({ yearMonth: '2026-05' });
     const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
     const confirmations = draft.payload.monthClose.confirmations;
     confirmations[confirmations.length - 1] = { ...confirmations[0] };
@@ -5228,7 +5709,7 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('shows Projection overage and keeps the zero-contract rule', async () => {
     for (const contractAmount of [100, 0]) {
-      const { db } = fullMonthCloseSource({ contractAmount });
+      const { db } = fullMonthCloseSource({ contractAmount, yearMonth: '2026-05' });
       const fetchImpl = vi.fn(async () => ({
         ok: true,
         status: 200,
@@ -5388,7 +5869,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('uses the CLOSED snapshot instead of current project or mirror values', async () => {
-    const current = fullMonthCloseSource();
+    const current = fullMonthCloseSource({ yearMonth: '2026-05' });
     const annualId = Buffer.from('project-a\n2025', 'utf8').toString('base64url');
     current.documents.set(`orgs/tenant-a/cashflow_sheet_year_totals/${annualId}`, {
       projectId: 'project-a',
@@ -5593,7 +6074,7 @@ describe('JVM weekly API BFF proxy', () => {
     }));
     const currentReadModel = {
       months: [{
-        yearMonth: '2026-06',
+        yearMonth: '2026-05',
         projection: {
           rowTotals: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, lineId === 'SALES_IN' ? 101 : 0])),
           weeks: currentWeeklyTotals.map((week) => ({
@@ -5641,7 +6122,7 @@ describe('JVM weekly API BFF proxy', () => {
         resultingTargetRevision: `sha256:${'3'.repeat(64)}`,
         calculationChecks: Array.from({ length: 10 }, (_, index) => ({
           mode: index < 5 ? 'projection' : 'actual',
-          yearMonth: '2026-06',
+          yearMonth: '2026-05',
           weekNo: (index % 5) + 1,
           reported: { depositTotal: index === 0 ? 999 : 0, withdrawalTotal: 0, balance: index === 0 ? 999 : 0 },
         })),
@@ -5651,16 +6132,16 @@ describe('JVM weekly API BFF proxy', () => {
         sourceFingerprint: `sha256:${'f'.repeat(64)}`,
         sheetFacts: {
           weeklyCalculationChecks: [{
-            mode: 'projection', yearMonth: '2026-06', weekNo: 1,
+            mode: 'projection', yearMonth: '2026-05', weekNo: 1,
             reported: { depositTotal: 111, withdrawalTotal: 0, balance: 111 },
           }],
           annualCashflowTotals: [{ year: 2026, projection: { totalIn: 111 } }],
           cashflowGrandTotals: { projection: { totalIn: 111 } },
-          projectionActualDifferences: [{ yearMonth: '2026-06', amount: 111 }],
+          projectionActualDifferences: [{ yearMonth: '2026-05', amount: 111 }],
         },
         weeklyTotals: frozenWeeklyTotals,
         ledgerWeeks: frozenWeeklyTotals.map((week) => ({
-          yearMonth: '2026-06',
+          yearMonth: '2026-05',
           weekNo: week.weekNo,
           projection: week.projection,
           actual: week.actual,
@@ -5691,13 +6172,13 @@ describe('JVM weekly API BFF proxy', () => {
     mirror.sheetFacts = {
       weeklyCalculationChecks: Array.from({ length: 10 }, (_, index) => ({
         mode: index < 5 ? 'projection' : 'actual',
-        yearMonth: '2026-06',
+        yearMonth: '2026-05',
         weekNo: (index % 5) + 1,
         reported: { depositTotal: index === 0 ? 321 : 0, withdrawalTotal: 0, balance: index === 0 ? 321 : 0 },
       })),
       annualCashflowTotals: [{ year: 2026, projection: { totalIn: 654 }, actual: { totalIn: 321 } }],
       cashflowGrandTotals: { projection: { totalIn: 987 }, actual: { totalIn: 654 } },
-      projectionActualDifferences: [{ yearMonth: '2026-06', amount: 333 }],
+      projectionActualDifferences: [{ yearMonth: '2026-05', amount: 333 }],
       issues: [],
     };
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db });
@@ -5725,7 +6206,7 @@ describe('JVM weekly API BFF proxy', () => {
           targetRevision: close.lastAmendmentEvidence.resultingTargetRevision,
           annual: [{ year: 2026, projection: { totalIn: 654 }, actual: { totalIn: 321 } }],
           grandTotals: { projection: { totalIn: 987 }, actual: { totalIn: 654 } },
-          projectionActualDifferences: [{ yearMonth: '2026-06', amount: 333 }],
+          projectionActualDifferences: [{ yearMonth: '2026-05', amount: 333 }],
         });
         expect(response.body.dashboard.sheetFormulaValues.weekly[0].reported.depositTotal).toBe(321);
         expect(response.body.dashboard.source).toMatchObject({
@@ -5857,7 +6338,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('asks users to apply a newly loaded revision to the MYSCube sheet', async () => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ additionalYearMonths: ['2026-05'] });
     source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a').appliedSourceRevision = `sha256:${'a'.repeat(64)}`;
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,
@@ -5936,7 +6417,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('warns when the pinned sheet total does not equal its item values', async () => {
-    const source = fullMonthCloseSource({ calculationMismatch: true });
+    const source = fullMonthCloseSource({ calculationMismatch: true, yearMonth: '2026-05' });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -5961,6 +6442,7 @@ describe('JVM weekly API BFF proxy', () => {
   it('stores sheet reconciliation warnings in the designated-approver request', async () => {
     const source = fullMonthCloseSource({
       controlMatches: false, calculationMismatch: true, explicitZero: true, explicitEmpty: true,
+      additionalYearMonths: ['2026-05'],
     });
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,
@@ -6181,7 +6663,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('marks an overflowing monthly line total unavailable instead of publishing an unsafe row total', async () => {
-    const source = fullMonthCloseSource();
+    const source = fullMonthCloseSource({ yearMonth: '2026-05' });
     const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     mirror.cells = mirror.cells.map((cell) => {
       if (cell.mode !== 'projection') return cell;
@@ -6264,7 +6746,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('keeps an explicit sheet zero in the complete month-close evidence', async () => {
-    const source = fullMonthCloseSource({ explicitZero: true });
+    const source = fullMonthCloseSource({ explicitZero: true, yearMonth: '2026-05' });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -6986,7 +7468,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(statusFilters).toHaveLength(2);
     expect(statusFilters.every((entry) => (
       entry.operator === 'in'
-      && entry.expected.toSorted().join(',') === ['APPROVING', 'PENDING', 'REOPEN_REQUESTED', 'UNCERTAIN'].join(',')
+      && entry.expected.toSorted().join(',') === ['APPROVING', 'PENDING', 'PENDING_APPROVAL', 'REOPEN_REQUESTED', 'UNCERTAIN'].join(',')
     ))).toBe(true);
     expect(source.monthCloseRequestQueries.filter((entry) => entry.kind === 'limit' && entry.count === 1))
       .toEqual([{ kind: 'limit', count: 1 }, { kind: 'limit', count: 1 }]);
@@ -7198,8 +7680,10 @@ describe('JVM weekly API BFF proxy', () => {
   it('serves current reopen authority from exact runtime member and canonical approver state', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
-      status: 'REOPEN_REQUESTED', revision: 2, requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-08', 'REOPEN_REQUESTED', {
+        ledgerRevision: 2,
+        workflowRevision: 2,
+      }),
     });
     const appFor = (actorId, availability) => {
       const fetchImpl = vi.fn(async (url, init) => {
@@ -8130,9 +8614,8 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
     source.documents.set(requestPath, {
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
+      ...canonicalMonthCloseRequest('2026-08', 'APPROVED', { ledgerRevision: 1 }),
       scope: { fromMonth: '2023-01', throughMonth: '2026-07' },
-      status: 'APPROVED', revision: 1, requestedByUid: 'pm-1', approverUid: 'finance-1',
     });
     const fetchImpl = vi.fn(async (url) => ({
       ok: true,
@@ -8162,7 +8645,8 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => {
         expect(response.body.request).toMatchObject({
-          requestId: 'project-a-2026-08', status: 'REOPEN_REQUESTED', revision: 2,
+          requestId: 'project-a-2026-08', status: 'REOPEN_REQUESTED',
+          revision: 1, ledgerRevision: 2,
           reopenRequest: {
             reason: '증빙 정정 필요', requestedByUid: 'pm-1', requestedAt: expect.any(String),
           },
@@ -8176,7 +8660,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'reopen-cumulative-1')
       .send(reopenPayload)
       .expect(200)
-      .expect((response) => expect(response.body.request.revision).toBe(2));
+      .expect((response) => expect(response.body.request).toMatchObject({ revision: 1, ledgerRevision: 2 }));
 
     const approver = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'finance-1', actorRole: 'finance',
@@ -8191,7 +8675,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => {
         expect(response.body.request).toMatchObject({
-          status: 'REOPENED', revision: 3,
+          status: 'REOPENED', revision: 1, ledgerRevision: 3,
           reopenRequest: {
             reason: '증빙 정정 필요', requestedByUid: 'pm-1', requestedAt: expect.any(String),
           },
@@ -8208,7 +8692,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'reopen-cumulative-decision-1')
       .send(decisionPayload)
       .expect(200)
-      .expect((response) => expect(response.body.request.revision).toBe(3));
+      .expect((response) => expect(response.body.request).toMatchObject({ revision: 1, ledgerRevision: 3 }));
     expect(fetchImpl.mock.calls.filter(([url]) => url.endsWith('/reopen-request'))).toHaveLength(1);
     expect(fetchImpl.mock.calls.filter(([url]) => url.endsWith('/reopen-decision'))).toHaveLength(2);
     expect(JSON.parse(fetchImpl.mock.calls.find(([url]) => url.endsWith('/reopen-request'))[1].body)).toEqual({
@@ -8226,8 +8710,10 @@ describe('JVM weekly API BFF proxy', () => {
       uid: 'admin-1', role: 'admin', status: 'ACTIVE', projectIds: [],
     });
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
-      status: 'REOPEN_REQUESTED', revision: 2, requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-08', 'REOPEN_REQUESTED', {
+        ledgerRevision: 2,
+        workflowRevision: 2,
+      }),
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
@@ -8251,7 +8737,7 @@ describe('JVM weekly API BFF proxy', () => {
       })
       .expect(200)
       .expect((response) => expect(response.body.request).toMatchObject({
-        status: 'REOPENED', revision: 3,
+        status: 'REOPENED', revision: 1, ledgerRevision: 3,
       }));
 
     expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r3-reopen_decided'))
@@ -8262,8 +8748,11 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     source.documents.get('orgs/tenant-a/projects/project-a').executiveApproverId = 'viewer-2';
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
-      status: 'REOPEN_REQUESTED', revision: 2, requestedByUid: 'pm-1', approverUid: 'viewer-2',
+      ...canonicalMonthCloseRequest('2026-08', 'REOPEN_REQUESTED', {
+        ledgerRevision: 2,
+        workflowRevision: 2,
+        approverUid: 'viewer-2',
+      }),
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
@@ -8287,7 +8776,7 @@ describe('JVM weekly API BFF proxy', () => {
       })
       .expect(200)
       .expect((response) => expect(response.body.request).toMatchObject({
-        status: 'REOPENED', revision: 3,
+        status: 'REOPENED', revision: 1, ledgerRevision: 3,
       }));
 
     expect(source.documents.get('orgs/tenant-a/members/viewer-2')).toMatchObject({ projectIds: [] });
@@ -8298,10 +8787,7 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
     source.documents.set(requestPath, {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
-      cycleYearMonth: '2026-08', throughMonth: '2026-07',
-      status: 'APPROVED', revision: 1, requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-08', 'APPROVED'),
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
@@ -8331,10 +8817,7 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
     source.documents.set(requestPath, {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
-      cycleYearMonth: '2026-08', throughMonth: '2026-07',
-      status: 'APPROVED', revision: 1, requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-08', 'APPROVED'),
     });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
@@ -8364,10 +8847,7 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
     source.documents.set(requestPath, {
-      contractVersion: 'cashflow-cumulative-close-v2',
-      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
-      cycleYearMonth: '2026-08', throughMonth: '2026-07',
-      status: 'APPROVED', revision: 1, requestedByUid: 'pm-1', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-08', 'APPROVED'),
     });
     const appliedKeys = new Set();
     let canonicalEffects = 0;
@@ -8415,7 +8895,9 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'reopen-crash-window-key')
       .send(payload)
       .expect(200)
-      .expect((response) => expect(response.body.request).toMatchObject({ status: 'REOPEN_REQUESTED', revision: 2 }));
+      .expect((response) => expect(response.body.request).toMatchObject({
+        status: 'REOPEN_REQUESTED', revision: 1, ledgerRevision: 2,
+      }));
 
     const commandKeys = fetchImpl.mock.calls.map(([, init]) => JSON.parse(init.body).idempotencyKey);
     expect(commandKeys).toEqual(['reopen-crash-window-key', 'reopen-crash-window-key']);
@@ -8628,8 +9110,11 @@ describe('JVM weekly API BFF proxy', () => {
   it('delegates reopen decision authority to the canonical JVM domain gate', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
-      requestId: 'project-a-2026-06', projectId: 'project-a', yearMonth: '2026-06',
-      status: 'REOPEN_REQUESTED', revision: 2, requestedByUid: 'viewer-2', approverUid: 'finance-1',
+      ...canonicalMonthCloseRequest('2026-06', 'REOPEN_REQUESTED', {
+        ledgerRevision: 2,
+        workflowRevision: 2,
+        requestedByUid: 'viewer-2',
+      }),
     });
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       ok: false,
@@ -9480,12 +9965,14 @@ describe('JVM month-close calendar contract', () => {
     const jvmSource = monthDashboardSource({
       ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
     });
-    jvmSource.monthCloseCalendar[5] = {
-      yearMonth: '2026-06',
-      closeDeadline: '2099-01-02',
+    jvmSource.monthCloseCalendar[4] = {
+      yearMonth: '2026-05',
+      closeDeadline: '2026-06-10',
       closeDeadlineAt: '2099-01-03T00:00:00Z',
       approverDeadlineAt: '2099-01-04T00:00:00Z',
     };
+    jvmSource.settlementStatuses.items[0].deadlineAt = '2099-01-03T00:00:00Z';
+    jvmSource.settlementStatuses.items[0].approverDeadlineAt = '2099-01-04T00:00:00Z';
     const { app } = createCalendarApp({ ...jvmSource, db: source.db });
 
     await request(app)
@@ -9494,8 +9981,8 @@ describe('JVM month-close calendar contract', () => {
       .expect((response) => {
         expect(response.body.dashboard.monthCloseStatuses).toEqual(expect.arrayContaining([
           expect.objectContaining({
-            yearMonth: '2026-06',
-            closeDeadline: '2099-01-02',
+            yearMonth: '2026-05',
+            closeDeadline: '2026-06-10',
             closeDeadlineAt: '2099-01-03T00:00:00Z',
             approverDeadlineAt: '2099-01-04T00:00:00Z',
           }),

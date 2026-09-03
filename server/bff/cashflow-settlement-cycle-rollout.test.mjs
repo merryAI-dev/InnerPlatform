@@ -24,10 +24,37 @@ const settlementCycleCommands = [
   'REQUEST_MONTH_REOPEN', 'APPROVE_MONTH_REOPEN', 'REJECT_MONTH_REOPEN', 'CANCEL_ACTIVE_CYCLE',
 ];
 
-function deniedCapabilities() {
-  return Object.fromEntries(settlementCycleCommands.map((command) => [command, {
-    allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE',
-  }]));
+function lockedCapabilities() {
+  return {
+    ...Object.fromEntries(settlementCycleCommands.map((command) => [command, {
+      allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE',
+    }])),
+    REQUEST_MONTH_REOPEN: { allowed: true, reasonCode: '' },
+  };
+}
+
+function lockedMonthCloseSettlement() {
+  return {
+    period: 'MONTH', status: 'LOCKED', revision: 2,
+    submittedAt: '2026-09-03T01:00:00Z', submittedBy: 'pm-1',
+    approvedAt: '2026-09-03T02:00:00Z', approvedBy: 'head-1',
+    deadlineAt: '2026-09-10T15:00:00Z', approverDeadlineAt: '2026-09-30T15:00:00Z',
+  };
+}
+
+function lockedSettlementStatuses() {
+  return {
+    projectId: 'project-a',
+    yearMonth: '2026-09',
+    items: [
+      lockedMonthCloseSettlement(),
+      ...Array.from({ length: 5 }, (_, index) => ({
+        period: `WEEK_${index + 1}`, status: 'WAITING_FOR_UPDATE', revision: 0,
+        submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '',
+        deadlineAt: '2026-09-06T15:00:00Z', approverDeadlineAt: '2026-09-07T04:00:00Z',
+      })),
+    ],
+  };
 }
 
 function document(id, data) {
@@ -533,7 +560,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
       },
       projections: [{
         projectId: 'secret-project', cycleYearMonth: '2026-09', requestId: 'secret-request',
-        businessState: 'APPROVED', health: 'INCONSISTENT',
+        businessState: 'LOCKED', health: 'INCONSISTENT',
       }],
       cutover: null,
     };
@@ -557,11 +584,11 @@ describe('cashflow settlement-cycle rollout audit', () => {
     };
     expect(assertSettlementCycleCutoverReady(inventory, [{
       projectId: 'project-a', cycleYearMonth: '2026-09',
-      businessState: 'APPROVED', health: 'OK', requestId: 'project-a-2026-09',
+      businessState: 'LOCKED', health: 'OK', requestId: 'project-a-2026-09',
     }])).toEqual({ ready: true, verifiedProjects: 1 });
     expect(() => assertSettlementCycleCutoverReady(inventory, [{
       projectId: 'project-a', cycleYearMonth: '2026-09',
-      businessState: 'APPROVED', health: 'INCONSISTENT', requestId: 'project-a-2026-09',
+      businessState: 'LOCKED', health: 'INCONSISTENT', requestId: 'project-a-2026-09',
     }])).toThrow(/not ready/i);
   });
 
@@ -624,11 +651,12 @@ describe('cashflow settlement-cycle rollout audit', () => {
       { projectId: 'project-a', cycleYearMonth: '2026-09', requestId: 'project-a-2026-09' },
     ];
     const readProjection = vi.fn(async () => ({
+      settlementStatuses: lockedSettlementStatuses(),
       settlementCycle: {
         cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
-        businessState: 'APPROVED', health: 'OK', workflowRevision: 7,
-        monthCloseSettlement: null, supersededAttempt: null,
-        commandCapabilities: deniedCapabilities(),
+        businessState: 'LOCKED', health: 'OK', workflowRevision: 7,
+        monthCloseSettlement: lockedMonthCloseSettlement(), supersededAttempt: null,
+        commandCapabilities: lockedCapabilities(),
         provenance: {
           affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
           closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
@@ -645,7 +673,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
       targets, readProjection, readAlignedRequest,
     })).resolves.toEqual([{
       projectId: 'project-a', cycleYearMonth: '2026-09',
-      requestId: 'project-a-2026-09', businessState: 'APPROVED', health: 'OK',
+      requestId: 'project-a-2026-09', businessState: 'LOCKED', health: 'OK',
     }]);
     expect(readProjection).toHaveBeenCalledWith({ projectId: 'project-a', cycleYearMonth: '2026-09' });
     expect(readAlignedRequest).toHaveBeenCalledWith(expect.objectContaining({
@@ -657,11 +685,12 @@ describe('cashflow settlement-cycle rollout audit', () => {
       targets,
       readAlignedRequest,
       readProjection: async () => ({
+        settlementStatuses: lockedSettlementStatuses(),
         settlementCycle: {
           cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
-          businessState: 'APPROVED', health: 'OK', workflowRevision: 7,
-          monthCloseSettlement: null, supersededAttempt: null,
-          commandCapabilities: deniedCapabilities(),
+          businessState: 'LOCKED', health: 'OK', workflowRevision: 7,
+          monthCloseSettlement: lockedMonthCloseSettlement(), supersededAttempt: null,
+          commandCapabilities: lockedCapabilities(),
           provenance: {
             affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
             closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
@@ -682,7 +711,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
       }
       return {
         settlementCycle: {
-          cycleYearMonth: '2026-09', businessState: 'APPROVED', health: 'OK',
+          cycleYearMonth: '2026-09', businessState: 'LOCKED', health: 'OK',
           provenance: { requestId: 'project-a-2026-09' },
         },
       };

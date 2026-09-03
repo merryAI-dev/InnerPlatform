@@ -18,32 +18,6 @@ class CashflowSettlementCyclePolicyTest {
     }
 
     @Test
-    void canonicalDocumentsResolveToOneMonthCloseLifecycle() {
-        assertThat(resolve("", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("NOT_REQUESTED");
-        assertThat(resolve("", "CLOSED", "COMPLETED")).isEqualTo("APPROVED");
-        assertThat(resolve("PENDING", "OPEN", "PENDING_APPROVAL")).isEqualTo("PENDING_APPROVAL");
-        assertThat(resolve("PENDING", "OPEN", "SUBMITTED")).isEqualTo("PENDING_APPROVAL");
-        assertThat(resolve("APPROVING", "OPEN", "PENDING_APPROVAL")).isEqualTo("APPROVING");
-        assertThat(resolve("APPROVED", "CLOSED", "COMPLETED")).isEqualTo("APPROVED");
-        assertThat(resolve("APPROVED", "CLOSED", "LOCKED")).isEqualTo("APPROVED");
-        assertThat(resolve("REOPEN_REQUESTED", "REOPEN_REQUESTED", "COMPLETED")).isEqualTo("REOPEN_REQUESTED");
-        assertThat(resolve("REOPEN_REQUESTED", "REOPEN_REQUESTED", "LOCKED")).isEqualTo("REOPEN_REQUESTED");
-        assertThat(resolve("REOPENED", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("REOPENED");
-        assertThat(resolve("REJECTED", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("REJECTED");
-        assertThat(resolve("WITHDRAWN", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("WITHDRAWN");
-        assertThat(resolve("UNCERTAIN", "CLOSED", "COMPLETED")).isEqualTo("UNCERTAIN");
-    }
-
-    @Test
-    void contradictoryOrUnknownDocumentsFailClosed() {
-        assertThat(resolve("APPROVED", "OPEN", "COMPLETED")).isEqualTo("INCONSISTENT");
-        assertThat(resolve("PENDING", "CLOSED", "PENDING_APPROVAL")).isEqualTo("INCONSISTENT");
-        assertThat(resolve("REOPENED", "CLOSED", "COMPLETED")).isEqualTo("INCONSISTENT");
-        assertThat(resolve("UNKNOWN", "OPEN", "WAITING_FOR_UPDATE")).isEqualTo("INCONSISTENT");
-        assertThat(resolve("", "OPEN", "COMPLETED")).isEqualTo("INCONSISTENT");
-    }
-
-    @Test
     void generalSettlementTransitionAcceptsWeeksAndRejectsMonth() {
         assertThat(CashflowSettlementCyclePolicy.requireWeeklyTransitionPeriod("WEEK_1")).isEqualTo("WEEK_1");
         assertThat(CashflowSettlementCyclePolicy.requireWeeklyTransitionPeriod("WEEK_5")).isEqualTo("WEEK_5");
@@ -61,7 +35,7 @@ class CashflowSettlementCyclePolicyTest {
 
         CashflowSettlementCyclePolicy.Projection projection = CashflowSettlementCyclePolicy.project(
             new CashflowSettlementCyclePolicy.ProjectionFacts(
-                false, "", 0, "", "WAITING_FOR_UPDATE", true, provenance
+                false, "", 0, "OPEN", "WAITING_FOR_UPDATE", true, provenance, false
             )
         );
 
@@ -72,10 +46,24 @@ class CashflowSettlementCyclePolicyTest {
     }
 
     @Test
+    void noAttemptRequiresTheOpenWaitingCanonicalMonthState() {
+        assertThat(CashflowSettlementCyclePolicy.project(
+            new CashflowSettlementCyclePolicy.ProjectionFacts(
+                false, "", 0, "OPEN", "LOCKED", false, null, false
+            )
+        ).businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
+        assertThat(CashflowSettlementCyclePolicy.project(
+            new CashflowSettlementCyclePolicy.ProjectionFacts(
+                false, "", 0, "CLOSED", "WAITING_FOR_UPDATE", false, null, false
+            )
+        ).businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
+    }
+
+    @Test
     void closedHeadWithoutVerifiedImmutableRangeFailsClosed() {
         CashflowSettlementCyclePolicy.Projection projection = CashflowSettlementCyclePolicy.project(
             new CashflowSettlementCyclePolicy.ProjectionFacts(
-                false, "", 0, "", "WAITING_FOR_UPDATE", true, null
+                false, "", 0, "", "WAITING_FOR_UPDATE", true, null, false
             )
         );
 
@@ -86,11 +74,14 @@ class CashflowSettlementCyclePolicyTest {
 
     @Test
     void newerVerifiedCatchUpApprovalSupersedesARejectedOrWithdrawnAttempt() {
+        CashflowSettlementCyclePolicy.ApprovalProvenance provenance = provenance(
+            "2026-06", "2026-08", "2026-09", "approval-v7", "project-a-2026-09"
+        );
         for (String attempt : new String[] {"REJECTED", "WITHDRAWN"}) {
             CashflowSettlementCyclePolicy.Projection projection = CashflowSettlementCyclePolicy.project(
                 new CashflowSettlementCyclePolicy.ProjectionFacts(
                     true, attempt, 4, "OPEN", "WAITING_FOR_UPDATE", true,
-                    provenance("2026-06", "2026-08", "2026-09", "approval-v7", "project-a-2026-09")
+                    provenance, false
                 )
             );
 
@@ -98,6 +89,42 @@ class CashflowSettlementCyclePolicyTest {
             assertThat(projection.workflowRevision()).isEqualTo(4);
             assertThat(projection.supersededAttempt()).isEqualTo(attempt);
         }
+        assertThat(CashflowSettlementCyclePolicy.project(
+            new CashflowSettlementCyclePolicy.ProjectionFacts(
+                true, "REJECTED", 4, "OPEN", "WAITING_FOR_UPDATE", false, provenance, false
+            )
+        ).businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
+        assertThat(CashflowSettlementCyclePolicy.project(
+            new CashflowSettlementCyclePolicy.ProjectionFacts(
+                true, "WITHDRAWN", 4, "CLOSED", "LOCKED", true, provenance, false
+            )
+        ).businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
+    }
+
+    @Test
+    void coveredAuthorityReopenKeepsTheQueriedCycleWaitingAndRejectsUnreachableAttempts() {
+        CashflowSettlementCyclePolicy.ApprovalProvenance provenance = provenance(
+            "2026-06", "2026-09", "2026-10", "approval-v8", "project-a-2026-10"
+        );
+        for (String attempt : new String[] {"", "REJECTED", "WITHDRAWN"}) {
+            CashflowSettlementCyclePolicy.Projection projection = CashflowSettlementCyclePolicy.project(
+                new CashflowSettlementCyclePolicy.ProjectionFacts(
+                    !attempt.isBlank(), attempt, 5, "OPEN", "WAITING_FOR_UPDATE", true,
+                    provenance, true
+                )
+            );
+            assertThat(projection.businessState())
+                .as(attempt.isBlank() ? "no exact attempt" : attempt)
+                .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.REOPEN_REQUESTED);
+            assertThat(projection.provenance()).isEqualTo(provenance);
+            assertThat(projection.supersededAttempt()).isEqualTo(attempt);
+        }
+
+        assertThat(CashflowSettlementCyclePolicy.project(
+            new CashflowSettlementCyclePolicy.ProjectionFacts(
+                true, "REOPENED", 5, "OPEN", "WAITING_FOR_UPDATE", true, provenance, true
+            )
+        ).businessState()).isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
     }
 
     @Test
@@ -203,6 +230,37 @@ class CashflowSettlementCyclePolicyTest {
     }
 
     @Test
+    void otherActiveCycleBlocksOnlyCommandsThatRequireAnInactiveCoordinator() {
+        for (CashflowSettlementCyclePolicy.BusinessState state : java.util.List.of(
+            CashflowSettlementCyclePolicy.BusinessState.NOT_REQUESTED,
+            CashflowSettlementCyclePolicy.BusinessState.REJECTED,
+            CashflowSettlementCyclePolicy.BusinessState.WITHDRAWN
+        )) {
+            assertThat(CashflowSettlementCyclePolicy.commandCapabilities(capabilityFacts(
+                state, true, true, false, false, false, false
+            )).get(CashflowSettlementCyclePolicy.Command.SUBMIT_MONTH_CLOSE))
+                .as(state.name())
+                .isEqualTo(new CashflowSettlementCyclePolicy.CommandCapability(
+                    false, "ACTIVE_CYCLE_EXISTS"
+                ));
+        }
+        assertThat(CashflowSettlementCyclePolicy.commandCapabilities(capabilityFacts(
+            CashflowSettlementCyclePolicy.BusinessState.LOCKED,
+            true, true, false, false, false, false
+        )).get(CashflowSettlementCyclePolicy.Command.REQUEST_MONTH_REOPEN))
+            .isEqualTo(new CashflowSettlementCyclePolicy.CommandCapability(
+                false, "ACTIVE_CYCLE_EXISTS"
+            ));
+        assertThat(allowedCommands(capabilityFacts(
+            CashflowSettlementCyclePolicy.BusinessState.REOPENED,
+            true, true, false, false, true, false
+        ))).containsExactly(
+            CashflowSettlementCyclePolicy.Command.SUBMIT_MONTH_CLOSE,
+            CashflowSettlementCyclePolicy.Command.CANCEL_ACTIVE_CYCLE
+        );
+    }
+
+    @Test
     void legacyUnhealthyOrInactiveReadsFailClosedForEveryCommand() {
         CashflowSettlementCyclePolicy.Projection approved = new CashflowSettlementCyclePolicy.Projection(
             CashflowSettlementCyclePolicy.BusinessState.LOCKED,
@@ -249,6 +307,20 @@ class CashflowSettlementCyclePolicyTest {
         boolean requester,
         boolean recoveryAdmin
     ) {
+        return capabilityFacts(
+            state, activeMember, projectWriter, currentApprover, requester, recoveryAdmin, true
+        );
+    }
+
+    private static CashflowSettlementCyclePolicy.CapabilityFacts capabilityFacts(
+        CashflowSettlementCyclePolicy.BusinessState state,
+        boolean activeMember,
+        boolean projectWriter,
+        boolean currentApprover,
+        boolean requester,
+        boolean recoveryAdmin,
+        boolean coordinatorInactive
+    ) {
         return new CashflowSettlementCyclePolicy.CapabilityFacts(
             new CashflowSettlementCyclePolicy.Projection(
                 state, CashflowSettlementCyclePolicy.Health.OK, 1, null, ""
@@ -258,7 +330,8 @@ class CashflowSettlementCyclePolicyTest {
             projectWriter,
             currentApprover,
             requester,
-            recoveryAdmin
+            recoveryAdmin,
+            coordinatorInactive
         );
     }
 
@@ -282,12 +355,6 @@ class CashflowSettlementCyclePolicyTest {
         });
     }
 
-    private static String resolve(String requestStatus, String ledgerStatus, String settlementStatus) {
-        return CashflowSettlementCyclePolicy.resolveMonthCloseLifecycle(
-            new CashflowSettlementCyclePolicy.MonthCloseFacts(requestStatus, ledgerStatus, settlementStatus)
-        ).name();
-    }
-
     private static CashflowSettlementCyclePolicy.Projection project(
         String requestStatus,
         long workflowRevision,
@@ -303,7 +370,8 @@ class CashflowSettlementCyclePolicyTest {
             ledgerStatus,
             settlementStatus,
             headClaimsTargetClosed,
-            provenance
+            provenance,
+            false
         ));
     }
 

@@ -219,6 +219,28 @@ public class WeeklyExpenseCommandService {
         String projectId,
         String yearMonth
     ) {
+        return readCashflowSettlementStatuses(actor, projectId, yearMonth, false);
+    }
+
+    public CashflowSettlementStatusesResponse readCashflowSettlementStatuses(
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth,
+        boolean settlementCycle
+    ) {
+        if (settlementCycle) {
+            CashflowWeeklyOverviewResponse.Item item =
+                readCashflowSettlementCycleDashboardItem(actor, projectId, yearMonth);
+            if (!"OK".equals(item.settlementCycle().health())
+                || "INCONSISTENT".equals(item.settlementCycle().businessState())) {
+                throw new WeeklyExpenseEditLeaseException(
+                    503,
+                    "cashflow_settlement_cycle_read_unavailable",
+                    "Cashflow settlement cycle projection is unavailable."
+                );
+            }
+            return item.settlementStatuses();
+        }
         authorizationService.requireProjectAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectId);
         return settlementStatusesResponse(
             projectId,
@@ -231,8 +253,48 @@ public class WeeklyExpenseCommandService {
         TrustedActorContext actor,
         CashflowSettlementStatusesBatchRequest request
     ) {
+        return readCashflowSettlementStatusesBatch(actor, request, false);
+    }
+
+    public CashflowSettlementStatusesBatchResponse readCashflowSettlementStatusesBatch(
+        TrustedActorContext actor,
+        CashflowSettlementStatusesBatchRequest request,
+        boolean settlementCycle
+    ) {
         List<String> projectIds = request.requireUniqueProjectIds();
         authorizationService.requireProjectsAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectIds);
+        if (settlementCycle) {
+            CashflowSettlementCyclePolicy.Identity identity =
+                CashflowSettlementCyclePolicy.identity(request.yearMonth());
+            Map<String, WeeklyExpensePersistence.CashflowSettlementCycleRecord> cyclesByProject;
+            try {
+                cyclesByProject = persistence.findCashflowSettlementCyclesBatch(
+                    actor, projectIds, identity.cycleYearMonth(), identity.monthCloseTargetYearMonth()
+                );
+            } catch (RuntimeException unavailable) {
+                cyclesByProject = Map.of();
+            }
+            List<CashflowSettlementStatusesResponse> items = new ArrayList<>();
+            List<CashflowSettlementStatusesBatchResponse.ErrorItem> errors = new ArrayList<>();
+            for (String projectId : projectIds) {
+                WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle = cyclesByProject.get(projectId);
+                if (cycle == null
+                    || cycle.projection().health() != CashflowSettlementCyclePolicy.Health.OK
+                    || cycle.projection().businessState() == CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT) {
+                    errors.add(new CashflowSettlementStatusesBatchResponse.ErrorItem(
+                        projectId, CashflowSettlementStatusesBatchResponse.STATUS_UNAVAILABLE
+                    ));
+                } else {
+                    items.add(settlementStatusesResponse(
+                        projectId,
+                        cycle.cycleYearMonth(),
+                        cycle.monthCloseTargetYearMonth(),
+                        cycle.weeklySettlements()
+                    ));
+                }
+            }
+            return new CashflowSettlementStatusesBatchResponse(items, errors);
+        }
         Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> recordsByProject =
             persistence.findCashflowSettlementStatusesBatch(actor.tenantId(), projectIds, request.yearMonth());
         List<CashflowSettlementStatusesResponse> items = new ArrayList<>();
@@ -748,7 +810,7 @@ public class WeeklyExpenseCommandService {
         return new CashflowWeeklyOverviewResponse("1", request.yearMonth(), items, errors);
     }
 
-    public CashflowWeeklyOverviewResponse.SettlementCycle readCashflowSettlementCycle(
+    public CashflowWeeklyOverviewResponse.Item readCashflowSettlementCycleDashboardItem(
         TrustedActorContext actor,
         String projectId,
         String cycleYearMonth
@@ -771,7 +833,17 @@ public class WeeklyExpenseCommandService {
                 "Cashflow settlement cycle projection is unavailable."
             );
         }
-        return settlementCycleResponse(cycle);
+        return new CashflowWeeklyOverviewResponse.Item(
+            projectId,
+            settlementStatusesResponse(
+                projectId,
+                cycle.cycleYearMonth(),
+                cycle.monthCloseTargetYearMonth(),
+                cycle.weeklySettlements()
+            ),
+            null,
+            settlementCycleResponse(cycle)
+        );
     }
 
     private CashflowWeeklyOverviewResponse.SettlementCycle settlementCycleResponse(
@@ -790,7 +862,9 @@ public class WeeklyExpenseCommandService {
                 authority.projectWriter(),
                 authority.currentApprover(),
                 authority.requester(),
-                authority.recoveryAdmin()
+                authority.recoveryAdmin(),
+                authority.coordinatorInactive(),
+                authority.latestApprovalAuthority()
             )
         ).forEach((command, capability) -> commandCapabilities.put(
             command.name(),

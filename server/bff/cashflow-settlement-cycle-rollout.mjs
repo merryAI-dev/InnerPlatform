@@ -670,7 +670,7 @@ function invalidProjectionCount(inventory, projections) {
       `${text(target.projectId)}\n${text(target.cycleYearMonth)}\n${text(target.requestId)}`,
     );
     return !projection
-      || text(projection.businessState) !== 'APPROVED'
+      || text(projection.businessState) !== 'LOCKED'
       || text(projection.health) !== 'OK';
   }).length;
 }

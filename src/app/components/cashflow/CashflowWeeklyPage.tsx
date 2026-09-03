@@ -77,6 +77,7 @@ export function filterCashflowProjectsBySettlementStatus<T extends { id: string;
   department: string,
   statuses: Record<string, CashflowSettlementStatusesResult>,
   statusErrors: Record<string, string>,
+  monthStatusErrors: Record<string, string>,
   statusesLoading: boolean,
   weekNos: number[],
   monthStatusFilter: SettlementStatusFilter,
@@ -88,7 +89,7 @@ export function filterCashflowProjectsBySettlementStatus<T extends { id: string;
     const matches = (period: CashflowSettlementPeriod, filter: SettlementStatusFilter) => (
       filter === 'ALL' || (statusItem(projectStatuses, period)?.status || 'WAITING_FOR_UPDATE') === filter
     );
-    return matches('MONTH', monthStatusFilter)
+    return (Boolean(monthStatusErrors[project.id]) || matches('MONTH', monthStatusFilter))
       && (weekStatusFilter === 'ALL' || weekNos.some((weekNo) => matches(`WEEK_${weekNo}` as CashflowSettlementPeriod, weekStatusFilter)));
   });
 }
@@ -111,7 +112,7 @@ function SettlementStatusButton({
   onAction: (action: 'SUBMIT' | 'APPROVE') => void;
 }) {
   const status = item?.status || 'WAITING_FOR_UPDATE';
-  if (status === 'COMPLETED') {
+  if ((period === 'MONTH' && status === 'LOCKED') || (period !== 'MONTH' && status === 'COMPLETED')) {
     return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />승인 완료</span>;
   }
   if (status === 'WAITING_FOR_UPDATE') {
@@ -157,8 +158,17 @@ function SettlementStatusFilterSelect({
         <SelectContent>
           <SelectItem value="ALL">전체 상태</SelectItem>
           <SelectItem value="WAITING_FOR_UPDATE">{period === 'MONTH' ? '결산 전' : '주정산 이전'}</SelectItem>
-          <SelectItem value="PENDING_APPROVAL">조직장 승인 필요</SelectItem>
-          <SelectItem value="COMPLETED">승인 완료</SelectItem>
+          {period === 'MONTH' ? (
+            <>
+              <SelectItem value="SUBMITTED">조직장 승인 필요</SelectItem>
+              <SelectItem value="LOCKED">승인 완료</SelectItem>
+            </>
+          ) : (
+            <>
+              <SelectItem value="PENDING_APPROVAL">조직장 승인 필요</SelectItem>
+              <SelectItem value="COMPLETED">승인 완료</SelectItem>
+            </>
+          )}
         </SelectContent>
       </Select>
     </div>
@@ -240,21 +250,25 @@ export function CashflowWeeklyPage() {
     (overview?.items || []).flatMap((item) => item.settlementStatuses ? [[item.projectId, item.settlementStatuses]] : []),
   ), [overview]);
   const statusErrors = useMemo<Record<string, string>>(() => {
-    if (overviewError) return Object.fromEntries(overviewProjectIds.map((projectId) => [projectId, overviewError]));
-    return Object.fromEntries((overview?.errors || [])
-      .filter((error) => error.code === 'STATUS_UNAVAILABLE')
-      .map((error) => [error.projectId, '결산 상태를 불러오지 못했습니다. 다시 불러와 주세요.']));
-  }, [overview, overviewError, overviewProjectIds]);
+    if (overviewError) return Object.fromEntries(overviewProjectIds.map((projectId) => [projectId, '상태 재확인 필요']));
+    return {};
+  }, [overviewError, overviewProjectIds]);
+  const monthStatusErrors = useMemo<Record<string, string>>(() => {
+    return Object.fromEntries((overview?.items || [])
+      .filter((item) => item.settlementCycle.health !== 'OK' || item.settlementCycle.businessState === 'INCONSISTENT')
+      .map((item) => [item.projectId, '상태 재확인 필요']));
+  }, [overview]);
   const filteredProjects = useMemo(() => filterCashflowProjectsBySettlementStatus(
     projects,
     deptFilter,
     statuses,
     statusErrors,
+    monthStatusErrors,
     overviewLoading,
     monthWeeks.map((week) => week.weekNo),
     monthStatusFilter,
     weekStatusFilter,
-  ), [deptFilter, monthStatusFilter, monthWeeks, overviewLoading, projects, statusErrors, statuses, weekStatusFilter]);
+  ), [deptFilter, monthStatusErrors, monthStatusFilter, monthWeeks, overviewLoading, projects, statusErrors, statuses, weekStatusFilter]);
 
   useEffect(() => {
     const projectIds = JSON.parse(overviewProjectIdsKey) as string[];
@@ -455,7 +469,7 @@ export function CashflowWeeklyPage() {
                       <td className="sticky left-[180px] z-20 bg-white px-2 py-2 font-medium">{executiveApprover.label || <span className="text-red-700">연결 필요</span>}</td>
                       <td className="sticky left-[284px] z-20 bg-white px-2 py-2 font-medium">{manager.label || <span className="text-red-700">연결 필요</span>}</td>
                       <td className="px-3 py-3 text-center">
-                        {statusErrors[project.id] ? <span className="text-amber-700">정보 확인 필요</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
+                        {statusErrors[project.id] || monthStatusErrors[project.id] ? <span className="text-amber-700">{statusErrors[project.id] || monthStatusErrors[project.id]}</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
                             item={statusItem(projectStatuses, 'MONTH')}
                             period="MONTH"
@@ -464,7 +478,9 @@ export function CashflowWeeklyPage() {
                             onAction={(action) => void transition(project.id, 'MONTH', action)}
                           />
                         )}
-                        <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
+                        {!statusErrors[project.id] && !monthStatusErrors[project.id]
+                          ? <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
+                          : null}
                       </td>
                       <td className="border-l-2 border-slate-300 px-3 py-3 text-center">
                         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-[11px]" onClick={() => openProject(project.id)}>
@@ -475,7 +491,7 @@ export function CashflowWeeklyPage() {
                         const period = `WEEK_${week.weekNo}` as CashflowSettlementPeriod;
                         return (
                           <td key={week.weekNo} className="px-3 py-3 text-center">
-                            {statusErrors[project.id] ? <span className="text-amber-700">정보 확인 필요</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
+                            {statusErrors[project.id] ? <span className="text-amber-700">{statusErrors[project.id]}</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                               <SettlementStatusButton
                                 item={statusItem(projectStatuses, period)}
                                 period={period}

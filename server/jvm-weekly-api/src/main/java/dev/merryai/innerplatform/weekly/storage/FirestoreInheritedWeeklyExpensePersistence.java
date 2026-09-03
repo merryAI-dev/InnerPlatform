@@ -579,7 +579,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             SettlementCycleReadDocuments documents = new SettlementCycleReadDocuments(
                 requestSnapshot.exists(), request, close, settlement, project,
                 headProjection.headClaimsTargetClosed(), headProjection.range(),
-                coordinatorProjection.workflowRevision(), invalid
+                headProjection.latestApprovalAuthority(),
+                coordinatorProjection.workflowRevision(), coordinator,
+                invalid
             );
             documentsByProject.put(projectId, documents);
             if (!headProjection.range().isEmpty()) {
@@ -634,22 +636,43 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             weeklySettlements = List.copyOf(weeklySettlements);
             CashflowSettlementStatusRecord monthSettlement = documents.exactRequestExists()
                 ? canonicalMonth : null;
+            SettlementCycleProvenanceDocuments provenanceDocuments = provenanceByProject.get(projectId);
             CashflowSettlementCyclePolicy.ApprovalProvenance provenance = settlementCycleApprovalProvenance(
-                tenantId, projectId, documents.range(), provenanceByProject.get(projectId)
+                tenantId, projectId, documents.range(), provenanceDocuments
             );
-            long workflowRevision = documents.invalid() ? -1 : documents.workflowRevision();
             String requestStatus = text(request.get("status"), "");
             String ledgerStatus = close.isEmpty() ? "OPEN" : text(close.get("status"), "OPEN");
-            String settlementStatus = monthSettlement == null
-                ? "WAITING_FOR_UPDATE" : monthSettlement.status();
+            String settlementStatus = canonicalMonth.status();
+            boolean coveredByLaterCycle = provenance != null
+                && provenance.closedByCycleYearMonth().compareTo(cycleYearMonth) > 0;
+            boolean coveredAuthorityDocumentsReopenRequested = coveredByLaterCycle
+                && provenanceDocuments != null
+                && "REOPEN_REQUESTED".equals(text(provenanceDocuments.request().get("status"), ""))
+                && "REOPEN_REQUESTED".equals(text(provenanceDocuments.cycleLedger().get("status"), ""));
+            Long authorityWorkflowRevision = coveredAuthorityDocumentsReopenRequested
+                ? canonicalNonNegativeLong(provenanceDocuments.request().get("workflowRevision"))
+                : null;
+            CashflowSettlementCycleWorkflow.Coordinator coordinator = documents.coordinator();
+            boolean coveredAuthorityCoordinatorMatches = coveredAuthorityDocumentsReopenRequested
+                && coordinator.activeState() == CashflowSettlementCycleWorkflow.ActiveState.REOPEN_REQUESTED
+                && provenance.closedByCycleYearMonth().equals(coordinator.activeCycleYearMonth())
+                && provenance.requestId().equals(coordinator.activeRequestId())
+                && authorityWorkflowRevision != null
+                && authorityWorkflowRevision == coordinator.workflowRevision();
+            long workflowRevision = documents.invalid()
+                || (coveredAuthorityDocumentsReopenRequested && !coveredAuthorityCoordinatorMatches)
+                ? -1 : documents.workflowRevision();
             CashflowSettlementCyclePolicy.Projection projection = CashflowSettlementCyclePolicy.project(
                 new CashflowSettlementCyclePolicy.ProjectionFacts(
                     documents.exactRequestExists(), requestStatus, workflowRevision,
-                    ledgerStatus, settlementStatus, documents.headClaimsTargetClosed(), provenance
+                    ledgerStatus, settlementStatus, documents.headClaimsTargetClosed(), provenance,
+                    coveredAuthorityCoordinatorMatches
                 )
             );
-            if (projection.businessState() == CashflowSettlementCyclePolicy.BusinessState.LOCKED
-                && (!documents.exactRequestExists() || !projection.supersededAttempt().isBlank())) {
+            if ((projection.businessState() == CashflowSettlementCyclePolicy.BusinessState.REOPEN_REQUESTED
+                    && coveredByLaterCycle)
+                || (projection.businessState() == CashflowSettlementCyclePolicy.BusinessState.LOCKED
+                    && (!documents.exactRequestExists() || !projection.supersededAttempt().isBlank()))) {
                 monthSettlement = null;
             }
             WeeklyExpensePersistence.CashflowSettlementCycleAuthority authority = settlementCycleAuthority(
@@ -660,7 +683,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 documents.project(),
                 request,
                 provenance,
-                provenanceByProject.get(projectId)
+                provenanceByProject.get(projectId),
+                documents.coordinator().activeState()
+                    == CashflowSettlementCycleWorkflow.ActiveState.INACTIVE,
+                documents.latestApprovalAuthority()
             );
             result.put(projectId, new CashflowSettlementCycleRecord(
                 projectId,
@@ -705,7 +731,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> project,
         Map<String, Object> request,
         CashflowSettlementCyclePolicy.ApprovalProvenance provenance,
-        SettlementCycleProvenanceDocuments provenanceDocuments
+        SettlementCycleProvenanceDocuments provenanceDocuments,
+        boolean coordinatorInactive,
+        boolean latestApprovalAuthority
     ) {
         boolean activeMember = memberExists && isActiveStoredMember(member, actor);
         boolean projectExists = !project.isEmpty()
@@ -727,7 +755,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             projectWriter,
             projectWriter && designatedApprover,
             activeMember && actor.id().equals(text(request.get("requestedByUid"), "")),
-            projectWriter && "admin".equals(storedRole)
+            projectWriter && "admin".equals(storedRole),
+            coordinatorInactive,
+            latestApprovalAuthority
         );
     }
 
@@ -863,7 +893,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     && !targetMonth.isAfter(YearMonth.parse(text(range.get("affectedThroughMonth"), ""))))
                 .findFirst()
                 .orElse(Map.of());
-            return new SettlementCycleHeadProjection(claimsTarget, matchingRange, false);
+            boolean latestApprovalAuthority = !matchingRange.isEmpty()
+                && matchingRange.equals(ranges.getLast());
+            return new SettlementCycleHeadProjection(
+                claimsTarget, matchingRange, latestApprovalAuthority, false
+            );
         } catch (RuntimeException error) {
             return SettlementCycleHeadProjection.invalidProjection();
         }
@@ -883,8 +917,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             String requestId = text(range.get("requestId"), "");
             String closedByCycle = text(range.get("closedByCycleYearMonth"), "");
             String rootHash = text(range.get("rootHash"), "");
-            Long ledgerRevision = canonicalPositiveLong(range.get("ledgerRevision"));
-            if (ledgerRevision == null) return null;
+            Long approvalLedgerRevision = canonicalPositiveLong(range.get("ledgerRevision"));
+            if (approvalLedgerRevision == null) return null;
 
             Map<String, Object> version = documents.version();
             Map<String, Object> snapshot = nestedMap(version.get("snapshot"));
@@ -924,7 +958,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 || !projectId.equals(text(version.get("projectId"), ""))
                 || (!canonicalV3 && !targetKeyedV1 && !cycleKeyedV1)
                 || !"CLOSED".equals(text(version.get("status"), ""))
-                || ledgerRevision.longValue() != longValue(version.get("revision"), -1)
+                || approvalLedgerRevision.longValue() != longValue(version.get("revision"), -1)
                 || !CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION.equals(text(snapshot.get("contractVersion"), ""))
                 || !projectId.equals(text(snapshot.get("projectId"), ""))
                 || !requestId.equals(text(snapshot.get("requestId"), ""))
@@ -940,14 +974,19 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 ? documents.cycleLedger() : documents.targetLedger();
             String expectedLedgerYearMonth = canonicalV3 || cycleKeyedV1
                 ? closedByCycle : affectedThrough;
+            Long currentLedgerRevision = canonicalPositiveLong(ledger.get("revision"));
+            String ledgerStatus = text(ledger.get("status"), "");
             if (ledger.isEmpty()
                 || !CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION.equals(text(ledger.get("contractVersion"), ""))
                 || !tenantId.equals(text(ledger.get("tenantId"), ""))
                 || !projectId.equals(text(ledger.get("projectId"), ""))
                 || !expectedLedgerYearMonth.equals(text(ledger.get("yearMonth"), ""))
-                || !Set.of("CLOSED", "REOPEN_REQUESTED").contains(text(ledger.get("status"), ""))
+                || !Set.of("CLOSED", "REOPEN_REQUESTED").contains(ledgerStatus)
                 || !approvalVersionId.equals(text(ledger.get("latestVersionId"), ""))
-                || ledgerRevision.longValue() != longValue(ledger.get("revision"), -1)
+                || currentLedgerRevision == null
+                || (canonicalV3
+                    ? currentLedgerRevision < approvalLedgerRevision
+                    : !currentLedgerRevision.equals(approvalLedgerRevision))
                 || !versionSnapshotHash.equals(text(ledger.get("snapshotHash"), ""))
                 || (canonicalV3
                     && !versionSnapshotHash.equals(hashCanonicalJson(nestedMap(ledger.get("snapshot")))))) {
@@ -962,7 +1001,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             Long requestRevision = canonicalPositiveLong(
                 request.containsKey("evidenceRevision") ? request.get("evidenceRevision") : request.get("revision")
             );
+            Long requestLedgerRevision = canonicalPositiveLong(request.get("ledgerRevision"));
             Long snapshotRequestRevision = canonicalPositiveLong(snapshot.get("requestRevision"));
+            String requestStatus = text(request.get("status"), "");
             boolean canonicalRequest = canonicalV3
                 && closedByCycle.equals(requestYearMonth)
                 && "REQUEST".equals(requestDocumentType)
@@ -980,17 +1021,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 || !projectId.equals(text(request.get("projectId"), ""))
                 || !requestId.equals(text(request.get("requestId"), ""))
                 || (!canonicalRequest && !targetKeyedRequest && !cycleKeyedRequest)
-                || !Set.of("APPROVED", "REOPEN_REQUESTED").contains(text(request.get("status"), ""))
+                || !("CLOSED".equals(ledgerStatus) && "APPROVED".equals(requestStatus)
+                    || "REOPEN_REQUESTED".equals(ledgerStatus) && "REOPEN_REQUESTED".equals(requestStatus))
                 || !scopedTextMatches(request.get("tenantId"), tenantId)
                 || requestRevision == null
                 || !requestRevision.equals(snapshotRequestRevision)
                 || (canonicalV3 && !tenantId.equals(text(request.get("tenantId"), "")))
                 || (canonicalV3 && !approvalVersionId.equals(text(request.get("approvalVersionId"), "")))
                 || (canonicalV3 && !rootHash.equals(text(request.get("manifestHash"), "")))
-                || (canonicalV3 && ledgerRevision.longValue() != longValue(request.get("ledgerRevision"), -1))
+                || (canonicalV3 && !currentLedgerRevision.equals(requestLedgerRevision))
                 || (!canonicalV3 && !optionalTextMatches(request.get("approvalVersionId"), approvalVersionId))
                 || (!canonicalV3 && !optionalTextMatches(request.get("manifestHash"), rootHash))
-                || (!canonicalV3 && !optionalLongMatches(request.get("ledgerRevision"), ledgerRevision))) {
+                || (!canonicalV3 && !optionalLongMatches(request.get("ledgerRevision"), approvalLedgerRevision))) {
                 return null;
             }
             return new CashflowSettlementCyclePolicy.ApprovalProvenance(
@@ -999,7 +1041,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 closedByCycle,
                 approvalVersionId,
                 requestId,
-                ledgerRevision,
+                approvalLedgerRevision,
                 rootHash
             );
         } catch (RuntimeException error) {
@@ -3785,6 +3827,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String projectId,
         String yearMonth,
         CashflowMonthReopenPort.SettlementCycleContext context,
+        long expectedLedgerRevision,
         String expectedRequestStatus,
         String expectedMonthStatus
     ) {
@@ -3820,7 +3863,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ))
             || !context.monthCloseTargetYearMonth().equals(text(request.get("monthCloseTargetYearMonth"), ""))
             || context.evidenceRevision() != longValue(request.get("evidenceRevision"), -1)
-            || !context.manifestHash().equals(text(request.get("manifestHash"), ""))) {
+            || !context.manifestHash().equals(text(request.get("manifestHash"), ""))
+            || expectedLedgerRevision != longValue(request.get("ledgerRevision"), -1)) {
             throw new WeeklyExpenseConflictException("Cashflow settlement cycle reopen request changed.");
         }
         CashflowSettlementCycleWorkflow.Coordinator coordinator = cashflowSettlementCycleCoordinator(
@@ -3870,6 +3914,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> latestRange = ranges.isEmpty() ? Map.of() : ranges.getLast();
         String approvalVersionId = text(request.get("approvalVersionId"), "");
         Long requestLedgerRevision = canonicalPositiveLong(request.get("ledgerRevision"));
+        Long approvalLedgerRevision = canonicalPositiveLong(latestRange.get("ledgerRevision"));
         if (head.isEmpty()
             || !cumulativeAuthorityExists(head)
             || !"CLOSED".equals(text(head.get("status"), ""))
@@ -3880,10 +3925,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !context.manifestHash().equals(text(head.get("rootHash"), ""))
             || approvalVersionId.isBlank()
             || requestLedgerRevision == null
+            || approvalLedgerRevision == null
             || !context.requestId().equals(text(latestRange.get("requestId"), ""))
             || !approvalVersionId.equals(text(latestRange.get("approvalVersionId"), ""))
             || !context.monthCloseTargetYearMonth().equals(text(latestRange.get("affectedThroughMonth"), ""))
-            || requestLedgerRevision.longValue() != longValue(latestRange.get("ledgerRevision"), -1)
+            || requestLedgerRevision < approvalLedgerRevision
             || !context.manifestHash().equals(text(latestRange.get("rootHash"), ""))) {
             throw new WeeklyExpenseConflictException(
                 "Only the latest verified cashflow settlement approval can be reopened."
@@ -3922,7 +3968,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> current = data(snapshot);
         SettlementCycleReopenState cycle = settlementCycle.present()
             ? requireSettlementCycleReopenState(
-                actor, projectId, transition.yearMonth(), settlementCycle, "APPROVED", "LOCKED"
+                actor, projectId, transition.yearMonth(), settlementCycle,
+                transition.expectedRevision(), "APPROVED", "LOCKED"
             )
             : SettlementCycleReopenState.none();
         Instant now = clock.instant();
@@ -4006,7 +4053,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         SettlementCycleReopenState cycle = settlementCycle.present()
             ? requireSettlementCycleReopenState(
                 actor, projectId, transition.yearMonth(), settlementCycle,
-                "REOPEN_REQUESTED", "LOCKED"
+                transition.expectedRevision(), "REOPEN_REQUESTED", "LOCKED"
             )
             : SettlementCycleReopenState.none();
         Map<String, Object> cumulativeHead = transition.updatesHeadAuthority()
@@ -6146,7 +6193,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> project,
         boolean headClaimsTargetClosed,
         Map<String, Object> range,
+        boolean latestApprovalAuthority,
         long workflowRevision,
+        CashflowSettlementCycleWorkflow.Coordinator coordinator,
         boolean invalid
     ) {}
 
@@ -6169,14 +6218,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private record SettlementCycleHeadProjection(
         boolean headClaimsTargetClosed,
         Map<String, Object> range,
+        boolean latestApprovalAuthority,
         boolean invalid
     ) {
         private static SettlementCycleHeadProjection empty() {
-            return new SettlementCycleHeadProjection(false, Map.of(), false);
+            return new SettlementCycleHeadProjection(false, Map.of(), false, false);
         }
 
         private static SettlementCycleHeadProjection invalidProjection() {
-            return new SettlementCycleHeadProjection(false, Map.of(), true);
+            return new SettlementCycleHeadProjection(false, Map.of(), false, true);
         }
     }
 

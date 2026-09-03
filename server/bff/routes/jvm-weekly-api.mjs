@@ -51,11 +51,14 @@ import {
   cashflowMonthCloseRequestPath,
   withdrawPendingCumulativeCloseRequest,
 } from '../cashflow-month-close-withdrawal.mjs';
-import {
-  cashflowFinanceWeekDeadlineAt,
-  cashflowWeeklyApproverDeadlineAt,
-} from '../cashflow-close-deadline.mjs';
+import { cashflowWeeklyApproverDeadlineAt } from '../cashflow-close-deadline.mjs';
 import { cashflowMonthRequestCovers } from '../cashflow-month-state.mjs';
+import {
+  readAlignedCashflowSettlementCycleRequest,
+  requireCashflowSettlementCycleReadContext,
+  requireCashflowSettlementStatusesBatchResult,
+  requireCashflowSettlementStatusesResult,
+} from '../cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import * as z from 'zod/v4';
@@ -66,7 +69,7 @@ const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
 const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
 const CASHFLOW_WEEKLY_COMPLETE_ROLES = ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'];
 const CASHFLOW_MONTH_WORKFLOW_ROLES = ['admin', 'finance', 'pm', 'viewer'];
-const CASHFLOW_APPROVER_LOCKED_REQUEST_STATUSES = ['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'];
+const CASHFLOW_APPROVER_LOCKED_REQUEST_STATUSES = ['PENDING', 'PENDING_APPROVAL', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN'];
 
 function cashflowProjectMonthCloseRequestsQuery(db, tenantId, projectId) {
   if (!db?.collection) throw new Error('cashflow month-close request store unavailable');
@@ -101,19 +104,13 @@ function cashflowAction(enabled, guide, extra = {}) {
   return { enabled: Boolean(enabled), guide: enabled ? '' : guide, ...extra };
 }
 
-function cashflowMonthCloseRequestCanBeSubmitted(record, sourceCloseStatus) {
-  if (!record) return true;
-  if (['REJECTED', 'REOPENED', 'WITHDRAWN'].includes(readOptionalText(record.status))) return true;
-  return readOptionalText(record.status) === 'APPROVED' && readOptionalText(sourceCloseStatus) === 'OPEN';
-}
-
 function buildCashflowMonthCloseActions({
   req,
   dashboard,
   close,
   requestRecord,
   requestAvailable,
-  reopenCapability,
+  settlementCycleContext,
   approverLockRead,
   actionAccess,
   authMode,
@@ -132,9 +129,9 @@ function buildCashflowMonthCloseActions({
   const requestUnavailableGuide = '승인 요청 상태를 불러오지 못했습니다. 다시 불러온 뒤 진행해 주세요.';
   const currentDeadline = dashboard?.deadlineSummary?.current || null;
   const cumulativeScopeReady = Boolean(dashboard?.cumulativeCloseScope);
-  const requestStatus = readOptionalText(requestRecord?.status);
+  const commandCapabilities = settlementCycleContext.commandCapabilities;
   const requestCanBeSubmitted = requestAvailable
-    && cashflowMonthCloseRequestCanBeSubmitted(requestRecord, close?.status);
+    && commandCapabilities.SUBMIT_MONTH_CLOSE.allowed;
   const requestEnabled = workflowRoleAllowed
     && requestCanBeSubmitted
     && close?.closeEligible === true
@@ -215,10 +212,7 @@ function buildCashflowMonthCloseActions({
     withdrawMonthClose: cashflowAction(
       requestAvailable
         && workflowRoleAllowed
-        && requestStatus === 'PENDING'
-        && readOptionalText(requestRecord?.contractVersion) === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
-        && Boolean(readOptionalText(requestRecord?.manifestHash))
-        && readOptionalText(requestRecord?.requestedByUid) === readOptionalText(req.context?.actorId),
+        && commandCapabilities.WITHDRAW_MONTH_CLOSE.allowed,
       !requestAvailable
         ? requestUnavailableGuide
         : !actionAllowed
@@ -230,37 +224,20 @@ function buildCashflowMonthCloseActions({
     requestMonthReopen: cashflowAction(
       requestAvailable
         && workflowRoleAllowed
-        && requestStatus === 'APPROVED'
-        && reopenCapability.available
-        && reopenCapability.enabled,
+        && commandCapabilities.REQUEST_MONTH_REOPEN.allowed,
       !requestAvailable
         ? requestUnavailableGuide
         : !actionAllowed
           ? accessGuide
         : !workflowRoleAllowed
           ? '월 결산 재오픈 요청 권한이 없습니다.'
-          : requestStatus !== 'APPROVED'
-            ? '승인 완료된 월 결산만 재오픈을 요청할 수 있습니다.'
-            : !reopenCapability.available
-              ? '재오픈 가능 여부를 확인하지 못했습니다. 다시 불러온 뒤 진행해 주세요.'
-              : '승인 완료된 최신 월 결산만 재오픈을 요청할 수 있습니다.',
+          : '승인 완료된 최신 월 결산만 재오픈을 요청할 수 있습니다.',
     ),
     cumulativeScope: {
       ready: cumulativeScopeReady,
       guide: cumulativeScopeReady ? '' : '서버의 누적 결산 고정 범위를 확인하지 못했습니다.',
     },
   };
-}
-
-function readJvmReopenRequestCapability(source) {
-  const raw = objectValue(source?.reopenRequest);
-  const enabled = raw?.enabled;
-  const reasonCode = readOptionalText(raw?.reasonCode);
-  const validReason = /^[A-Z][A-Z0-9_]*$/.test(reasonCode);
-  if (typeof enabled !== 'boolean' || (enabled ? reasonCode !== '' : !validReason)) {
-    return { available: false, enabled: false };
-  }
-  return { available: true, enabled };
 }
 
 function cashflowRateStatusLabel(percent) {
@@ -331,7 +308,6 @@ const CASHFLOW_SECTION_ERROR_LABELS = new Map([
   ['monthCloseRequest', '월 결산 승인 요청'],
   ['monthCloseApproverLock', '조직장 변경 잠금'],
   ['monthCloseActionAccess', '현금흐름 작업 권한'],
-  ['monthCloseReopenCapability', '월 결산 재오픈 가능 여부'],
   ['projectMetadata', '프로젝트 등록 정보'],
   ['sheetMirror', '시트 기준값'],
 ]);
@@ -434,49 +410,32 @@ export function cashflowWeekSurfaceTone({ month, weeklyStatus, weeklyAvailable, 
   return isCurrent ? 'current' : 'default';
 }
 
-function cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable, settlementStatus) {
-  if (!requestAvailable || readOptionalText(close?.status) === 'UNAVAILABLE') {
+function cashflowSettlementCycleMonthClosePresentation(context, requestRecord) {
+  if (context.health !== 'OK' || context.businessState === 'INCONSISTENT') {
     return { statusLabel: '상태 재확인 필요', tone: 'danger' };
   }
-  const requestStatus = readOptionalText(requestRecord?.status);
-  if (requestStatus === 'REOPEN_REQUESTED') return { statusLabel: '재오픈 승인 대기', tone: 'warning' };
-  if (requestStatus === 'REOPENED') return { statusLabel: '재결산 필요', tone: 'warning' };
-  if (requestStatus === 'REJECTED') return { statusLabel: '월 결산 반려', tone: 'danger' };
-  if (requestStatus === 'APPROVED') {
+  if (context.businessState === 'REOPEN_REQUESTED') {
+    return { statusLabel: '재오픈 승인 대기', tone: 'warning' };
+  }
+  if (context.businessState === 'REOPENED') return { statusLabel: '재결산 필요', tone: 'warning' };
+  if (context.businessState === 'REJECTED') return { statusLabel: '월 결산 반려', tone: 'danger' };
+  if (context.businessState === 'LOCKED') {
     return {
       status: 'COMPLETED',
       statusLabel: '월 결산 완료',
       tone: 'success',
-      approvedAt: readOptionalText(requestRecord?.reviewedAt),
+      approvedAt: readOptionalText(context.cycle.monthCloseSettlement?.approvedAt)
+        || readOptionalText(requestRecord?.reviewedAt),
     };
   }
-  const canonicalStatus = readOptionalText(settlementStatus?.status);
-  if (canonicalStatus === 'COMPLETED') {
-    return {
-      status: 'COMPLETED',
-      statusLabel: '월 결산 완료',
-      tone: 'success',
-      approvedAt: readOptionalText(settlementStatus?.approvedAt),
-    };
-  }
-  if (canonicalStatus === 'PENDING_APPROVAL') {
+  if (context.businessState === 'SUBMITTED') {
     return { status: 'PENDING_APPROVAL', statusLabel: '조직장 승인 대기', tone: 'warning', approvedAt: '' };
   }
-  if (canonicalStatus === 'WAITING_FOR_UPDATE') {
-    return { status: 'WAITING_FOR_UPDATE', statusLabel: '결산 전', tone: 'neutral', approvedAt: '' };
-  }
-  // canonical JVM 상태가 없는 기존 결산 요청만 호환한다. JVM 상태가 있으면 위 값이 항상 우선한다.
-  if (['PENDING', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)) {
-    return { statusLabel: '조직장 승인 대기', tone: 'warning' };
-  }
-  if (!requestRecord && readOptionalText(close?.status) === 'CLOSED') {
-    return { statusLabel: '월 결산 완료', tone: 'success' };
-  }
-  return { statusLabel: '결산 전', tone: 'neutral' };
+  return { status: 'WAITING_FOR_UPDATE', statusLabel: '결산 전', tone: 'neutral', approvedAt: '' };
 }
 
 function buildCashflowMonthClosePresentation({
-  dashboard, close, requestRecord, requestAvailable, settlementStatus, comparisonBoundary,
+  dashboard, settlementCycleContext, requestRecord, comparisonBoundary,
 }) {
   const weeklyYear = readWeeklyYear(dashboard?.canonical?.weeklyYear);
   const annualYears = weeklyYear === null ? [] : annualYearsFor(weeklyYear);
@@ -590,7 +549,7 @@ function buildCashflowMonthClosePresentation({
       changed: comparisonCells.some((cell) => cell.difference !== null && cell.difference !== 0),
       periodLabel: `${periodStart} ~ ${effectiveAsOfWeek?.yearMonth} ${effectiveAsOfWeek?.weekNo}주차`,
     },
-    monthClose: cashflowLoadedMonthClosePresentation(close, requestRecord, requestAvailable, settlementStatus),
+    monthClose: cashflowSettlementCycleMonthClosePresentation(settlementCycleContext, requestRecord),
     evidenceSource: 'DASHBOARD',
   };
 }
@@ -729,41 +688,6 @@ function resolveBffDataProjectId(env = process.env) {
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
 }
 
-async function alignMonthSettlementStatus(db, tenantId, result) {
-  const projects = Array.isArray(result?.items) && result.items.some((item) => item?.projectId)
-    ? result.items
-    : [result];
-  if (!db?.doc) return result;
-  await Promise.all(projects.map(async (project) => {
-    const projectId = readOptionalText(project?.projectId);
-    const yearMonth = readOptionalText(project?.yearMonth) || readOptionalText(result?.yearMonth);
-    const statusItems = Array.isArray(project?.items)
-      ? project.items
-      : project?.settlementStatuses?.items;
-    if (!projectId || !yearMonth || !Array.isArray(statusItems)) return;
-    // 마감의 단일 소스는 JVM 이다 (CashflowWeekDeadline). JVM 이 보낸 값을 그대로 쓰고,
-    // 아직 값을 보내지 않는 구버전 응답에만 parity 표 사본으로 채운다. 사본이 판정을
-    // 이기기 시작하면 규칙이 조용히 갈린다 - 그래서 순서가 JVM 먼저다.
-    const withDeadlines = (item) => {
-      const period = readOptionalText(item?.period);
-      const weekMatch = /^WEEK_([1-5])$/.exec(period);
-      if (!weekMatch) return item;
-      const deadlineAt = readOptionalText(item?.deadlineAt)
-        || cashflowFinanceWeekDeadlineAt(yearMonth, Number(weekMatch[1]));
-      const approverDeadlineAt = readOptionalText(item?.approverDeadlineAt)
-        || cashflowWeeklyApproverDeadlineAt(deadlineAt);
-      return { ...item, deadlineAt, approverDeadlineAt };
-    };
-    const alignedItems = statusItems.map(withDeadlines);
-    if (Array.isArray(project?.items)) {
-      project.items = alignedItems;
-    } else {
-      project.settlementStatuses = { ...project.settlementStatuses, items: alignedItems };
-    }
-  }));
-  return result;
-}
-
 function cashflowMonthCloseRequestMonthPath(tenantId, requestId, revision, yearMonth) {
   return `orgs/${tenantId}/cashflow_month_close_request_months/${requestId}-r${revision}-${yearMonth}`;
 }
@@ -858,6 +782,7 @@ function cashflowMonthCloseRequestView(
       canDecideReopen: Boolean(canDecideReopen),
       ...reopenAuthority,
       revision: record.revision,
+      ledgerRevision: record.ledgerRevision,
       manifestHash: record.manifestHash,
       monthCount: record.monthCount,
       weekCount: record.weekCount,
@@ -3608,7 +3533,10 @@ async function composeCashflowMonthDashboard({
   return {
     source,
     cumulativeCloseAuthority: monthCloseStatusRead.authority,
-    cumulativeCloseScope: buildCumulativeCloseScope(yearMonth, closedSnapshot || mirror),
+    cumulativeCloseScope: buildCumulativeCloseScope(
+      readOptionalText(close?.cycleYearMonth) || yearMonth,
+      closedSnapshot || mirror,
+    ),
     project,
     projectMetadata: projectMetadata(project),
     sheetMetadata: sheetFacts?.metadata || {},
@@ -3654,7 +3582,8 @@ async function composeCashflowMonthDashboard({
       comparisonAsOfWeek: comparisonBoundary.asOfWeek,
       evaluatedBusinessDate: readOptionalText(close?.evaluatedBusinessDate) || null,
       cycleYearMonth: readOptionalText(close?.cycleYearMonth) || yearMonth,
-      targetYearMonth: readOptionalText(close?.targetYearMonth) || buildCumulativeCloseScope(yearMonth).throughMonth,
+      targetYearMonth: readOptionalText(close?.targetYearMonth)
+        || buildCumulativeCloseScope(readOptionalText(close?.cycleYearMonth) || yearMonth).throughMonth,
       closeDeadline: readOptionalText(close?.closeDeadline) || null,
       closeDeadlineAt: readOptionalText(close?.closeDeadlineAt) || null,
       approverDeadlineAt: readOptionalText(close?.approverDeadlineAt) || null,
@@ -4236,7 +4165,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         // 동시에 죽인다 - 실제로 그렇게 죽었다. 확정(쓰기) 경로는 이 열화를 쓰지 않고
         // 전부 fail-closed 를 유지한다.
         const sectionErrors = [];
-        const [publicationBefore, source, weeklyCompliance, monthCloseRequestRead, approverLockRead, actionAccess] = await Promise.all([
+        const [publicationBefore, source, weeklyCompliance, approverLockRead, actionAccess] = await Promise.all([
           trace.measure(
             'publication_before',
             () => readCashflowSheetPublicationState({
@@ -4255,7 +4184,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             () => proxyJavaWeeklyRequest({
               context: req.context,
               method: 'GET',
-              path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
+              path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}&settlementCycle=true`,
               // 이 읽기는 아래 publication fingerprint 재시도로만 다시 실행한다.
               // 전송 timeout 재시도까지 겹치면 같은 무거운 JVM 읽기가 동시 두 번 돈다.
               retry: false,
@@ -4270,15 +4199,6 @@ export function mountJvmWeeklyApiRoutes(app, {
             }),
             { attempt: traceAttempt },
           ),
-          readCashflowMonthCloseRequest({
-            db,
-            tenantId: req.context.tenantId,
-            projectId: rawProjectId,
-            yearMonth,
-          }).then((record) => ({ available: true, record })).catch((error) => {
-            sectionErrors.push(sectionUnavailable('monthCloseRequest', 'cashflow_month_close_request_unavailable', error));
-            return { available: false, record: null };
-          }),
           readCashflowProjectApproverLock({
             db,
             tenantId: req.context.tenantId,
@@ -4297,6 +4217,26 @@ export function mountJvmWeeklyApiRoutes(app, {
             return { available: true, allowed: false };
           }),
         ]);
+        const settlementCycleContext = requireCashflowSettlementCycleReadContext(source, {
+          projectId: rawProjectId,
+          cycleYearMonth: yearMonth,
+        });
+        let monthCloseRequestRead;
+        try {
+          const record = await readAlignedCashflowSettlementCycleRequest({
+            db,
+            tenantId: req.context.tenantId,
+            projectId: rawProjectId,
+            context: settlementCycleContext,
+          });
+          monthCloseRequestRead = { available: true, record };
+        } catch (error) {
+          if (readOptionalText(error?.code) === 'cashflow_settlement_cycle_response_invalid') throw error;
+          sectionErrors.push(sectionUnavailable(
+            'monthCloseRequest', 'cashflow_month_close_request_unavailable', error,
+          ));
+          monthCloseRequestRead = { available: false, record: null };
+        }
         const monthCloseRequest = monthCloseRequestRead.record;
         const result = objectValue(source?.monthClose);
         const latestRun = objectValue(source?.latestRun);
@@ -4307,13 +4247,6 @@ export function mountJvmWeeklyApiRoutes(app, {
           if (!sectionErrors.some((current) => current.section === entry.section && current.code === entry.code)) {
             sectionErrors.push(entry);
           }
-        }
-        const reopenCapability = readJvmReopenRequestCapability(source);
-        if (!reopenCapability.available) {
-          sectionErrors.push({
-            section: 'monthCloseReopenCapability',
-            code: 'cashflow_month_reopen_capability_unavailable',
-          });
         }
         const snapshotCompatibility = objectValue(source?.snapshotCompatibility) || {
           status: '', missingEvidence: [],
@@ -4332,7 +4265,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           : snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY'
           && snapshotCompatibility.missingEvidence?.includes('OPENING_BALANCES')
             ? null
-            : requireJvmOpeningBalances(source, yearMonth);
+            : requireJvmOpeningBalances(source, settlementCycleContext.cycle.monthCloseTargetYearMonth);
         const authorityIssueCode = readOptionalText(monthStatusEvidence?.issueCode);
         const unavailableStatusMatches = authorityUnavailable
           && monthStatusEvidence?.operationalStatus === null
@@ -4362,9 +4295,18 @@ export function mountJvmWeeklyApiRoutes(app, {
         if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
           throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
         }
-        const monthCloseCalendar = readJvmMonthCloseCalendar(source, yearMonth);
+        const targetYearMonth = settlementCycleContext.cycle.monthCloseTargetYearMonth;
+        const monthCloseCalendar = readJvmMonthCloseCalendar(source, targetYearMonth);
         const operationalCycle = readJvmOperationalCycle(source, yearMonth);
-        const selectedCalendar = monthCloseCalendar.get(yearMonth);
+        const selectedCalendar = monthCloseCalendar.get(targetYearMonth);
+        const settlementMonth = source.settlementStatuses.items
+          .find((item) => readOptionalText(item?.period) === 'MONTH');
+        if (operationalCycle.targetYearMonth !== targetYearMonth
+          || operationalCycle.deadline !== selectedCalendar?.closeDeadline
+          || Date.parse(settlementMonth?.deadlineAt) !== Date.parse(selectedCalendar?.closeDeadlineAt)
+          || Date.parse(settlementMonth?.approverDeadlineAt) !== Date.parse(selectedCalendar?.approverDeadlineAt)) {
+          throw jvmMonthCloseResponseInvalid();
+        }
         const cycleBusinessDate = readOptionalText(result?.evaluatedBusinessDate) || localComparisonBoundary.asOfDate;
         let comparisonBoundary;
         try {
@@ -4390,6 +4332,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           closeEligible: operationalCycle.eligible,
           late: operationalCycle.late,
           monthState: monthCloseRequest ? cashflowMonthCloseRequestView(monthCloseRequest) : null,
+          settlementCycle: settlementCycleContext.cycle,
         };
         const cashflowSourceUnavailable = jvmPartial.unavailableSections.has('cashflow');
         const dashboard = cashflowSourceUnavailable
@@ -4400,7 +4343,7 @@ export function mountJvmWeeklyApiRoutes(app, {
               db,
               req,
               projectId: rawProjectId,
-              yearMonth,
+              yearMonth: targetYearMonth,
               close: cumulativeClose,
               cashflow,
               openingBalances,
@@ -4443,7 +4386,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           close: cumulativeClose,
           requestRecord: monthCloseRequest,
           requestAvailable: monthCloseRequestRead.available,
-          reopenCapability,
+          settlementCycleContext,
           approverLockRead,
           actionAccess,
           authMode,
@@ -4452,14 +4395,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         const operationsSummary = buildCashflowOperationsSummary(dashboard);
         const presentation = buildCashflowMonthClosePresentation({
           dashboard,
-          close: cumulativeClose,
+          settlementCycleContext,
           requestRecord: monthCloseRequest,
-          requestAvailable: monthCloseRequestRead.available,
-          settlementStatus: readOptionalText(monthCloseRequest?.throughMonth)
-            && readOptionalText(source?.settlementStatuses?.yearMonth) === readOptionalText(monthCloseRequest?.throughMonth)
-            && Array.isArray(source?.settlementStatuses?.items)
-            ? source.settlementStatuses.items.find((item) => readOptionalText(item?.period) === 'MONTH')
-            : null,
           comparisonBoundary,
         });
         if (publicationStateUnavailable
@@ -4533,9 +4470,10 @@ export function mountJvmWeeklyApiRoutes(app, {
     const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
-      path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(yearMonth)}`,
+      path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(yearMonth)}&settlementCycle=true`,
     });
-    res.status(200).json(await alignMonthSettlementStatus(db, req.context.tenantId, result));
+    requireCashflowSettlementStatusesResult(result, { projectId, yearMonth });
+    res.status(200).json(result);
   }));
 
   app.post('/api/v1/cashflow/settlement-statuses/batch', asyncHandler(async (req, res) => {
@@ -4557,12 +4495,13 @@ export function mountJvmWeeklyApiRoutes(app, {
     const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'POST',
-      path: '/api/v1/cashflow/settlement-statuses/batch',
+      path: '/api/v1/cashflow/settlement-statuses/batch?settlementCycle=true',
       command: 'read_cashflow_settlement_statuses_batch',
       body: { projectIds, yearMonth },
       mutation: false,
     });
-    res.status(200).json(await alignMonthSettlementStatus(db, req.context.tenantId, result));
+    requireCashflowSettlementStatusesBatchResult(result, { projectIds, yearMonth });
+    res.status(200).json(result);
   }));
 
   app.post('/api/v1/cashflow/:projectId/settlement-statuses/transition', asyncHandler(async (req, res) => {
@@ -4660,10 +4599,32 @@ export function mountJvmWeeklyApiRoutes(app, {
       method: 'POST',
       path: '/api/v1/cashflow/weekly-overview',
       command: 'read_cashflow_weekly_overview',
-      body: { projectIds, yearMonth },
+      body: { projectIds, yearMonth, settlementCycle: true },
       mutation: false,
     }), { projectCount: projectIds.length });
-    const alignedWeeklyResult = await alignMonthSettlementStatus(db, req.context.tenantId, weeklyResult);
+    const items = Array.isArray(weeklyResult?.items) ? weeklyResult.items : [];
+    const upstreamErrors = Array.isArray(weeklyResult?.errors) ? weeklyResult.errors : null;
+    const returnedProjectIds = items.map((item) => item?.projectId);
+    const upstreamErrorKeys = upstreamErrors?.map((error) => (
+      `${error?.projectId}:${error?.code}`
+    ));
+    if (weeklyResult?.version !== '2'
+      || weeklyResult?.yearMonth !== yearMonth
+      || items.length !== projectIds.length
+      || returnedProjectIds.some((projectId) => !projectIds.includes(projectId))
+      || new Set(returnedProjectIds).size !== returnedProjectIds.length
+      || !upstreamErrors
+      || upstreamErrors.some((error) => (
+        error?.code !== 'SUMMARY_UNAVAILABLE'
+        || !projectIds.includes(error?.projectId)
+      ))
+      || new Set(upstreamErrorKeys).size !== upstreamErrorKeys.length) {
+      throw createHttpError(502, '월 결산 사이클 응답의 범위가 올바르지 않습니다.', 'cashflow_settlement_cycle_response_invalid');
+    }
+    for (const item of items) {
+      const projectId = item.projectId;
+      requireCashflowSettlementCycleReadContext(item, { projectId, cycleYearMonth: yearMonth });
+    }
     let mirrorsByProjectId = new Map();
     let mirrorReadFailed = false;
     try {
@@ -4678,27 +4639,22 @@ export function mountJvmWeeklyApiRoutes(app, {
       mirrorReadFailed = true;
     }
     const combined = {
-      ...alignedWeeklyResult,
-      version: '4',
+      ...weeklyResult,
+      version: '5',
       yearMonth,
       monthCloseTargetYearMonth,
       monthCloseTargetLabel: `${Number(monthCloseTargetYearMonth.slice(5, 7))}월`,
-      items: (Array.isArray(alignedWeeklyResult?.items) ? alignedWeeklyResult.items : []).map((item) => {
-        const mirror = mirrorsByProjectId.get(readOptionalText(item?.projectId));
+      items: items.map((item) => {
+        const mirror = mirrorsByProjectId.get(item?.projectId);
         return {
           ...item,
           projectionActualSummary: mirror?.projectionActualSummary || null,
           sheetCapturedAt: mirror?.sheetCapturedAt || null,
         };
       }),
-      errors: [
-        ...(Array.isArray(alignedWeeklyResult?.errors)
-          ? alignedWeeklyResult.errors.filter((error) => readOptionalText(error?.code) !== 'SUMMARY_UNAVAILABLE')
-          : []),
-        ...(mirrorReadFailed
-          ? projectIds.map((projectId) => ({ projectId, code: 'SUMMARY_UNAVAILABLE' }))
-          : []),
-      ],
+      errors: mirrorReadFailed
+        ? projectIds.map((projectId) => ({ projectId, code: 'SUMMARY_UNAVAILABLE' }))
+        : [],
     };
     trace.emit('response', {
       outcome: 'ok',
@@ -6582,13 +6538,13 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (initial?.status === 'REOPEN_REQUESTED'
       && initial.projectId === projectId
       && initial.yearMonth === yearMonth
-      && Number(initial.revision) === expectedRevision + 1
+      && Number(initial.ledgerRevision) === expectedRevision + 1
       && readOptionalText(initial.reopenRequest?.idempotencyKey) === idempotencyKey) {
       res.status(200).json({ request: cashflowMonthCloseRequestView(initial) });
       return;
     }
     if (!initial || initial.projectId !== projectId || initial.yearMonth !== yearMonth
-      || initial.status !== 'APPROVED' || Number(initial.revision) !== expectedRevision) {
+      || initial.status !== 'APPROVED' || Number(initial.ledgerRevision) !== expectedRevision) {
       throw createHttpError(409, '현재 승인된 월 결산 요청만 재오픈을 요청할 수 있습니다.', 'cashflow_month_reopen_conflict');
     }
     const result = assertCashflowMonthReopenMutationResult(
@@ -6609,19 +6565,19 @@ export function mountJvmWeeklyApiRoutes(app, {
       const snapshot = await transaction.get(requestRef);
       const current = snapshot.exists ? snapshot.data() || null : null;
       if (current?.status === 'REOPEN_REQUESTED'
-        && Number(current.revision) === expectedRevision + 1
+        && Number(current.ledgerRevision) === expectedRevision + 1
         && readOptionalText(current.reopenRequest?.idempotencyKey) === idempotencyKey) {
         reopened = current;
         return;
       }
       if (!current || current.projectId !== projectId || current.yearMonth !== yearMonth
-        || current.status !== 'APPROVED' || Number(current.revision) !== expectedRevision) {
+        || current.status !== 'APPROVED' || Number(current.ledgerRevision) !== expectedRevision) {
         throw createHttpError(409, '현재 승인된 월 결산 요청만 재오픈을 요청할 수 있습니다.', 'cashflow_month_reopen_conflict');
       }
       reopened = {
         ...current,
         status: 'REOPEN_REQUESTED',
-        revision: expectedRevision + 1,
+        ledgerRevision: expectedRevision + 1,
         reopenRequest: {
           reason, requestedAt: now().toISOString(), requestedByUid: req.context.actorId,
           idempotencyKey,
@@ -6630,8 +6586,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         reopenDecision: null,
       };
       transaction.set(requestRef, reopened);
-      transaction.set(db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, reopened.revision, 'reopen_requested')), {
-        requestId, projectId, yearMonth, action: 'REOPEN_REQUESTED', revision: reopened.revision,
+      transaction.set(db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, reopened.ledgerRevision, 'reopen_requested')), {
+        requestId, projectId, yearMonth, action: 'REOPEN_REQUESTED', revision: reopened.ledgerRevision,
         actorUid: req.context.actorId, reason, idempotencyKey, jvmAuditId: result.auditId,
         createdAt: reopened.reopenRequest.requestedAt,
       });
@@ -6663,10 +6619,10 @@ export function mountJvmWeeklyApiRoutes(app, {
     const replayingDecision = initial?.status === terminalStatus
       && initial.projectId === projectId
       && initial.yearMonth === yearMonth
-      && Number(initial.revision) === expectedRevision + 1
+      && Number(initial.ledgerRevision) === expectedRevision + 1
       && readOptionalText(initial.reopenDecision?.idempotencyKey) === idempotencyKey;
     if (!replayingDecision && (!initial || initial.projectId !== projectId || initial.yearMonth !== yearMonth
-      || initial.status !== 'REOPEN_REQUESTED' || Number(initial.revision) !== expectedRevision)) {
+      || initial.status !== 'REOPEN_REQUESTED' || Number(initial.ledgerRevision) !== expectedRevision)) {
       throw createHttpError(409, '변경되었거나 처리된 재오픈 요청입니다.', 'cashflow_month_reopen_conflict');
     }
     const result = assertCashflowMonthReopenMutationResult(
@@ -6691,19 +6647,19 @@ export function mountJvmWeeklyApiRoutes(app, {
       const snapshot = await transaction.get(requestRef);
       const current = snapshot.exists ? snapshot.data() || null : null;
       if (current?.status === terminalStatus
-        && Number(current.revision) === expectedRevision + 1
+        && Number(current.ledgerRevision) === expectedRevision + 1
         && readOptionalText(current.reopenDecision?.idempotencyKey) === idempotencyKey) {
         decided = current;
         return;
       }
       if (!current || current.projectId !== projectId || current.yearMonth !== yearMonth
-        || current.status !== 'REOPEN_REQUESTED' || Number(current.revision) !== expectedRevision) {
+        || current.status !== 'REOPEN_REQUESTED' || Number(current.ledgerRevision) !== expectedRevision) {
         throw createHttpError(409, '변경되었거나 처리된 재오픈 요청입니다.', 'cashflow_month_reopen_conflict');
       }
       decided = {
         ...current,
         status: terminalStatus,
-        revision: expectedRevision + 1,
+        ledgerRevision: expectedRevision + 1,
         reopenDecision: {
           decision, reason, decidedAt: now().toISOString(), decidedByUid: req.context.actorId,
           idempotencyKey,
@@ -6711,8 +6667,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         },
       };
       transaction.set(requestRef, decided);
-      transaction.set(db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, decided.revision, 'reopen_decided')), {
-        requestId, projectId, yearMonth, action: decision === 'APPROVE' ? 'REOPEN_APPROVED' : 'REOPEN_REJECTED', revision: decided.revision,
+      transaction.set(db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, decided.ledgerRevision, 'reopen_decided')), {
+        requestId, projectId, yearMonth, action: decision === 'APPROVE' ? 'REOPEN_APPROVED' : 'REOPEN_REJECTED', revision: decided.ledgerRevision,
         actorUid: req.context.actorId, reason, idempotencyKey, jvmAuditId: result.auditId,
         createdAt: decided.reopenDecision.decidedAt,
       });

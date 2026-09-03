@@ -93,21 +93,25 @@ async function openCashflowExportWithPlatformApi(
     weeklyOverviewBodies.push(body);
     const projectIds = body.projectIds || [];
     const statusFor = (projectId: string) => {
-      if (projectId === 'cashflow-e2e-a') {
-        return {
-          projectId, yearMonth: '2026-09', items: [{
-            period: 'WEEK_1', status: 'PENDING_APPROVAL',
-            submittedAt: '2026-09-01T01:00:00.000Z', submittedBy: 'person-manager',
-            approvedAt: '', approvedBy: '', revision: 1,
-          }],
-        };
-      }
-      if (projectId === 'cashflow-e2e-b') {
-        return {
-          projectId, yearMonth: '2026-09', items: [],
-        };
-      }
-      return null;
+      return {
+        projectId, yearMonth: '2026-09', items: [
+          {
+            period: 'MONTH', status: 'WAITING_FOR_UPDATE',
+            deadlineAt: '2026-09-10T15:00:00.000Z', approverDeadlineAt: '2026-09-30T15:00:00.000Z',
+            submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+          },
+          ...Array.from({ length: 5 }, (_, index) => ({
+            period: `WEEK_${index + 1}`,
+            status: projectId === 'cashflow-e2e-a' && index === 0
+              ? 'PENDING_APPROVAL' : 'WAITING_FOR_UPDATE',
+            submittedAt: projectId === 'cashflow-e2e-a' && index === 0
+              ? '2026-09-01T01:00:00.000Z' : '',
+            submittedBy: projectId === 'cashflow-e2e-a' && index === 0 ? 'person-manager' : '',
+            approvedAt: '', approvedBy: '', revision: projectId === 'cashflow-e2e-a' && index === 0 ? 1 : 0,
+            deadlineAt: '2026-09-06T15:00:00.000Z', approverDeadlineAt: '2026-09-07T04:00:00.000Z',
+          })),
+        ],
+      };
     };
     const summaryFor = (projectId: string) => projectId === 'cashflow-e2e-a' ? {
       projectId, source: 'SHEET_FORMULA', sourceRevision: 'mirror-source-1', fromMonth: '2026-01',
@@ -121,17 +125,26 @@ async function openCashflowExportWithPlatformApi(
         period, differenceAmount: period === 'WEEK_1' ? -12_345 : null,
       })),
     } : null;
+    const commandCapabilities = Object.fromEntries([
+      'SUBMIT_MONTH_CLOSE', 'WITHDRAW_MONTH_CLOSE', 'APPROVE_MONTH_CLOSE', 'REJECT_MONTH_CLOSE',
+      'REQUEST_MONTH_REOPEN', 'APPROVE_MONTH_REOPEN', 'REJECT_MONTH_REOPEN', 'CANCEL_ACTIVE_CYCLE',
+    ].map((command) => [command, { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' }]));
+    commandCapabilities.SUBMIT_MONTH_CLOSE = { allowed: true, reasonCode: '' };
     await fulfillJson(route, {
-      version: '4', yearMonth: body.yearMonth,
+      version: '5', yearMonth: body.yearMonth,
       monthCloseTargetYearMonth: '2026-08', monthCloseTargetLabel: '8월',
       items: projectIds.map((projectId) => ({
         projectId,
         settlementStatuses: statusFor(projectId),
         projectionActualSummary: summaryFor(projectId),
         sheetCapturedAt: projectId === 'cashflow-e2e-a' ? '2026-08-25T07:48:00.000Z' : null,
+        settlementCycle: {
+          cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+          businessState: 'NOT_REQUESTED', health: 'OK', workflowRevision: 0,
+          monthCloseSettlement: null, provenance: null, supersededAttempt: null, commandCapabilities,
+        },
       })),
       errors: projectIds.flatMap((projectId) => projectId === 'cashflow-e2e-c' ? [
-        { projectId, code: 'STATUS_UNAVAILABLE' },
         { projectId, code: 'SUMMARY_UNAVAILABLE' },
       ] : []),
     });
@@ -146,15 +159,23 @@ async function openCashflowExportWithPlatformApi(
         if (projectId === 'cashflow-e2e-c') return [];
         return [{
           projectId, yearMonth: body.yearMonth,
-          items: [{
-            period: 'WEEK_5',
-            status: projectId === 'cashflow-e2e-a' ? 'COMPLETED' : 'WAITING_FOR_UPDATE',
-            submittedAt: projectId === 'cashflow-e2e-a' ? '2026-08-31T01:00:00.000Z' : '',
-            submittedBy: projectId === 'cashflow-e2e-a' ? 'person-manager' : '',
-            approvedAt: projectId === 'cashflow-e2e-a' ? '2026-08-31T02:00:00.000Z' : '',
-            approvedBy: projectId === 'cashflow-e2e-a' ? 'person-head' : '',
-            revision: projectId === 'cashflow-e2e-a' ? 2 : 0,
-          }],
+          items: [
+            {
+              period: 'MONTH', status: 'WAITING_FOR_UPDATE', revision: 0,
+              submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '',
+              deadlineAt: '2026-08-10T15:00:00.000Z', approverDeadlineAt: '2026-08-31T15:00:00.000Z',
+            },
+            ...Array.from({ length: 5 }, (_, index) => ({
+              period: `WEEK_${index + 1}`,
+              status: projectId === 'cashflow-e2e-a' && index === 4 ? 'COMPLETED' : 'WAITING_FOR_UPDATE',
+              submittedAt: projectId === 'cashflow-e2e-a' && index === 4 ? '2026-08-31T01:00:00.000Z' : '',
+              submittedBy: projectId === 'cashflow-e2e-a' && index === 4 ? 'person-manager' : '',
+              approvedAt: projectId === 'cashflow-e2e-a' && index === 4 ? '2026-08-31T02:00:00.000Z' : '',
+              approvedBy: projectId === 'cashflow-e2e-a' && index === 4 ? 'person-head' : '',
+              revision: projectId === 'cashflow-e2e-a' && index === 4 ? 2 : 0,
+              deadlineAt: '2026-08-30T15:00:00.000Z', approverDeadlineAt: '2026-08-31T04:00:00.000Z',
+            })),
+          ],
         }];
       }),
       errors: projectIds.flatMap((projectId) => projectId === 'cashflow-e2e-c'
@@ -302,7 +323,6 @@ test('shows the canonical recent two-week operations snapshot without the legacy
   await expect(row).toContainText('2026. 08. 25. 16:48');
   const missingRow = page.getByRole('row').filter({ has: page.getByRole('cell', { name: '나 사업', exact: true }) });
   await expect(missingRow).toContainText('주정산 이전');
-  await expect(missingRow).toContainText('주정산 정보를 불러오지 못함');
   await expect(missingRow).toContainText('제출 전');
   await expect(missingRow).toContainText('승인 전');
   await expect(missingRow).toContainText('시트 저장값 없음');

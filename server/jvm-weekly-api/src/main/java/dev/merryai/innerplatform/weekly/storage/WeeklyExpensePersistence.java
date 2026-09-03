@@ -287,7 +287,7 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
             this(
                 projectId, cycleYearMonth, monthCloseTargetYearMonth, weeklySettlements,
                 monthSettlement, projection,
-                new CashflowSettlementCycleAuthority(false, false, false, false, false, false)
+                new CashflowSettlementCycleAuthority(false, false, false, false, false, false, true, true)
             );
         }
     }
@@ -298,8 +298,38 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         boolean projectWriter,
         boolean currentApprover,
         boolean requester,
-        boolean recoveryAdmin
+        boolean recoveryAdmin,
+        boolean coordinatorInactive,
+        boolean latestApprovalAuthority
     ) {
+        public CashflowSettlementCycleAuthority(
+            boolean legacyReadOnly,
+            boolean activeMember,
+            boolean projectWriter,
+            boolean currentApprover,
+            boolean requester,
+            boolean recoveryAdmin,
+            boolean coordinatorInactive
+        ) {
+            this(
+                legacyReadOnly, activeMember, projectWriter, currentApprover,
+                requester, recoveryAdmin, coordinatorInactive, true
+            );
+        }
+
+        public CashflowSettlementCycleAuthority(
+            boolean legacyReadOnly,
+            boolean activeMember,
+            boolean projectWriter,
+            boolean currentApprover,
+            boolean requester,
+            boolean recoveryAdmin
+        ) {
+            this(
+                legacyReadOnly, activeMember, projectWriter, currentApprover,
+                requester, recoveryAdmin, true, true
+            );
+        }
     }
 
     record CashflowSettlementCycleCommandState(

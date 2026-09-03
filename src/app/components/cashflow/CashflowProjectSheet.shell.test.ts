@@ -1115,6 +1115,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('uses server-owned action decisions while reopen decisions use canonical server authority', () => {
+    const reopenSource = source.slice(
+      source.indexOf('const handleMonthReopenAction'),
+      source.indexOf('const handleRefreshSheetMirror'),
+    );
     expect(source).not.toContain("role === 'pm' || role === 'finance'");
     expect(source).not.toContain('const canFinalizeMonth');
     expect(source).not.toContain('const canCompleteWeekly');
@@ -1125,6 +1129,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');
     // 권한 판정은 서버(canDecideReopen). 화면은 그 값으로 버튼을 막을 뿐, 별도 문구를 띄우지 않는다.
     expect(source).toContain("if (reopenAction !== 'request' && !canReviewReopen) {");
+    expect(reopenSource).toContain('const expectedRevision = monthCloseRequest.ledgerRevision;');
+    expect(reopenSource).toContain('expectedRevision,');
+    expect(reopenSource).not.toContain('expectedRevision: monthCloseRequest.revision');
   });
 
   it('keeps a missing server cell null instead of fabricating zero', () => {

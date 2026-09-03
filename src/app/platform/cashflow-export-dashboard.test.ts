@@ -5,6 +5,11 @@ import {
   resolveCashflowExportRecentWeeks,
 } from './cashflow-export-dashboard';
 
+const settlementDeadlines = {
+  deadlineAt: '2026-08-30T15:00:00.000Z',
+  approverDeadlineAt: '2026-08-31T04:00:00.000Z',
+};
+
 describe('cashflow export operations dashboard', () => {
   it.each([
     ['2026-08-26', [['2026-08', 4], ['2026-08', 5]]],
@@ -32,6 +37,7 @@ describe('cashflow export operations dashboard', () => {
       projectId: 'project-a',
       yearMonth: '2026-08',
       items: [{
+        ...settlementDeadlines,
         period: 'WEEK_5' as const,
         status: 'COMPLETED' as const,
         submittedAt: '2026-08-31T01:00:00.000Z', submittedBy: 'pm-1',
@@ -41,6 +47,7 @@ describe('cashflow export operations dashboard', () => {
       projectId: 'project-a',
       yearMonth: '2026-09',
       items: [{
+        ...settlementDeadlines,
         period: 'WEEK_1' as const,
         status: 'PENDING_APPROVAL' as const,
         submittedAt: '2026-09-01T01:00:00.000Z', submittedBy: 'pm-1',
@@ -60,6 +67,7 @@ describe('cashflow export operations dashboard', () => {
   it('fails closed instead of choosing between duplicate status identities', () => {
     const [week] = resolveCashflowExportRecentWeeks('2026-08-31');
     const status = {
+      ...settlementDeadlines,
       period: week.period,
       status: 'COMPLETED' as const,
       submittedAt: '2026-08-25T01:00:00.000Z', submittedBy: 'pm-1',

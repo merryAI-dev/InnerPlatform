@@ -1858,19 +1858,33 @@ class WeeklyExpenseControllerTest {
             new CashflowOpeningBalance.Mode(java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()),
             new CashflowOpeningBalance.Mode(java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
         ));
-        WeeklyExpensePersistence.CashflowSettlementStatusRecord completed =
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord legacyTargetMonth =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "MONTH", "COMPLETED", "2026-08-20T02:51:00Z", "pm-1",
+                "2026-08-25T06:45:00Z", "head-1", 2
+            );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord legacyTargetWeek =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "WEEK_1", "COMPLETED", "", "", "", "", 1
+            );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord canonicalMonth =
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
                 "MONTH", "LOCKED", "2026-08-20T02:51:00Z", "pm-1",
                 "2026-08-25T06:45:00Z", "head-1", 2
             );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord canonicalWeek =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "WEEK_1", "PENDING_APPROVAL", "", "", "", "", 0
+            );
         when(dashboardPersistence.findCashflowSettlementStatuses(
             "tenant-cycle-dashboard", "project-cycle-dashboard", "2026-07"
-        )).thenReturn(List.of(completed));
+        )).thenReturn(List.of(legacyTargetMonth, legacyTargetWeek));
         when(dashboardPersistence.findCashflowSettlementCyclesBatch(
             any(TrustedActorContext.class), eq(List.of("project-cycle-dashboard")), eq("2026-08"), eq("2026-07")
         )).thenReturn(Map.of(
             "project-cycle-dashboard", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
-                "project-cycle-dashboard", "2026-08", "2026-07", List.of(), completed,
+                "project-cycle-dashboard", "2026-08", "2026-07",
+                List.of(canonicalMonth, canonicalWeek), canonicalMonth,
                 new CashflowSettlementCyclePolicy.Projection(
                     CashflowSettlementCyclePolicy.BusinessState.LOCKED,
                     CashflowSettlementCyclePolicy.Health.OK,
@@ -1896,8 +1910,29 @@ class WeeklyExpenseControllerTest {
             .isEqualTo("LOCKED");
         assertThat(json.path("settlementCycle").path("provenance").path("requestId").asText())
             .isEqualTo("project-cycle-dashboard-2026-08");
+        assertThat(json.path("settlementStatuses").path("yearMonth").asText())
+            .isEqualTo("2026-08");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("status").asText())
+            .isEqualTo("LOCKED");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("deadlineAt").asText())
+            .isEqualTo("2026-08-10T15:00:00Z");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("approverDeadlineAt").asText())
+            .isEqualTo("2026-08-31T15:00:00Z");
+        assertThat(json.path("settlementStatuses").path("items").get(1).path("status").asText())
+            .isEqualTo("PENDING_APPROVAL");
+        assertThat(json.path("settlementStatuses").path("items").get(1).path("deadlineAt").asText())
+            .isEqualTo("2026-08-02T15:00:00Z");
+        assertThat(json.path("monthCloseCalendar").get(6).path("yearMonth").asText())
+            .isEqualTo("2026-07");
+        assertThat(json.path("monthCloseCalendar").get(6).path("closeDeadline").asText())
+            .isEqualTo(json.path("operationalCycle").path("closeDeadline").asText());
+        assertThat(json.path("monthCloseCalendar").get(6).path("approverDeadlineAt").asText())
+            .isEqualTo("2026-08-31T15:00:00Z");
         verify(dashboardPersistence).findCashflowSettlementCyclesBatch(
             any(TrustedActorContext.class), eq(List.of("project-cycle-dashboard")), eq("2026-08"), eq("2026-07")
+        );
+        verify(dashboardPersistence, never()).findCashflowSettlementStatuses(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", "2026-07"
         );
     }
 

@@ -52,6 +52,9 @@ import {
   type CashflowMonthCloseActions,
   type CashflowMonthClosePresentation,
   type CashflowOperationsSummary,
+  type CashflowSettlementCycle,
+  type CashflowSettlementStatusItem,
+  type CashflowSettlementStatusesResult,
   reopenCashflowWeeklyUpdateViaBff,
   requestCashflowMonthCloseViaBff,
   fetchCurrentCashflowMonthCloseRequestViaBff,
@@ -75,6 +78,79 @@ import {
 } from './platform-bff-client';
 
 const cashflowLease = { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 };
+
+const cashflowSettlementCycleCommands = [
+  'SUBMIT_MONTH_CLOSE', 'WITHDRAW_MONTH_CLOSE', 'APPROVE_MONTH_CLOSE', 'REJECT_MONTH_CLOSE',
+  'REQUEST_MONTH_REOPEN', 'APPROVE_MONTH_REOPEN', 'REJECT_MONTH_REOPEN', 'CANCEL_ACTIVE_CYCLE',
+];
+
+function cashflowWeeklyOverviewCycle(
+  monthCloseSettlement: CashflowSettlementStatusItem | null = null,
+): CashflowSettlementCycle {
+  const submitted = monthCloseSettlement !== null;
+  return {
+    cycleYearMonth: '2026-08', weeklyYearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07',
+    businessState: submitted ? 'SUBMITTED' : 'NOT_REQUESTED', health: 'OK', workflowRevision: submitted ? 1 : 0,
+    monthCloseSettlement, provenance: null, supersededAttempt: null,
+    commandCapabilities: {
+      ...Object.fromEntries(cashflowSettlementCycleCommands.map((command) => [
+        command, { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+      ])),
+      ...(submitted ? {
+        WITHDRAW_MONTH_CLOSE: { allowed: true, reasonCode: '' },
+        APPROVE_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+        REJECT_MONTH_CLOSE: { allowed: false, reasonCode: 'NOT_CURRENT_APPROVER' },
+        CANCEL_ACTIVE_CYCLE: { allowed: false, reasonCode: 'RECOVERY_ADMIN_REQUIRED' },
+      } : { SUBMIT_MONTH_CLOSE: { allowed: true, reasonCode: '' } }),
+    } as CashflowSettlementCycle['commandCapabilities'],
+  };
+}
+
+function cashflowWeeklyOverviewStatuses(projectId: string, items: CashflowSettlementStatusItem[] = [
+  {
+    period: 'MONTH', status: 'WAITING_FOR_UPDATE',
+    deadlineAt: '2026-08-10T15:00:00.000Z', approverDeadlineAt: '2026-08-31T15:00:00.000Z',
+    submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+  },
+  {
+    period: 'WEEK_1', status: 'PENDING_APPROVAL',
+    deadlineAt: '2026-08-02T15:00:00.000Z', approverDeadlineAt: '2026-08-03T04:00:00.000Z',
+    submittedAt: '2026-08-03T01:00:00.000Z', submittedBy: 'pm-1', approvedAt: '', approvedBy: '', revision: 1,
+  },
+  ...Array.from({ length: 4 }, (_, index) => ({
+    period: `WEEK_${index + 2}` as CashflowSettlementStatusItem['period'],
+    status: 'WAITING_FOR_UPDATE' as const,
+    deadlineAt: '2026-08-06T15:00:00.000Z',
+    approverDeadlineAt: '2026-08-07T04:00:00.000Z',
+    submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+  })),
+]): CashflowSettlementStatusesResult {
+  return { projectId, yearMonth: '2026-08', items };
+}
+
+function cashflowInconsistentOverviewCycle(): CashflowSettlementCycle {
+  return {
+    ...cashflowWeeklyOverviewCycle(),
+    businessState: 'INCONSISTENT', health: 'UNAVAILABLE', workflowRevision: -1,
+    commandCapabilities: Object.fromEntries(cashflowSettlementCycleCommands.map((command) => [
+      command, { allowed: false, reasonCode: 'PROJECTION_NOT_READY' },
+    ])) as CashflowSettlementCycle['commandCapabilities'],
+  };
+}
+
+function cashflowWeeklyOverviewData(
+  settlementCycle: CashflowSettlementCycle = cashflowWeeklyOverviewCycle(),
+) {
+  return {
+    version: '5', yearMonth: '2026-08',
+    monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
+    items: [{
+      projectId: 'p001', settlementStatuses: cashflowWeeklyOverviewStatuses('p001'),
+      projectionActualSummary: null, sheetCapturedAt: '2026-08-25T07:48:00.000Z', settlementCycle,
+    }],
+    errors: [],
+  };
+}
 
 function asMockClient<T extends {
   post: ReturnType<typeof vi.fn>;
@@ -231,7 +307,10 @@ describe('platform-bff-client', () => {
   });
 
   it('posts all settlement project IDs in one bounded batch request', async () => {
-    const data = { items: [], errors: [{ projectId: 'p002', code: 'STATUS_UNAVAILABLE' }] };
+    const data = {
+      items: [cashflowWeeklyOverviewStatuses('p001')],
+      errors: [{ projectId: 'p002', code: 'STATUS_UNAVAILABLE' as const }],
+    };
     const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
     const result = await fetchCashflowSettlementStatusesBatchViaBff({
       tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' },
@@ -243,6 +322,28 @@ describe('platform-bff-client', () => {
       body: { projectIds: ['p001', 'p002'], yearMonth: '2026-08' }, retries: 0, timeoutMs: 12000,
     }));
     expect(result).toEqual(data);
+  });
+
+  it.each([
+    ['missing project coverage', () => ({
+      items: [cashflowWeeklyOverviewStatuses('p001')], errors: [],
+    })],
+    ['malformed settlement status', () => {
+      const settlement = cashflowWeeklyOverviewStatuses('p001');
+      Reflect.set(settlement.items[1], 'deadlineAt', null);
+      return {
+        items: [settlement], errors: [{ projectId: 'p002', code: 'STATUS_UNAVAILABLE' }],
+      };
+    }],
+  ])('fails a settlement batch closed for %s', async (_label, response) => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: response() })), get: vi.fn(), request: vi.fn(),
+    });
+
+    await expect(fetchCashflowSettlementStatusesBatchViaBff({
+      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' },
+      projectIds: ['p001', 'p002'], yearMonth: '2026-08', client,
+    })).rejects.toThrow('현금흐름 정산 상태 응답이 올바르지 않습니다.');
   });
 
   it('posts project IDs and the selected month to the sheet-formula projection-actual summary adapter', async () => {
@@ -274,23 +375,21 @@ describe('platform-bff-client', () => {
     expect(result.errors).toEqual([{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' }]);
   });
 
-  it('posts all visible projects once to the weekly overview without rejecting per-project unavailable data', async () => {
+  it('posts all visible projects once to the weekly overview without rejecting unavailable summaries', async () => {
     const projectIds = Array.from({ length: 61 }, (_, index) => `p${index + 1}`);
     const data = {
-      version: '4',
+      version: '5',
       yearMonth: '2026-08',
       monthCloseTargetYearMonth: '2026-07',
       monthCloseTargetLabel: '7월',
       items: projectIds.map((projectId) => ({
         projectId,
-        settlementStatuses: { projectId, yearMonth: '2026-08', items: [] },
+        settlementStatuses: cashflowWeeklyOverviewStatuses(projectId),
         projectionActualSummary: null,
         sheetCapturedAt: null,
+        settlementCycle: cashflowWeeklyOverviewCycle(),
       })),
-      errors: projectIds.flatMap((projectId) => [
-        { projectId, code: 'STATUS_UNAVAILABLE' as const },
-        { projectId, code: 'SUMMARY_UNAVAILABLE' as const },
-      ]),
+      errors: projectIds.map((projectId) => ({ projectId, code: 'SUMMARY_UNAVAILABLE' as const })),
     };
     const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
 
@@ -303,7 +402,7 @@ describe('platform-bff-client', () => {
     }));
   });
 
-  it('preserves a complete v4 weekly status and stored mirror item', async () => {
+  it('preserves a complete v5 weekly status, canonical cycle, and stored mirror item', async () => {
     const summary = {
       projectId: 'p001', source: 'SHEET_FORMULA' as const, sourceRevision: 'source-1', fromMonth: '2026-01',
       comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 5 },
@@ -317,20 +416,36 @@ describe('platform-bff-client', () => {
         differenceAmount: period === 'WEEK_5' ? -12_345 : null,
       })),
     };
-    const status = {
+    const monthStatus = {
+      period: 'MONTH' as const, status: 'SUBMITTED' as const,
+      deadlineAt: '2026-08-10T15:00:00.000Z', approverDeadlineAt: '2026-08-31T15:00:00.000Z',
+      submittedAt: '2026-08-11T01:00:00.000Z', submittedBy: 'pm-1', approvedAt: '', approvedBy: '', revision: 1,
+    };
+    const weekStatus = {
       period: 'WEEK_5' as const, status: 'COMPLETED' as const,
       deadlineAt: '2026-08-30T15:00:00.000Z', approverDeadlineAt: '2026-08-31T04:00:00.000Z',
       submittedAt: '2026-08-31T01:00:00.000Z', submittedBy: 'pm-1',
       approvedAt: '2026-08-31T02:00:00.000Z', approvedBy: 'head-1', revision: 2,
     };
     const data = {
-      version: '4' as const, yearMonth: '2026-08',
+      version: '5' as const, yearMonth: '2026-08',
       monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
       items: [{
         projectId: 'p001',
-        settlementStatuses: { projectId: 'p001', yearMonth: '2026-08', items: [status] },
+        settlementStatuses: cashflowWeeklyOverviewStatuses('p001', [
+          monthStatus,
+          ...Array.from({ length: 4 }, (_, index) => ({
+            period: `WEEK_${index + 1}` as 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4',
+            status: 'WAITING_FOR_UPDATE' as const,
+            deadlineAt: '2026-08-06T15:00:00.000Z',
+            approverDeadlineAt: '2026-08-07T04:00:00.000Z',
+            submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 0,
+          })),
+          weekStatus,
+        ]),
         projectionActualSummary: summary,
         sheetCapturedAt: '2026-08-25T07:48:00.000Z',
+        settlementCycle: cashflowWeeklyOverviewCycle(monthStatus),
       }],
       errors: [],
     };
@@ -342,10 +457,61 @@ describe('platform-bff-client', () => {
     })).resolves.toBe(data);
   });
 
+  it('accepts the canonical INCONSISTENT persistence sentinel revision', async () => {
+    const data = cashflowWeeklyOverviewData(cashflowInconsistentOverviewCycle());
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' },
+      projectIds: ['p001'], yearMonth: '2026-08', client,
+    })).resolves.toBe(data);
+  });
+
+  it('accepts a structurally valid superseded catch-up cycle without reinterpreting its lifecycle', async () => {
+    const commandCapabilities = Object.fromEntries(cashflowSettlementCycleCommands.map((command) => [
+      command, { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' },
+    ])) as CashflowSettlementCycle['commandCapabilities'];
+    commandCapabilities.REQUEST_MONTH_REOPEN = { allowed: true, reasonCode: '' };
+    const data = cashflowWeeklyOverviewData({
+      ...cashflowWeeklyOverviewCycle(), businessState: 'LOCKED', workflowRevision: 2,
+      monthCloseSettlement: null,
+      provenance: {
+        affectedFromMonth: '2026-01', affectedThroughMonth: '2026-08', closedByCycleYearMonth: '2026-09',
+        approvalVersionId: 'approval-2', requestId: 'p001-2026-09', ledgerRevision: 2,
+        rootHash: `sha256:${'a'.repeat(64)}`,
+      },
+      commandCapabilities,
+    });
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+
+    await expect(fetchCashflowWeeklyOverviewViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' },
+      projectIds: ['p001'], yearMonth: '2026-08', client,
+    })).resolves.toBe(data);
+  });
+
   it.each([
     ['wrong response version', (data: any) => { data.version = '3'; }],
+    ['legacy response version', (data: any) => { data.version = '4'; }],
     ['foreign settlement project', (data: any) => { data.items[0].settlementStatuses.projectId = 'foreign'; }],
     ['foreign settlement month', (data: any) => { data.items[0].settlementStatuses.yearMonth = '2026-07'; }],
+    ['missing settlement cycle', (data: any) => { delete data.items[0].settlementCycle; }],
+    ['foreign settlement cycle', (data: any) => { data.items[0].settlementCycle.cycleYearMonth = '2026-09'; }],
+    ['foreign weekly cycle', (data: any) => { data.items[0].settlementCycle.weeklyYearMonth = '2026-09'; }],
+    ['foreign month-close target', (data: any) => { data.items[0].settlementCycle.monthCloseTargetYearMonth = '2026-06'; }],
+    ['non-previous shared month-close target', (data: any) => {
+      data.monthCloseTargetYearMonth = '2026-06';
+      data.items[0].settlementCycle.monthCloseTargetYearMonth = '2026-06';
+    }],
+    ['malformed cycle capabilities', (data: any) => { delete data.items[0].settlementCycle.commandCapabilities.SUBMIT_MONTH_CLOSE; }],
+    ['negative revision outside INCONSISTENT', (data: any) => { data.items[0].settlementCycle.workflowRevision = -1; }],
+    ['revision below the INCONSISTENT sentinel', (data: any) => {
+      data.items[0].settlementCycle = { ...cashflowInconsistentOverviewCycle(), workflowRevision: -2 };
+    }],
+    ['non-public status error', (data: any) => { data.errors = [{ projectId: 'p001', code: 'STATUS_UNAVAILABLE' }]; }],
+    ['legacy MONTH pending status', (data: any) => { data.items[0].settlementStatuses.items[0].status = 'PENDING_APPROVAL'; }],
+    ['legacy MONTH completed status', (data: any) => { data.items[0].settlementStatuses.items[0].status = 'COMPLETED'; }],
+    ['MONTH-only status on a week', (data: any) => { data.items[0].settlementStatuses.items[1].status = 'LOCKED'; }],
     ['foreign summary project', (data: any) => {
       data.items[0].projectionActualSummary = {
         projectId: 'foreign', source: 'SHEET_FORMULA', sourceRevision: 'source-1', fromMonth: '2026-01',
@@ -362,24 +528,18 @@ describe('platform-bff-client', () => {
     }],
     ['malformed capture timestamp', (data: any) => { data.items[0].sheetCapturedAt = 'not-an-instant'; }],
     ['duplicate settlement period', (data: any) => {
-      const status = {
-        period: 'WEEK_5', status: 'COMPLETED', submittedAt: '', submittedBy: '',
-        approvedAt: '', approvedBy: '', revision: 1,
-      };
-      data.items[0].settlementStatuses.items = [status, { ...status }];
+      data.items[0].settlementStatuses.items.push({ ...data.items[0].settlementStatuses.items[1] });
+    }],
+    ['missing settlement week', (data: any) => {
+      data.items[0].settlementStatuses.items = data.items[0].settlementStatuses.items
+        .filter((item: any) => item.period !== 'WEEK_3');
+    }],
+    ['malformed settlement timestamps', (data: any) => {
+      data.items[0].settlementStatuses.items[1].submittedAt = 'not-an-instant';
+      data.items[0].settlementStatuses.items[1].deadlineAt = null;
     }],
   ])('fails closed for a weekly overview with %s', async (_label, mutate) => {
-    const data: any = {
-      version: '4', yearMonth: '2026-08',
-      monthCloseTargetYearMonth: '2026-07', monthCloseTargetLabel: '7월',
-      items: [{
-        projectId: 'p001',
-        settlementStatuses: { projectId: 'p001', yearMonth: '2026-08', items: [] },
-        projectionActualSummary: null,
-        sheetCapturedAt: '2026-08-25T07:48:00.000Z',
-      }],
-      errors: [],
-    };
+    const data: any = cashflowWeeklyOverviewData();
     mutate(data);
     const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
 

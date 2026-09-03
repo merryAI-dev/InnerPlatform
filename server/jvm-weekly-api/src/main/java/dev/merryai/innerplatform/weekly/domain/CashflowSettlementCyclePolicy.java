@@ -36,40 +36,6 @@ public final class CashflowSettlementCyclePolicy {
         return normalized;
     }
 
-    public static Lifecycle resolveMonthCloseLifecycle(MonthCloseFacts facts) {
-        String request = facts.requestStatus();
-        String ledger = facts.ledgerStatus();
-        String settlement = canonicalMonthStatus(facts.settlementStatus());
-
-        if (request.isBlank()) {
-            if ("OPEN".equals(ledger) && "WAITING_FOR_UPDATE".equals(settlement)) {
-                return Lifecycle.NOT_REQUESTED;
-            }
-            if ("CLOSED".equals(ledger) && "LOCKED".equals(settlement)) {
-                return Lifecycle.APPROVED;
-            }
-            return Lifecycle.INCONSISTENT;
-        }
-        return switch (request) {
-            case "PENDING" -> matches(ledger, settlement, "OPEN", "SUBMITTED")
-                ? Lifecycle.PENDING_APPROVAL : Lifecycle.INCONSISTENT;
-            case "APPROVING" -> matches(ledger, settlement, "OPEN", "SUBMITTED")
-                ? Lifecycle.APPROVING : Lifecycle.INCONSISTENT;
-            case "APPROVED" -> matches(ledger, settlement, "CLOSED", "LOCKED")
-                ? Lifecycle.APPROVED : Lifecycle.INCONSISTENT;
-            case "REOPEN_REQUESTED" -> matches(ledger, settlement, "REOPEN_REQUESTED", "LOCKED")
-                ? Lifecycle.REOPEN_REQUESTED : Lifecycle.INCONSISTENT;
-            case "REOPENED" -> matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
-                ? Lifecycle.REOPENED : Lifecycle.INCONSISTENT;
-            case "REJECTED" -> matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
-                ? Lifecycle.REJECTED : Lifecycle.INCONSISTENT;
-            case "WITHDRAWN" -> matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
-                ? Lifecycle.WITHDRAWN : Lifecycle.INCONSISTENT;
-            case "UNCERTAIN" -> Lifecycle.UNCERTAIN;
-            default -> Lifecycle.INCONSISTENT;
-        };
-    }
-
     public static Projection project(ProjectionFacts facts) {
         String request = normalized(facts.requestStatus()).toUpperCase(Locale.ROOT);
         String ledger = normalized(facts.ledgerStatus()).toUpperCase(Locale.ROOT);
@@ -84,14 +50,31 @@ public final class CashflowSettlementCyclePolicy {
             return inconsistent(facts.workflowRevision(), health);
         }
 
+        if (facts.coveredAuthorityReopenRequested()) {
+            boolean queriedAttemptAllowed = (!facts.exactRequestExists() && request.isBlank())
+                || (facts.exactRequestExists() && Set.of("REJECTED", "WITHDRAWN").contains(request));
+            if (queriedAttemptAllowed
+                && provenance != null
+                && facts.headClaimsTargetClosed()
+                && matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")) {
+                return new Projection(
+                    BusinessState.REOPEN_REQUESTED, health, facts.workflowRevision(), provenance, request
+                );
+            }
+            return inconsistent(facts.workflowRevision(), health);
+        }
+
         if (!facts.exactRequestExists() || request.isBlank() || "BUILDING".equals(request)) {
             if (provenance != null) {
-                return approved(facts.workflowRevision(), health, provenance, "");
+                return facts.headClaimsTargetClosed()
+                    && matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
+                    ? approved(facts.workflowRevision(), health, provenance, "")
+                    : inconsistent(facts.workflowRevision(), health);
             }
-            if (facts.headClaimsTargetClosed()) {
-                return inconsistent(facts.workflowRevision(), health);
-            }
-            return new Projection(BusinessState.NOT_REQUESTED, health, facts.workflowRevision(), null, "");
+            return !facts.headClaimsTargetClosed()
+                && matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
+                ? new Projection(BusinessState.NOT_REQUESTED, health, facts.workflowRevision(), null, "")
+                : inconsistent(facts.workflowRevision(), health);
         }
 
         if ("APPROVING".equals(request) || "UNCERTAIN".equals(request)) {
@@ -109,7 +92,10 @@ public final class CashflowSettlementCyclePolicy {
         }
 
         if (("REJECTED".equals(request) || "WITHDRAWN".equals(request)) && provenance != null) {
-            return approved(facts.workflowRevision(), health, provenance, request);
+            return facts.headClaimsTargetClosed()
+                && matches(ledger, settlement, "OPEN", "WAITING_FOR_UPDATE")
+                ? approved(facts.workflowRevision(), health, provenance, request)
+                : inconsistent(facts.workflowRevision(), health);
         }
 
         return switch (request) {
@@ -164,7 +150,8 @@ public final class CashflowSettlementCyclePolicy {
         capabilities.put(Command.SUBMIT_MONTH_CLOSE, capability(
             Set.of(BusinessState.NOT_REQUESTED, BusinessState.REOPENED,
                 BusinessState.REJECTED, BusinessState.WITHDRAWN).contains(state),
-            facts.projectWriter(), "PROJECT_WRITE_FORBIDDEN"
+            facts.projectWriter() && (state == BusinessState.REOPENED || facts.coordinatorInactive()),
+            facts.projectWriter() ? "ACTIVE_CYCLE_EXISTS" : "PROJECT_WRITE_FORBIDDEN"
         ));
         capabilities.put(Command.WITHDRAW_MONTH_CLOSE, capability(
             state == BusinessState.SUBMITTED,
@@ -181,7 +168,10 @@ public final class CashflowSettlementCyclePolicy {
         ));
         capabilities.put(Command.REQUEST_MONTH_REOPEN, capability(
             state == BusinessState.LOCKED,
-            facts.projectWriter(), "PROJECT_WRITE_FORBIDDEN"
+            facts.projectWriter() && facts.coordinatorInactive() && facts.latestApprovalAuthority(),
+            !facts.projectWriter()
+                ? "PROJECT_WRITE_FORBIDDEN"
+                : !facts.coordinatorInactive() ? "ACTIVE_CYCLE_EXISTS" : "LATEST_APPROVAL_REQUIRED"
         ));
         boolean reopenDecisionAuthority = facts.currentApprover() || facts.recoveryAdmin();
         capabilities.put(Command.APPROVE_MONTH_REOPEN, capability(
@@ -284,14 +274,6 @@ public final class CashflowSettlementCyclePolicy {
     public record Identity(String cycleYearMonth, String weeklyYearMonth, String monthCloseTargetYearMonth) {
     }
 
-    public record MonthCloseFacts(String requestStatus, String ledgerStatus, String settlementStatus) {
-        public MonthCloseFacts {
-            requestStatus = normalized(requestStatus).toUpperCase(Locale.ROOT);
-            ledgerStatus = normalized(ledgerStatus).toUpperCase(Locale.ROOT);
-            settlementStatus = normalized(settlementStatus).toUpperCase(Locale.ROOT);
-        }
-    }
-
     public record ProjectionFacts(
         boolean exactRequestExists,
         String requestStatus,
@@ -299,7 +281,8 @@ public final class CashflowSettlementCyclePolicy {
         String ledgerStatus,
         String settlementStatus,
         boolean headClaimsTargetClosed,
-        ApprovalProvenance provenance
+        ApprovalProvenance provenance,
+        boolean coveredAuthorityReopenRequested
     ) {
     }
 
@@ -333,8 +316,40 @@ public final class CashflowSettlementCyclePolicy {
         boolean projectWriter,
         boolean currentApprover,
         boolean requester,
-        boolean recoveryAdmin
+        boolean recoveryAdmin,
+        boolean coordinatorInactive,
+        boolean latestApprovalAuthority
     ) {
+        public CapabilityFacts(
+            Projection projection,
+            boolean legacyReadOnly,
+            boolean activeMember,
+            boolean projectWriter,
+            boolean currentApprover,
+            boolean requester,
+            boolean recoveryAdmin,
+            boolean coordinatorInactive
+        ) {
+            this(
+                projection, legacyReadOnly, activeMember, projectWriter, currentApprover,
+                requester, recoveryAdmin, coordinatorInactive, true
+            );
+        }
+
+        public CapabilityFacts(
+            Projection projection,
+            boolean legacyReadOnly,
+            boolean activeMember,
+            boolean projectWriter,
+            boolean currentApprover,
+            boolean requester,
+            boolean recoveryAdmin
+        ) {
+            this(
+                projection, legacyReadOnly, activeMember, projectWriter, currentApprover,
+                requester, recoveryAdmin, true, true
+            );
+        }
     }
 
     public record CommandCapability(boolean allowed, String reasonCode) {
@@ -375,19 +390,6 @@ public final class CashflowSettlementCyclePolicy {
         OK,
         RECONCILING,
         UNAVAILABLE
-    }
-
-    public enum Lifecycle {
-        NOT_REQUESTED,
-        PENDING_APPROVAL,
-        APPROVING,
-        APPROVED,
-        REOPEN_REQUESTED,
-        REOPENED,
-        REJECTED,
-        WITHDRAWN,
-        UNCERTAIN,
-        INCONSISTENT
     }
 
     public enum ViolationReason {

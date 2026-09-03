@@ -1,16 +1,23 @@
 package dev.merryai.innerplatform.weekly.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesResponse;
 import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementStatusRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
+import dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +34,29 @@ class CashflowSettlementStatusDeadlineServiceTest {
 
     private static WeeklyExpensePersistence.CashflowSettlementStatusRecord record(String period) {
         return new WeeklyExpensePersistence.CashflowSettlementStatusRecord(period, "COMPLETED", "", "", "", "", 1);
+    }
+
+    private static WeeklyExpensePersistence.CashflowSettlementStatusRecord record(String period, String status) {
+        return new WeeklyExpensePersistence.CashflowSettlementStatusRecord(period, status, "", "", "", "", 1);
+    }
+
+    private static WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle(
+        String projectId,
+        CashflowSettlementCyclePolicy.BusinessState businessState,
+        CashflowSettlementCyclePolicy.Health health,
+        List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> settlements
+    ) {
+        return new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
+            projectId,
+            "2026-08",
+            "2026-07",
+            settlements,
+            settlements.stream().filter(item -> "MONTH".equals(item.period())).findFirst().orElse(null),
+            new CashflowSettlementCyclePolicy.Projection(businessState, health, 1, null, ""),
+            new WeeklyExpensePersistence.CashflowSettlementCycleAuthority(
+                false, false, false, false, false, false
+            )
+        );
     }
 
     @Test
@@ -53,6 +83,143 @@ class CashflowSettlementStatusDeadlineServiceTest {
             org.assertj.core.groups.Tuple.tuple("WEEK_1", "2026-08-02T15:00:00Z", "2026-08-03T04:00:00Z"),
             // 2주: 목요일(8/6) 자정 = 8/7 0시 KST(= 8/6 15:00Z), 승인은 +13시간 = 금 13:00 KST.
             org.assertj.core.groups.Tuple.tuple("WEEK_2", "2026-08-06T15:00:00Z", "2026-08-07T04:00:00Z")
+        );
+    }
+
+    @Test
+    void canonicalSingleReadUsesOnlyAHealthyFullCycleProjection() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
+            persistence, authorization, new ObjectMapper(), false, "live"
+        );
+        List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> healthySettlements = List.of(
+            record("MONTH", "SUBMITTED"), record("WEEK_1", "COMPLETED")
+        );
+        when(persistence.findCashflowSettlementCyclesBatch(
+            ACTOR, List.of("project-a"), "2026-08", "2026-07"
+        )).thenReturn(Map.of(
+            "project-a", cycle(
+                "project-a",
+                CashflowSettlementCyclePolicy.BusinessState.SUBMITTED,
+                CashflowSettlementCyclePolicy.Health.OK,
+                healthySettlements
+            )
+        ));
+
+        CashflowSettlementStatusesResponse response =
+            service.readCashflowSettlementStatuses(ACTOR, "project-a", "2026-08", true);
+
+        assertThat(response.yearMonth()).isEqualTo("2026-08");
+        assertThat(response.items()).extracting(
+            CashflowSettlementStatusesResponse.Item::period,
+            CashflowSettlementStatusesResponse.Item::status,
+            CashflowSettlementStatusesResponse.Item::deadlineAt,
+            CashflowSettlementStatusesResponse.Item::approverDeadlineAt
+        ).containsExactly(
+            org.assertj.core.groups.Tuple.tuple(
+                "MONTH", "SUBMITTED", "2026-08-10T15:00:00Z", "2026-08-31T15:00:00Z"
+            ),
+            org.assertj.core.groups.Tuple.tuple(
+                "WEEK_1", "COMPLETED", "2026-08-02T15:00:00Z", "2026-08-03T04:00:00Z"
+            )
+        );
+        verify(persistence).findCashflowSettlementCyclesBatch(
+            ACTOR, List.of("project-a"), "2026-08", "2026-07"
+        );
+        verify(persistence, never()).findCashflowSettlementStatuses("tenant-a", "project-a", "2026-08");
+
+        when(persistence.findCashflowSettlementCyclesBatch(
+            ACTOR, List.of("project-b"), "2026-08", "2026-07"
+        )).thenReturn(Map.of(
+            "project-b", cycle(
+                "project-b",
+                CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT,
+                CashflowSettlementCyclePolicy.Health.OK,
+                List.of(record("MONTH", "LOCKED"))
+            )
+        ));
+
+        assertThatThrownBy(() -> service.readCashflowSettlementStatuses(
+            ACTOR, "project-b", "2026-08", true
+        )).isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .extracting(error -> ((WeeklyExpenseEditLeaseException) error).code())
+            .isEqualTo("cashflow_settlement_cycle_read_unavailable");
+    }
+
+    @Test
+    void canonicalBatchReadReturnsStatusesOnlyForHealthyFullCycleProjections() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
+            persistence, authorization, new ObjectMapper(), false, "live"
+        );
+        List<String> projectIds = List.of("project-a", "project-b", "project-c");
+        when(persistence.findCashflowSettlementCyclesBatch(
+            ACTOR, projectIds, "2026-08", "2026-07"
+        )).thenReturn(Map.of(
+            "project-a", cycle(
+                "project-a",
+                CashflowSettlementCyclePolicy.BusinessState.SUBMITTED,
+                CashflowSettlementCyclePolicy.Health.OK,
+                List.of(record("MONTH", "SUBMITTED"), record("WEEK_1", "COMPLETED"))
+            ),
+            "project-b", cycle(
+                "project-b",
+                CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT,
+                CashflowSettlementCyclePolicy.Health.OK,
+                List.of(record("MONTH", "LOCKED"))
+            )
+        ));
+
+        CashflowSettlementStatusesBatchResponse response = service.readCashflowSettlementStatusesBatch(
+            ACTOR,
+            new CashflowSettlementStatusesBatchRequest(projectIds, "2026-08"),
+            true
+        );
+
+        assertThat(response.items()).singleElement().satisfies(item -> {
+            assertThat(item.yearMonth()).isEqualTo("2026-08");
+            assertThat(item.items()).extracting(
+                CashflowSettlementStatusesResponse.Item::period,
+                CashflowSettlementStatusesResponse.Item::status
+            ).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("MONTH", "SUBMITTED"),
+                org.assertj.core.groups.Tuple.tuple("WEEK_1", "COMPLETED")
+            );
+        });
+        assertThat(response.errors()).extracting(
+            CashflowSettlementStatusesBatchResponse.ErrorItem::projectId,
+            CashflowSettlementStatusesBatchResponse.ErrorItem::code
+        ).containsExactly(
+            org.assertj.core.groups.Tuple.tuple("project-b", "STATUS_UNAVAILABLE"),
+            org.assertj.core.groups.Tuple.tuple("project-c", "STATUS_UNAVAILABLE")
+        );
+        verify(persistence).findCashflowSettlementCyclesBatch(
+            ACTOR, projectIds, "2026-08", "2026-07"
+        );
+        verify(persistence, never()).findCashflowSettlementStatusesBatch(
+            "tenant-a", projectIds, "2026-08"
+        );
+
+        when(persistence.findCashflowSettlementCyclesBatch(
+            ACTOR, projectIds, "2026-08", "2026-07"
+        )).thenThrow(new IllegalStateException("cycle backend unavailable"));
+
+        CashflowSettlementStatusesBatchResponse unavailable = service.readCashflowSettlementStatusesBatch(
+            ACTOR,
+            new CashflowSettlementStatusesBatchRequest(projectIds, "2026-08"),
+            true
+        );
+
+        assertThat(unavailable.items()).isEmpty();
+        assertThat(unavailable.errors()).extracting(
+            CashflowSettlementStatusesBatchResponse.ErrorItem::projectId,
+            CashflowSettlementStatusesBatchResponse.ErrorItem::code
+        ).containsExactly(
+            org.assertj.core.groups.Tuple.tuple("project-a", "STATUS_UNAVAILABLE"),
+            org.assertj.core.groups.Tuple.tuple("project-b", "STATUS_UNAVAILABLE"),
+            org.assertj.core.groups.Tuple.tuple("project-c", "STATUS_UNAVAILABLE")
         );
     }
 
