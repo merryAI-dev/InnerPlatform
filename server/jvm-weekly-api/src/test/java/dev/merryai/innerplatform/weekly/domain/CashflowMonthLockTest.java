@@ -24,7 +24,7 @@ class CashflowMonthLockTest {
         "2026-07, 2026-08, 2024-06, false",
         "2026-06, 2026-07, 2026-07, false",
         "2026-06, 2026-07, 2026-06, true",
-        "2026-12, 2027-01, 2026-12, false",
+        "2026-12, 2027-01, 2026-12, true",
     })
     void lockMatchesTheBffTable(String closedThrough, String settlementMonth, String target, boolean expected) {
         assertThat(CashflowMonthLock.isLocked(
@@ -43,8 +43,8 @@ class CashflowMonthLockTest {
     }
 
     @Test
-    void neverLocksOutsideTheCycleYear() {
-        // 연간 열로만 존재하는 기간을 월별 CLOSED 로 해석하면 여기서 깨진다.
+    void neverLocksOutsideTheClosedThroughYear() {
+        // closedThrough보다 앞선 연간 열을 월별 CLOSED 로 해석하면 여기서 깨진다.
         for (String yearMonth : new String[] {"2023-01", "2024-06", "2025-12"}) {
             assertThat(CashflowMonthLock.isLocked(
                 YearMonth.parse(yearMonth), YearMonth.parse("2026-08"), YearMonth.parse("2026-07")

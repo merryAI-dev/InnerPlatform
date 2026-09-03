@@ -10,9 +10,8 @@ import java.time.YearMonth;
  * 판정에 쓰지 않는다. 월별 문서의 키는 회차 월이므로 그것을 데이터 월로 읽으면 아직 열려
  * 있는 달까지 잠긴다 - 실제로 라이브에서 8월 회차가 8월을 잠근 것처럼 보이는 증상이 났다.
  *
- * <p>회차 연도 밖의 달은 잠기지 않는다. 주별 블록이 프로젝트당 한 연도이고, 그 앞뒤 연도는
- * 연간 열로만 존재하기 때문이다. 계약은 그 연간형을 월별 CLOSED 로 해석하지 말라고 못
- * 박았다.
+ * <p>직전월을 포함한 {@code closedThrough} 연도의 달만 잠근다. 1월 회차도 전년도 12월을
+ * 잠그며, 그보다 앞선 연간 열은 월별 CLOSED 로 해석하지 않는다.
  *
  * <p>기한 규칙({@link CashflowCloseDeadline})과 같은 처방이다. 규칙을 이 클래스와
  * {@code server/bff/cashflow-close-calendar.mjs} 두 곳에만 두고, 같은 표를 양쪽 테스트에
@@ -32,7 +31,7 @@ public final class CashflowMonthLock {
      */
     public static boolean isLocked(YearMonth target, YearMonth settlementMonth, YearMonth closedThrough) {
         if (target == null || settlementMonth == null || closedThrough == null) return false;
-        if (target.getYear() != settlementMonth.getYear()) return false;
+        if (target.getYear() != closedThrough.getYear()) return false;
         return !target.isAfter(closedThrough);
     }
 }

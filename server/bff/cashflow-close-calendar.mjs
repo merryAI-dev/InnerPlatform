@@ -45,7 +45,7 @@ export function readCashflowCumulativeCloseAuthority(
 /**
  * 누적 결산이 이 달을 잠갔는가. 잠금 판정의 단일 소스다.
  *
- * 회차 연도 밖의 달은 잠기지 않는다 - 주별 블록이 프로젝트당 한 연도이기 때문이다.
+ * 직전월을 포함한 closedThrough 연도의 달만 잠근다. 1월 회차도 전년도 12월을 잠근다.
  * JVM 의 isCumulativeClosed 와 같은 규칙이며, 한쪽을 고치면 양쪽 테스트가 깨진다.
  *
  * head 가 있는 프로젝트에서 월별 monthly_closes 문서는 잠금의 근거가 아니다.
@@ -57,7 +57,7 @@ export function cashflowCumulativeMonthLocked(authority, yearMonth) {
   const closedThrough = text(authority.closedThrough);
   const settlementMonth = text(authority.settlementMonth);
   if (!closedThrough || !settlementMonth) return false;
-  if (month.slice(0, 4) !== settlementMonth.slice(0, 4)) return false;
+  if (month.slice(0, 4) !== closedThrough.slice(0, 4)) return false;
   return month <= closedThrough;
 }
 

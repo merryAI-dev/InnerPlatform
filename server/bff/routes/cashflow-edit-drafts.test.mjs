@@ -376,19 +376,19 @@ describe('cashflow private edit drafts', () => {
     })).resolves.toMatchObject({ status: 200 });
   });
 
-  it('keeps a January settlement from turning the previous annual year into monthly authority', async () => {
+  it('locks December as the previous month of a January settlement cycle', async () => {
     const h = harness();
     h.db.documents.set(
       'orgs/tenant-a/cashflow_cumulative_close_heads/project-a',
-      cumulativeCloseHead({ settlementMonth: '2026-01', closedThrough: '2025-12' }),
+      cumulativeCloseHead({ settlementMonth: '2027-01', closedThrough: '2026-12' }),
     );
 
     await expect(h.service.open({
       ...h.base,
-      idempotencyKey: 'january-settlement-does-not-lock-annual-year',
+      idempotencyKey: 'january-settlement-locks-previous-month',
       baseSnapshot,
-      payload: { monthClose: { yearMonth: '2025-12' } },
-    })).resolves.toMatchObject({ status: 200 });
+      payload: { monthClose: { yearMonth: '2026-12' } },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_locked' });
   });
 
   it.each([

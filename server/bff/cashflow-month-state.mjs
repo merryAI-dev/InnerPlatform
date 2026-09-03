@@ -1,5 +1,8 @@
 import { createHttpError, readOptionalText } from './bff-utils.mjs';
-import { readCashflowCumulativeCloseAuthority } from './cashflow-close-calendar.mjs';
+import {
+  cashflowCumulativeMonthLocked,
+  readCashflowCumulativeCloseAuthority,
+} from './cashflow-close-calendar.mjs';
 
 function isYearMonth(value) {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
@@ -88,9 +91,7 @@ export async function assertCashflowMonthWritable({ db, transaction, tenantId, p
     if (!authority) {
       throw createHttpError(409, '월 결산 기준 정보를 확인할 수 없어 안전하게 중단했어요. AXR 현금흐름 기간·마감 정책에서 상태를 확인해 주세요.', 'cashflow_month_close_contract_invalid');
     }
-    const weeklyYear = Number(authority.settlementMonth.slice(0, 4));
-    if (!yearMonth.startsWith(`${weeklyYear}-`)) return;
-    if (yearMonth > authority.closedThrough) return;
+    if (!cashflowCumulativeMonthLocked(authority, yearMonth)) return;
     throw createHttpError(409, `${yearMonth} 누적 결산 완료 월은 수정할 수 없습니다.`, 'cashflow_month_locked');
   }
 

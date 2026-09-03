@@ -446,7 +446,7 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
     closedThroughLabel: closedThrough
       ? formatYearMonthLabel(closedThrough, '까지 마감')
       : '마감 범위 없음',
-    // 잠금은 결산 회차 연도 안에서 closedThrough 이하 월만 (cashflowCumulativeMonthLocked). 회차가 없으면 잠금도 없다.
+    // 잠금은 closedThrough 연도 안에서 그 이하 월만 (cashflowCumulativeMonthLocked). 회차가 없으면 잠금도 없다.
     settlementMonth,
     settlementMonthLabel: settlementMonth
       ? formatYearMonthLabel(settlementMonth, ' 회차')
