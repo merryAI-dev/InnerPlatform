@@ -717,7 +717,7 @@ public class WeeklyExpenseController {
                 targetMonth.toString(),
                 CashflowCloseDeadline.forTargetMonth(targetMonth).toString(),
                 CashflowCloseDeadline.settlementDeadlineAt(targetMonth).toString(),
-                ApproverDeadlineCalculator.monthly(targetMonth.toString(), 3).toString()
+                ApproverDeadlineCalculator.monthly(targetMonth.toString()).toString()
             ))
             .toList();
     }

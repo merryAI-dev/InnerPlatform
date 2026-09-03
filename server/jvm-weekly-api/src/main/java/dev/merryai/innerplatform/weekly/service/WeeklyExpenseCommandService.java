@@ -514,10 +514,22 @@ public class WeeklyExpenseCommandService {
         String yearMonth,
         List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records
     ) {
+        return settlementStatusesResponse(projectId, yearMonth, yearMonth, records);
+    }
+
+    private CashflowSettlementStatusesResponse settlementStatusesResponse(
+        String projectId,
+        String weeklyYearMonth,
+        String monthYearMonth,
+        List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records
+    ) {
         return new CashflowSettlementStatusesResponse(
             projectId,
-            yearMonth,
-            records.stream().map(record -> settlementStatusItem(yearMonth, record)).toList()
+            weeklyYearMonth,
+            records.stream().map(record -> settlementStatusItem(
+                "MONTH".equals(record.period()) ? monthYearMonth : weeklyYearMonth,
+                record
+            )).toList()
         );
     }
 
@@ -530,7 +542,7 @@ public class WeeklyExpenseCommandService {
         if ("MONTH".equals(record.period())) {
             YearMonth targetMonth = YearMonth.parse(yearMonth);
             deadlineAt = CashflowCloseDeadline.settlementDeadlineAt(targetMonth).toString();
-            approverDeadlineAt = ApproverDeadlineCalculator.monthly(yearMonth, 3).toString();
+            approverDeadlineAt = ApproverDeadlineCalculator.monthly(yearMonth).toString();
         } else if (record.period() != null && record.period().matches("WEEK_[1-5]")) {
             // 주정산도 JVM 이 기한의 단일 소스다. 이전에는 BFF 가 같은 규칙 사본으로 채웠는데,
             // 사본만 살아 있으면 규칙이 조용히 갈린다 (CashflowWeekDeadline Javadoc 참고).
@@ -650,7 +662,12 @@ public class WeeklyExpenseCommandService {
                     projectId, CashflowWeeklyOverviewResponse.STATUS_UNAVAILABLE
                 ));
             } else {
-                statuses = settlementStatusesResponse(projectId, request.yearMonth(), records);
+                statuses = settlementStatusesResponse(
+                    projectId,
+                    cycle.cycleYearMonth(),
+                    cycle.monthCloseTargetYearMonth(),
+                    records
+                );
             }
             CashflowProjectionActualSummaryBatchResponse.Item summary = null;
             CashflowLedgerSource source = sourcesByProject.get(projectId);

@@ -1998,7 +1998,7 @@ class WeeklyExpenseControllerTest {
         assertThat(json.path("monthCloseCalendar").get(7).path("closeDeadlineAt").asText())
             .isEqualTo("2026-09-10T15:00:00Z");
         assertThat(json.path("monthCloseCalendar").get(7).path("approverDeadlineAt").asText())
-            .isEqualTo("2026-09-13T15:00:00Z");
+            .isEqualTo("2026-09-30T15:00:00Z");
         assertThat(json.path("reopenRequest").path("enabled").asBoolean()).isTrue();
     }
 

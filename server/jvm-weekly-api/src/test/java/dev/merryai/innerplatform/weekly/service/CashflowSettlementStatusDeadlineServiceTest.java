@@ -47,8 +47,8 @@ class CashflowSettlementStatusDeadlineServiceTest {
             CashflowSettlementStatusesResponse.Item::deadlineAt,
             CashflowSettlementStatusesResponse.Item::approverDeadlineAt
         ).containsExactly(
-            // 월: 익월 11일 0시 KST / 승인 14일 0시 KST — 기존 동작 그대로.
-            org.assertj.core.groups.Tuple.tuple("MONTH", "2026-09-10T15:00:00Z", "2026-09-13T15:00:00Z"),
+            // 월: 익월 11일 0시 KST / 승인은 그 달 말일까지.
+            org.assertj.core.groups.Tuple.tuple("MONTH", "2026-09-10T15:00:00Z", "2026-09-30T15:00:00Z"),
             // 1주: 2026-08-01 이 토요일이라 목요일이 없는 부분 주. 주 마지막 날(8/2) 다음날 0시 KST.
             org.assertj.core.groups.Tuple.tuple("WEEK_1", "2026-08-02T15:00:00Z", "2026-08-03T04:00:00Z"),
             // 2주: 목요일(8/6) 자정 = 8/7 0시 KST(= 8/6 15:00Z), 승인은 +13시간 = 금 13:00 KST.

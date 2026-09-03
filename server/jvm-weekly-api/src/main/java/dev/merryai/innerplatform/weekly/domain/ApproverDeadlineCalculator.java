@@ -17,12 +17,11 @@ public final class ApproverDeadlineCalculator {
             .plus(Objects.requireNonNull(approvalDelay, "approvalDelay"));
     }
 
-    public static Instant monthly(String yearMonth, long approvalDelayDays) {
+    public static Instant monthly(String yearMonth) {
         return YearMonth.parse(Objects.requireNonNull(yearMonth, "yearMonth"))
-            .plusMonths(1)
-            .atDay(11)
+            .plusMonths(2)
+            .atDay(1)
             .atStartOfDay(SEOUL)
-            .plusDays(approvalDelayDays)
             .toInstant();
     }
 }

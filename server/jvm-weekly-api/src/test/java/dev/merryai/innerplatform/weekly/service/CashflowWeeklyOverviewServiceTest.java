@@ -138,12 +138,26 @@ class CashflowWeeklyOverviewServiceTest {
             .get("APPROVE_MONTH_CLOSE").allowed()).isFalse();
         assertThat(response.items().get(1).settlementCycle().commandCapabilities()
             .get("APPROVE_MONTH_CLOSE").allowed()).isTrue();
-        assertThat(response.items()).allSatisfy(item -> assertThat(item.settlementStatuses().items().getLast())
-            .extracting(
-                CashflowSettlementStatusesResponse.Item::deadlineAt,
-                CashflowSettlementStatusesResponse.Item::approverDeadlineAt
-            )
-            .containsExactly("2026-08-27T15:00:00Z", "2026-08-28T04:00:00Z"));
+        assertThat(response.items()).allSatisfy(item -> {
+            assertThat(item.settlementStatuses().items().getFirst())
+                .extracting(
+                    CashflowSettlementStatusesResponse.Item::deadlineAt,
+                    CashflowSettlementStatusesResponse.Item::approverDeadlineAt
+                )
+                .containsExactly("2026-08-10T15:00:00Z", "2026-08-31T15:00:00Z");
+            assertThat(item.settlementStatuses().items().getLast())
+                .extracting(
+                    CashflowSettlementStatusesResponse.Item::deadlineAt,
+                    CashflowSettlementStatusesResponse.Item::approverDeadlineAt
+                )
+                .containsExactly("2026-08-27T15:00:00Z", "2026-08-28T04:00:00Z");
+            assertThat(item.settlementCycle().monthCloseSettlement())
+                .extracting(
+                    CashflowSettlementStatusesResponse.Item::deadlineAt,
+                    CashflowSettlementStatusesResponse.Item::approverDeadlineAt
+                )
+                .containsExactly("2026-08-10T15:00:00Z", "2026-08-31T15:00:00Z");
+        });
         assertThat(response.items()).allSatisfy(item -> assertThat(item.projectionActualSummary()).isNotNull());
         assertThat(response.errors()).isEmpty();
         verify(authorization).requireProjectsAllowedForCommands(
