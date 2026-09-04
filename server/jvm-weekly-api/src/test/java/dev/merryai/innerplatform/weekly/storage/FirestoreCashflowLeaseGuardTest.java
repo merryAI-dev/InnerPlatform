@@ -5297,7 +5297,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void januarySettlementKeepsThePreviousAnnualYearOutsideMonthlyWriteAuthority() {
+    void januarySettlementLocksThePreviousMonthAcrossTheYearBoundary() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
             "contractVersion", "cashflow-cumulative-close-v2",
@@ -5311,13 +5311,14 @@ class FirestoreCashflowLeaseGuardTest {
             "revision", 1L
         ));
 
-        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> {
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
             fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
             fixture.persistence.requireCashflowMonthsOpen(
                 "tenant-a", "project-a", List.of("2025-12", "2026-01")
             );
             return null;
-        })).doesNotThrowAnyException();
+        })).isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .hasMessageContaining("2025-12");
     }
 
     @Test
