@@ -12,6 +12,7 @@ import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
+import dev.merryai.innerplatform.weekly.api.NormalizeLegacyCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.CancelCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.SubmitCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementCycleRequest;
@@ -287,19 +288,46 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
             this(
                 projectId, cycleYearMonth, monthCloseTargetYearMonth, weeklySettlements,
                 monthSettlement, projection,
-                new CashflowSettlementCycleAuthority(false, false, false, false, false, false)
+                new CashflowSettlementCycleAuthority(false, false, false, false, false, true, true)
             );
         }
     }
 
     record CashflowSettlementCycleAuthority(
-        boolean legacyReadOnly,
         boolean activeMember,
         boolean projectWriter,
         boolean currentApprover,
         boolean requester,
-        boolean recoveryAdmin
+        boolean recoveryAdmin,
+        boolean coordinatorInactive,
+        boolean latestApprovalAuthority
     ) {
+        public CashflowSettlementCycleAuthority(
+            boolean activeMember,
+            boolean projectWriter,
+            boolean currentApprover,
+            boolean requester,
+            boolean recoveryAdmin,
+            boolean coordinatorInactive
+        ) {
+            this(
+                activeMember, projectWriter, currentApprover,
+                requester, recoveryAdmin, coordinatorInactive, true
+            );
+        }
+
+        public CashflowSettlementCycleAuthority(
+            boolean activeMember,
+            boolean projectWriter,
+            boolean currentApprover,
+            boolean requester,
+            boolean recoveryAdmin
+        ) {
+            this(
+                activeMember, projectWriter, currentApprover,
+                requester, recoveryAdmin, true, true
+            );
+        }
     }
 
     record CashflowSettlementCycleCommandState(
@@ -325,7 +353,21 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         String closedThrough,
         String cycleYearMonth,
         String approvalVersionId,
-        long headRevision
+        long headRevision,
+        String migrationFingerprint,
+        boolean migrationRequired
+    ) {
+    }
+
+    record CashflowSettlementCycleLegacyRequestNormalizationState(
+        String projectId,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
+        String requestId,
+        long workflowRevision,
+        long evidenceRevision,
+        String migrationFingerprint,
+        boolean migrationRequired
     ) {
     }
 
@@ -475,6 +517,18 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         TrustedActorContext actor,
         String projectId,
         MigrateCashflowSettlementCycleHeadV2Request request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_cycle_migration_backend_unavailable",
+            "Cashflow settlement cycle migration requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSettlementCycleLegacyRequestNormalizationState normalizeLegacyCashflowSettlementCycleRequest(
+        TrustedActorContext actor,
+        String projectId,
+        NormalizeLegacyCashflowSettlementCycleRequest request
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,

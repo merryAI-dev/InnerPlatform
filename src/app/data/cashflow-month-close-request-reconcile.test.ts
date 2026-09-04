@@ -11,7 +11,7 @@ const base = {
   requestId: 'p1-2026-08',
   projectId: 'p1',
   yearMonth: '2026-08',
-  status: 'PENDING',
+  status: 'PENDING_APPROVAL',
   canDecideReopen: false,
   revision: 1,
   requestedByUid: 'me',
@@ -32,11 +32,11 @@ describe('month close request reconcile after client timeout', () => {
     expect(isRequestFromThisAttempt(base, { actorUid: 'me', startedAtIso })).toBe(true);
     expect(isRequestFromThisAttempt({ ...base, requestedByUid: 'someone' }, { actorUid: 'me', startedAtIso })).toBe(false);
     expect(isRequestFromThisAttempt({ ...base, requestedAt: '2026-08-19T00:45:59.000Z' }, { actorUid: 'me', startedAtIso })).toBe(false);
-    expect(isRequestFromThisAttempt({ ...base, status: 'REJECTED' } as CashflowMonthCloseRequest, { actorUid: 'me', startedAtIso })).toBe(false);
+    expect(isRequestFromThisAttempt({ ...base, status: 'REJECTED' }, { actorUid: 'me', startedAtIso })).toBe(false);
     expect(isRequestFromThisAttempt(null, { actorUid: 'me', startedAtIso })).toBe(false);
   });
 
-  it('returns the request once the server shows it PENDING, waiting through BUILDING and read failures', async () => {
+  it('returns the request once the canonical cycle shows it pending approval', async () => {
     const fetchCurrent = vi.fn()
       .mockRejectedValueOnce(new Error('network'))
       .mockResolvedValueOnce({ ...base, status: 'BUILDING' })
@@ -50,7 +50,7 @@ describe('month close request reconcile after client timeout', () => {
     expect(sleep).toHaveBeenCalledTimes(2);
   });
 
-  it('gives up with null when the request never appears — that is the only time "failed" is true', async () => {
+  it('gives up with null when the request never appears', async () => {
     const fetchCurrent = vi.fn(async () => null);
     const sleep = vi.fn(async () => {});
     const result = await reconcileMonthCloseRequestAfterTimeout({

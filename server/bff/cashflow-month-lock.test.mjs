@@ -10,7 +10,7 @@ import {
 //
 // 규칙은 2026-08-14 기간 권한 계약이 정한 것이다:
 //   잠금 기준은 head 의 closedThrough 하나이며, monthly_closes 는 실행 이력이다.
-//   회차 연도 밖의 달(연간형 2024·2025)은 월별 CLOSED 로 해석하지 않는다.
+//   closedThrough 연도보다 앞선 연간형 2024·2025는 월별 CLOSED 로 해석하지 않는다.
 const authorityOf = (closedThrough, settlementMonth) => readCashflowCumulativeCloseAuthority({
   contractVersion: 'cashflow-cumulative-close-v2',
   tenantId: 'mysc',
@@ -29,14 +29,14 @@ const LOCK_PARITY = [
   ['2026-07', '2026-08', '2026-08', false],
   ['2026-07', '2026-08', '2026-07', true],
   ['2026-07', '2026-08', '2026-01', true],
-  // 회차 연도 밖 - 연간형으로만 존재하는 기간은 잠그지 않는다.
+  // closedThrough 연도 밖 - 연간형으로만 존재하는 기간은 잠그지 않는다.
   ['2026-07', '2026-08', '2025-12', false],
   ['2026-07', '2026-08', '2024-06', false],
   // 라이브 2026전남글로벌: 7월 회차는 6월까지.
   ['2026-06', '2026-07', '2026-07', false],
   ['2026-06', '2026-07', '2026-06', true],
-  // 회차가 연초면 이전 연도는 회차 연도 밖이라 잠기지 않는다.
-  ['2026-12', '2027-01', '2026-12', false],
+  // 연초 회차도 직전 월까지 같은 누적 월 결산으로 잠근다.
+  ['2026-12', '2027-01', '2026-12', true],
 ];
 
 describe('cumulative month lock — JVM parity', () => {
@@ -57,7 +57,7 @@ describe('사보타주 — 계약을 어기면 여기서 깨진다', () => {
   });
 
   // 연도 제한을 빼면 2023-01 부터 전부 잠긴다. 계약이 금지한 해석이다.
-  it('회차 연도 밖은 closedThrough 이전이어도 잠기지 않는다', () => {
+  it('closedThrough 연도 밖은 그보다 이전이어도 잠기지 않는다', () => {
     const authority = authorityOf('2026-07', '2026-08');
     for (const yearMonth of ['2023-01', '2024-06', '2025-12']) {
       expect(cashflowCumulativeMonthLocked(authority, yearMonth)).toBe(false);

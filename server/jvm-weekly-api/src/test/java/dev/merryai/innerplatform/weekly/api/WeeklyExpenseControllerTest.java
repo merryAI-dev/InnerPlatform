@@ -233,6 +233,27 @@ class WeeklyExpenseControllerTest {
         }
     }
 
+    @Test
+    void legacySettlementCycleRequestNormalizationIsCutoffBound() throws Exception {
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-a/settlement-cycle/normalize-legacy-active-request")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(Map.ofEntries(
+                        Map.entry("idempotencyKey", "normalize-outside-cutoff"),
+                        Map.entry("cycleYearMonth", "2027-01"),
+                        Map.entry("expectedRequestRevision", 1),
+                        Map.entry("expectedManifestHash", "sha256:" + "a".repeat(64)),
+                        Map.entry("reason", "cutoff validation"),
+                        Map.entry("dryRun", true),
+                        Map.entry("expectedMigrationFingerprint", "")
+                    ))),
+                "tenant-a",
+                "admin-1",
+                "admin"
+            ))
+            .andExpect(status().isBadRequest());
+    }
+
     private static MockHttpServletRequestBuilder asActor(
         MockHttpServletRequestBuilder request,
         String tenantId,
@@ -1858,21 +1879,35 @@ class WeeklyExpenseControllerTest {
             new CashflowOpeningBalance.Mode(java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()),
             new CashflowOpeningBalance.Mode(java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
         ));
-        WeeklyExpensePersistence.CashflowSettlementStatusRecord completed =
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord legacyTargetMonth =
             new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
                 "MONTH", "COMPLETED", "2026-08-20T02:51:00Z", "pm-1",
                 "2026-08-25T06:45:00Z", "head-1", 2
             );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord legacyTargetWeek =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "WEEK_1", "COMPLETED", "", "", "", "", 1
+            );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord canonicalMonth =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "MONTH", "LOCKED", "2026-08-20T02:51:00Z", "pm-1",
+                "2026-08-25T06:45:00Z", "head-1", 2
+            );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord canonicalWeek =
+            new WeeklyExpensePersistence.CashflowSettlementStatusRecord(
+                "WEEK_1", "PENDING_APPROVAL", "", "", "", "", 0
+            );
         when(dashboardPersistence.findCashflowSettlementStatuses(
             "tenant-cycle-dashboard", "project-cycle-dashboard", "2026-07"
-        )).thenReturn(List.of(completed));
+        )).thenReturn(List.of(legacyTargetMonth, legacyTargetWeek));
         when(dashboardPersistence.findCashflowSettlementCyclesBatch(
             any(TrustedActorContext.class), eq(List.of("project-cycle-dashboard")), eq("2026-08"), eq("2026-07")
         )).thenReturn(Map.of(
             "project-cycle-dashboard", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
-                "project-cycle-dashboard", "2026-08", "2026-07", List.of(), completed,
+                "project-cycle-dashboard", "2026-08", "2026-07",
+                List.of(canonicalMonth, canonicalWeek), canonicalMonth,
                 new CashflowSettlementCyclePolicy.Projection(
-                    CashflowSettlementCyclePolicy.BusinessState.APPROVED,
+                    CashflowSettlementCyclePolicy.BusinessState.LOCKED,
                     CashflowSettlementCyclePolicy.Health.OK,
                     2,
                     new CashflowSettlementCyclePolicy.ApprovalProvenance(
@@ -1893,11 +1928,32 @@ class WeeklyExpenseControllerTest {
 
         JsonNode json = objectMapper.valueToTree(response);
         assertThat(json.path("settlementCycle").path("businessState").asText())
-            .isEqualTo("APPROVED");
+            .isEqualTo("LOCKED");
         assertThat(json.path("settlementCycle").path("provenance").path("requestId").asText())
             .isEqualTo("project-cycle-dashboard-2026-08");
+        assertThat(json.path("settlementStatuses").path("yearMonth").asText())
+            .isEqualTo("2026-08");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("status").asText())
+            .isEqualTo("LOCKED");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("deadlineAt").asText())
+            .isEqualTo("2026-08-10T15:00:00Z");
+        assertThat(json.path("settlementStatuses").path("items").get(0).path("approverDeadlineAt").asText())
+            .isEqualTo("2026-08-31T15:00:00Z");
+        assertThat(json.path("settlementStatuses").path("items").get(1).path("status").asText())
+            .isEqualTo("PENDING_APPROVAL");
+        assertThat(json.path("settlementStatuses").path("items").get(1).path("deadlineAt").asText())
+            .isEqualTo("2026-08-02T15:00:00Z");
+        assertThat(json.path("monthCloseCalendar").get(6).path("yearMonth").asText())
+            .isEqualTo("2026-07");
+        assertThat(json.path("monthCloseCalendar").get(6).path("closeDeadline").asText())
+            .isEqualTo(json.path("operationalCycle").path("closeDeadline").asText());
+        assertThat(json.path("monthCloseCalendar").get(6).path("approverDeadlineAt").asText())
+            .isEqualTo("2026-08-31T15:00:00Z");
         verify(dashboardPersistence).findCashflowSettlementCyclesBatch(
             any(TrustedActorContext.class), eq(List.of("project-cycle-dashboard")), eq("2026-08"), eq("2026-07")
+        );
+        verify(dashboardPersistence, never()).findCashflowSettlementStatuses(
+            "tenant-cycle-dashboard", "project-cycle-dashboard", "2026-07"
         );
     }
 
@@ -1998,7 +2054,7 @@ class WeeklyExpenseControllerTest {
         assertThat(json.path("monthCloseCalendar").get(7).path("closeDeadlineAt").asText())
             .isEqualTo("2026-09-10T15:00:00Z");
         assertThat(json.path("monthCloseCalendar").get(7).path("approverDeadlineAt").asText())
-            .isEqualTo("2026-09-13T15:00:00Z");
+            .isEqualTo("2026-09-30T15:00:00Z");
         assertThat(json.path("reopenRequest").path("enabled").asBoolean()).isTrue();
     }
 

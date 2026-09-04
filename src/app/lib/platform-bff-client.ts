@@ -1250,7 +1250,6 @@ export interface CashflowMonthCloseDashboard {
     cycleYearMonth?: string;
     targetYearMonth?: string;
     closeDeadline: string | null;
-    // 진행 바용 시각 표현(KST). closeDeadlineAt = 익월 11일 0시, approverDeadlineAt = 14일 0시.
     closeDeadlineAt?: string | null;
     approverDeadlineAt?: string | null;
     late: boolean;
@@ -1275,13 +1274,14 @@ export interface CloseCashflowMonthPayload {
   contractVersion?: 'cashflow-cumulative-close-v2';
   yearMonth: string;
   expectedRevision: number;
+  expectedWorkflowRevision: number;
   expectedApproverUid: string;
   expectedProjectVersion: number;
   expectedOpeningBalances: CashflowOpeningBalances;
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REOPEN_REQUESTED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'PENDING_APPROVAL' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REOPEN_REQUESTED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
 
 export interface CashflowMonthCloseStoredSource {
   sourceRevision: string | null;
@@ -1372,11 +1372,15 @@ export interface CashflowMonthCloseRequest {
   requestId: string;
   projectId: string;
   yearMonth: string;
+  cycleYearMonth?: string;
+  monthCloseTargetYearMonth?: string;
   throughMonth?: string;
   status: CashflowMonthCloseRequestStatus;
   canDecideReopen: boolean;
   reopenAuthorityAvailability?: 'ALLOWED' | 'FORBIDDEN' | 'UNAVAILABLE';
   revision: number;
+  workflowRevision?: number;
+  ledgerRevision?: number;
   fromMonth?: string;
   manifestHash?: string;
   monthCount?: number;
@@ -1585,6 +1589,13 @@ export interface CashflowMonthCloseResult {
   commandName: string;
   projectId: string;
   yearMonth: string;
+  cycleYearMonth: string;
+  targetYearMonth: string;
+  closeDeadline: string;
+  closeDeadlineAt: string;
+  approverDeadlineAt: string;
+  monthState: CashflowMonthCloseRequest | null;
+  settlementCycle: CashflowSettlementCycle;
   status: CashflowMonthCloseStatus;
   revision: number;
   reopenCount: number;
@@ -1671,14 +1682,13 @@ export interface CashflowWeeklyCompliancePage {
 }
 
 export type CashflowSettlementPeriod = 'MONTH' | `WEEK_${1 | 2 | 3 | 4 | 5}`;
-export type CashflowSettlementStatus = 'WAITING_FOR_UPDATE' | 'PENDING_APPROVAL' | 'COMPLETED';
+export type CashflowSettlementStatus = 'WAITING_FOR_UPDATE' | 'SUBMITTED' | 'LOCKED' | 'PENDING_APPROVAL' | 'COMPLETED';
 
 export interface CashflowSettlementStatusItem {
   period: CashflowSettlementPeriod;
   status: CashflowSettlementStatus;
-  // 진행 바용 마감(KST, 표시 전용). 주차 마감은 JVM financeWeekDeadline 과 같은 표.
-  deadlineAt?: string | null;
-  approverDeadlineAt?: string | null;
+  deadlineAt: string;
+  approverDeadlineAt: string;
   submittedAt: string;
   submittedBy: string;
   approvedAt: string;
@@ -1727,20 +1737,53 @@ export interface CashflowProjectionActualSummaryBatch {
   }>;
 }
 
+export type CashflowSettlementCycleCommand =
+  | 'SUBMIT_MONTH_CLOSE'
+  | 'WITHDRAW_MONTH_CLOSE'
+  | 'APPROVE_MONTH_CLOSE'
+  | 'REJECT_MONTH_CLOSE'
+  | 'REQUEST_MONTH_REOPEN'
+  | 'APPROVE_MONTH_REOPEN'
+  | 'REJECT_MONTH_REOPEN'
+  | 'CANCEL_ACTIVE_CYCLE';
+
+export interface CashflowSettlementCycle {
+  cycleYearMonth: string;
+  weeklyYearMonth: string;
+  monthCloseTargetYearMonth: string;
+  closeDeadline?: string;
+  businessState: 'NOT_REQUESTED' | 'SUBMITTED' | 'LOCKED' | 'REOPEN_REQUESTED' | 'REOPENED' | 'REJECTED' | 'WITHDRAWN' | 'INCONSISTENT';
+  health: 'OK' | 'RECONCILING' | 'UNAVAILABLE';
+  workflowRevision: number;
+  monthCloseSettlement: CashflowSettlementStatusItem | null;
+  provenance: {
+    affectedFromMonth: string;
+    affectedThroughMonth: string;
+    closedByCycleYearMonth: string;
+    approvalVersionId: string;
+    requestId: string;
+    ledgerRevision: number;
+    rootHash: string;
+  } | null;
+  supersededAttempt: 'REJECTED' | 'WITHDRAWN' | null;
+  commandCapabilities: Record<CashflowSettlementCycleCommand, { allowed: boolean; reasonCode: string }>;
+}
+
 export interface CashflowWeeklyOverviewResult {
-  version: '4';
+  version: '5';
   yearMonth: string;
   monthCloseTargetYearMonth: string;
   monthCloseTargetLabel: string;
   items: Array<{
     projectId: string;
-    settlementStatuses: CashflowSettlementStatusesResult | null;
+    settlementStatuses: CashflowSettlementStatusesResult;
     projectionActualSummary: CashflowProjectionActualSummary | null;
     sheetCapturedAt: string | null;
+    settlementCycle: CashflowSettlementCycle;
   }>;
   errors: Array<{
     projectId: string;
-    code: 'STATUS_UNAVAILABLE' | 'SUMMARY_UNAVAILABLE';
+    code: 'SUMMARY_UNAVAILABLE';
   }>;
 }
 
@@ -3692,18 +3735,70 @@ export async function fetchCashflowWeeklyComplianceViaBff(params: {
   return response.data;
 }
 
-export async function fetchCashflowSettlementStatusesViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  yearMonth: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSettlementStatusesResult> {
-  const response = await resolveClient(params.client).get<CashflowSettlementStatusesResult>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(params.yearMonth)}`,
-    { tenantId: params.tenantId, actor: toRequestActor(params.actor), retries: 0, timeoutMs: 12000 },
-  );
-  return response.data;
+const cashflowSettlementPeriods = new Set<CashflowSettlementPeriod>([
+  'MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5',
+]);
+const cashflowMonthSettlementStatuses = new Set<CashflowSettlementStatus>([
+  'WAITING_FOR_UPDATE', 'SUBMITTED', 'LOCKED',
+]);
+const cashflowWeekSettlementStatuses = new Set<CashflowSettlementStatus>([
+  'WAITING_FOR_UPDATE', 'PENDING_APPROVAL', 'COMPLETED',
+]);
+
+function isCashflowSettlementInstant(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.trim() === value
+    && /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value));
+}
+
+function isIsoCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || value.trim() !== value) return false;
+  const match = /^(20\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+function isCashflowSettlementStatusItem(value: unknown): value is CashflowSettlementStatusItem {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  if (typeof item.period !== 'string' || !cashflowSettlementPeriods.has(item.period as CashflowSettlementPeriod)) return false;
+  const statuses = item.period === 'MONTH' ? cashflowMonthSettlementStatuses : cashflowWeekSettlementStatuses;
+  return typeof item.status === 'string'
+    && statuses.has(item.status as CashflowSettlementStatus)
+    && typeof item.submittedAt === 'string'
+    && typeof item.submittedBy === 'string'
+    && typeof item.approvedAt === 'string'
+    && typeof item.approvedBy === 'string'
+    && Number.isSafeInteger(item.revision)
+    && Number(item.revision) >= 0
+    && (item.submittedAt === '' || isCashflowSettlementInstant(item.submittedAt))
+    && (item.approvedAt === '' || isCashflowSettlementInstant(item.approvedAt))
+    && isCashflowSettlementInstant(item.deadlineAt)
+    && isCashflowSettlementInstant(item.approverDeadlineAt);
+}
+
+function isCashflowSettlementStatusesResult(
+  value: unknown,
+  projectId: string,
+  yearMonth: string,
+): value is CashflowSettlementStatusesResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const settlement = value as Record<string, unknown>;
+  const items = Array.isArray(settlement.items) ? settlement.items : [];
+  const periodKeys = items.map((item) => (
+    item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>).period : undefined
+  ));
+  return settlement.projectId === projectId
+    && settlement.yearMonth === yearMonth
+    && Array.isArray(settlement.items)
+    && items.length === cashflowSettlementPeriods.size
+    && items.every(isCashflowSettlementStatusItem)
+    && new Set(periodKeys).size === periodKeys.length;
 }
 
 export async function fetchCashflowSettlementStatusesBatchViaBff(params: {
@@ -3723,7 +3818,23 @@ export async function fetchCashflowSettlementStatusesBatchViaBff(params: {
       timeoutMs: 12000,
     },
   );
-  return response.data;
+  const result = response.data;
+  const requestedIds = new Set(params.projectIds);
+  const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
+  const errorIds = Array.isArray(result?.errors) ? result.errors.map((error) => error?.projectId) : [];
+  const returnedIds = [...itemIds, ...errorIds];
+  if (requestedIds.size !== params.projectIds.length
+    || !Array.isArray(result?.items)
+    || result.items.some((item) => !requestedIds.has(item?.projectId)
+      || !isCashflowSettlementStatusesResult(item, item?.projectId, params.yearMonth))
+    || !Array.isArray(result?.errors)
+    || result.errors.some((error) => error?.code !== 'STATUS_UNAVAILABLE'
+      || !requestedIds.has(error?.projectId))
+    || returnedIds.length !== params.projectIds.length
+    || new Set(returnedIds).size !== returnedIds.length) {
+    throw new Error('현금흐름 정산 상태 응답이 올바르지 않습니다.');
+  }
+  return result;
 }
 
 export async function transitionCashflowSettlementStatusViaBff(params: {
@@ -3731,7 +3842,7 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
   actor: ActorLike;
   projectId: string;
   yearMonth: string;
-  period: CashflowSettlementPeriod;
+  period: Exclude<CashflowSettlementPeriod, 'MONTH'>;
   action: 'SUBMIT' | 'APPROVE';
   client?: PlatformApiClientLike;
 }): Promise<CashflowSettlementStatusesResult> {
@@ -3811,13 +3922,18 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
   );
   const result = response.data;
   const requestedIds = new Set(params.projectIds);
+  const [cycleYear, cycleMonth] = params.yearMonth.split('-').map(Number);
+  const expectedMonthCloseTargetYearMonth = cycleMonth === 1
+    ? `${cycleYear - 1}-12`
+    : `${cycleYear}-${String(cycleMonth - 1).padStart(2, '0')}`;
   const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
-  const periods = new Set(['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5']);
-  const statuses = new Set(['WAITING_FOR_UPDATE', 'PENDING_APPROVAL', 'COMPLETED']);
-  const validInstant = (value: unknown) => typeof value === 'string'
-    && value.trim() === value
-    && /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && Number.isFinite(Date.parse(value));
+  const cycleCommands = new Set([
+    'SUBMIT_MONTH_CLOSE', 'WITHDRAW_MONTH_CLOSE', 'APPROVE_MONTH_CLOSE', 'REJECT_MONTH_CLOSE',
+    'REQUEST_MONTH_REOPEN', 'APPROVE_MONTH_REOPEN', 'REJECT_MONTH_REOPEN', 'CANCEL_ACTIVE_CYCLE',
+  ]);
+  const objectValue = (value: unknown): Record<string, any> | null => (
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : null
+  );
   const validSummary = (summary: CashflowProjectionActualSummary | null, projectId: string) => {
     if (summary === null) return true;
     const periodKeys = Array.isArray(summary?.periods) ? summary.periods.map((period) => period?.period) : [];
@@ -3837,45 +3953,64 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
       && ['success', 'danger'].includes(summary.display.statusTone)
       && typeof summary.display.differenceLabel === 'string'
       && Array.isArray(summary.periods)
-      && summary.periods.every((period) => periods.has(period?.period)
+      && summary.periods.every((period) => cashflowSettlementPeriods.has(period?.period)
         && (period?.differenceAmount === null || Number.isSafeInteger(period?.differenceAmount)))
       && new Set(periodKeys).size === periodKeys.length;
   };
-  const validSettlement = (settlement: CashflowSettlementStatusesResult | null, projectId: string) => {
-    if (settlement === null) return true;
-    const periodKeys = Array.isArray(settlement?.items) ? settlement.items.map((item) => item?.period) : [];
-    return settlement?.projectId === projectId
-      && settlement.yearMonth === params.yearMonth
-      && Array.isArray(settlement.items)
-      && settlement.items.every((item) => periods.has(item?.period)
-        && statuses.has(item?.status)
-        && typeof item?.submittedAt === 'string'
-        && typeof item?.submittedBy === 'string'
-        && typeof item?.approvedAt === 'string'
-        && typeof item?.approvedBy === 'string'
-        && Number.isSafeInteger(item?.revision)
-        && item.revision >= 0
-        && (item?.deadlineAt == null || typeof item.deadlineAt === 'string')
-        && (item?.approverDeadlineAt == null || typeof item.approverDeadlineAt === 'string'))
-      && new Set(periodKeys).size === periodKeys.length;
+  const validCycle = (cycle: CashflowSettlementCycle) => {
+    const source = objectValue(cycle);
+    const capabilities = objectValue(source?.commandCapabilities);
+    const provenance = source?.provenance === null ? null : objectValue(source?.provenance);
+    const monthCloseSettlement = source?.monthCloseSettlement === null ? null : objectValue(source?.monthCloseSettlement);
+    const capabilityNames = capabilities ? Object.keys(capabilities) : [];
+    return Boolean(source)
+      && source?.cycleYearMonth === params.yearMonth
+      && source?.weeklyYearMonth === params.yearMonth
+      && source?.monthCloseTargetYearMonth === result.monthCloseTargetYearMonth
+      && isIsoCalendarDate(source?.closeDeadline)
+      && ['NOT_REQUESTED', 'SUBMITTED', 'LOCKED', 'REOPEN_REQUESTED', 'REOPENED', 'REJECTED', 'WITHDRAWN', 'INCONSISTENT'].includes(source?.businessState)
+      && ['OK', 'RECONCILING', 'UNAVAILABLE'].includes(source?.health)
+      && Number.isSafeInteger(source?.workflowRevision)
+      && source.workflowRevision >= (source.businessState === 'INCONSISTENT' ? -1 : 0)
+      && (source?.monthCloseSettlement === null
+        || (Boolean(monthCloseSettlement) && isCashflowSettlementStatusItem(monthCloseSettlement)
+          && monthCloseSettlement?.period === 'MONTH'))
+      && (source?.provenance === null || (Boolean(provenance)
+        && /^20\d{2}-(0[1-9]|1[0-2])$/.test(provenance?.affectedFromMonth)
+        && /^20\d{2}-(0[1-9]|1[0-2])$/.test(provenance?.affectedThroughMonth)
+        && /^20\d{2}-(0[1-9]|1[0-2])$/.test(provenance?.closedByCycleYearMonth)
+        && typeof provenance?.approvalVersionId === 'string'
+        && typeof provenance?.requestId === 'string'
+        && Number.isSafeInteger(provenance?.ledgerRevision)
+        && /^sha256:[a-f0-9]{64}$/.test(provenance?.rootHash)))
+      && [null, 'REJECTED', 'WITHDRAWN'].includes(source?.supersededAttempt)
+      && capabilityNames.length === cycleCommands.size
+      && capabilityNames.every((command) => cycleCommands.has(command))
+      && capabilityNames.every((command) => {
+        const capability = objectValue(capabilities?.[command]);
+        return typeof capability?.allowed === 'boolean'
+          && typeof capability?.reasonCode === 'string'
+          && (capability.allowed ? capability.reasonCode === '' : /^[A-Z][A-Z0-9_]*$/.test(capability.reasonCode));
+      });
   };
   const errorKeys = Array.isArray(result?.errors)
     ? result.errors.map((error) => `${error?.projectId}:${error?.code}`)
     : [];
-  if (result?.version !== '4'
+  if (result?.version !== '5'
     || result?.yearMonth !== params.yearMonth
-    || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(result?.monthCloseTargetYearMonth || '')
+    || result?.monthCloseTargetYearMonth !== expectedMonthCloseTargetYearMonth
     || typeof result?.monthCloseTargetLabel !== 'string'
     || !Array.isArray(result?.items)
     || itemIds.length !== params.projectIds.length
     || itemIds.some((projectId) => !requestedIds.has(projectId))
     || new Set(itemIds).size !== itemIds.length
-    || result.items.some((item) => !validSettlement(item?.settlementStatuses, item?.projectId)
+    || result.items.some((item) => !isCashflowSettlementStatusesResult(item?.settlementStatuses, item?.projectId, params.yearMonth)
+      || !validCycle(item?.settlementCycle)
       || !validSummary(item?.projectionActualSummary, item?.projectId)
-      || (item?.sheetCapturedAt !== null && !validInstant(item?.sheetCapturedAt)))
+      || (item?.sheetCapturedAt !== null && !isCashflowSettlementInstant(item?.sheetCapturedAt)))
     || !Array.isArray(result?.errors)
     || result.errors.some((error) => !requestedIds.has(error?.projectId)
-      || !['STATUS_UNAVAILABLE', 'SUMMARY_UNAVAILABLE'].includes(error?.code))
+      || error?.code !== 'SUMMARY_UNAVAILABLE')
     || new Set(errorKeys).size !== errorKeys.length) {
     throw new Error('현금흐름 현황 응답이 올바르지 않습니다.');
   }
@@ -3988,7 +4123,7 @@ export async function requestCashflowMonthCloseViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 27_000,
@@ -4017,25 +4152,6 @@ export async function saveCashflowMonthCloseApproverViaBff(params: {
     },
   );
   return response.data;
-}
-
-export async function fetchCurrentCashflowMonthCloseRequestViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  yearMonth: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseRequest | null> {
-  const response = await resolveClient(params.client).get<{ request: CashflowMonthCloseRequest | null }>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/current?yearMonth=${encodeURIComponent(params.yearMonth)}`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      retries: 0,
-      timeoutMs: 12000,
-    },
-  );
-  return response.data.request;
 }
 
 export async function fetchPendingCashflowMonthCloseRequestsViaBff(params: {
@@ -4116,7 +4232,7 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12_000,
@@ -4148,7 +4264,14 @@ export async function withdrawCashflowMonthCloseRequestViaBff(params: {
   actor: ActorLike;
   projectId: string;
   requestId: string;
-  payload: { expectedRevision: number; expectedManifestHash: string; reason?: string };
+  payload: {
+    cycleYearMonth: string;
+    monthCloseTargetYearMonth: string;
+    expectedRevision: number;
+    expectedManifestHash: string;
+    expectedWorkflowRevision: number;
+    reason: string;
+  };
   idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<{ request: CashflowMonthCloseRequest }> {
@@ -4157,7 +4280,7 @@ export async function withdrawCashflowMonthCloseRequestViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -4182,7 +4305,7 @@ export async function requestCashflowMonthReopenViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -4204,7 +4327,7 @@ export async function decideCashflowMonthReopenViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,

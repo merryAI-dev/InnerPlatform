@@ -16,7 +16,7 @@ public record CashflowCumulativeCloseHead(
         if (closedThrough == null || closedThrough.isBlank()) return "OPEN";
         YearMonth horizon = YearMonth.parse(closedThrough);
         YearMonth settlement = YearMonth.parse(settlementMonth);
-        return target.getYear() == settlement.getYear() && !target.isAfter(horizon)
+        return CashflowMonthLock.isLocked(target, settlement, horizon)
             ? "CLOSED"
             : "OPEN";
     }

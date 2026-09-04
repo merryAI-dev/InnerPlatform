@@ -89,6 +89,9 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND, Set.of(
             "admin"
         )),
+        Map.entry(WeeklyExpenseCommandService.NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND, Set.of(
+            "admin"
+        )),
         Map.entry(WeeklyExpenseCommandService.CLOSE_WEEK_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND, Set.of("admin", "finance"))
     );

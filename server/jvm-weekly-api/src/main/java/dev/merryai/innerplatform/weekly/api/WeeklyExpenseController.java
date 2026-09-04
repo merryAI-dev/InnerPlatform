@@ -451,18 +451,20 @@ public class WeeklyExpenseController {
     public CashflowSettlementStatusesResponse readCashflowSettlementStatuses(
         @PathVariable String projectId,
         @RequestParam("yearMonth") String yearMonth,
+        @RequestParam(value = "settlementCycle", defaultValue = "false") boolean settlementCycle,
         @RequestHeader("x-tenant-id") String tenantId,
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
         return commandService.readCashflowSettlementStatuses(
-            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, yearMonth
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, yearMonth, settlementCycle
         );
     }
 
     @PostMapping("/cashflow/settlement-statuses/batch")
     public CashflowSettlementStatusesBatchResponse readCashflowSettlementStatusesBatch(
+        @RequestParam(value = "settlementCycle", defaultValue = "false") boolean settlementCycle,
         @RequestHeader("x-tenant-id") String tenantId,
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
@@ -470,7 +472,7 @@ public class WeeklyExpenseController {
         @Valid @RequestBody CashflowSettlementStatusesBatchRequest request
     ) {
         return commandService.readCashflowSettlementStatusesBatch(
-            actorContext(tenantId, actorId, actorRole, actorEmail), request
+            actorContext(tenantId, actorId, actorRole, actorEmail), request, settlementCycle
         );
     }
 
@@ -540,6 +542,20 @@ public class WeeklyExpenseController {
         @Valid @RequestBody MigrateCashflowSettlementCycleHeadV2Request request
     ) {
         return commandService.migrateCashflowSettlementCycleHeadV2(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/settlement-cycle/normalize-legacy-active-request")
+    public CashflowSettlementCycleLegacyRequestNormalizationResponse normalizeLegacyCashflowSettlementCycleRequest(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody NormalizeLegacyCashflowSettlementCycleRequest request
+    ) {
+        return commandService.normalizeLegacyCashflowSettlementCycleRequest(
             actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
         );
     }
@@ -643,9 +659,16 @@ public class WeeklyExpenseController {
         CashflowMonthDashboardSourceResponse.OperationalCycle cycle = operationalCycle(
             yearMonth, operationalStatus, latestRun
         );
-        CashflowSettlementStatusesResponse settlementStatuses = commandService.readCashflowSettlementStatuses(
-            actor, result.latestRun().projectId(), cycle.targetYearMonth()
-        );
+        CashflowWeeklyOverviewResponse.Item settlementCycleItem = settlementCycle
+            ? commandService.readCashflowSettlementCycleDashboardItem(
+                actor, result.latestRun().projectId(), yearMonth
+            )
+            : null;
+        CashflowSettlementStatusesResponse settlementStatuses = settlementCycle
+            ? settlementCycleItem.settlementStatuses()
+            : commandService.readCashflowSettlementStatuses(
+                actor, result.latestRun().projectId(), cycle.targetYearMonth()
+            );
         return new CashflowMonthDashboardSourceResponse(
             monthClose,
             latestRun,
@@ -682,11 +705,7 @@ public class WeeklyExpenseController {
             cycle,
             settlementStatuses,
             monthCloseCalendar(dashboardYearMonth),
-            settlementCycle
-                ? commandService.readCashflowSettlementCycle(
-                    actor, result.latestRun().projectId(), yearMonth
-                )
-                : null
+            settlementCycle ? settlementCycleItem.settlementCycle() : null
         );
     }
 
@@ -717,7 +736,7 @@ public class WeeklyExpenseController {
                 targetMonth.toString(),
                 CashflowCloseDeadline.forTargetMonth(targetMonth).toString(),
                 CashflowCloseDeadline.settlementDeadlineAt(targetMonth).toString(),
-                ApproverDeadlineCalculator.monthly(targetMonth.toString(), 3).toString()
+                ApproverDeadlineCalculator.monthly(targetMonth.toString()).toString()
             ))
             .toList();
     }

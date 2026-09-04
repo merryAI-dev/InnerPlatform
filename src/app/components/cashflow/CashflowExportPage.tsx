@@ -388,11 +388,7 @@ export function CashflowExportPage() {
           if (item.settlementStatuses) settlementResults.push(item.settlementStatuses);
         });
         result.value.errors.forEach((error) => {
-          if (error.code === 'STATUS_UNAVAILABLE') {
-            statusErrors[settlementErrorKey(error.projectId, currentWeek.yearMonth)] = true;
-          } else if (error.code === 'SUMMARY_UNAVAILABLE') {
-            summaryErrors[error.projectId] = true;
-          }
+          summaryErrors[error.projectId] = true;
         });
       });
 

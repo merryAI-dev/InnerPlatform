@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,31 +20,31 @@ class ApproverDeadlineCalculatorTest {
     }
 
     @Test
-    void calculatesMonthlyDeadlineAcrossYearAndLeapYearBoundariesInKst() {
-        assertThat(ApproverDeadlineCalculator.monthly("2026-12", 3))
-            .isEqualTo("2027-01-13T15:00:00Z");
-        assertThat(ApproverDeadlineCalculator.monthly("2024-02", 3))
-            .isEqualTo("2024-03-13T15:00:00Z");
-        assertThat(ApproverDeadlineCalculator.monthly("2024-02", 3).atZone(ZoneId.of("Asia/Seoul")))
-            .hasToString("2024-03-14T00:00+09:00[Asia/Seoul]");
+    void calculatesMonthlyDeadlineAsTheStartOfTheSecondFollowingMonthInKst() {
+        assertThat(ApproverDeadlineCalculator.monthly("2026-08"))
+            .isEqualTo("2026-09-30T15:00:00Z");
+        assertThat(ApproverDeadlineCalculator.monthly("2026-12"))
+            .isEqualTo("2027-01-31T15:00:00Z");
+        assertThat(ApproverDeadlineCalculator.monthly("2024-01"))
+            .isEqualTo("2024-02-29T15:00:00Z");
     }
 
     @Test
     void isDeterministicFromInputsAlone() {
-        Instant expected = Instant.parse("2026-09-13T15:00:00Z");
+        Instant expected = Instant.parse("2026-09-30T15:00:00Z");
 
         for (int iteration = 0; iteration < 1_000; iteration++) {
-            assertThat(ApproverDeadlineCalculator.monthly("2026-08", 3)).isEqualTo(expected);
+            assertThat(ApproverDeadlineCalculator.monthly("2026-08")).isEqualTo(expected);
         }
     }
 
     @Test
     void rejectsInvalidYearMonthsWithoutFallback() {
         assertThatNullPointerException()
-            .isThrownBy(() -> ApproverDeadlineCalculator.monthly(null, 3));
+            .isThrownBy(() -> ApproverDeadlineCalculator.monthly(null));
         assertThatExceptionOfType(DateTimeParseException.class)
-            .isThrownBy(() -> ApproverDeadlineCalculator.monthly("", 3));
+            .isThrownBy(() -> ApproverDeadlineCalculator.monthly(""));
         assertThatExceptionOfType(DateTimeParseException.class)
-            .isThrownBy(() -> ApproverDeadlineCalculator.monthly("2026-13", 3));
+            .isThrownBy(() -> ApproverDeadlineCalculator.monthly("2026-13"));
     }
 }

@@ -19,13 +19,13 @@ class CashflowMonthAuthorityTest {
     }
 
     @Test
-    void januarySettlementDoesNotTurnThePreviousAnnualYearIntoMonthlyAuthority() {
+    void januarySettlementClosesItsPreviousMonthAcrossTheYearBoundary() {
         CashflowCumulativeCloseHead head = new CashflowCumulativeCloseHead(
-            "CLOSED", "2023-01", "2026-01", "2025-12", "sha256:" + "a".repeat(64), 1
+            "CLOSED", "2023-01", "2027-01", "2026-12", "sha256:" + "a".repeat(64), 1
         );
 
-        assertThat(head.operationalStatus("2025-12")).isEqualTo("OPEN");
-        assertThat(head.operationalStatus("2026-01")).isEqualTo("OPEN");
+        assertThat(head.operationalStatus("2026-12")).isEqualTo("CLOSED");
+        assertThat(head.operationalStatus("2027-01")).isEqualTo("OPEN");
     }
 
     @Test

@@ -43,6 +43,8 @@ import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
 import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
+import dev.merryai.innerplatform.weekly.api.NormalizeLegacyCashflowSettlementCycleRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleLegacyRequestNormalizationResponse;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
@@ -5297,7 +5299,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void januarySettlementKeepsThePreviousAnnualYearOutsideMonthlyWriteAuthority() {
+    void januarySettlementLocksThePreviousMonthAcrossTheYearBoundary() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", Map.of(
             "contractVersion", "cashflow-cumulative-close-v2",
@@ -5311,13 +5313,14 @@ class FirestoreCashflowLeaseGuardTest {
             "revision", 1L
         ));
 
-        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> {
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
             fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
             fixture.persistence.requireCashflowMonthsOpen(
                 "tenant-a", "project-a", List.of("2025-12", "2026-01")
             );
             return null;
-        })).doesNotThrowAnyException();
+        })).isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .hasMessageContaining("2025-12");
     }
 
     @Test
@@ -5344,6 +5347,71 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void settlementCycleSubmitUsesTheCycleMonthWithoutChangingThePreviousCycle() {
+        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-09-01"));
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1", "version", 3L
+        ));
+        String previousCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08";
+        String currentCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09";
+        fixture.documents.put(previousCyclePath, completedSettlement("2026-08", true));
+        fixture.documents.put(currentCyclePath, completedSettlement("2026-09", false));
+        ((Map<String, Object>) ((Map<String, Object>) fixture.documents.get(previousCyclePath)
+            .get("periods")).get("MONTH")).put("status", "LOCKED");
+        Map<String, Object> previousCycleBefore = deepCopy(fixture.documents.get(previousCyclePath));
+        Map<String, Object> currentWeekBefore = deepCopy((Map<String, Object>) ((Map<String, Object>)
+            fixture.documents.get(currentCyclePath).get("periods")).get("WEEK_2"));
+        SubmitCashflowSettlementCycleRequest submit = stagedSettlementCycle(
+            fixture, "2026-09", "stage-cycle-key", "submit-cycle-key", 0
+        );
+
+        var submitted = fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .submitCashflowSettlementCycle(ACTOR, "project-a", submit));
+
+        assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/project-a-2026-09"))
+            .containsEntry("status", "PENDING_APPROVAL")
+            .containsEntry("cycleYearMonth", "2026-09")
+            .containsEntry("monthCloseTargetYearMonth", "2026-08");
+        Map<String, Object> currentPeriods = (Map<String, Object>) fixture.documents
+            .get(currentCyclePath).get("periods");
+        assertThat(currentPeriods).containsKey("MONTH");
+        assertThat((Map<String, Object>) currentPeriods.get("MONTH"))
+            .containsEntry("status", "SUBMITTED");
+        assertThat(submitted.businessState()).isEqualTo("SUBMITTED");
+        assertThat(fixture.documents.get(previousCyclePath)).isEqualTo(previousCycleBefore);
+        assertThat((Map<String, Object>) currentPeriods.get("WEEK_2")).isEqualTo(currentWeekBefore);
+
+        WeeklyExpensePersistence.CashflowSettlementCycleRecord projected = fixture.persistence
+            .findCashflowSettlementCyclesBatch(
+                ACTOR, List.of("project-a"), "2026-09", "2026-08"
+            ).get("project-a");
+        assertThat(projected.projection().businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.SUBMITTED);
+        assertThat(projected.monthSettlement().status()).isEqualTo("SUBMITTED");
+        assertThat(projected.weeklySettlements())
+            .filteredOn(record -> record.period().equals("WEEK_2"))
+            .extracting(WeeklyExpensePersistence.CashflowSettlementStatusRecord::status)
+            .containsExactly("COMPLETED");
+
+        Map<String, Object> legacySubmitted = new LinkedHashMap<>((Map<String, Object>)
+            currentPeriods.get("MONTH"));
+        legacySubmitted.put("status", "PENDING_APPROVAL");
+        currentPeriods.put("MONTH", legacySubmitted);
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .transitionCashflowSettlementCycle(ACTOR, "project-a", new TransitionCashflowSettlementCycleRequest(
+                "withdraw-cycle-key", "WITHDRAW", "2026-09", "2026-08", "project-a-2026-09",
+                1, submit.manifestHash(), 1, "입력 다시 확인"
+            )));
+        currentPeriods = (Map<String, Object>) fixture.documents.get(currentCyclePath).get("periods");
+        assertThat((Map<String, Object>) currentPeriods.get("MONTH"))
+            .containsEntry("status", "WAITING_FOR_UPDATE");
+        assertThat((Map<String, Object>) currentPeriods.get("WEEK_2")).isEqualTo(currentWeekBefore);
+        assertThat(fixture.documents.get(previousCyclePath)).isEqualTo(previousCycleBefore);
+    }
+
+    @Test
     void settlementCycleSubmitClaimsStagedEvidenceAndWithdrawsAllCanonicalStateAtomically() {
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-01"));
         fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
@@ -5356,7 +5424,7 @@ class FirestoreCashflowLeaseGuardTest {
         var submitted = fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
             .submitCashflowSettlementCycle(ACTOR, "project-a", submit));
 
-        assertThat(submitted.businessState()).isEqualTo("PENDING_APPROVAL");
+        assertThat(submitted.businessState()).isEqualTo("SUBMITTED");
         assertThat(submitted.workflowRevision()).isEqualTo(1);
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08"))
             .containsEntry("documentType", "REQUEST")
@@ -5369,10 +5437,10 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("activeRequestId", "project-a-2026-08")
             .containsEntry("activeState", "PENDING_APPROVAL")
             .containsEntry("workflowRevision", 1L);
-        Map<String, Object> julyPeriods = (Map<String, Object>) fixture.documents
-            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07").get("periods");
-        assertThat((Map<String, Object>) julyPeriods.get("MONTH"))
-            .containsEntry("status", "PENDING_APPROVAL")
+        Map<String, Object> augustPeriods = (Map<String, Object>) fixture.documents
+            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08").get("periods");
+        assertThat((Map<String, Object>) augustPeriods.get("MONTH"))
+            .containsEntry("status", "SUBMITTED")
             .containsEntry("submittedBy", "pm-1");
         assertThat(fixture.documents.get(
             "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08/stages/stage-submit"
@@ -5392,9 +5460,9 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/__active__-project-a"))
             .containsEntry("activeState", "INACTIVE")
             .containsEntry("workflowRevision", 2L);
-        julyPeriods = (Map<String, Object>) fixture.documents
-            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07").get("periods");
-        assertThat((Map<String, Object>) julyPeriods.get("MONTH"))
+        augustPeriods = (Map<String, Object>) fixture.documents
+            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08").get("periods");
+        assertThat((Map<String, Object>) augustPeriods.get("MONTH"))
             .containsEntry("status", "WAITING_FOR_UPDATE")
             .containsEntry("submittedAt", "")
             .containsEntry("approvedAt", "");
@@ -5504,11 +5572,18 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void settlementCycleApprovalClosesLedgerRequestCoordinatorAndTargetMonthInOneTransaction() {
+    void settlementCycleApprovalClosesLedgerRequestCoordinatorAndCycleMonthInOneTransaction() {
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-01"));
         fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
             "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1", "version", 3L
         ));
+        String previousCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07";
+        String currentCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08";
+        fixture.documents.put(previousCyclePath, completedSettlement("2026-07", true));
+        fixture.documents.put(currentCyclePath, completedSettlement("2026-08", false));
+        Map<String, Object> previousCycleBefore = deepCopy(fixture.documents.get(previousCyclePath));
+        Map<String, Object> currentWeekBefore = deepCopy((Map<String, Object>) ((Map<String, Object>)
+            fixture.documents.get(currentCyclePath).get("periods")).get("WEEK_2"));
         SubmitCashflowSettlementCycleRequest submit = stagedSettlementCycle(
             fixture, "2026-08", "stage-approve", "submit-approve", 0
         );
@@ -5516,6 +5591,12 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.persistence.runCommandTransaction(() -> service.submitCashflowSettlementCycle(
             ACTOR, "project-a", submit
         ));
+        Map<String, Object> currentPeriods = (Map<String, Object>) fixture.documents
+            .get(currentCyclePath).get("periods");
+        Map<String, Object> legacySubmitted = new LinkedHashMap<>((Map<String, Object>)
+            currentPeriods.get("MONTH"));
+        legacySubmitted.put("status", "PENDING_APPROVAL");
+        currentPeriods.put("MONTH", legacySubmitted);
         CloseCashflowMonthRequest approve = new CloseCashflowMonthRequest(
             "approve-cycle", "", "", "2026-08", 0, 0, true,
             List.of(), List.of(), List.of(), List.of(), List.of(), null, null,
@@ -5537,12 +5618,14 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/__active__-project-a"))
             .containsEntry("activeState", "INACTIVE")
             .containsEntry("workflowRevision", 2L);
-        Map<String, Object> julyPeriods = (Map<String, Object>) fixture.documents
-            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07").get("periods");
-        assertThat((Map<String, Object>) julyPeriods.get("MONTH"))
-            .containsEntry("status", "COMPLETED")
+        Map<String, Object> augustPeriods = (Map<String, Object>) fixture.documents
+            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08").get("periods");
+        assertThat((Map<String, Object>) augustPeriods.get("MONTH"))
+            .containsEntry("status", "LOCKED")
             .containsEntry("revision", 2L)
             .containsEntry("approvedBy", "pm-1");
+        assertThat((Map<String, Object>) augustPeriods.get("WEEK_2")).isEqualTo(currentWeekBefore);
+        assertThat(fixture.documents.get(previousCyclePath)).isEqualTo(previousCycleBefore);
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
             .containsEntry("closedThrough", "2026-07")
             .containsEntry("requestId", "project-a-2026-08")
@@ -5555,6 +5638,12 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
             "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1", "version", 3L
         ));
+        String previousCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07";
+        String currentCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08";
+        fixture.documents.put(previousCyclePath, completedSettlement("2026-07", true));
+        fixture.documents.put(currentCyclePath, completedSettlement("2026-08", false));
+        Map<String, Object> currentWeekBefore = deepCopy((Map<String, Object>) ((Map<String, Object>)
+            fixture.documents.get(currentCyclePath).get("periods")).get("WEEK_2"));
         SubmitCashflowSettlementCycleRequest submit = stagedSettlementCycle(
             fixture, "2026-08", "stage-reopen", "submit-reopen", 0
         );
@@ -5569,6 +5658,12 @@ class FirestoreCashflowLeaseGuardTest {
                 submit.requestId(), submit.evidenceRevision(), submit.manifestHash(),
                 submit.cycleYearMonth(), submit.monthCloseTargetYearMonth(), 1, "최초 승인"
             )));
+        Map<String, Object> cyclePeriods = (Map<String, Object>) fixture.documents
+            .get(currentCyclePath).get("periods");
+        Map<String, Object> legacyLocked = new LinkedHashMap<>((Map<String, Object>)
+            cyclePeriods.get("MONTH"));
+        legacyLocked.put("status", "COMPLETED");
+        cyclePeriods.put("MONTH", legacyLocked);
 
         CashflowMonthCloseResponse requested = fixture.persistence.runCommandTransaction(() -> service
             .requestCashflowMonthReopen(
@@ -5600,9 +5695,73 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("activeState", "REOPEN_REQUESTED")
             .containsEntry("activeRequestId", submit.requestId())
             .containsEntry("workflowRevision", 3L);
-        Map<String, Object> completedJuly = (Map<String, Object>) ((Map<String, Object>) fixture.documents
-            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07").get("periods")).get("MONTH");
-        assertThat(completedJuly).containsEntry("status", "COMPLETED");
+        WeeklyExpensePersistence.CashflowSettlementCycleRecord reopenProjection = fixture.persistence
+            .findCashflowSettlementCyclesBatch(
+                ACTOR, List.of("project-a"), submit.cycleYearMonth(), submit.monthCloseTargetYearMonth()
+            ).get("project-a");
+        assertThat(reopenProjection.projection().businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.REOPEN_REQUESTED);
+        assertThat(reopenProjection.projection().health())
+            .isEqualTo(CashflowSettlementCyclePolicy.Health.OK);
+        assertThat(reopenProjection.projection().provenance())
+            .isNotNull()
+            .extracting(CashflowSettlementCyclePolicy.ApprovalProvenance::ledgerRevision)
+            .isEqualTo(approved.revision());
+        assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08"))
+            .containsEntry("ledgerRevision", requested.revision());
+        Map<String, Object> lockedAugust = (Map<String, Object>) ((Map<String, Object>) fixture.documents
+            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08").get("periods")).get("MONTH");
+        assertThat(lockedAugust).containsEntry("status", "COMPLETED");
+
+        CashflowMonthCloseResponse rejected = fixture.persistence.runCommandTransaction(() -> service
+            .decideCashflowMonthReopen(
+                ACTOR,
+                "project-a",
+                "stage-data-project",
+                new CashflowMonthReopenCommands.DecideReopen(
+                    "reject-cycle-reopen",
+                    submit.cycleYearMonth(),
+                    requested.revision(),
+                    "REJECT",
+                    "정정 반려",
+                    submit.requestId(),
+                    submit.cycleYearMonth(),
+                    submit.monthCloseTargetYearMonth(),
+                    submit.evidenceRevision(),
+                    submit.manifestHash(),
+                    3
+                )
+            ));
+        assertThat(rejected.status()).isEqualTo("CLOSED");
+        WeeklyExpensePersistence.CashflowSettlementCycleRecord rejectedProjection = fixture.persistence
+            .findCashflowSettlementCyclesBatch(
+                ACTOR, List.of("project-a"), submit.cycleYearMonth(), submit.monthCloseTargetYearMonth()
+            ).get("project-a");
+        assertThat(rejectedProjection.projection().businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
+        assertThat(rejectedProjection.projection().provenance())
+            .isNotNull()
+            .extracting(CashflowSettlementCyclePolicy.ApprovalProvenance::ledgerRevision)
+            .isEqualTo(approved.revision());
+
+        CashflowMonthCloseResponse requestedAgain = fixture.persistence.runCommandTransaction(() -> service
+            .requestCashflowMonthReopen(
+                ACTOR,
+                "project-a",
+                "stage-data-project",
+                new CashflowMonthReopenCommands.RequestReopen(
+                    "request-cycle-reopen-again",
+                    submit.cycleYearMonth(),
+                    rejected.revision(),
+                    "원장 재정정",
+                    submit.requestId(),
+                    submit.cycleYearMonth(),
+                    submit.monthCloseTargetYearMonth(),
+                    submit.evidenceRevision(),
+                    submit.manifestHash(),
+                    4
+                )
+            ));
 
         CashflowMonthCloseResponse reopened = fixture.persistence.runCommandTransaction(() -> service
             .decideCashflowMonthReopen(
@@ -5612,7 +5771,7 @@ class FirestoreCashflowLeaseGuardTest {
                 new CashflowMonthReopenCommands.DecideReopen(
                     "approve-cycle-reopen",
                     submit.cycleYearMonth(),
-                    requested.revision(),
+                    requestedAgain.revision(),
                     "APPROVE",
                     "정정 승인",
                     submit.requestId(),
@@ -5620,26 +5779,32 @@ class FirestoreCashflowLeaseGuardTest {
                     submit.monthCloseTargetYearMonth(),
                     submit.evidenceRevision(),
                     submit.manifestHash(),
-                    3
+                    5
                 )
             ));
 
         assertThat(reopened.status()).isEqualTo("OPEN");
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08"))
             .containsEntry("status", "REOPENED")
-            .containsEntry("workflowRevision", 4L)
+            .containsEntry("workflowRevision", 6L)
             .hasEntrySatisfying("reopenDecision", value -> assertThat((Map<String, Object>) value)
                 .containsEntry("decision", "APPROVE")
                 .containsEntry("decidedByUid", "pm-1")
                 .containsEntry("reason", "정정 승인"));
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_month_close_requests/__active__-project-a"))
             .containsEntry("activeState", "REOPENED")
-            .containsEntry("workflowRevision", 4L);
-        Map<String, Object> resetJuly = (Map<String, Object>) ((Map<String, Object>) fixture.documents
-            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07").get("periods")).get("MONTH");
-        assertThat(resetJuly)
+            .containsEntry("workflowRevision", 6L);
+        Map<String, Object> resetAugust = (Map<String, Object>) ((Map<String, Object>) fixture.documents
+            .get("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08").get("periods")).get("MONTH");
+        assertThat(resetAugust)
             .containsEntry("status", "WAITING_FOR_UPDATE")
             .doesNotContainKeys("submittedAt", "submittedBy", "approvedAt", "approvedBy");
+        assertThat((Map<String, Object>) ((Map<String, Object>) fixture.documents
+            .get(previousCyclePath).get("periods")).get("MONTH"))
+            .containsEntry("status", "COMPLETED");
+        assertThat((Map<String, Object>) ((Map<String, Object>) fixture.documents
+            .get(currentCyclePath).get("periods")).get("WEEK_2"))
+            .isEqualTo(currentWeekBefore);
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
             .containsEntry("authorityExists", false)
             .containsEntry("revision", 2L)
@@ -5672,19 +5837,45 @@ class FirestoreCashflowLeaseGuardTest {
                 .map(Map.Entry::getValue)
                 .toList()
         );
-        SubmitCashflowSettlementCycleRequest september = stagedSettlementCycle(
-            fixture, "2026-09", "stage-september-catch-up", "submit-september-catch-up", 2,
+        SubmitCashflowSettlementCycleRequest october = stagedSettlementCycle(
+            fixture, "2026-10", "stage-october-catch-up", "submit-october-catch-up", 2,
             currentTargetRevision
         );
         fixture.persistence.runCommandTransaction(() -> service.submitCashflowSettlementCycle(
-            ACTOR, "project-a", september
+            ACTOR, "project-a", october
         ));
+        var lockedWhileOctoberIsActive = service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-06"
+        ).settlementCycle();
+        assertThat(lockedWhileOctoberIsActive.businessState()).isEqualTo("LOCKED");
+        assertThat(lockedWhileOctoberIsActive.commandCapabilities().get("REQUEST_MONTH_REOPEN"))
+            .extracting(
+                value -> value.allowed(),
+                value -> value.reasonCode()
+            )
+            .containsExactly(false, "ACTIVE_CYCLE_EXISTS");
+        var futureWhileOctoberIsActive = service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-11"
+        ).settlementCycle();
+        assertThat(futureWhileOctoberIsActive.businessState()).isEqualTo("NOT_REQUESTED");
+        assertThat(futureWhileOctoberIsActive.commandCapabilities().get("SUBMIT_MONTH_CLOSE"))
+            .extracting(
+                value -> value.allowed(),
+                value -> value.reasonCode()
+            )
+            .containsExactly(false, "ACTIVE_CYCLE_EXISTS");
+        var activeOctober = service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-10"
+        ).settlementCycle();
+        assertThat(activeOctober.businessState()).isEqualTo("SUBMITTED");
+        assertThat(activeOctober.commandCapabilities().get("WITHDRAW_MONTH_CLOSE").allowed()).isTrue();
+        assertThat(activeOctober.commandCapabilities().get("APPROVE_MONTH_CLOSE").allowed()).isTrue();
         CashflowMonthCloseResponse approved = fixture.persistence.runCommandTransaction(() ->
             service.closeCashflowMonth(
-                ACTOR, "project-a", SESSION, settlementCycleApproval(september, "approve-september", 3)
+                ACTOR, "project-a", SESSION, settlementCycleApproval(october, "approve-october", 3)
             )
         );
-        for (String cycleYearMonth : List.of("2026-07", "2026-08", "2026-09")) {
+        for (String cycleYearMonth : List.of("2026-07", "2026-08", "2026-09", "2026-10")) {
             String targetYearMonth = YearMonth.parse(cycleYearMonth).minusMonths(1).toString();
             WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle = fixture.persistence
                 .findCashflowSettlementCyclesBatch(
@@ -5692,7 +5883,7 @@ class FirestoreCashflowLeaseGuardTest {
                 ).get("project-a");
             assertThat(cycle.projection().businessState())
                 .as(cycleYearMonth)
-                .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
+                .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
             assertThat(cycle.projection().provenance())
                 .as(cycleYearMonth)
                 .isNotNull()
@@ -5702,8 +5893,19 @@ class FirestoreCashflowLeaseGuardTest {
                     CashflowSettlementCyclePolicy.ApprovalProvenance::closedByCycleYearMonth,
                     CashflowSettlementCyclePolicy.ApprovalProvenance::requestId
                 )
-                .containsExactly("2026-06", "2026-08", "2026-09", september.requestId());
+                .containsExactly("2026-06", "2026-09", "2026-10", october.requestId());
         }
+        assertThat(service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-06"
+        ).settlementCycle().commandCapabilities().get("REQUEST_MONTH_REOPEN"))
+            .extracting(
+                value -> value.allowed(),
+                value -> value.reasonCode()
+            )
+            .containsExactly(false, "LATEST_APPROVAL_REQUIRED");
+        assertThat(service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-09"
+        ).settlementCycle().commandCapabilities().get("REQUEST_MONTH_REOPEN").allowed()).isTrue();
 
         CashflowMonthCloseResponse reopenRequested = fixture.persistence.runCommandTransaction(() ->
             service.requestCashflowMonthReopen(
@@ -5711,39 +5913,68 @@ class FirestoreCashflowLeaseGuardTest {
                 "project-a",
                 "stage-data-project",
                 new CashflowMonthReopenCommands.RequestReopen(
-                    "request-september-catch-up-reopen",
-                    september.cycleYearMonth(),
+                    "request-october-catch-up-reopen",
+                    october.cycleYearMonth(),
                     approved.revision(),
                     "catch-up 승인 회수",
-                    september.requestId(),
-                    september.cycleYearMonth(),
-                    september.monthCloseTargetYearMonth(),
-                    september.evidenceRevision(),
-                    september.manifestHash(),
+                    october.requestId(),
+                    october.cycleYearMonth(),
+                    october.monthCloseTargetYearMonth(),
+                    october.evidenceRevision(),
+                    october.manifestHash(),
                     4
                 )
             )
         );
+        var coveredReopen = service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-09"
+        );
+        assertThat(coveredReopen.settlementCycle())
+            .extracting(
+                value -> value.businessState(),
+                value -> value.health(),
+                value -> value.monthCloseSettlement()
+            )
+            .containsExactly("REOPEN_REQUESTED", "OK", null);
+        assertThat(coveredReopen.settlementStatuses().items().getFirst())
+            .extracting(
+                value -> value.period(),
+                value -> value.status()
+            )
+            .containsExactly("MONTH", "WAITING_FOR_UPDATE");
+        assertThat(coveredReopen.settlementCycle().commandCapabilities()
+            .get("REQUEST_MONTH_REOPEN").allowed()).isFalse();
+        String coordinatorPath = "orgs/tenant-a/cashflow_month_close_requests/__active__-project-a";
+        Map<String, Object> reopenCoordinator = fixture.documents.get(coordinatorPath);
+        Map<String, Object> inactiveCoordinator = new LinkedHashMap<>(reopenCoordinator);
+        inactiveCoordinator.put("activeState", "INACTIVE");
+        inactiveCoordinator.put("activeCycleYearMonth", "");
+        inactiveCoordinator.put("activeRequestId", "");
+        fixture.documents.put(coordinatorPath, inactiveCoordinator);
+        assertThat(service.readCashflowSettlementCycleDashboardItem(
+            READ_ACTOR, "project-a", "2026-09"
+        ).settlementCycle().businessState()).isEqualTo("INCONSISTENT");
+        fixture.documents.put(coordinatorPath, reopenCoordinator);
         fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
             ACTOR,
             "project-a",
             "stage-data-project",
             new CashflowMonthReopenCommands.DecideReopen(
-                "approve-september-catch-up-reopen",
-                september.cycleYearMonth(),
+                "approve-october-catch-up-reopen",
+                october.cycleYearMonth(),
                 reopenRequested.revision(),
                 "APPROVE",
                 "5월 authority 복원",
-                september.requestId(),
-                september.cycleYearMonth(),
-                september.monthCloseTargetYearMonth(),
-                september.evidenceRevision(),
-                september.manifestHash(),
+                october.requestId(),
+                october.cycleYearMonth(),
+                october.monthCloseTargetYearMonth(),
+                october.evidenceRevision(),
+                october.manifestHash(),
                 5
             )
         ));
 
-        for (String cycleYearMonth : List.of("2026-07", "2026-08")) {
+        for (String cycleYearMonth : List.of("2026-07", "2026-08", "2026-09")) {
             String targetYearMonth = YearMonth.parse(cycleYearMonth).minusMonths(1).toString();
             assertThat(fixture.persistence.findCashflowSettlementCyclesBatch(
                 ACTOR, List.of("project-a"), cycleYearMonth, targetYearMonth
@@ -5752,7 +5983,7 @@ class FirestoreCashflowLeaseGuardTest {
                 .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.NOT_REQUESTED);
         }
         assertThat(fixture.persistence.findCashflowSettlementCyclesBatch(
-            ACTOR, List.of("project-a"), "2026-09", "2026-08"
+            ACTOR, List.of("project-a"), "2026-10", "2026-09"
         ).get("project-a").projection().businessState())
             .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.REOPENED);
     }
@@ -5773,10 +6004,6 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.persistence.runCommandTransaction(() -> service.closeCashflowMonth(
             ACTOR, "project-a", SESSION, settlementCycleApproval(submit, "approve-read-snapshot", 1)
         ));
-        fixture.documents.put(
-            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08",
-            completedSettlement("2026-08", false)
-        );
         clearInvocations(fixture.db, fixture.transaction);
 
         WeeklyExpensePersistence.CashflowSettlementCycleRecord projected = fixture.persistence
@@ -5785,13 +6012,13 @@ class FirestoreCashflowLeaseGuardTest {
             ).get("project-a");
 
         assertThat(projected.projection().businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
         assertThat(projected.weeklySettlements())
             .extracting(WeeklyExpensePersistence.CashflowSettlementStatusRecord::period)
             .containsExactly("MONTH", "WEEK_1", "WEEK_2", "WEEK_3", "WEEK_4", "WEEK_5");
         assertThat(projected.authority()).isEqualTo(
             new WeeklyExpensePersistence.CashflowSettlementCycleAuthority(
-                false, true, true, true, true, false
+                true, true, true, true, false
             )
         );
         verify(fixture.db).runTransaction(
@@ -5801,6 +6028,24 @@ class FirestoreCashflowLeaseGuardTest {
         );
         verify(fixture.db, never()).getAll(any(DocumentReference[].class));
         verify(fixture.transaction, times(2)).getAll(any(DocumentReference[].class));
+    }
+
+    @Test
+    void settlementCycleReadFailsClosedWhenNoRequestHasAStoredLockedMonth() {
+        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-01"));
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08",
+            completedSettlement("2026-08", true)
+        );
+
+        WeeklyExpensePersistence.CashflowSettlementCycleRecord cycle = fixture.persistence
+            .findCashflowSettlementCyclesBatch(
+                ACTOR, List.of("project-a"), "2026-08", "2026-07"
+            ).get("project-a");
+
+        assertThat(cycle.projection().businessState())
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.INCONSISTENT);
+        assertThat(cycle.monthSettlement()).isNull();
     }
 
     @Test
@@ -6031,7 +6276,7 @@ class FirestoreCashflowLeaseGuardTest {
                 ).get("project-a");
             assertThat(projected.projection().businessState())
                 .as(terminalAction)
-                .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
+                .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
             assertThat(projected.projection().workflowRevision()).as(terminalAction).isEqualTo(4);
 
             CashflowMonthCloseResponse requested = fixture.persistence.runCommandTransaction(() -> service
@@ -6072,6 +6317,13 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
             "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1", "version", 3L
         ));
+        String previousCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07";
+        String currentCyclePath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08";
+        fixture.documents.put(previousCyclePath, completedSettlement("2026-07", true));
+        fixture.documents.put(currentCyclePath, completedSettlement("2026-08", false));
+        Map<String, Object> previousCycleBefore = deepCopy(fixture.documents.get(previousCyclePath));
+        Map<String, Object> currentWeekBefore = deepCopy((Map<String, Object>) ((Map<String, Object>)
+            fixture.documents.get(currentCyclePath).get("periods")).get("WEEK_2"));
         SubmitCashflowSettlementCycleRequest submit = stagedSettlementCycle(
             fixture, "2026-08", "stage-admin-cancel", "submit-admin-cancel", 0
         );
@@ -6114,12 +6366,16 @@ class FirestoreCashflowLeaseGuardTest {
         )).containsEntry("activeState", "INACTIVE")
             .containsEntry("workflowRevision", 2L);
         Map<String, Object> month = (Map<String, Object>) ((Map<String, Object>) fixture.documents.get(
-            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07"
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
         ).get("periods")).get("MONTH");
         assertThat(month).containsEntry("status", "WAITING_FOR_UPDATE")
             .containsEntry("revision", 2L)
             .containsEntry("submittedAt", "")
             .containsEntry("approvedAt", "");
+        assertThat((Map<String, Object>) ((Map<String, Object>) fixture.documents
+            .get(currentCyclePath).get("periods")).get("WEEK_2"))
+            .isEqualTo(currentWeekBefore);
+        assertThat(fixture.documents.get(previousCyclePath)).isEqualTo(previousCycleBefore);
         assertThat(fixture.documents.get(
             "orgs/tenant-a/cashflow_cumulative_close_heads/project-a"
         )).isEqualTo(headSentinel);
@@ -6160,13 +6416,35 @@ class FirestoreCashflowLeaseGuardTest {
     void verifiedLegacyCumulativeHeadMigrationIsAtomicActorBoundAndIdempotent() {
         Fixture fixture = fixture(member(Map.of("role", "admin")), Map.of());
         seedVerifiedLegacyCumulativeApproval(fixture);
+        Map<String, Object> sourceRequest = deepCopy(fixture.documents.get(
+            "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08"
+        ));
+        Map<String, Object> sourceLedger = deepCopy(fixture.documents.get(
+            monthClosePath("project-a", "2026-08")
+        ));
+        Map<String, Object> protectedStatus = deepCopy(fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09"
+        ));
         fixture.documents.put("orgs/tenant-a/members/admin-2", member(Map.of(
             "uid", "admin-2", "role", "admin"
         )));
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        MigrateCashflowSettlementCycleHeadV2Request dryRun =
+            new MigrateCashflowSettlementCycleHeadV2Request(
+                "migrate-v1-head", 4, SOURCE_REVISION, "검증된 legacy authority 복구", true, ""
+            );
+        Map<String, Map<String, Object>> beforeDryRun = deepCopy(fixture.documents);
+        CashflowSettlementCycleHeadMigrationResponse validated = fixture.persistence.runCommandTransaction(() ->
+            service.migrateCashflowSettlementCycleHeadV2(ACTOR, "project-a", dryRun)
+        );
+        assertThat(validated.auditId()).isEmpty();
+        assertThat(validated.migrationFingerprint()).matches("sha256:[0-9a-f]{64}");
+        assertThat(fixture.documents).isEqualTo(beforeDryRun);
+
         MigrateCashflowSettlementCycleHeadV2Request request =
             new MigrateCashflowSettlementCycleHeadV2Request(
-                "migrate-v1-head", 4, SOURCE_REVISION, "검증된 legacy authority 복구"
+                "migrate-v1-head", 4, SOURCE_REVISION, "검증된 legacy authority 복구",
+                false, validated.migrationFingerprint()
             );
 
         CashflowSettlementCycleHeadMigrationResponse migrated = fixture.persistence.runCommandTransaction(() ->
@@ -6186,7 +6464,7 @@ class FirestoreCashflowLeaseGuardTest {
                 CashflowSettlementCycleHeadMigrationResponse::approvalVersionId,
                 CashflowSettlementCycleHeadMigrationResponse::headRevision
             )
-            .containsExactly("2026-08", "2026-09", "project-a-2026-08-r3", 5L);
+            .containsExactly("2026-08", "2026-09", "project-a-2026-09-r3-migrated-v3", 5L);
         Map<String, Object> head = fixture.documents.get(
             "orgs/tenant-a/cashflow_cumulative_close_heads/project-a"
         );
@@ -6201,10 +6479,44 @@ class FirestoreCashflowLeaseGuardTest {
                 .containsEntry("affectedFromMonth", "2023-01")
                 .containsEntry("affectedThroughMonth", "2026-08")
                 .containsEntry("closedByCycleYearMonth", "2026-09")
-                .containsEntry("approvalVersionId", "project-a-2026-08-r3")
-                .containsEntry("requestId", "project-a-2026-08")
+                .containsEntry("approvalVersionId", "project-a-2026-09-r3-migrated-v3")
+                .containsEntry("requestId", "project-a-2026-09")
                 .containsEntry("ledgerRevision", 3L)
                 .containsEntry("rootHash", SOURCE_REVISION));
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-09"
+        )).containsEntry("documentType", "REQUEST")
+            .containsEntry("cycleYearMonth", "2026-09")
+            .containsEntry("monthCloseTargetYearMonth", "2026-08")
+            .containsEntry("approvalVersionId", "project-a-2026-09-r3-migrated-v3")
+            .containsEntry("ledgerRevision", 3L);
+        Map<String, Object> cycleLedger = fixture.documents.get(monthClosePath("project-a", "2026-09"));
+        Map<String, Object> cycleVersion = fixture.documents.get(
+            "orgs/tenant-a/monthly_close_versions/project-a-2026-09-r3-migrated-v3"
+        );
+        assertThat(cycleLedger)
+            .containsEntry("latestVersionId", "project-a-2026-09-r3-migrated-v3")
+            .containsEntry("revision", 3L)
+            .containsEntry("snapshotHash", cycleVersion.get("snapshotHash"));
+        assertThat(cycleVersion)
+            .containsEntry("schemaVersion", 3L)
+            .containsEntry("yearMonth", "2026-09")
+            .containsEntry("revision", 3L);
+        assertThat((Map<String, Object>) cycleVersion.get("snapshot"))
+            .containsEntry("schemaVersion", 3L)
+            .containsEntry("approvalVersionId", "project-a-2026-09-r3-migrated-v3")
+            .containsEntry("affectedFromMonth", "2023-01")
+            .containsEntry("affectedThroughMonth", "2026-08")
+            .containsEntry("headRevision", 5L);
+        assertThat(fixture.persistence.hashCanonicalJson((Map<String, Object>) cycleVersion.get("snapshot")))
+            .isEqualTo(cycleVersion.get("snapshotHash"));
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08"
+        )).isEqualTo(sourceRequest);
+        assertThat(fixture.documents.get(monthClosePath("project-a", "2026-08"))).isEqualTo(sourceLedger);
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09"
+        )).isEqualTo(protectedStatus);
         assertThat(fixture.documents.values().stream()
             .filter(document -> WeeklyExpenseCommandService.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND
                 .equals(document.get("commandName")))
@@ -6230,7 +6542,7 @@ class FirestoreCashflowLeaseGuardTest {
                 ACTOR, List.of("project-a"), "2026-09", "2026-08"
             ).get("project-a");
         assertThat(projected.projection().businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
+            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.LOCKED);
         assertThat(projected.projection().health())
             .isEqualTo(CashflowSettlementCyclePolicy.Health.OK);
         assertThat(projected.projection().provenance())
@@ -6240,7 +6552,7 @@ class FirestoreCashflowLeaseGuardTest {
                 CashflowSettlementCyclePolicy.ApprovalProvenance::affectedThroughMonth,
                 CashflowSettlementCyclePolicy.ApprovalProvenance::approvalVersionId
             )
-            .containsExactly("2023-01", "2026-08", "project-a-2026-08-r3");
+            .containsExactly("2023-01", "2026-08", "project-a-2026-09-r3-migrated-v3");
 
         MigrateCashflowSettlementCycleHeadV2Request changedReason =
             new MigrateCashflowSettlementCycleHeadV2Request(
@@ -6262,6 +6574,179 @@ class FirestoreCashflowLeaseGuardTest {
             .isInstanceOf(WeeklyExpenseConflictException.class)
             .hasMessageContaining("different request body");
         assertThat(fixture.documents).isEqualTo(afterFirstMigration);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void legacyHeadMigrationPreservesPostCloseLedgerRevisionWhileUsingApprovalRevision() {
+        Fixture fixture = fixture(member(Map.of("role", "admin")), Map.of());
+        seedVerifiedLegacyCumulativeApproval(fixture);
+        String ledgerPath = monthClosePath("project-a", "2026-08");
+        Map<String, Object> amendedLedger = new LinkedHashMap<>(fixture.documents.get(ledgerPath));
+        amendedLedger.put("revision", 4L);
+        amendedLedger.put("lastAmendmentEvidence", Map.of("kind", "POST_CLOSE", "revision", 4L));
+        fixture.documents.put(ledgerPath, amendedLedger);
+        fixture.documents.put("orgs/tenant-a/members/admin-2", member(Map.of(
+            "uid", "admin-2", "role", "admin"
+        )));
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+
+        CashflowSettlementCycleHeadMigrationResponse validated = fixture.persistence.runCommandTransaction(() ->
+            service.migrateCashflowSettlementCycleHeadV2(
+                ACTOR,
+                "project-a",
+                new MigrateCashflowSettlementCycleHeadV2Request(
+                    "migrate-amended-ledger", 4, SOURCE_REVISION,
+                    "승인 뒤 ledger amendment 보존", true, ""
+                )
+            )
+        );
+        CashflowSettlementCycleHeadMigrationResponse migrated = fixture.persistence.runCommandTransaction(() ->
+            service.migrateCashflowSettlementCycleHeadV2(
+                ACTOR,
+                "project-a",
+                new MigrateCashflowSettlementCycleHeadV2Request(
+                    "migrate-amended-ledger", 4, SOURCE_REVISION,
+                    "승인 뒤 ledger amendment 보존", false, validated.migrationFingerprint()
+                )
+            )
+        );
+
+        assertThat(migrated.approvalVersionId())
+            .isEqualTo("project-a-2026-09-r3-migrated-v3");
+        Map<String, Object> request = fixture.documents.get(
+            "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-09"
+        );
+        Map<String, Object> ledger = fixture.documents.get(monthClosePath("project-a", "2026-09"));
+        Map<String, Object> version = fixture.documents.get(
+            "orgs/tenant-a/monthly_close_versions/project-a-2026-09-r3-migrated-v3"
+        );
+        Map<String, Object> head = fixture.documents.get(
+            "orgs/tenant-a/cashflow_cumulative_close_heads/project-a"
+        );
+        assertThat(request).containsEntry("ledgerRevision", 4L);
+        assertThat(ledger)
+            .containsEntry("revision", 4L)
+            .containsEntry("lastAmendmentEvidence", Map.of("kind", "POST_CLOSE", "revision", 4L));
+        assertThat(version).containsEntry("revision", 3L);
+        assertThat((List<Map<String, Object>>) head.get("closedRanges"))
+            .singleElement()
+            .satisfies(range -> assertThat(range).containsEntry("ledgerRevision", 3L));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void legacyActiveRequestNormalizationIsAtomicAndPreservesWeeklyStatus() {
+        Fixture fixture = fixture(member(Map.of("role", "admin")), Map.of());
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.ofEntries(
+            Map.entry("id", "project-a"),
+            Map.entry("tenantId", "tenant-a"),
+            Map.entry("version", 3L),
+            Map.entry("executiveApproverId", "pm-1")
+        ));
+        String requestId = "project-a-2026-09";
+        cumulativeCloseRequest(fixture, "2026-09", requestId, false, 1);
+        String requestPath = "orgs/tenant-a/cashflow_month_close_requests/" + requestId;
+        Map<String, Object> rawRequest = new LinkedHashMap<>(fixture.documents.get(requestPath));
+        rawRequest.remove("reviewIdempotencyKey");
+        rawRequest.remove("approvalId");
+        rawRequest.remove("operationId");
+        rawRequest.put("tenantId", "tenant-a");
+        rawRequest.put("status", "PENDING");
+        rawRequest.put("requestedAt", NOW.minusSeconds(120).toString());
+        rawRequest.put("requestedByUid", "pm-1");
+        rawRequest.put("approverUid", "pm-1");
+        fixture.documents.put(requestPath, rawRequest);
+        String statusPath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09";
+        Map<String, Object> weekOne = Map.of(
+            "status", "COMPLETED", "revision", 3L,
+            "submittedAt", NOW.minusSeconds(300).toString(), "submittedBy", "pm-1",
+            "approvedAt", NOW.minusSeconds(240).toString(), "approvedBy", "pm-1"
+        );
+        fixture.documents.put(statusPath, new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("tenantId", "tenant-a"),
+            Map.entry("projectId", "project-a"),
+            Map.entry("yearMonth", "2026-09"),
+            Map.entry("periods", Map.of("WEEK_1", weekOne)),
+            Map.entry("updatedAt", NOW.minusSeconds(240).toString())
+        )));
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        NormalizeLegacyCashflowSettlementCycleRequest dryRun =
+            new NormalizeLegacyCashflowSettlementCycleRequest(
+                "normalize-september-request", "2026-09", 1,
+                String.valueOf(rawRequest.get("manifestHash")), "legacy active request", true, ""
+            );
+        Map<String, Map<String, Object>> beforeDryRun = deepCopy(fixture.documents);
+
+        CashflowSettlementCycleLegacyRequestNormalizationResponse validated =
+            fixture.persistence.runCommandTransaction(() ->
+                service.normalizeLegacyCashflowSettlementCycleRequest(ACTOR, "project-a", dryRun)
+            );
+        assertThat(fixture.documents).isEqualTo(beforeDryRun);
+
+        NormalizeLegacyCashflowSettlementCycleRequest apply =
+            new NormalizeLegacyCashflowSettlementCycleRequest(
+                "normalize-september-request", "2026-09", 1,
+                String.valueOf(rawRequest.get("manifestHash")), "legacy active request", false,
+                validated.migrationFingerprint()
+            );
+        Map<String, Object> changedStatus = deepCopy(fixture.documents.get(statusPath));
+        Map<String, Object> changedPeriods = new LinkedHashMap<>((Map<String, Object>) changedStatus.get("periods"));
+        changedPeriods.put("WEEK_2", Map.of("status", "SUBMITTED", "revision", 1L));
+        changedStatus.put("periods", changedPeriods);
+        fixture.documents.put(statusPath, changedStatus);
+        Map<String, Map<String, Object>> beforeConflict = deepCopy(fixture.documents);
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            service.normalizeLegacyCashflowSettlementCycleRequest(ACTOR, "project-a", apply)
+        ))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("fingerprint changed");
+        assertThat(fixture.documents).isEqualTo(beforeConflict);
+        fixture.documents.put(statusPath, deepCopy(beforeDryRun.get(statusPath)));
+        CashflowSettlementCycleLegacyRequestNormalizationResponse normalized =
+            fixture.persistence.runCommandTransaction(() ->
+                service.normalizeLegacyCashflowSettlementCycleRequest(ACTOR, "project-a", apply)
+            );
+        Map<String, Map<String, Object>> afterApply = deepCopy(fixture.documents);
+        assertThat(fixture.persistence.runCommandTransaction(() ->
+            service.normalizeLegacyCashflowSettlementCycleRequest(ACTOR, "project-a", apply)
+        )).isEqualTo(normalized);
+        assertThat(fixture.documents).isEqualTo(afterApply);
+        CashflowSettlementCycleLegacyRequestNormalizationResponse resumedDryRun =
+            fixture.persistence.runCommandTransaction(() ->
+                service.normalizeLegacyCashflowSettlementCycleRequest(ACTOR, "project-a", dryRun)
+            );
+        assertThat(resumedDryRun.migrationRequired()).isFalse();
+        assertThat(fixture.documents).isEqualTo(afterApply);
+
+        assertThat(fixture.documents.get(requestPath))
+            .containsEntry("documentType", "REQUEST")
+            .containsEntry("status", "PENDING_APPROVAL")
+            .containsEntry("cycleYearMonth", "2026-09")
+            .containsEntry("monthCloseTargetYearMonth", "2026-08")
+            .containsEntry("evidenceRevision", 1L)
+            .containsEntry("workflowRevision", 1L);
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_month_close_requests/__active__-project-a"
+        ))
+            .containsEntry("activeCycleYearMonth", "2026-09")
+            .containsEntry("activeRequestId", requestId)
+            .containsEntry("activeState", "PENDING_APPROVAL")
+            .containsEntry("workflowRevision", 1L);
+        Map<String, Object> periods = (Map<String, Object>) fixture.documents.get(statusPath).get("periods");
+        assertThat(periods.get("WEEK_1")).isEqualTo(weekOne);
+        assertThat((Map<String, Object>) periods.get("MONTH"))
+            .containsEntry("status", "SUBMITTED")
+            .containsEntry("revision", 1L)
+            .containsEntry("submittedAt", rawRequest.get("requestedAt"))
+            .containsEntry("submittedBy", "pm-1")
+            .containsEntry("approvedAt", "")
+            .containsEntry("approvedBy", "");
+        assertThat(fixture.documents).doesNotContainKeys(
+            monthClosePath("project-a", "2026-09"),
+            "orgs/tenant-a/cashflow_cumulative_close_heads/project-a",
+            "orgs/tenant-a/monthly_close_versions/project-a-2026-09-r1"
+        );
     }
 
     @Test
@@ -6333,38 +6818,6 @@ class FirestoreCashflowLeaseGuardTest {
         )))
             .isInstanceOf(WeeklyExpenseConflictException.class);
         assertThat(mixedShape.documents).isEqualTo(beforeMixedShape);
-    }
-
-    @Test
-    void verifiedCycleKeyedV1HeadMigrationPreservesTheTargetMonthProvenance() {
-        Fixture fixture = fixture(member(Map.of("role", "admin")), Map.of());
-        seedVerifiedCycleKeyedV1CumulativeApproval(fixture);
-
-        CashflowSettlementCycleHeadMigrationResponse migrated = fixture.persistence.runCommandTransaction(() ->
-            commandService(fixture.persistence).migrateCashflowSettlementCycleHeadV2(
-                ACTOR,
-                "project-a",
-                new MigrateCashflowSettlementCycleHeadV2Request(
-                    "migrate-cycle-keyed-v1-head", 4, SOURCE_REVISION, "cycle-keyed legacy head 복구"
-                )
-            )
-        );
-
-        assertThat(migrated.approvalVersionId()).isEqualTo("project-a-2026-09-r3");
-        WeeklyExpensePersistence.CashflowSettlementCycleRecord projected = fixture.persistence
-            .findCashflowSettlementCyclesBatch(
-                ACTOR, List.of("project-a"), "2026-09", "2026-08"
-            ).get("project-a");
-        assertThat(projected.projection().businessState())
-            .isEqualTo(CashflowSettlementCyclePolicy.BusinessState.APPROVED);
-        assertThat(projected.projection().provenance())
-            .isNotNull()
-            .extracting(
-                CashflowSettlementCyclePolicy.ApprovalProvenance::affectedThroughMonth,
-                CashflowSettlementCyclePolicy.ApprovalProvenance::closedByCycleYearMonth,
-                CashflowSettlementCyclePolicy.ApprovalProvenance::approvalVersionId
-            )
-            .containsExactly("2026-08", "2026-09", "project-a-2026-09-r3");
     }
 
     @Test
@@ -7177,10 +7630,12 @@ class FirestoreCashflowLeaseGuardTest {
             "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
         ).get("periods");
         assertThat((Map<String, Object>) targetPeriods.get("MONTH"))
-            .containsEntry("status", "WAITING_FOR_UPDATE");
-        assertThat(fixture.documents.get(
+            .containsEntry("status", "COMPLETED");
+        Map<String, Object> cyclePeriods = (Map<String, Object>) fixture.documents.get(
             "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09"
-        )).isEqualTo(currentCycleSettlement);
+        ).get("periods");
+        assertThat((Map<String, Object>) cyclePeriods.get("MONTH"))
+            .containsEntry("status", "WAITING_FOR_UPDATE");
     }
 
     @Test
@@ -7255,7 +7710,7 @@ class FirestoreCashflowLeaseGuardTest {
             .filter(invocation -> Set.of("set", "create").contains(invocation.getMethod().getName()))
             .count();
 
-        assertThat(transactionWrites).isEqualTo(490);
+        assertThat(transactionWrites).isEqualTo(491);
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
             .containsEntry("authorityExists", false)
             .containsEntry("closedRanges", List.of())
@@ -7270,11 +7725,12 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("status", "WAITING_FOR_UPDATE");
         assertThat((Map<String, Object>) lastPeriods.get("WEEK_5"))
             .containsEntry("status", "WAITING_FOR_UPDATE");
-        assertThat((Map<String, Object>) lastPeriods.get("MONTH"))
-            .containsEntry("status", "WAITING_FOR_UPDATE");
-        assertThat(fixture.documents).doesNotContainKey(
+        Map<String, Object> cyclePeriods = (Map<String, Object>) fixture.documents.get(
             "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09"
-        );
+        ).get("periods");
+        assertThat((Map<String, Object>) cyclePeriods.get("MONTH"))
+            .containsEntry("status", "WAITING_FOR_UPDATE");
+        assertThat(lastPeriods).doesNotContainKey("MONTH");
     }
 
     @Test
@@ -7447,11 +7903,13 @@ class FirestoreCashflowLeaseGuardTest {
             "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07"
         ).get("periods");
         assertThat((Map<String, Object>) julyPeriods.get("MONTH"))
+            .containsEntry("status", "COMPLETED");
+        Map<String, Object> augustPeriods = (Map<String, Object>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
+        ).get("periods");
+        assertThat((Map<String, Object>) augustPeriods.get("MONTH"))
             .containsEntry("status", "WAITING_FOR_UPDATE")
             .doesNotContainKeys("submittedAt", "submittedBy", "approvedAt", "approvedBy");
-        assertThat(fixture.documents.get(
-            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
-        )).isEqualTo(augustSettlementBeforeReopen);
         Map<String, Object> decisionAudit = fixture.documents.values().stream()
             .filter(document -> "exact-restore-decision".equals(document.get("idempotencyKey")))
             .filter(document -> "cashflowMonth.decideReopen".equals(document.get("commandName")))
@@ -7729,13 +8187,13 @@ class FirestoreCashflowLeaseGuardTest {
             "updatedAt", NOW.toString()
         )));
         fixture.documents.put(
-            "orgs/tenant-a/cashflow_settlement_statuses/project-a-" + targetYearMonth,
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-" + cycleYearMonth,
             new LinkedHashMap<>(Map.of(
                 "tenantId", "tenant-a",
                 "projectId", "project-a",
-                "yearMonth", targetYearMonth,
+                "yearMonth", cycleYearMonth,
                 "periods", Map.of("MONTH", Map.of(
-                    "status", "PENDING_APPROVAL",
+                    "status", "SUBMITTED",
                     "revision", 1L,
                     "submittedAt", NOW.minusSeconds(60).toString(),
                     "submittedBy", "pm-1",
@@ -8621,7 +9079,20 @@ class FirestoreCashflowLeaseGuardTest {
     private static void seedVerifiedLegacyCumulativeApproval(Fixture fixture) {
         String requestId = "project-a-2026-08";
         String versionId = "project-a-2026-08-r3";
-        String snapshotHash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        Map<String, Object> snapshot = Map.ofEntries(
+            Map.entry("schemaVersion", 2),
+            Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
+            Map.entry("projectId", "project-a"),
+            Map.entry("yearMonth", "2026-08"),
+            Map.entry("requestId", requestId),
+            Map.entry("requestRevision", 7L),
+            Map.entry("manifestHash", SOURCE_REVISION),
+            Map.entry("rootHash", SOURCE_REVISION),
+            Map.entry("headRevision", 4L),
+            Map.entry("approvalId", ""),
+            Map.entry("operationId", "")
+        );
+        String snapshotHash = fixture.persistence.hashCanonicalJson(snapshot);
         fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
             "id", "project-a", "tenantId", "tenant-a", "executiveApproverId", "pm-1"
         ));
@@ -8679,8 +9150,8 @@ class FirestoreCashflowLeaseGuardTest {
             Map.entry("closedByUid", "pm-1")
         ));
         fixture.documents.put(
-            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08",
-            completedSettlement("2026-08", true)
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09",
+            completedSettlement("2026-09", true)
         );
         fixture.documents.put("orgs/tenant-a/monthly_close_versions/" + versionId, Map.ofEntries(
             Map.entry("id", versionId),
@@ -8694,19 +9165,7 @@ class FirestoreCashflowLeaseGuardTest {
             Map.entry("snapshotHash", snapshotHash),
             Map.entry("closedAt", NOW.minusSeconds(60).toString()),
             Map.entry("closedByUid", "pm-1"),
-            Map.entry("snapshot", Map.ofEntries(
-                Map.entry("schemaVersion", 2),
-                Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
-                Map.entry("projectId", "project-a"),
-                Map.entry("yearMonth", "2026-08"),
-                Map.entry("requestId", requestId),
-                Map.entry("requestRevision", 7L),
-                Map.entry("manifestHash", SOURCE_REVISION),
-                Map.entry("rootHash", SOURCE_REVISION),
-                Map.entry("headRevision", 4L),
-                Map.entry("approvalId", ""),
-                Map.entry("operationId", "")
-            ))
+            Map.entry("snapshot", snapshot)
         ));
         fixture.documents.put(idempotencyPath(
             "tenant-a", "project-a", WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND,
@@ -8724,57 +9183,6 @@ class FirestoreCashflowLeaseGuardTest {
                 + SOURCE_REVISION + "\",\"headRevision\":4}"),
             Map.entry("createdAt", NOW.minusSeconds(60).toString())
         ));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void seedVerifiedCycleKeyedV1CumulativeApproval(Fixture fixture) {
-        seedVerifiedLegacyCumulativeApproval(fixture);
-
-        String oldRequestPath = "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08";
-        String requestPath = "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-09";
-        Map<String, Object> request = new LinkedHashMap<>(fixture.documents.remove(oldRequestPath));
-        request.put("requestId", "project-a-2026-09");
-        request.put("yearMonth", "2026-09");
-        request.put("cycleYearMonth", "2026-09");
-        request.put("throughMonth", "2026-08");
-        Map<String, Object> result = new LinkedHashMap<>((Map<String, Object>) request.get("monthCloseResult"));
-        result.put("yearMonth", "2026-09");
-        result.put("requestId", "project-a-2026-09");
-        request.put("monthCloseResult", result);
-        fixture.documents.put(requestPath, request);
-
-        String oldClosePath = monthClosePath("project-a", "2026-08");
-        String closePath = monthClosePath("project-a", "2026-09");
-        Map<String, Object> close = new LinkedHashMap<>(fixture.documents.remove(oldClosePath));
-        close.put("yearMonth", "2026-09");
-        close.put("latestVersionId", "project-a-2026-09-r3");
-        fixture.documents.put(closePath, close);
-
-        String oldVersionPath = "orgs/tenant-a/monthly_close_versions/project-a-2026-08-r3";
-        String versionPath = "orgs/tenant-a/monthly_close_versions/project-a-2026-09-r3";
-        Map<String, Object> version = new LinkedHashMap<>(fixture.documents.remove(oldVersionPath));
-        version.put("id", "project-a-2026-09-r3");
-        version.put("yearMonth", "2026-09");
-        Map<String, Object> snapshot = new LinkedHashMap<>((Map<String, Object>) version.get("snapshot"));
-        snapshot.put("yearMonth", "2026-09");
-        snapshot.put("requestId", "project-a-2026-09");
-        version.put("snapshot", snapshot);
-        fixture.documents.put(versionPath, version);
-
-        Map<String, Object> head = new LinkedHashMap<>(fixture.documents.get(
-            "orgs/tenant-a/cashflow_cumulative_close_heads/project-a"
-        ));
-        head.put("requestId", "project-a-2026-09");
-        fixture.documents.put("orgs/tenant-a/cashflow_cumulative_close_heads/project-a", head);
-
-        String receiptPath = idempotencyPath(
-            "tenant-a", "project-a", WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND,
-            "legacy-jvm-close"
-        );
-        Map<String, Object> receipt = new LinkedHashMap<>(fixture.documents.get(receiptPath));
-        receipt.put("responseJson", String.valueOf(receipt.get("responseJson"))
-            .replace("2026-08", "2026-09"));
-        fixture.documents.put(receiptPath, receipt);
     }
 
     private static CashflowMonthReopenPort.Actor reopenActor(TrustedActorContext actor) {

@@ -1,13 +1,14 @@
 package dev.merryai.innerplatform.weekly.api;
 
-public record CashflowSettlementCycleHeadMigrationResponse(
+public record CashflowSettlementCycleLegacyRequestNormalizationResponse(
     boolean ok,
     String commandName,
     String projectId,
-    String closedThrough,
     String cycleYearMonth,
-    String approvalVersionId,
-    long headRevision,
+    String monthCloseTargetYearMonth,
+    String requestId,
+    long workflowRevision,
+    long evidenceRevision,
     String migrationFingerprint,
     boolean migrationRequired,
     String auditId

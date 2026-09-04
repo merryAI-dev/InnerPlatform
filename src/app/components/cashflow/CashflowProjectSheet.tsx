@@ -50,7 +50,6 @@ import {
   reopenCashflowWeeklyUpdateViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
-  fetchCurrentCashflowMonthCloseRequestViaBff,
   fetchCashflowWeeklyComplianceViaBff,
   requestCashflowMonthReopenViaBff,
   type CashflowMonthCloseCell,
@@ -65,6 +64,8 @@ import {
   type CashflowActivitySource,
   type CashflowWeeklyComplianceItem,
 } from '../../lib/platform-bff-client';
+import { getCashflowSettlementPeriodOrder, isYearMonth } from '../../platform/cashflow-weeks';
+import { addMonthsToYearMonth } from '../../platform/business-days';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import {
@@ -200,7 +201,7 @@ type PortalTimelineTone = CashflowMonthClosePresentationWeek['surfaceTone'] | Ca
 
 type PortalTimelineNode = {
   key: string;
-  kind: 'weekly' | 'monthly' | 'monthly-executed' | 'project-end';
+  kind: 'weekly' | 'monthly' | 'project-end';
   label: string;
   statusLabel: string;
   periodLabel?: string;
@@ -471,15 +472,19 @@ export function CashflowProjectSheet({
     yearMonth,
   ) ? loadedMonthCloseResult : null;
   const cashflowPresentation = monthCloseResult?.presentation;
-  const [loadedMonthCloseRequest, setMonthCloseRequest] = useState<CashflowMonthCloseRequest | null>(null);
-  const monthCloseRequest = isCashflowMonthCloseRequestForSelection(
-    loadedMonthCloseRequest,
-    projectId,
-    yearMonth,
-  ) ? loadedMonthCloseRequest : null;
+  const monthCloseRequest = monthCloseResult?.monthState || null;
   const monthCloseActions = monthCloseResult?.actions;
-  const [monthCloseRequestError, setMonthCloseRequestError] = useState<string | null>(null);
-  const canReviewReopen = monthCloseRequest?.canDecideReopen === true;
+  const monthCloseCycle = monthCloseResult?.settlementCycle;
+  const monthCloseTargetYearMonth = isYearMonth(yearMonth)
+    && isYearMonth(monthCloseResult?.targetYearMonth)
+    && monthCloseCycle?.cycleYearMonth === yearMonth
+    && monthCloseCycle.monthCloseTargetYearMonth === monthCloseResult.targetYearMonth
+    && monthCloseResult.targetYearMonth === addMonthsToYearMonth(yearMonth, -1)
+    ? monthCloseResult.targetYearMonth
+    : '';
+  const canApproveReopen = monthCloseCycle?.commandCapabilities.APPROVE_MONTH_REOPEN.allowed === true;
+  const canRejectReopen = monthCloseCycle?.commandCapabilities.REJECT_MONTH_REOPEN.allowed === true;
+  const canReviewReopen = canApproveReopen || canRejectReopen;
   const [monthCloseLoading, setMonthCloseLoading] = useState(false);
   // 화면 열 때 요청 12개가 동시에 나가면 Vercel 인스턴스가 늘어나는 동안 제일 중요한 month-close 가
   // 제일 늦게 끝났다(2026-08-19, 2.6초 vs 7.8초). 첫 화면은 config + month-close 둘로 그리고,
@@ -600,7 +605,6 @@ export function CashflowProjectSheet({
   const [cashflowEventMonth, setCashflowEventMonth] = useState('ALL');
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
   const monthCloseRequestGenerationRef = useRef(0);
-  const monthCloseCurrentRequestGenerationRef = useRef(0);
   const monthCloseMutationGenerationRef = useRef<Record<CashflowMonthCloseMutationOperation, number>>({
     approver: 0,
     request: 0,
@@ -944,64 +948,6 @@ export function CashflowProjectSheet({
     setMonthCloseSettled(false);
     void loadCashflowMonthClose();
   }, [loadCashflowMonthClose]);
-
-  const loadMonthCloseRequest = useCallback(async (): Promise<void> => {
-    const requestGeneration = ++monthCloseCurrentRequestGenerationRef.current;
-    const requestedProjectId = projectId;
-    const requestedYearMonth = yearMonth;
-    const isCurrentRequest = () => shouldApplyCashflowMonthCloseRequestResult({
-      requestGeneration,
-      currentGeneration: monthCloseCurrentRequestGenerationRef.current,
-      requestedProjectId,
-      selectedProjectId: selectedProjectIdRef.current,
-      requestedYearMonth,
-      selectedYearMonth: selectedYearMonthRef.current,
-    });
-    if (!projectId || !orgId || !user?.uid) {
-      if (isCurrentRequest()) {
-        setMonthCloseRequest(null);
-        setMonthCloseRequestError(null);
-      }
-      return;
-    }
-    if (isCurrentRequest()) {
-      setMonthCloseRequest(null);
-      setMonthCloseRequestError(null);
-    }
-    try {
-      const actor = await resolveBffActor();
-      if (!actor?.idToken) {
-        if (isCurrentRequest()) setMonthCloseRequestError('로그인 상태를 다시 확인한 뒤 월 결산 승인 상태를 불러와 주세요.');
-        return;
-      }
-      const request = await fetchCurrentCashflowMonthCloseRequestViaBff({
-        tenantId: orgId,
-        actor,
-        projectId,
-        yearMonth,
-      });
-      if (isCurrentRequest()) {
-        setMonthCloseRequest(request);
-        setMonthCloseRequestError(null);
-      }
-    } catch (error) {
-      if (!isCurrentRequest()) return;
-      setMonthCloseRequest(null);
-      setMonthCloseRequestError('월 결산 승인 상태를 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.');
-      logCashflowSettlement({
-        phase: 'error',
-        operation: 'cashflow.month_close.request.load',
-        projectId,
-        yearMonth,
-        error,
-      });
-    }
-  }, [orgId, projectId, resolveBffActor, user?.uid, yearMonth]);
-
-  useEffect(() => {
-    if (!monthCloseSettled) return;
-    void loadMonthCloseRequest();
-  }, [loadMonthCloseRequest, monthCloseSettled]);
 
   useEffect(() => {
     if (!weeklyActionNotice) return;
@@ -1517,16 +1463,17 @@ export function CashflowProjectSheet({
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;
     if (!dashboard?.source || !Array.isArray(dashboard.cells)) return cashflowSheetMirror;
+    if (!monthCloseTargetYearMonth) return null;
     return {
       projectId,
       status: dashboard.source.kind === 'PINNED_MIRROR' && dashboard.source.status === 'FRESH' ? 'FRESH' : 'STALE',
       sourceRevision: dashboard.source.sourceRevision,
       targetRevisionAtFetch: dashboard.source.targetRevision,
       capturedAt: dashboard.source.capturedAt,
-      yearMonths: [yearMonth],
+      yearMonths: [monthCloseTargetYearMonth],
       cells: dashboard.cells.map((cell) => ({
         mode: cell.mode,
-        yearMonth,
+        yearMonth: monthCloseTargetYearMonth,
         weekNo: cell.weekNo,
         lineId: cell.cashflowLine,
         direction: CASHFLOW_IN_LINES.includes(cell.cashflowLine as CashflowSheetLineId) ? 'IN' : 'OUT',
@@ -1536,11 +1483,11 @@ export function CashflowProjectSheet({
         ...(['VALUE', 'ZERO'].includes(cell.cellState) ? { amount: cell.amount } : {}),
       })),
     };
-  }, [cashflowSheetMirror, monthCloseResult?.dashboard, projectId, yearMonth]);
+  }, [cashflowSheetMirror, monthCloseResult?.dashboard, monthCloseTargetYearMonth, projectId]);
 
   useEffect(() => {
     setMonthCloseHumanReviewed(false);
-  }, [yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]);
+  }, [monthCloseTargetYearMonth, yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]);
 
   useEffect(() => {
     const sourceRows = monthCloseResult?.dashboard?.sheetDepositScheduleRows || [];
@@ -1563,7 +1510,7 @@ export function CashflowProjectSheet({
   const monthCloseCellsState = useMemo(() => {
     try {
       return {
-        cells: normalizeCashflowMonthCloseCells(monthClosePinnedSource, yearMonth),
+        cells: normalizeCashflowMonthCloseCells(monthClosePinnedSource, monthCloseTargetYearMonth),
         error: null as string | null,
       };
     } catch (error) {
@@ -1572,7 +1519,7 @@ export function CashflowProjectSheet({
         error: error instanceof Error ? error.message : '결산 대상 시트 셀을 확인하지 못했습니다.',
       };
     }
-  }, [monthClosePinnedSource, yearMonth]);
+  }, [monthClosePinnedSource, monthCloseTargetYearMonth]);
 
   // 막는 사유는 서버 판정 그대로 쓰고, 어느 칸인지만 펴서 보여준다. 화면이 다시 판정하지 않는다.
   const monthCloseBlockers = useMemo(() => (
@@ -1582,33 +1529,6 @@ export function CashflowProjectSheet({
       lines: describeCashflowMonthCloseIssue(blocker),
     }))
   ), [monthCloseResult?.dashboard?.validation?.blockers]);
-
-  // 안내는 한 줄. 상태에서 결정적인 것 하나만 고른다(2026-08-19 보람: 다 보여주니 정보가 아님).
-  // 회수·반려된 요청은 "요청 안 한 상태" 로 되돌린다 - 진행 바가 끝난 일처럼 보이면 안 된다.
-  /*
-   * 회차 월과 덮는 대상 월은 다르다. 누적 결산은 8월에 돌려도 대상이 2026-07 까지다
-   * (throughMonth). 회차가 있다는 것만 보고 "이 달 결산 완료" 로 그리면, 아직 아무도
-   * 하지 않은 8월이 완료로 보인다 - 라이브에서 그랬다(JLIN IBS).
-   *
-   * 회차 자체는 그대로 둔다. 회수·승인은 회차 월로 하는 것이 맞다. 여기서는 "보고 있는
-   * 달이 그 회차에 덮이는가" 만 따로 판단한다. 값은 서버가 이미 준다.
-   */
-  const monthCoveredByRequest = useMemo(() => {
-    const through = String(monthCloseRequest?.throughMonth || monthCloseRequest?.yearMonth || '');
-    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(through)) return true;
-    return yearMonth <= through;
-  }, [monthCloseRequest?.throughMonth, monthCloseRequest?.yearMonth, yearMonth]);
-
-  const monthRequestProgress = useMemo(() => {
-    const status = String(monthCloseRequest?.status || '').toUpperCase();
-    const inFlight = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);
-    // 덮이지 않는 달은 그 회차의 진행도를 빌려 쓰지 않는다.
-    const requested = inFlight && monthCoveredByRequest;
-    return {
-      requested,
-      approved: requested && ['APPROVED', 'REOPEN_REQUESTED'].includes(status),
-    };
-  }, [monthCloseRequest?.status, monthCoveredByRequest]);
 
   // 일정 진행 바. 마감·완료 시각·초과 판정은 서버 값이고, 여기서는 단계 상태만 고른다.
   const weeklyScheduleSteps = useMemo(() => {
@@ -1629,102 +1549,63 @@ export function CashflowProjectSheet({
   }, [monthCloseResult?.dashboard?.deadlineSummary?.current]);
 
   const monthScheduleSteps = useMemo(() => {
-    const summary = monthCloseResult?.dashboard?.summary;
-    if (!summary?.closeDeadlineAt) return [];
+    if (!monthCloseResult?.closeDeadlineAt) return [];
+    const businessState = monthCloseCycle?.businessState;
+    const requestActive = ['SUBMITTED', 'LOCKED', 'REOPEN_REQUESTED'].includes(businessState || '');
+    const approved = ['LOCKED', 'REOPEN_REQUESTED'].includes(businessState || '');
+    const settlement = monthCloseCycle?.monthCloseSettlement;
     return buildScheduleSteps({
       practitionerLabel: '결산 요청',
       approverLabel: '조직장 승인',
-      practitionerDeadline: summary.closeDeadlineAt,
-      approverDeadline: summary.approverDeadlineAt,
-      practitionerDoneAt: monthRequestProgress.requested ? monthCloseRequest?.requestedAt : null,
-      approverDoneAt: monthRequestProgress.approved ? monthCloseRequest?.reviewedAt : null,
+      practitionerDeadline: monthCloseResult.closeDeadlineAt,
+      approverDeadline: monthCloseResult.approverDeadlineAt,
+      practitionerDoneAt: requestActive ? (settlement?.submittedAt || monthCloseRequest?.requestedAt) : null,
+      approverDoneAt: approved ? (settlement?.approvedAt || monthCloseRequest?.reviewedAt) : null,
       nowIso: new Date().toISOString(),
     });
-  }, [monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthRequestProgress, monthCloseResult?.dashboard?.summary]);
+  }, [monthCloseCycle?.businessState, monthCloseCycle?.monthCloseSettlement, monthCloseRequest?.requestedAt, monthCloseRequest?.reviewedAt, monthCloseResult?.approverDeadlineAt, monthCloseResult?.closeDeadlineAt]);
 
-  /*
-   * 이 달을 덮는 회차가 없으면 이 달은 아직 결산 전이다. 지난 회차의 "완료" 배지를
-   * 빌려 쓰면 배지는 완료인데 아래 단계는 진행 중이라 화면이 스스로 모순된다.
-   */
-  const monthOwnPresentation = useMemo(() => {
-    // 라벨은 서버 표현을 그대로 쓴다. 이 달을 덮는 회차가 있을 때만 그 표현이 이 달의 것이다.
-    if (monthCoveredByRequest) {
-      return {
-        statusLabel: cashflowPresentation?.monthClose.statusLabel || '확인 불가',
-        tone: cashflowPresentation?.monthClose.tone || 'neutral',
-      };
-    }
-    return { statusLabel: '결산 전', tone: 'neutral' as const };
-  }, [cashflowPresentation?.monthClose, monthCoveredByRequest]);
-
-  /*
-   * 이 달에 실행됐지만 이 달을 덮지 않는 회차(예: 8월에 돌린 7월분 누적 결산).
-   * 대상 월이 다르므로 이 달의 마감이 아니라 그 회차의 완료 사실만 그린다.
-   */
-  const executedCycleSteps = useMemo(() => {
-    if (monthCoveredByRequest || !monthCloseRequest?.requestedAt) return [];
-    const executedCycleApproved = cashflowPresentation?.monthClose.status === 'COMPLETED';
-    return buildScheduleSteps({
-      practitionerLabel: '결산 요청',
-      approverLabel: '조직장 승인',
-      // 지난 회차의 마감은 이 화면의 관심이 아니다. 시각을 지어내지 않는다.
-      practitionerDeadline: null,
-      approverDeadline: null,
-      practitionerDoneAt: monthCloseRequest.requestedAt,
-      approverDoneAt: executedCycleApproved ? cashflowPresentation?.monthClose.approvedAt : null,
-      approverDone: executedCycleApproved,
-      nowIso: new Date().toISOString(),
-    });
-  }, [cashflowPresentation?.monthClose, monthCloseRequest?.requestedAt, monthCoveredByRequest]);
+  const settlementPeriodOrder = useMemo(() => getCashflowSettlementPeriodOrder({
+    yearMonth,
+    closeDeadline: monthCloseResult?.closeDeadline,
+  }), [monthCloseResult?.closeDeadline, yearMonth]);
+  const monthDeadlineKnown = settlementPeriodOrder.at(-1) !== 'MONTH';
 
   const portalTimelineNodes = useMemo<PortalTimelineNode[]>(() => {
     if (!portalMode) return [];
-    const weeklyNodes = (cashflowPresentation?.weeks || [])
+    const weeklyNodes = new Map((cashflowPresentation?.weeks || [])
       .filter((week) => week.yearMonth === yearMonth)
-      .map((week): PortalTimelineNode => {
-        return {
+      .map((week) => [`WEEK_${week.weekNo}`, {
           key: `weekly-${week.yearMonth}-${week.weekNo}`,
           kind: 'weekly',
           label: `${week.label} 주정산`,
-          statusLabel: week.statusLabel || '확인 불가',
+          statusLabel: week.weeklyStatusLabel || '주간 정산 상태 확인 필요',
           periodLabel: `${week.weekStart} ~ ${week.weekEnd}`,
           tone: week.surfaceTone,
           current: week.isCurrent,
-        };
-      });
-    const monthlyPresentation = cashflowPresentation?.monthClose;
-    /*
-     * 월결산 노드를 둘로 나눈다.
-     *
-     * 예전에는 노드가 하나였고, 배지는 "이 달에 실행된 회차"(7월분 · 완료)를, 단계는
-     * "이 달을 대상으로 하는 결산"(8월분 · 9월 마감)을 그렸다. 서로 다른 두 회차가 한
-     * 자리에 섞여 "완료인데 진행 중" 으로 보였다. 노드 하나가 회차 하나만 말하게 한다.
-     */
-    const executedCycleNode: PortalTimelineNode | null = executedCycleSteps.length > 0
-      ? {
-        key: `monthly-executed-${monthCloseRequest?.throughMonth || ''}`,
-        kind: 'monthly-executed',
-        // 사람은 "무엇을 결산했나" 로 기억한다. 실행 시각은 아래 단계에 남는다.
-        label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`,
-        statusLabel: monthlyPresentation?.statusLabel || '확인 불가',
-        tone: monthlyPresentation?.tone || 'neutral',
-        current: false,
-      }
-      : null;
+        } satisfies PortalTimelineNode]));
+    const targetYearMonth = monthCloseTargetYearMonth;
+    const targetLabel = /^20\d{2}-(0[1-9]|1[0-2])$/.test(targetYearMonth)
+      ? `${targetYearMonth.slice(0, 4) === yearMonth.slice(0, 4) ? '' : `${targetYearMonth.slice(0, 4)}년 `}${Number(targetYearMonth.slice(5, 7))}월분 결산`
+      : '월결산';
+    const deadlineLabel = monthDeadlineKnown && monthCloseResult?.closeDeadline
+      ? `${Number(monthCloseResult.closeDeadline.slice(5, 7))}/${Number(monthCloseResult.closeDeadline.slice(8, 10))} 마감`
+      : '마감 확인 필요';
+    const monthHealthy = monthCloseCycle?.health === 'OK' && monthCloseCycle.businessState !== 'INCONSISTENT';
+    const monthlyPresentation = monthHealthy ? cashflowPresentation?.monthClose : null;
     const monthlyNode: PortalTimelineNode = {
-      key: `monthly-${yearMonth}`,
+      key: `monthly-${targetYearMonth}`,
       kind: 'monthly',
-      label: `${yearMonth.slice(5)}월 월결산`,
-      // 이 달을 덮는 회차가 없으면 상태도 이 달 기준이어야 한다 - 지난 회차의 배지를 빌리지 않는다.
-      statusLabel: monthOwnPresentation.statusLabel,
-      tone: monthOwnPresentation.tone as PortalTimelineTone,
+      label: `${targetLabel} · ${deadlineLabel}`,
+      statusLabel: monthlyPresentation?.statusLabel || '상태 재확인 필요',
+      tone: monthlyPresentation?.tone || 'danger',
       current: false,
     };
     const projectEnd = project?.contractEnd;
     return [
-      ...(executedCycleNode ? [executedCycleNode] : []),
-      ...weeklyNodes,
-      monthlyNode,
+      ...settlementPeriodOrder.flatMap((period) => period === 'MONTH'
+        ? [monthlyNode]
+        : weeklyNodes.get(period) ? [weeklyNodes.get(period)!] : []),
       {
         key: 'project-end',
         kind: 'project-end',
@@ -1734,7 +1615,7 @@ export function CashflowProjectSheet({
         current: false,
       },
     ];
-  }, [cashflowPresentation?.monthClose, cashflowPresentation?.weeks, executedCycleSteps, monthCloseRequest?.throughMonth, monthOwnPresentation, portalMode, project?.contractEnd, yearMonth]);
+  }, [cashflowPresentation?.monthClose, cashflowPresentation?.weeks, monthCloseCycle?.businessState, monthCloseCycle?.health, monthCloseResult?.closeDeadline, monthCloseTargetYearMonth, monthDeadlineKnown, portalMode, project?.contractEnd, settlementPeriodOrder, yearMonth]);
 
   const weeklyEnabledActions = [
     monthCloseActions?.completeWeekly.enabled ? 'complete' : null,
@@ -1760,16 +1641,16 @@ export function CashflowProjectSheet({
         ? weeklyConfirmBusy
         : false;
   const monthlyEnabledActions = [
-    monthCloseActions?.requestMonthClose.enabled ? 'request' : null,
-    monthCloseActions?.withdrawMonthClose.enabled ? 'withdraw' : null,
-    !monthCloseError && monthCloseActions?.requestMonthReopen.enabled ? 'reopen' : null,
+    monthDeadlineKnown && monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed ? 'request' : null,
+    monthDeadlineKnown && monthCloseCycle?.commandCapabilities.WITHDRAW_MONTH_CLOSE.allowed ? 'withdraw' : null,
+    monthDeadlineKnown && !monthCloseError && monthCloseCycle?.commandCapabilities.REQUEST_MONTH_REOPEN.allowed ? 'reopen' : null,
   ].filter((action): action is 'request' | 'withdraw' | 'reopen' => Boolean(action));
   const portalMonthlyAction = portalMode && !canReviewReopen && monthlyEnabledActions.length === 1
     ? monthlyEnabledActions[0]
     : null;
   const portalMonthlyActionAmbiguous = portalMode && !canReviewReopen && monthlyEnabledActions.length > 1;
   const portalMonthlyButtonLabel = portalMonthlyAction === 'request'
-    ? monthCloseActions?.requestMonthClose.label || '월 결산 요청'
+    ? ['REJECTED', 'REOPENED', 'WITHDRAWN'].includes(monthCloseCycle?.businessState || '') ? '월 결산 재요청' : '월 결산 요청'
     : portalMonthlyAction === 'withdraw'
       ? '월 결산 요청 회수'
       : portalMonthlyAction === 'reopen'
@@ -1788,13 +1669,13 @@ export function CashflowProjectSheet({
     approverName: monthCloseRequest?.approverName,
     requestedAt: monthCloseRequest?.requestedAt,
     currentUid: user?.uid,
-    canWithdraw: monthCloseActions?.withdrawMonthClose.enabled === true,
+    canWithdraw: monthCloseCycle?.commandCapabilities.WITHDRAW_MONTH_CLOSE.allowed === true,
     withdrawGuide: monthCloseActions?.withdrawMonthClose.guide,
-    canRequestReopen: monthCloseActions?.requestMonthReopen.enabled === true,
+    canRequestReopen: monthCloseCycle?.commandCapabilities.REQUEST_MONTH_REOPEN.allowed === true,
     reopenGuide: monthCloseActions?.requestMonthReopen.guide,
     requestGuide: monthCloseActions?.requestMonthClose.guide,
     todayIso: new Date().toISOString(),
-  }), [monthCloseActions?.requestMonthClose.guide, monthCloseActions?.requestMonthReopen, monthCloseActions?.withdrawMonthClose, monthCloseRequest?.approverName, monthCloseRequest?.requestedAt, monthCloseRequest?.requestedByName, monthCloseRequest?.requestedByUid, monthCloseRequest?.status, user?.uid]);
+  }), [monthCloseActions?.requestMonthClose.guide, monthCloseActions?.requestMonthReopen.guide, monthCloseActions?.withdrawMonthClose.guide, monthCloseCycle?.commandCapabilities, monthCloseRequest?.approverName, monthCloseRequest?.requestedAt, monthCloseRequest?.requestedByName, monthCloseRequest?.requestedByUid, monthCloseRequest?.status, user?.uid]);
 
   const monthClosePreparation = useMemo(() => {
     if (monthCloseError) {
@@ -1821,7 +1702,7 @@ export function CashflowProjectSheet({
         actionLabel: '결산 상태 다시 확인',
       };
     }
-    if (!cashflowPresentation || !monthCloseActions?.requestMonthClose) {
+    if (!cashflowPresentation) {
       return {
         status: 'STATUS_RETRY_REQUIRED' as const,
         title: '월 결산 상태를 확인할 수 없습니다.',
@@ -1829,11 +1710,15 @@ export function CashflowProjectSheet({
         actionLabel: '결산 상태 다시 확인',
       };
     }
-    if (monthCloseActions.requestMonthClose.enabled !== true) {
+    if (!monthCloseTargetYearMonth
+      || !monthDeadlineKnown
+      || monthCloseCycle?.health !== 'OK'
+      || monthCloseCycle.businessState === 'INCONSISTENT'
+      || monthCloseCycle.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed !== true) {
       return {
         status: 'SERVER_BLOCKED' as const,
         title: '월 결산을 진행할 수 없습니다.',
-        detail: monthCloseActions.requestMonthClose.guide || '확인 불가',
+        detail: monthCloseActions?.requestMonthClose.guide || '확인 불가',
         actionLabel: null,
       };
     }
@@ -1843,7 +1728,7 @@ export function CashflowProjectSheet({
       detail: '서버에서 월 결산 요청 가능 상태를 확인했습니다.',
       actionLabel: null,
     };
-  }, [cashflowPresentation, monthCloseActions?.requestMonthClose, monthCloseError, monthCloseLoading, monthCloseResult]);
+  }, [cashflowPresentation, monthCloseActions?.requestMonthClose.guide, monthCloseCycle, monthCloseError, monthCloseLoading, monthCloseResult, monthCloseTargetYearMonth, monthDeadlineKnown]);
 
   const handleSaveExecutiveApprover = useCallback(async (): Promise<void> => {
     if (monthCloseActions?.changeExecutiveApprover.enabled !== true) {
@@ -1884,7 +1769,7 @@ export function CashflowProjectSheet({
   const handleOpenMonthCloseReview = useCallback((): void => {
     const summary = {
       status: monthClosePreparation.status,
-      requestMonthCloseEnabled: monthCloseActions?.requestMonthClose.enabled === true,
+      submitMonthCloseAllowed: monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed === true,
       requestMonthCloseGuide: monthCloseActions?.requestMonthClose.guide || '',
     };
     logCashflowSettlement({
@@ -1894,7 +1779,7 @@ export function CashflowProjectSheet({
       yearMonth,
       summary,
     });
-    if (monthCloseActions?.requestMonthClose.enabled !== true) {
+    if (!monthDeadlineKnown || monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed !== true) {
       return;
     }
     if (project && !savedExecutiveApproverId) {
@@ -1911,10 +1796,10 @@ export function CashflowProjectSheet({
         summary,
       });
     }
-  }, [monthCloseActions?.requestMonthClose, monthClosePreparation.status, project, projectId, savedExecutiveApproverId, yearMonth]);
+  }, [monthCloseActions?.requestMonthClose.guide, monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed, monthClosePreparation.status, monthDeadlineKnown, project, projectId, savedExecutiveApproverId, yearMonth]);
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
-    if (monthCloseActions?.requestMonthClose.enabled !== true) {
+    if (!monthDeadlineKnown || monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed !== true) {
       return;
     }
     if (selectedProjectIdRef.current !== projectId || selectedYearMonthRef.current !== yearMonth) {
@@ -1922,34 +1807,6 @@ export function CashflowProjectSheet({
     }
     if (!yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed) {
       if (!savedExecutiveApproverId) setExecutiveApproverAttention(true);
-      return;
-    }
-    let monthCloseInput: CashflowMonthCloseDraftInput;
-    try {
-      if (monthCloseCellsState.error) throw new Error(monthCloseCellsState.error);
-      const managementChecks = monthCloseResult?.dashboard?.managementChecks || [];
-      monthCloseInput = buildCashflowMonthCloseDraftInput({
-        mirror: monthClosePinnedSource,
-        yearMonth,
-        humanReviewed: monthCloseHumanReviewed,
-        depositScheduleRows: monthCloseDepositRows,
-        managementChecks,
-        deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
-          trackingStartedAt: null,
-          missedCount: 0,
-          completedCount: 0,
-          current: null,
-        } satisfies CashflowDeadlineSummary,
-      });
-    } catch (error) {
-      logCashflowSettlement({
-        phase: 'info',
-        operation: 'cashflow.month_close.preflight.blocked',
-        projectId,
-        yearMonth,
-        summary: { reason: 'draft_input_invalid', hasSheetConfig: Boolean(cashflowSheetConfig?.value) },
-        error,
-      });
       return;
     }
     const reviewedOpeningBalances = monthCloseResult?.dashboard?.openingBalances;
@@ -1960,13 +1817,6 @@ export function CashflowProjectSheet({
     const mutationScope = captureMonthCloseMutationScope('request');
     setMonthCloseBusy(true);
     const startedAt = Date.now();
-    logCashflowSettlement({
-      phase: 'start',
-      operation: 'cashflow.month_close.request',
-      projectId,
-      yearMonth,
-      summary: { sourceRevision: monthCloseInput.sourceRevision, targetRevision: monthCloseInput.targetRevision },
-    });
     try {
       const actor = await resolveBffActor();
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
@@ -1979,12 +1829,52 @@ export function CashflowProjectSheet({
       });
       if (!isCurrentMonthCloseMutation(mutationScope, prepared)) return;
       setMonthCloseResult(prepared);
-      if (prepared.actions.requestMonthClose.enabled !== true) {
+      if (prepared.settlementCycle.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed !== true) {
         throw new Error(
           prepared.actions.requestMonthClose.guide
             || '서버에서 월 결산 가능 상태를 확인하지 못했습니다.',
         );
       }
+      if (prepared.targetYearMonth !== monthCloseTargetYearMonth
+        || prepared.settlementCycle.cycleYearMonth !== yearMonth
+        || prepared.settlementCycle.monthCloseTargetYearMonth !== prepared.targetYearMonth) {
+        throw new Error('월 결산 회차와 대상 월을 다시 확인해 주세요.');
+      }
+      let monthCloseInput: CashflowMonthCloseDraftInput;
+      try {
+        if (monthCloseCellsState.error) throw new Error(monthCloseCellsState.error);
+        const managementChecks = monthCloseResult?.dashboard?.managementChecks || [];
+        monthCloseInput = buildCashflowMonthCloseDraftInput({
+          mirror: monthClosePinnedSource,
+          yearMonth: prepared.targetYearMonth,
+          humanReviewed: monthCloseHumanReviewed,
+          depositScheduleRows: monthCloseDepositRows,
+          managementChecks,
+          deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
+            trackingStartedAt: null,
+            missedCount: 0,
+            completedCount: 0,
+            current: null,
+          } satisfies CashflowDeadlineSummary,
+        });
+      } catch (error) {
+        logCashflowSettlement({
+          phase: 'info',
+          operation: 'cashflow.month_close.preflight.blocked',
+          projectId,
+          yearMonth,
+          summary: { reason: 'draft_input_invalid', hasSheetConfig: Boolean(cashflowSheetConfig?.value) },
+          error,
+        });
+        return;
+      }
+      logCashflowSettlement({
+        phase: 'start',
+        operation: 'cashflow.month_close.request',
+        projectId,
+        yearMonth,
+        summary: { sourceRevision: monthCloseInput.sourceRevision, targetRevision: monthCloseInput.targetRevision },
+      });
       const requestStartedAtIso = new Date().toISOString();
       let request: CashflowMonthCloseRequest;
       try {
@@ -1996,6 +1886,7 @@ export function CashflowProjectSheet({
             contractVersion: 'cashflow-cumulative-close-v2',
             yearMonth,
             expectedRevision: prepared.revision,
+            expectedWorkflowRevision: prepared.settlementCycle.workflowRevision,
             expectedApproverUid: savedExecutiveApproverId,
             expectedProjectVersion: project?.version ?? 0,
             expectedOpeningBalances: reviewedOpeningBalances,
@@ -2009,28 +1900,25 @@ export function CashflowProjectSheet({
         if (!isRequestTimeoutError(error) || !isCurrentMonthCloseMutation(mutationScope)) throw error;
         setMonthCloseError('요청 결과를 확인하고 있어요. 잠시만 기다려 주세요.');
         const reconciled = await reconcileMonthCloseRequestAfterTimeout({
-          fetchCurrent: () => fetchCurrentCashflowMonthCloseRequestViaBff({ tenantId: orgId, actor, projectId, yearMonth }),
+          fetchCurrent: async () => (
+            await fetchCashflowMonthCloseViaBff({ tenantId: orgId, actor, projectId, yearMonth })
+          ).monthState,
           actorUid: actor.uid,
           startedAtIso: requestStartedAtIso,
         });
         if (!isCurrentMonthCloseMutation(mutationScope)) return;
         setMonthCloseError(null);
-        if (!reconciled) {
+        if (!reconciled || reconciled.projectId !== projectId || reconciled.yearMonth !== yearMonth) {
           throw new Error('월 결산 요청이 접수되지 않았어요. 잠시 후 다시 시도해 주세요.');
         }
         request = reconciled;
       }
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
-      if (request.status !== 'PENDING') throw new Error('월결산 결재 요청 상태를 확인하지 못했습니다.');
-      monthCloseCurrentRequestGenerationRef.current += 1;
-      setMonthCloseRequest(request);
+      if (request.status !== 'PENDING_APPROVAL') throw new Error('월결산 결재 요청 상태를 확인하지 못했습니다.');
       setMonthCloseReviewOpen(false);
       setMonthCloseReviewDirty(false);
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
-      await Promise.all([
-        loadCashflowMonthClose(),
-        loadMonthCloseRequest(),
-      ]);
+      await loadCashflowMonthClose();
       if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
       toast.success('월 결산 승인 요청을 보냈어요. 조직장 승인을 기다립니다.');
       logCashflowSettlement({
@@ -2051,7 +1939,7 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest()]);
+      await loadCashflowMonthClose();
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
     } finally {
       if (isCurrentMonthCloseMutation(mutationScope)) setMonthCloseBusy(false);
@@ -2062,12 +1950,14 @@ export function CashflowProjectSheet({
     isCurrentMonthCloseMutation,
     monthClosePinnedSource,
     loadCashflowMonthClose,
-    loadMonthCloseRequest,
     monthCloseCellsState,
     monthCloseDepositRows,
     monthCloseHumanReviewed,
     monthCloseResult,
+    monthCloseTargetYearMonth,
     monthCloseActions?.requestMonthClose,
+    monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed,
+    monthDeadlineKnown,
     monthCloseRequest?.revision,
     orgId,
     projectId,
@@ -2078,10 +1968,18 @@ export function CashflowProjectSheet({
   ]);
 
   const handleWithdrawMonthCloseRequest = useCallback(async (): Promise<void> => {
-    if (monthCloseActions?.withdrawMonthClose.enabled !== true) {
+    if (!monthDeadlineKnown || monthCloseCycle?.commandCapabilities.WITHDRAW_MONTH_CLOSE.allowed !== true) {
       return;
     }
-    if (!monthCloseRequest?.manifestHash) return;
+    const authorityCycleYearMonth = monthCloseRequest?.cycleYearMonth;
+    const authorityTargetYearMonth = monthCloseRequest?.monthCloseTargetYearMonth;
+    const authorityWorkflowRevision = monthCloseRequest?.workflowRevision;
+    if (!monthCloseRequest?.manifestHash
+      || !isYearMonth(authorityCycleYearMonth)
+      || !isYearMonth(authorityTargetYearMonth)
+      || typeof authorityWorkflowRevision !== 'number'
+      || !Number.isSafeInteger(authorityWorkflowRevision)
+      || authorityWorkflowRevision < 0) return;
     const startedAt = Date.now();
     const mutationScope = captureMonthCloseMutationScope('withdraw');
     setMonthCloseBusy(true);
@@ -2089,27 +1987,27 @@ export function CashflowProjectSheet({
       const actor = await resolveBffActor();
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      if (!isCurrentMonthCloseMutation(mutationScope, monthCloseRequest)) return;
+      if (!isCurrentMonthCloseMutation(mutationScope) || monthCloseRequest.projectId !== projectId) return;
       const { request } = await withdrawCashflowMonthCloseRequestViaBff({
         tenantId: orgId,
         actor,
         projectId,
         requestId: monthCloseRequest.requestId,
         payload: {
+          cycleYearMonth: authorityCycleYearMonth,
+          monthCloseTargetYearMonth: authorityTargetYearMonth,
           expectedRevision: monthCloseRequest.revision,
           expectedManifestHash: monthCloseRequest.manifestHash,
+          expectedWorkflowRevision: authorityWorkflowRevision,
           reason: monthCloseWithdrawReason.trim(),
         },
         idempotencyKey: `cashflow-month-close-withdraw:${monthCloseRequest.requestId}:r${monthCloseRequest.revision}`,
       });
-      if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
-      monthCloseCurrentRequestGenerationRef.current += 1;
-      setMonthCloseRequest(request);
+      if (!isCurrentMonthCloseMutation(mutationScope) || request.projectId !== projectId) return;
       setMonthCloseWithdrawOpen(false);
       setMonthCloseWithdrawReason('');
-      if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
-      await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest()]);
-      if (!isCurrentMonthCloseMutation(mutationScope, request)) return;
+      await loadCashflowMonthClose();
+      if (!isCurrentMonthCloseMutation(mutationScope)) return;
       toast.success('월 결산 요청을 회수했어요.');
       logCashflowSettlement({
         phase: 'success',
@@ -2129,7 +2027,7 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      await loadMonthCloseRequest();
+      await loadCashflowMonthClose();
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
     } finally {
       if (isCurrentMonthCloseMutation(mutationScope)) setMonthCloseBusy(false);
@@ -2138,10 +2036,10 @@ export function CashflowProjectSheet({
     captureMonthCloseMutationScope,
     isCurrentMonthCloseMutation,
     loadCashflowMonthClose,
-    loadMonthCloseRequest,
-    monthCloseActions?.withdrawMonthClose,
+    monthCloseCycle?.commandCapabilities.WITHDRAW_MONTH_CLOSE.allowed,
     monthCloseRequest,
     monthCloseWithdrawReason,
+    monthDeadlineKnown,
     orgId,
     projectId,
     resolveBffActor,
@@ -2153,10 +2051,20 @@ export function CashflowProjectSheet({
     if (!reopenAction || !monthCloseRequest || !reason) {
       return;
     }
-    if (reopenAction === 'request' && monthCloseActions?.requestMonthReopen.enabled !== true) {
+    if (!monthDeadlineKnown) {
       return;
     }
-    if (reopenAction !== 'request' && !canReviewReopen) {
+    if (reopenAction === 'request' && monthCloseCycle?.commandCapabilities.REQUEST_MONTH_REOPEN.allowed !== true) {
+      return;
+    }
+    if (reopenAction === 'approve' && !canApproveReopen) {
+      return;
+    }
+    if (reopenAction === 'reject' && !canRejectReopen) {
+      return;
+    }
+    const expectedRevision = monthCloseRequest.ledgerRevision;
+    if (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0) {
       return;
     }
 
@@ -2166,8 +2074,8 @@ export function CashflowProjectSheet({
       const actor = await resolveBffActor();
       if (!isCurrentMonthCloseMutation(mutationScope)) return;
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      if (!isCurrentMonthCloseMutation(mutationScope, monthCloseRequest)) return;
-      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${monthCloseRequest.requestId}:${monthCloseRequest.revision}`;
+      if (!isCurrentMonthCloseMutation(mutationScope) || monthCloseRequest.projectId !== projectId) return;
+      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${monthCloseRequest.requestId}:${expectedRevision}`;
       const result = reopenAction === 'request'
         ? await requestCashflowMonthReopenViaBff({
             tenantId: orgId,
@@ -2176,7 +2084,7 @@ export function CashflowProjectSheet({
             payload: {
               requestId: monthCloseRequest.requestId,
               yearMonth: monthCloseRequest.yearMonth,
-              expectedRevision: monthCloseRequest.revision,
+              expectedRevision,
               reason,
             },
             idempotencyKey,
@@ -2188,16 +2096,15 @@ export function CashflowProjectSheet({
             payload: {
               requestId: monthCloseRequest.requestId,
               yearMonth: monthCloseRequest.yearMonth,
-              expectedRevision: monthCloseRequest.revision,
+              expectedRevision,
               decision: reopenAction === 'approve' ? 'APPROVE' : 'REJECT',
               reason,
             },
             idempotencyKey,
           });
-      if (!isCurrentMonthCloseMutation(mutationScope, result.request)) return;
-      setMonthCloseRequest(result.request);
-      if (!isCurrentMonthCloseMutation(mutationScope, result.request)) return;
-      void loadMonthCloseRequest();
+      if (!isCurrentMonthCloseMutation(mutationScope) || result.request.projectId !== projectId) return;
+      await loadCashflowMonthClose();
+      if (!isCurrentMonthCloseMutation(mutationScope)) return;
       void reloadCashflowActivityForMutations('month_reopen_completed');
       setReopenAction(null);
       setReopenReason('');
@@ -2213,7 +2120,7 @@ export function CashflowProjectSheet({
     } finally {
       if (isCurrentMonthCloseMutation(mutationScope)) setMonthCloseBusy(false);
     }
-  }, [canReviewReopen, captureMonthCloseMutationScope, isCurrentMonthCloseMutation, loadMonthCloseRequest, monthCloseActions?.requestMonthReopen, monthCloseRequest, orgId, portalMode, projectId, reloadCashflowActivityForMutations, reopenAction, reopenReason, resolveBffActor, yearMonth]);
+  }, [canApproveReopen, canRejectReopen, captureMonthCloseMutationScope, isCurrentMonthCloseMutation, loadCashflowMonthClose, monthCloseCycle?.commandCapabilities.REQUEST_MONTH_REOPEN.allowed, monthCloseRequest, monthDeadlineKnown, orgId, portalMode, projectId, reloadCashflowActivityForMutations, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
   const handleRefreshSheetMirror = useCallback(async (): Promise<CashflowSheetLabMirrorResult | null> => {
     if (!cashflowSheetConfig?.value) {
@@ -3050,9 +2957,9 @@ export function CashflowProjectSheet({
           <tr>
             {visibleWeeks.map((week) => (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}-weekly-close`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-center align-middle ${cashflowSurfaceClass(week.surfaceTone, week.overdue) || 'bg-white'}`}>
-                  <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[12px] font-semibold ${week.surfaceTone === 'danger' || week.surfaceTone === 'unavailable' ? 'text-red-700' : week.statusLabel ? 'text-slate-700' : 'text-slate-300'}`}>
+                  <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[12px] font-semibold ${week.surfaceTone === 'danger' || week.surfaceTone === 'unavailable' ? 'text-red-700' : week.weeklyStatusLabel ? 'text-slate-700' : 'text-slate-300'}`}>
                     {week.surfaceTone === 'closed' ? <LockKeyhole className="h-3 w-3" aria-hidden="true" /> : <CheckCircle2 className="h-3 w-3" />}
-                    {week.statusLabel}
+                    {week.weeklyStatusLabel || '주간 정산 상태 확인 필요'}
                   </span>
                 </th>
             ))}
@@ -3359,7 +3266,7 @@ export function CashflowProjectSheet({
             size="sm"
             variant={portalMonthlyAction === 'request' ? 'default' : 'outline'}
             className={`min-h-8 w-full rounded-md px-3 text-[12px] font-semibold ${portalMonthlyAction === 'request' ? 'bg-[#17324D] text-white shadow-none hover:bg-slate-800' : 'border-slate-300 bg-white text-[#17324D]'}`}
-            disabled={monthCloseBusy || monthCloseLoading || !portalMonthlyAction}
+            disabled={monthCloseBusy || monthCloseLoading || !monthDeadlineKnown || !portalMonthlyAction}
             aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}
             title={portalMonthlyActionAmbiguous ? '여러 월결산 동작이 동시에 가능해 상태를 다시 확인해야 합니다.' : undefined}
             onClick={() => {
@@ -3380,8 +3287,8 @@ export function CashflowProjectSheet({
           </Button>
         ) : !monthCloseError && canReviewReopen ? (
           <>
-            <Button type="button" size="sm" className="min-h-8 flex-1 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
-            <Button type="button" size="sm" variant="outline" className="min-h-8 flex-1 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={monthCloseBusy || monthCloseLoading} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
+            <Button type="button" size="sm" className="min-h-8 flex-1 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={monthCloseBusy || monthCloseLoading || !monthDeadlineKnown || !canApproveReopen} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
+            <Button type="button" size="sm" variant="outline" className="min-h-8 flex-1 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={monthCloseBusy || monthCloseLoading || !monthDeadlineKnown || !canRejectReopen} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
           </>
         ) : null}
       </div>
@@ -3419,17 +3326,10 @@ export function CashflowProjectSheet({
                         {renderWeeklyAction()}
                       </div>
                     ) : null}
-                    {node.kind === 'monthly-executed' ? (
-                      <div data-cashflow-portal-monthly-executed-node className="px-2">
-                        {renderScheduleDetails(executedCycleSteps, true)}
-                        {renderMonthlyAction()}
-                      </div>
-                    ) : null}
                     {node.kind === 'monthly' ? (
                       <div data-cashflow-portal-monthly-node className="px-2">
                         {renderScheduleDetails(monthScheduleSteps, true)}
-                        {/* 회수·재오픈은 요청 레코드를 가진 회차의 일이다. 그 회차가 앞 노드로 나갔으면 버튼도 거기 있다. */}
-                        {executedCycleSteps.length > 0 ? null : renderMonthlyAction()}
+                        {renderMonthlyAction()}
                       </div>
                     ) : null}
                   </div>
@@ -3455,7 +3355,7 @@ export function CashflowProjectSheet({
           <div data-cashflow-portal-settlement-annotations className={`mt-5 grid gap-3 border-t border-border pt-4 ${compact ? '' : 'sm:grid-cols-2'}`}>
             <div className="text-[12px] leading-5 text-muted-foreground">
               <div className={`font-semibold ${portalTimelineTextClass(currentPresentationWeek?.surfaceTone || 'neutral')}`}>
-                이번 주 주정산 · {currentPresentationWeek?.statusLabel || '확인 불가'}
+                이번 주 주정산 · {currentPresentationWeek?.weeklyStatusLabel || '주간 정산 상태 확인 필요'}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span>누적 미준수 <strong className="ml-1 text-red-700">{deadlineSummaryUnavailable ? '확인 불가' : formatCashflowCount(monthCloseResult?.dashboard?.deadlineSummary?.missedCount, '회')}</strong></span>
@@ -3472,7 +3372,6 @@ export function CashflowProjectSheet({
               </div>
               {monthCloseNotice ? <div className={`mt-1 ${monthCloseNotice.tone === 'attention' ? 'font-semibold text-red-700' : ''}`}>{monthCloseNotice.text}</div> : null}
               {monthCloseBlockers.length > 0 ? <div role="alert" className="mt-2 text-red-700">월 결산을 진행할 수 없어요: {monthCloseBlockers.map((blocker) => blocker.message).join(' · ')}</div> : null}
-              {monthCloseRequestError ? <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-red-700"><span>{monthCloseRequestError}</span><button type="button" className="font-semibold underline underline-offset-2" onClick={() => { void loadMonthCloseRequest(); }}>다시 불러오기</button></div> : null}
             </div>
           </div>
         </div>
@@ -3601,7 +3500,7 @@ export function CashflowProjectSheet({
                     <div className="text-[13px] font-bold text-card-foreground">주간 정산</div>
                     <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
                       {currentPresentationWeek
-                        ? `${currentPresentationWeek.label} · ${currentPresentationWeek.statusLabel}`
+                        ? `${currentPresentationWeek.label} · ${currentPresentationWeek.weeklyStatusLabel || '주간 정산 상태 확인 필요'}`
                         : '확인 불가'}
                     </div>
                   </div>
@@ -3705,53 +3604,41 @@ export function CashflowProjectSheet({
                         {monthCloseNotice.text}
                       </div>
                     ) : null}
-                    {monthCloseRequestError ? (
-                      <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-red-700">
-                        <span>{monthCloseRequestError}</span>
-                        <button
-                          type="button"
-                          className="font-semibold underline underline-offset-2"
-                          onClick={() => { void loadMonthCloseRequest(); }}
-                        >
-                          다시 불러오기
-                        </button>
-                      </div>
-                    ) : null}
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {monthCloseActions?.requestMonthClose.enabled ? (
+                    {monthCloseCycle?.commandCapabilities.SUBMIT_MONTH_CLOSE.allowed ? (
                       <Button
                         type="button"
                         size="sm"
                         className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] font-semibold text-white shadow-none hover:bg-slate-800"
-                        disabled={monthCloseBusy || monthCloseLoading}
+                        disabled={monthCloseBusy || monthCloseLoading || !monthDeadlineKnown}
                         onClick={handleOpenMonthCloseReview}
                       >
                         <CheckCircle2 className="mr-1 h-3 w-3" />
-                        {monthCloseActions.requestMonthClose.label}
+                        {portalMonthlyButtonLabel}
                       </Button>
                     ) : null}
-                    {monthCloseActions?.withdrawMonthClose.enabled ? (
+                    {monthCloseCycle?.commandCapabilities.WITHDRAW_MONTH_CLOSE.allowed ? (
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
                         className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700"
-                        disabled={monthCloseBusy || monthCloseLoading}
+                        disabled={monthCloseBusy || monthCloseLoading || !monthDeadlineKnown}
                         onClick={() => { setMonthCloseWithdrawReason(''); setMonthCloseWithdrawOpen(true); }}
                       >
                         결재 요청 회수
                       </Button>
                     ) : null}
-                    {!monthCloseError && monthCloseActions?.requestMonthReopen.enabled ? (
-                      <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-[#17324D]" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
+                    {!monthCloseError && monthCloseCycle?.commandCapabilities.REQUEST_MONTH_REOPEN.allowed ? (
+                      <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-[#17324D]" disabled={!monthDeadlineKnown} onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                         재오픈 요청
                       </Button>
                     ) : null}
                     {!monthCloseError && canReviewReopen ? (
                       <>
-                        <Button type="button" size="sm" className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
-                        <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
+                        <Button type="button" size="sm" className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] text-white shadow-none hover:bg-slate-800" disabled={!monthDeadlineKnown || !canApproveReopen} onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
+                        <Button type="button" size="sm" variant="outline" className="h-8 rounded-md border-slate-300 bg-white px-3 text-[12px] text-slate-700" disabled={!monthDeadlineKnown || !canRejectReopen} onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
                       </>
                     ) : null}
                   </div>
@@ -4040,10 +3927,13 @@ export function CashflowProjectSheet({
     );
   }
 
-  const monthCloseStatusLabel = monthOwnPresentation.statusLabel;
-  const monthCloseStatusClass = monthOwnPresentation.tone === 'danger'
+  const monthClosePresentation = monthCloseCycle?.health === 'OK' && monthCloseCycle.businessState !== 'INCONSISTENT'
+    ? cashflowPresentation?.monthClose
+    : null;
+  const monthCloseStatusLabel = monthClosePresentation?.statusLabel || '상태 재확인 필요';
+  const monthCloseStatusClass = monthClosePresentation?.tone === 'danger'
     ? 'border border-red-200 bg-red-50 text-red-700'
-    : monthOwnPresentation.tone === 'success'
+    : monthClosePresentation?.tone === 'success'
       ? 'border border-border bg-secondary text-secondary-foreground'
       : 'border border-border bg-accent text-accent-foreground';
   const sheetDashboardMetadata = cashflowPresentation?.evidenceSource === 'DASHBOARD'
@@ -4183,7 +4073,7 @@ export function CashflowProjectSheet({
             <input
               type="checkbox"
               checked={monthCloseHumanReviewed}
-              disabled={monthCloseBusy || monthCloseActions?.requestMonthClose.enabled !== true}
+              disabled={monthCloseBusy || monthClosePreparation.status !== 'READY'}
               onChange={(event) => setMonthCloseHumanReviewed(event.target.checked)}
               className="mt-1 h-4 w-4 rounded border-slate-300 text-[#17324D]"
             />
@@ -4204,14 +4094,14 @@ export function CashflowProjectSheet({
               </Button>
             ) : null}
             <AlertDialogAction
-               disabled={!cumulativeRequestScopeReady || !yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed || monthCloseBusy || monthCloseActions?.requestMonthClose.enabled !== true}
+               disabled={!cumulativeRequestScopeReady || !yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed || monthCloseBusy || monthClosePreparation.status !== 'READY'}
               onClick={(event) => {
                 event.preventDefault();
                 void handleFinalizeMonthClose();
               }}
             >
               {monthCloseBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-              {monthCloseActions?.requestMonthClose.label || '월 결산 승인 요청'}
+              {portalMonthlyButtonLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

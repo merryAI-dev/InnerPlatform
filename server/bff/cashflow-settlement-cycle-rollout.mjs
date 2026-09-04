@@ -1,10 +1,14 @@
-import { createHash } from 'node:crypto';
 import { requireCashflowSettlementCycleReadContext } from './cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs';
+import {
+  CASHFLOW_SETTLEMENT_CYCLE_CUTOFF_MONTH,
+  isHistoricalCashflowSettlementCycle,
+} from './cashflow/settlement-cycle/contract.mjs';
+import { sha256, stableStringify } from './utils.mjs';
 
 const CONTRACT_VERSION = 'cashflow-cumulative-close-v2';
 const MIGRATE_COMMAND = 'cashflowSettlementCycle.migrateHeadV2';
-const UNRESOLVED_REQUEST_STATES = new Set(['BUILDING', 'APPROVING', 'UNCERTAIN']);
-const LEGACY_ACTIVE_STATES = new Set([
+const NORMALIZE_COMMAND = 'cashflowSettlementCycle.normalizeLegacyActiveRequest';
+const ACTIVE_REQUEST_STATES = new Set([
   'BUILDING', 'PENDING', 'PENDING_APPROVAL', 'APPROVING', 'UNCERTAIN', 'REOPEN_REQUESTED',
 ]);
 const ACTIVE_COORDINATOR_STATES = new Set(['PENDING_APPROVAL', 'REOPENED', 'REOPEN_REQUESTED']);
@@ -13,13 +17,17 @@ const ROOT_HASH = /^sha256:[a-f0-9]{64}$/;
 const YEAR_MONTH = /^20\d{2}-(0[1-9]|1[0-2])$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const ROLLOUT_COUNT_NAMES = [
-  'legacyHeads', 'canonicalHeads', 'replayableMigratedHeads', 'invalidHeads',
-  'unresolvedRequests', 'legacyActiveRequests', 'coordinators',
-  'invalidCoordinators', 'genericMonthDocuments',
+  'legacyHeads', 'canonicalHeads', 'recoverableHeads', 'invalidHeads',
+  'unresolvedRequests', 'legacyActiveRequests', 'coordinators', 'activeCoordinators',
+  'invalidCoordinators', 'historicalActiveRequests', 'normalizationCandidates',
+  'canonicalActiveRequests', 'invalidActiveRequests', 'genericMonthDocuments',
 ];
 const CUTOVER_BLOCKER_NAMES = [
-  'legacyHeads', 'invalidHeads', 'unresolvedRequests',
-  'legacyActiveRequests', 'invalidCoordinators',
+  'legacyHeads', 'invalidHeads', 'normalizationCandidates',
+  'invalidActiveRequests', 'invalidCoordinators',
+];
+const HEAD_MIGRATION_BLOCKER_NAMES = [
+  'invalidHeads', 'invalidActiveRequests', 'invalidCoordinators',
 ];
 
 function text(value) {
@@ -56,6 +64,7 @@ export function parseSettlementCycleRolloutArgs(args) {
     apply: false,
     verifyCutover: false,
     allowProjects: [],
+    normalizeProjects: [],
   };
   const valueFlags = new Map([
     ['--firebase-project', 'firebaseProjectId'],
@@ -63,6 +72,7 @@ export function parseSettlementCycleRolloutArgs(args) {
     ['--tenant', 'tenantId'],
     ['--confirm-tenant', 'confirmTenantId'],
     ['--allow-projects', 'allowProjects'],
+    ['--normalize-projects', 'normalizeProjects'],
     ['--people-uid', 'actorUid'],
     ['--reason', 'reason'],
     ['--jvm-base-url', 'jvmBaseUrl'],
@@ -87,7 +97,7 @@ export function parseSettlementCycleRolloutArgs(args) {
     if (!field || index + 1 >= args.length) throw new Error(`Unknown or incomplete option: ${arg}`);
     const value = args[index + 1];
     index += 1;
-    options[field] = field === 'allowProjects' ? parseCsv(value) : value;
+    options[field] = ['allowProjects', 'normalizeProjects'].includes(field) ? parseCsv(value) : value;
   }
   return options;
 }
@@ -104,6 +114,7 @@ export function validateSettlementCycleRolloutOptions(source) {
     jvmBaseUrl: text(source.jvmBaseUrl).replace(/\/$/, ''),
     jvmAudience: text(source.jvmAudience || source.jvmBaseUrl).replace(/\/$/, ''),
     allowProjects: parseCsv(source.allowProjects),
+    normalizeProjects: parseCsv(source.normalizeProjects),
   };
   if (!SAFE_ID.test(options.firebaseProjectId)) throw new Error('--firebase-project is required and must be exact.');
   if (!SAFE_ID.test(options.tenantId)) throw new Error('--tenant is required and must be exact.');
@@ -115,6 +126,10 @@ export function validateSettlementCycleRolloutOptions(source) {
   }
   if (options.verifyCutover && !SAFE_ID.test(options.actorUid)) {
     throw new Error('--verify-cutover requires an exact active --people-uid.');
+  }
+  if (options.verifyCutover && (options.normalizeProjects.length === 0
+    || options.normalizeProjects.some((projectId) => projectId === '*' || !SAFE_ID.test(projectId)))) {
+    throw new Error('--verify-cutover requires exact --normalize-projects without wildcard.');
   }
   if (!options.apply) return options;
   if (options.confirmProjectId !== options.firebaseProjectId) {
@@ -166,6 +181,53 @@ function canonicalActiveRequest(documentId, record) {
     && documentId === `${projectId}-${cycleYearMonth}`;
 }
 
+function requestCycle(record) {
+  return text(record.cycleYearMonth) || text(record.yearMonth);
+}
+
+function historicalActiveRequest(documentId, record) {
+  const projectId = text(record.projectId);
+  const cycleYearMonth = requestCycle(record);
+  return SAFE_ID.test(projectId)
+    && YEAR_MONTH.test(cycleYearMonth)
+    && isHistoricalCashflowSettlementCycle(cycleYearMonth)
+    && text(record.contractVersion) === CONTRACT_VERSION
+    && text(record.requestId) === documentId
+    && documentId === `${projectId}-${cycleYearMonth}`;
+}
+
+function normalizationCandidate(documentId, record) {
+  const projectId = text(record.projectId);
+  const cycleYearMonth = requestCycle(record);
+  const revision = Number(record.revision);
+  const manifestHash = text(record.manifestHash);
+  const requestedAt = text(record.requestedAt);
+  const requestedByUid = text(record.requestedByUid);
+  if (text(record.documentType)
+    || text(record.contractVersion) !== CONTRACT_VERSION
+    || !SAFE_ID.test(projectId)
+    || cycleYearMonth !== CASHFLOW_SETTLEMENT_CYCLE_CUTOFF_MONTH
+    || text(record.yearMonth) !== cycleYearMonth
+    || text(record.requestId) !== documentId
+    || documentId !== `${projectId}-${cycleYearMonth}`
+    || text(record.throughMonth) !== previousYearMonth(cycleYearMonth)
+    || text(record.status) !== 'PENDING'
+    || !Number.isSafeInteger(revision) || revision < 1
+    || !ROOT_HASH.test(manifestHash)
+    || !ISO_INSTANT.test(requestedAt)
+    || !SAFE_ID.test(requestedByUid)) return null;
+  return {
+    projectId,
+    requestId: documentId,
+    cycleYearMonth,
+    monthCloseTargetYearMonth: previousYearMonth(cycleYearMonth),
+    expectedRequestRevision: revision,
+    expectedManifestHash: manifestHash,
+    requestedAt,
+    requestedByUid,
+  };
+}
+
 function previousYearMonth(value) {
   if (!YEAR_MONTH.test(text(value))) return '';
   const [year, month] = value.split('-').map(Number);
@@ -178,7 +240,7 @@ function nextYearMonth(value) {
   return month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
-function canonicalHeadProjectionTarget(projectId, record) {
+function canonicalHeadProjectionTarget(projectId, record, allowLegacyTargetRequest = false) {
   if (text(record.contractVersion) !== CONTRACT_VERSION
     || text(record.projectId) !== projectId
     || text(record.fromMonth) !== '2023-01'
@@ -215,7 +277,8 @@ function canonicalHeadProjectionTarget(projectId, record) {
   const targetRequestId = `${projectId}-${text(latest.affectedThroughMonth)}`;
   if (text(latest.affectedThroughMonth) !== text(record.closedThrough)
     || text(latest.rootHash) !== text(record.rootHash)
-    || ![cycleRequestId, targetRequestId].includes(text(latest.requestId))) return null;
+    || (text(latest.requestId) !== cycleRequestId
+      && (!allowLegacyTargetRequest || text(latest.requestId) !== targetRequestId))) return null;
   return {
     canonical: true,
     target: {
@@ -239,8 +302,6 @@ function validLegacyHead(projectId, record) {
     && SAFE_ID.test(text(record.requestId))
     && Number.isSafeInteger(record.requestRevision)
     && record.requestRevision > 0
-    && SAFE_ID.test(text(record.approvalId))
-    && SAFE_ID.test(text(record.operationId))
     && ROOT_HASH.test(text(record.rootHash))
     && !Object.hasOwn(record, 'authorityExists')
     && !Object.hasOwn(record, 'closedRanges');
@@ -283,13 +344,13 @@ function normalizedHeadState(document) {
   };
 }
 
-function replayableMigratedHead(projectId, record, canonical) {
+function recoverableMigratedHead(projectId, record, projection) {
   const ranges = Array.isArray(record.closedRanges) ? record.closedRanges : [];
   const range = ranges[0];
   const migratedAt = text(record.migratedAt);
   const migratedByUid = text(record.migratedByUid);
   const tenantId = text(record.tenantId);
-  if (!canonical?.target
+  if (!projection?.target
     || text(record.status) !== 'CLOSED'
     || ranges.length !== 1
     || !ISO_INSTANT.test(migratedAt)
@@ -300,22 +361,13 @@ function replayableMigratedHead(projectId, record, canonical) {
     || record.revision <= 1
     || !Number.isSafeInteger(record.requestRevision)
     || record.requestRevision <= 0
-    || !SAFE_ID.test(text(record.approvalId))
-    || !SAFE_ID.test(text(record.operationId))
     || text(record.requestId) !== text(range?.requestId)
     || text(record.rootHash) !== text(range?.rootHash)) return null;
   return {
     projectId,
-    expectedHeadRevision: record.revision - 1,
+    expectedHeadRevision: record.revision,
     expectedHeadRootHash: text(record.rootHash),
     tenantId,
-    migratedByUid,
-    expectedResponse: {
-      closedThrough: text(record.closedThrough),
-      cycleYearMonth: text(record.settlementMonth),
-      approvalVersionId: text(range.approvalVersionId),
-      headRevision: record.revision,
-    },
   };
 }
 
@@ -363,9 +415,21 @@ function normalizedSettlementState(document) {
   };
 }
 
+function protectedSettlementStatus(document) {
+  const seconds = document?.updateTime?.seconds;
+  const nanoseconds = document?.updateTime?.nanoseconds;
+  return {
+    documentId: typeof document?.id === 'string' ? document.id : '',
+    dataHash: `sha256:${sha256(stableStringify(dataOf(document)))}`,
+    updateTime: Number.isSafeInteger(seconds) && Number.isSafeInteger(nanoseconds)
+      ? { seconds, nanoseconds }
+      : null,
+  };
+}
+
 export function buildSettlementCycleRolloutInventory({ requests = [], heads = [], settlements = [] }) {
   const legacyHeads = [];
-  const migratedHeads = [];
+  const recoverableHeads = [];
   const invalidHeads = [];
   const verificationTargets = [];
   let canonicalHeadCount = 0;
@@ -373,11 +437,15 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
     const record = dataOf(document);
     const projectId = text(document.id);
     const canonical = canonicalHeadProjectionTarget(projectId, record);
+    const recoverable = recoverableMigratedHead(
+      projectId, record, canonical || canonicalHeadProjectionTarget(projectId, record, true),
+    );
     if (canonical) {
       canonicalHeadCount += 1;
       if (canonical.target) verificationTargets.push(canonical.target);
-      const replayable = replayableMigratedHead(projectId, record, canonical);
-      if (replayable) migratedHeads.push(replayable);
+      if (recoverable) recoverableHeads.push(recoverable);
+    } else if (recoverable) {
+      recoverableHeads.push(recoverable);
     } else if (validLegacyHead(projectId, record)) {
       legacyHeads.push({
         projectId,
@@ -391,22 +459,74 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
 
   const unresolvedRequests = [];
   const legacyActiveRequests = [];
+  const historicalActiveRequests = [];
+  const normalizationCandidates = [];
+  const canonicalActiveRequests = [];
+  const invalidActiveRequests = [];
   const invalidCoordinators = [];
+  const activeCoordinatorRecords = [];
   let coordinatorCount = 0;
+  let activeCoordinatorCount = 0;
   for (const document of requests) {
     const record = dataOf(document);
     const documentType = text(record.documentType);
     if (documentType === 'ACTIVE_COORDINATOR') {
       coordinatorCount += 1;
+      if (ACTIVE_COORDINATOR_STATES.has(text(record.activeState))) {
+        activeCoordinatorCount += 1;
+        activeCoordinatorRecords.push({
+          projectId: text(record.projectId),
+          cycleYearMonth: text(record.activeCycleYearMonth),
+          requestId: text(record.activeRequestId),
+          workflowRevision: Number(record.workflowRevision),
+        });
+      }
       if (coordinatorIsInvalid(record)) invalidCoordinators.push({ id: document.id, projectId: text(record.projectId) });
       continue;
     }
     const status = text(record.status);
-    if (UNRESOLVED_REQUEST_STATES.has(status)) {
+    if (ACTIVE_REQUEST_STATES.has(status)) {
       unresolvedRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
-    }
-    if (LEGACY_ACTIVE_STATES.has(status) && !canonicalActiveRequest(document.id, record)) {
-      legacyActiveRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
+      if (!canonicalActiveRequest(document.id, record)) {
+        legacyActiveRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
+      }
+      const historical = historicalActiveRequest(document.id, record);
+      const candidate = normalizationCandidate(document.id, record);
+      if (historical) {
+        historicalActiveRequests.push({
+          requestId: document.id,
+          projectId: text(record.projectId),
+          status,
+          revision: Number(record.revision),
+          dataHash: `sha256:${sha256(stableStringify(record))}`,
+        });
+      } else if (candidate) {
+        normalizationCandidates.push(candidate);
+      } else if (canonicalActiveRequest(document.id, record)) {
+        const active = {
+          projectId: text(record.projectId),
+          requestId: document.id,
+          cycleYearMonth: requestCycle(record),
+          monthCloseTargetYearMonth: text(record.monthCloseTargetYearMonth),
+          workflowRevision: Number(record.workflowRevision),
+          evidenceRevision: Number(record.evidenceRevision),
+          manifestHash: text(record.manifestHash),
+          requestedAt: text(record.requestedAt),
+          requestedByUid: text(record.requestedByUid),
+          status,
+        };
+        canonicalActiveRequests.push(active);
+        verificationTargets.push({
+          projectId: active.projectId,
+          cycleYearMonth: active.cycleYearMonth,
+          requestId: active.requestId,
+          expectedBusinessState: status === 'PENDING' || status === 'PENDING_APPROVAL'
+            ? 'SUBMITTED' : status,
+          expectedRequestStatus: status,
+        });
+      } else {
+        invalidActiveRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
+      }
     }
     if (documentType === 'REQUEST'
       && text(record.contractVersion) === CONTRACT_VERSION
@@ -432,24 +552,36 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
     counts: {
       legacyHeads: legacyHeads.length,
       canonicalHeads: canonicalHeadCount,
-      replayableMigratedHeads: migratedHeads.length,
+      recoverableHeads: recoverableHeads.length,
       invalidHeads: invalidHeads.length,
       unresolvedRequests: unresolvedRequests.length,
       legacyActiveRequests: legacyActiveRequests.length,
       coordinators: coordinatorCount,
+      activeCoordinators: activeCoordinatorCount,
       invalidCoordinators: invalidCoordinators.length,
+      historicalActiveRequests: historicalActiveRequests.length,
+      normalizationCandidates: normalizationCandidates.length,
+      canonicalActiveRequests: canonicalActiveRequests.length,
+      invalidActiveRequests: invalidActiveRequests.length,
       genericMonthDocuments,
     },
     legacyHeads: legacyHeads.sort((left, right) => left.projectId.localeCompare(right.projectId)),
-    migratedHeads: migratedHeads.sort((left, right) => left.projectId.localeCompare(right.projectId)),
+    recoverableHeads: recoverableHeads.sort((left, right) => left.projectId.localeCompare(right.projectId)),
     invalidHeads: invalidHeads.sort((left, right) => left.projectId.localeCompare(right.projectId)),
     unresolvedRequests: unresolvedRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
     legacyActiveRequests: legacyActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
     invalidCoordinators: invalidCoordinators.sort((left, right) => left.id.localeCompare(right.id)),
+    historicalActiveRequests: historicalActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    normalizationCandidates: normalizationCandidates.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    canonicalActiveRequests: canonicalActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    activeCoordinatorRecords: activeCoordinatorRecords.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    invalidActiveRequests: invalidActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
     verificationTargets: [...targetMap.values()].sort((left, right) => (
       left.projectId.localeCompare(right.projectId)
       || left.cycleYearMonth.localeCompare(right.cycleYearMonth)
     )),
+    protectedSettlementStatuses: settlements.map(protectedSettlementStatus)
+      .sort((left, right) => left.documentId.localeCompare(right.documentId)),
     canonicalState: {
       heads: heads.map(normalizedHeadState).sort((left, right) => left.projectId.localeCompare(right.projectId)),
       requests: requests.map(normalizedRequestState)
@@ -477,6 +609,35 @@ export async function readSettlementCycleRolloutInventory({ db, tenantId }) {
     heads: heads.docs,
     settlements: settlements.docs,
   });
+}
+
+export function settlementCycleRequestNormalizationCandidates(inventory) {
+  const pending = Array.isArray(inventory?.normalizationCandidates)
+    ? inventory.normalizationCandidates : [];
+  const completed = (Array.isArray(inventory?.canonicalActiveRequests)
+    ? inventory.canonicalActiveRequests : [])
+    .filter((row) => row.cycleYearMonth === CASHFLOW_SETTLEMENT_CYCLE_CUTOFF_MONTH
+      && row.monthCloseTargetYearMonth === previousYearMonth(row.cycleYearMonth)
+      && row.status === 'PENDING_APPROVAL'
+      && Number.isSafeInteger(row.workflowRevision) && row.workflowRevision > 0
+      && Number.isSafeInteger(row.evidenceRevision) && row.evidenceRevision > 0
+      && ROOT_HASH.test(row.manifestHash)
+      && ISO_INSTANT.test(row.requestedAt)
+      && SAFE_ID.test(row.requestedByUid))
+    .map((row) => ({
+      projectId: row.projectId,
+      requestId: row.requestId,
+      cycleYearMonth: row.cycleYearMonth,
+      monthCloseTargetYearMonth: row.monthCloseTargetYearMonth,
+      expectedRequestRevision: row.evidenceRevision,
+      expectedManifestHash: row.manifestHash,
+      requestedAt: row.requestedAt,
+      requestedByUid: row.requestedByUid,
+      workflowRevision: row.workflowRevision,
+      alreadyNormalized: true,
+    }));
+  return [...pending, ...completed]
+    .sort((left, right) => left.projectId.localeCompare(right.projectId));
 }
 
 export async function verifySettlementCycleProjections({ targets = [], readProjection, readAlignedRequest }) {
@@ -509,7 +670,7 @@ export async function verifySettlementCycleProjections({ targets = [], readProje
       || text(aligned.requestId) !== target.requestId
       || text(aligned.cycleYearMonth || aligned.yearMonth) !== context.requestCycleYearMonth
       || text(aligned.monthCloseTargetYearMonth || aligned.throughMonth) !== context.requestTargetYearMonth
-      || text(aligned.status) !== 'APPROVED'
+      || text(aligned.status) !== text(target.expectedRequestStatus || 'APPROVED')
       || Number(aligned.workflowRevision) !== context.workflowRevision) {
       throw new Error(`Settlement-cycle BFF read alignment mismatch for ${target.projectId}`);
     }
@@ -561,6 +722,15 @@ export async function createSettlementCycleJvmOperations({ client, tenantId, act
       retry: false,
       mutation: true,
     }),
+    normalize: ({ projectId, body }) => client.requestJson({
+      context,
+      method: 'POST',
+      path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-cycle/normalize-legacy-active-request`,
+      command: NORMALIZE_COMMAND,
+      body,
+      retry: false,
+      mutation: true,
+    }),
     readProjection: ({ projectId, cycleYearMonth }) => client.requestJson({
       context,
       method: 'GET',
@@ -574,22 +744,83 @@ export async function createSettlementCycleJvmOperations({ client, tenantId, act
 
 export function buildSettlementCycleHeadMigrationBody({
   tenantId, projectId, expectedHeadRevision, expectedHeadRootHash, reason,
+  dryRun = false, expectedMigrationFingerprint = '',
 }) {
   const digest = text(expectedHeadRootHash).replace(/^sha256:/, '').slice(0, 16);
   return {
-    idempotencyKey: `settlement-head-v2:${tenantId}:${projectId}:r${expectedHeadRevision}:${digest}`,
+    idempotencyKey: `settlement-cycle-v3:${tenantId}:${projectId}:r${expectedHeadRevision}:${digest}`,
     expectedHeadRevision,
     expectedHeadRootHash,
     reason: text(reason),
+    dryRun,
+    expectedMigrationFingerprint,
   };
+}
+
+export function buildSettlementCycleRequestNormalizationBody({
+  tenantId, projectId, cycleYearMonth, expectedRequestRevision, expectedManifestHash, reason,
+  dryRun = false, expectedMigrationFingerprint = '',
+}) {
+  const digest = text(expectedManifestHash).replace(/^sha256:/, '').slice(0, 16);
+  return {
+    idempotencyKey: `settlement-cycle-normalize-v1:${tenantId}:${projectId}:r${expectedRequestRevision}:${digest}`,
+    cycleYearMonth,
+    expectedRequestRevision,
+    expectedManifestHash,
+    reason: text(reason),
+    dryRun,
+    expectedMigrationFingerprint,
+  };
+}
+
+function migrationResponseIsValid({ projectId, row, response, expected, dryRun }) {
+  const migrationRequired = response?.migrationRequired;
+  return response?.ok === true
+    && text(response.commandName) === MIGRATE_COMMAND
+    && text(response.projectId) === projectId
+    && typeof migrationRequired === 'boolean'
+    && Number(response.headRevision) === row.expectedHeadRevision + (migrationRequired ? 1 : 0)
+    && (dryRun || migrationRequired)
+    && YEAR_MONTH.test(text(response.closedThrough))
+    && nextYearMonth(response.closedThrough) === text(response.cycleYearMonth)
+    && SAFE_ID.test(text(response.approvalVersionId))
+    && ROOT_HASH.test(text(response.migrationFingerprint))
+    && (dryRun ? !text(response.auditId) : Boolean(text(response.auditId)))
+    && (!expected || (
+      text(response.closedThrough) === text(expected.closedThrough)
+      && text(response.cycleYearMonth) === text(expected.cycleYearMonth)
+      && text(response.approvalVersionId) === text(expected.approvalVersionId)
+      && Number(response.headRevision) === Number(expected.headRevision)
+      && text(response.migrationFingerprint) === text(expected.migrationFingerprint)
+    ));
 }
 
 export async function executeSettlementCycleHeadMigrations({ inventory, options, migrate }) {
   if (!options.apply) return [];
+  const blockers = HEAD_MIGRATION_BLOCKER_NAMES
+    .filter((name) => Number(inventory?.counts?.[name] || 0) !== 0)
+    .map((name) => `${name}=${inventory.counts[name]}`);
+  if (blockers.length > 0) {
+    throw new Error(`Settlement-cycle migration is not ready: ${blockers.join(', ')}`);
+  }
   const legacyByProject = new Map((inventory.legacyHeads || []).map((row) => [row.projectId, row]));
-  const migratedByProject = new Map((inventory.migratedHeads || []).map((row) => [row.projectId, row]));
-  const results = [];
-  for (const projectId of options.allowProjects) {
+  const migratedByProject = new Map((inventory.recoverableHeads || []).map((row) => [row.projectId, row]));
+  const activeRequests = inventory.canonicalActiveRequests || [];
+  const activeCoordinators = inventory.activeCoordinatorRecords || [];
+  if (activeRequests.length || activeCoordinators.length) {
+    const activeKeys = activeRequests
+      .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`).sort();
+    const coordinatorKeys = activeCoordinators
+      .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`).sort();
+    if (legacyByProject.size || stableStringify(activeKeys) !== stableStringify(coordinatorKeys)
+      || stableStringify([...migratedByProject.keys()].sort())
+        !== stableStringify([...options.allowProjects].sort())
+      || [...migratedByProject.values()].some(({ tenantId }) => tenantId !== options.tenantId)) {
+      throw new Error('Settlement-cycle migration resume order is invalid.');
+    }
+    return [];
+  }
+  const plans = options.allowProjects.map((projectId) => {
     const legacy = legacyByProject.get(projectId);
     const migrated = migratedByProject.get(projectId);
     if (legacy && migrated) {
@@ -597,47 +828,174 @@ export async function executeSettlementCycleHeadMigrations({ inventory, options,
     }
     const row = legacy || migrated;
     if (!row) throw new Error(`Allowlisted project is not eligible for migration or replay: ${projectId}`);
-    if (migrated && migrated.migratedByUid !== options.actorUid) {
-      throw new Error(`Allowlisted migrated head is bound to a different actor: ${projectId}`);
-    }
     if (migrated && migrated.tenantId !== options.tenantId) {
       throw new Error(`Allowlisted migrated head is bound to a different tenant: ${projectId}`);
     }
-    const body = buildSettlementCycleHeadMigrationBody({
+    return { projectId, row, body: buildSettlementCycleHeadMigrationBody({
       tenantId: options.tenantId,
       actorUid: options.actorUid,
       reason: options.reason,
       ...row,
+    }) };
+  });
+  for (const plan of plans) {
+    const response = await migrate({
+      projectId: plan.projectId,
+      body: { ...plan.body, dryRun: true },
     });
-    const response = await migrate({ projectId, body });
-    if (response?.ok !== true
-      || text(response.commandName) !== MIGRATE_COMMAND
-      || text(response.projectId) !== projectId
-      || Number(response.headRevision) !== row.expectedHeadRevision + 1
-      || (row.expectedResponse && (
-        text(response.closedThrough) !== row.expectedResponse.closedThrough
-        || text(response.cycleYearMonth) !== row.expectedResponse.cycleYearMonth
-        || text(response.approvalVersionId) !== row.expectedResponse.approvalVersionId
-        || Number(response.headRevision) !== row.expectedResponse.headRevision
-      ))
-      || !text(response.auditId)) {
-      throw new Error(`JVM returned an invalid migration response for ${projectId}`);
+    if (!migrationResponseIsValid({ ...plan, response, dryRun: true })) {
+      throw new Error(`JVM returned an invalid migration dry-run response for ${plan.projectId}`);
     }
-    results.push({ projectId, headRevision: response.headRevision, auditId: response.auditId });
+    plan.migrationFingerprint = text(response.migrationFingerprint);
+    plan.migrationRequired = response.migrationRequired;
+    plan.dryRunResponse = response;
+  }
+  const results = [];
+  for (const plan of plans.filter(({ migrationRequired }) => migrationRequired)) {
+    const body = {
+      ...plan.body,
+      expectedMigrationFingerprint: plan.migrationFingerprint,
+    };
+    const response = await migrate({ projectId: plan.projectId, body });
+    if (!migrationResponseIsValid({
+      ...plan, response, expected: plan.dryRunResponse, dryRun: false,
+    })) {
+      throw new Error(`JVM returned an invalid migration response for ${plan.projectId}`);
+    }
+    results.push({
+      projectId: plan.projectId,
+      cycleYearMonth: text(response.cycleYearMonth),
+      headRevision: response.headRevision,
+      auditId: response.auditId,
+    });
   }
   return results;
 }
 
-export function assertSettlementCycleCutoverReady(inventory, projections) {
+function normalizationResponseIsValid({ projectId, row, response, expected, dryRun }) {
+  const migrationRequired = response?.migrationRequired;
+  return response?.ok === true
+    && text(response.commandName) === NORMALIZE_COMMAND
+    && text(response.projectId) === projectId
+    && text(response.cycleYearMonth) === row.cycleYearMonth
+    && text(response.monthCloseTargetYearMonth) === row.monthCloseTargetYearMonth
+    && text(response.requestId) === row.requestId
+    && Number.isSafeInteger(response.workflowRevision) && response.workflowRevision > 0
+    && (!row.workflowRevision || response.workflowRevision === row.workflowRevision)
+    && Number(response.evidenceRevision) === row.expectedRequestRevision
+    && typeof migrationRequired === 'boolean'
+    && (dryRun || migrationRequired)
+    && ROOT_HASH.test(text(response.migrationFingerprint))
+    && (dryRun ? !text(response.auditId) : Boolean(text(response.auditId)))
+    && (!expected || (
+      Number(response.workflowRevision) === Number(expected.workflowRevision)
+      && Number(response.evidenceRevision) === Number(expected.evidenceRevision)
+      && text(response.migrationFingerprint) === text(expected.migrationFingerprint)
+    ));
+}
+
+export async function executeSettlementCycleRequestNormalizations({
+  inventory, expectedCandidates = settlementCycleRequestNormalizationCandidates(inventory), options, normalize,
+}) {
+  if (!options.apply) return [];
+  const blockerNames = [
+    'legacyHeads', 'invalidHeads',
+    'invalidActiveRequests', 'invalidCoordinators',
+  ];
+  const blockers = blockerNames
+    .filter((name) => Number(inventory?.counts?.[name] || 0) !== 0)
+    .map((name) => `${name}=${inventory.counts[name]}`);
+  if (blockers.length > 0) {
+    throw new Error(`Settlement-cycle request normalization is not ready: ${blockers.join(', ')}`);
+  }
+  const currentCandidates = settlementCycleRequestNormalizationCandidates(inventory);
+  if (stableStringify(expectedCandidates) !== stableStringify(currentCandidates)) {
+    throw new Error('Settlement-cycle request normalization evidence changed after head migration.');
+  }
+  const completedKeys = currentCandidates.filter(({ alreadyNormalized }) => alreadyNormalized)
+    .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`)
+    .sort();
+  const coordinatorKeys = (inventory?.activeCoordinatorRecords || [])
+    .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`)
+    .sort();
+  if (stableStringify(completedKeys) !== stableStringify(coordinatorKeys)) {
+    throw new Error('Settlement-cycle normalized request coordinator changed.');
+  }
+  const candidates = new Map(expectedCandidates.map((row) => [row.projectId, row]));
+  if (candidates.size !== expectedCandidates.length
+    || stableStringify([...candidates.keys()].sort())
+      !== stableStringify([...options.normalizeProjects].sort())) {
+    throw new Error('Request normalization candidates do not match the exact allowlist.');
+  }
+  const plans = options.normalizeProjects.map((projectId) => {
+    const row = candidates.get(projectId);
+    if (!row) throw new Error(`Allowlisted project is not eligible for request normalization: ${projectId}`);
+    return { projectId, row, body: buildSettlementCycleRequestNormalizationBody({
+      tenantId: options.tenantId,
+      projectId,
+      reason: options.reason,
+      ...row,
+    }) };
+  });
+  for (const plan of plans) {
+    const response = await normalize({
+      projectId: plan.projectId,
+      body: { ...plan.body, dryRun: true },
+    });
+    if (!normalizationResponseIsValid({ ...plan, response, dryRun: true })) {
+      throw new Error(`JVM returned an invalid request normalization dry-run response for ${plan.projectId}`);
+    }
+    plan.dryRunResponse = response;
+    plan.migrationRequired = response.migrationRequired;
+  }
+  const results = [];
+  for (const plan of plans.filter(({ migrationRequired }) => migrationRequired)) {
+    const response = await normalize({
+      projectId: plan.projectId,
+      body: {
+        ...plan.body,
+        expectedMigrationFingerprint: text(plan.dryRunResponse.migrationFingerprint),
+      },
+    });
+    if (!normalizationResponseIsValid({
+      ...plan, response, expected: plan.dryRunResponse, dryRun: false,
+    })) {
+      throw new Error(`JVM returned an invalid request normalization response for ${plan.projectId}`);
+    }
+    results.push({
+      projectId: plan.projectId,
+      cycleYearMonth: text(response.cycleYearMonth),
+      requestId: text(response.requestId),
+      workflowRevision: response.workflowRevision,
+      auditId: response.auditId,
+    });
+  }
+  return results;
+}
+
+export function assertSettlementCycleCutoverReady(inventory, projections, expectedActiveProjects = []) {
   const counts = inventory?.counts || {};
   const blockers = CUTOVER_BLOCKER_NAMES
     .map((name) => [name, counts[name]])
     .filter(([, count]) => Number(count || 0) !== 0);
   const invalidProjections = invalidProjectionCount(inventory, projections);
-  if (blockers.length > 0 || invalidProjections > 0) {
+  const activeRequests = (inventory?.canonicalActiveRequests || []).map((record) => (
+    `${record.projectId}\n${record.cycleYearMonth}\n${record.requestId}\n${record.workflowRevision}`
+  )).sort();
+  const activeCoordinators = (inventory?.activeCoordinatorRecords || []).map((record) => (
+    `${record.projectId}\n${record.cycleYearMonth}\n${record.requestId}\n${record.workflowRevision}`
+  )).sort();
+  const activeMismatch = stableStringify(activeRequests) !== stableStringify(activeCoordinators);
+  const activeProjects = (inventory?.canonicalActiveRequests || [])
+    .map(({ projectId }) => projectId).sort();
+  const unexpectedActive = expectedActiveProjects.length > 0
+    && stableStringify(activeProjects) !== stableStringify([...expectedActiveProjects].sort());
+  if (blockers.length > 0 || invalidProjections > 0 || activeMismatch || unexpectedActive) {
     const detail = [
       ...blockers.map(([name, count]) => `${name}=${count}`),
       ...(invalidProjections ? [`invalidProjections=${invalidProjections}`] : []),
+      ...(activeMismatch ? ['activeCoordinatorMismatch=1'] : []),
+      ...(unexpectedActive ? ['unexpectedActiveRequests=1'] : []),
     ].join(', ');
     throw new Error(`Settlement-cycle frontend cutover is not ready: ${detail}`);
   }
@@ -651,13 +1009,24 @@ export function assertSettlementCycleInventoryStable(before, after) {
   return { stable: true };
 }
 
+export function assertProtectedSettlementStatusesUnchanged(before, after, documentIds = []) {
+  const protectedIds = new Set(documentIds);
+  const selected = (inventory) => (inventory?.protectedSettlementStatuses || [])
+    .filter(({ documentId }) => protectedIds.size === 0 || protectedIds.has(documentId));
+  if (stableStringify(selected(before)) !== stableStringify(selected(after))) {
+    throw new Error('Protected cashflow settlement status documents changed during migration.');
+  }
+  return { stable: true };
+}
+
 export function settlementCycleRolloutFingerprint(value) {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  return sha256(stableStringify(value));
 }
 
 function aggregateRolloutCounts(inventory) {
   const source = inventory?.counts || {};
-  return Object.fromEntries(ROLLOUT_COUNT_NAMES.map((name) => [name, Number(source[name] || 0)]));
+  const counts = Object.fromEntries(ROLLOUT_COUNT_NAMES.map((name) => [name, Number(source[name] || 0)]));
+  return { ...counts, migrationCandidates: counts.legacyHeads + counts.recoverableHeads };
 }
 
 function invalidProjectionCount(inventory, projections) {
@@ -670,7 +1039,7 @@ function invalidProjectionCount(inventory, projections) {
       `${text(target.projectId)}\n${text(target.cycleYearMonth)}\n${text(target.requestId)}`,
     );
     return !projection
-      || text(projection.businessState) !== 'APPROVED'
+      || text(projection.businessState) !== text(target.expectedBusinessState || 'LOCKED')
       || text(projection.health) !== 'OK';
   }).length;
 }
@@ -683,15 +1052,21 @@ export function settlementCycleRolloutAuditSummary(report) {
     .filter(([, count]) => count !== 0));
   const invalidProjections = invalidProjectionCount(report?.after, report?.projections);
   if (invalidProjections > 0) blockers.invalidProjections = invalidProjections;
+  const protectedSettlementStatuses = report?.before?.protectedSettlementStatuses || [];
   return {
     counts: {
       before,
       migrations: Array.isArray(report?.migrations) ? report.migrations.length : 0,
+      normalizations: Array.isArray(report?.normalizations) ? report.normalizations.length : 0,
       after,
       projections: Array.isArray(report?.projections) ? report.projections.length : 0,
       verifiedProjects: Number(report?.cutover?.verifiedProjects || 0),
     },
     blockers,
+    protectedSettlementStatuses: {
+      count: protectedSettlementStatuses.length,
+      fingerprint: settlementCycleRolloutFingerprint(protectedSettlementStatuses),
+    },
     fingerprint: settlementCycleRolloutFingerprint(report),
   };
 }

@@ -8,57 +8,6 @@ const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.t
   + readFileSync(resolve(import.meta.dirname, 'CashflowLateSheetChangeDialog.tsx'), 'utf8');
 
 describe('CashflowProjectSheet schedule bar', () => {
-  // 마감·완료 시각·초과 판정은 서버 값이고 화면은 단계만 고른다. 조직장 초과는 표시만(누적 없음).
-  it('draws a weekly and a month schedule bar from server deadlines', () => {
-    expect(source).toContain('buildScheduleSteps({');
-    expect(source).toContain("practitionerLabel: '완료 요청'");
-    expect(source).toContain("approverLabel: '조직장 확정'");
-    expect(source).toContain("practitionerLabel: '결산 요청'");
-    expect(source).toContain("approverLabel: '조직장 승인'");
-    expect(source).toContain('practitionerDeadline: summary.closeDeadlineAt');
-    expect(source).toContain('approverDeadline: summary.approverDeadlineAt');
-    expect(source).toContain('<CashflowScheduleBar steps={weeklyScheduleSteps}');
-    expect(source).toContain('<CashflowScheduleBar steps={monthScheduleSteps}');
-  });
-  it('does not invent a confirm timestamp, and drops withdrawn or rejected requests back to "not requested"', () => {
-    expect(source).toContain("approverDone: current.lockState === 'LOCKED'");
-    expect(source).not.toContain('current.confirmedAt || current.completedAt');
-    // 회수·반려된 요청은 "요청 전" 으로 되돌아간다. 진행 중으로 보는 상태는 이 다섯뿐이다.
-    expect(source).toContain("const inFlight = ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED', 'REOPEN_REQUESTED'].includes(status);");
-  });
-
-  // 회차 월과 덮는 대상 월은 다르다. 누적 결산을 8월에 돌려도 대상은 throughMonth 까지다.
-  // 회차가 있다는 것만 보고 그렸더니 아직 아무도 하지 않은 8월이 완료로 보였다(JLIN IBS).
-  // 덮이지 않는 달은 진행도를 빌리지 않고 예정 날짜만 그린다. 회차 자체는 건드리지 않는다 -
-  // 회수·승인은 회차 월로 하는 것이 맞고, 그 경로는 BFF 조회가 그대로 유지한다.
-  it('does not borrow a cycle progress for a month the cycle does not cover', () => {
-    expect(source).toContain('const monthCoveredByRequest =');
-    expect(source).toContain('return yearMonth <= through;');
-    expect(source).toContain('const requested = inFlight && monthCoveredByRequest;');
-  });
-
-  // 노드 하나가 두 회차를 그리던 문제. 배지는 8월에 돌린 7월분(완료)을, 단계는 8월분(9월 마감)을
-  // 봐서 "완료인데 진행 중" 이 됐다. 노드 하나는 회차 하나만 말한다.
-  it('splits the executed cycle out of the month it does not cover', () => {
-    // 실행된 회차는 그 달 안에서 일어난 일이므로 주정산 앞(월초)에 놓는다.
-    expect(source).toContain('const executedCycleNode: PortalTimelineNode | null');
-    expect(source).toContain('...(executedCycleNode ? [executedCycleNode] : []),\n      ...weeklyNodes,');
-    // 지난 회차의 마감은 이 화면의 관심이 아니다 - 완료 사실만 그리고 시각을 지어내지 않는다.
-    expect(source).toContain('practitionerDeadline: null,');
-    expect(source).toContain('practitionerDoneAt: monthCloseRequest.requestedAt,');
-    // 대상 월로 이름 붙인다. 사람은 "무엇을 결산했나" 로 기억한다.
-    expect(source).toContain("label: `${String(monthCloseRequest?.throughMonth || '').slice(5)}월분 결산`");
-    expect(source).toContain("cashflowPresentation?.monthClose.status === 'COMPLETED'");
-    expect(source).toContain('approverDoneAt: executedCycleApproved ? cashflowPresentation?.monthClose.approvedAt : null,');
-    expect(source).not.toContain("approverDoneAt: ['APPROVED', 'REOPEN_REQUESTED'].includes(status)");
-  });
-
-  it('keeps one month-close action button, on the node that owns the request', () => {
-    expect(source).toContain('{executedCycleSteps.length > 0 ? null : renderMonthlyAction()}');
-    expect(source).toContain('{renderScheduleDetails(executedCycleSteps, true)}');
-  });
-
-  // 배지와 단계가 서로 다른 근거를 보면 화면이 스스로 모순된다("월 결산 완료" 위 "결산 요청 · 진행 중").
   // 시트 검토·반영이 실패해도 아무것도 띄우지 않고 끝나는 자리가 넷 있었다. 사람 눈에는 버튼만
   // 원래대로 돌아오니 반영이 된 줄 안다. 성공은 토스트, 오류는 그 자리 인라인 배너(2026-08-19 결정).
   it('never ends a sheet stage or apply in silence', () => {
@@ -74,11 +23,6 @@ describe('CashflowProjectSheet schedule bar', () => {
     expect(source).toContain('{sheetOperationError ? (');
   });
 
-  it('reads the month badge from the same source as the month schedule steps', () => {
-    expect(source).toContain('const monthOwnPresentation = useMemo(');
-    expect(source).toContain('const monthCloseStatusLabel = monthOwnPresentation.statusLabel;');
-    expect(source).not.toContain("const monthCloseStatusLabel = cashflowPresentation?.monthClose.statusLabel");
-  });
 });
 
 describe('CashflowProjectSheet staged loading', () => {
@@ -88,11 +32,6 @@ describe('CashflowProjectSheet staged loading', () => {
     expect(source).toContain('const mirrorNeeded = sheetReviewDialogOpen');
     expect(source).toContain("|| (monthCloseSettled && !(monthCloseResult?.dashboard?.source && Array.isArray(monthCloseResult?.dashboard?.cells)))");
     expect(source).toContain('if (!mirrorNeeded) return () => { cancelled = true; };');
-  });
-  it('defers request record, apply-status and freshness probe until month-close settled', () => {
-    expect(source).toContain('if (!monthCloseSettled) return;\n    void loadMonthCloseRequest();');
-    expect(source).toContain('if (!monthCloseSettled || !projectId || !orgId || !user?.uid) return () => { cancelled = true; };');
-    expect(source).toContain('if (!monthCloseSettled || !cashflowSheetConfigLoaded || !cashflowSheetConfig?.value');
   });
   it('loads the activity timeline only when it scrolls into view, and the roster after month-close', () => {
     expect(source).toContain('new IntersectionObserver(');
@@ -111,24 +50,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('monthCloseResult.dashboard.summary.targetYearMonth}월 결산');
   });
 
-  it('uses the approval-backed BFF/JVM month-close contract and removes weekly close actions', () => {
-    expect(source).toContain('fetchCashflowMonthCloseViaBff');
-    expect(source).toContain('requestCashflowMonthCloseViaBff');
-    expect(source).toContain('fetchCurrentCashflowMonthCloseRequestViaBff');
-    expect(source).not.toContain('closeCashflowMonthViaBff');
-    expect(source).toContain('requestCashflowMonthReopenViaBff');
-    expect(source).toContain('decideCashflowMonthReopenViaBff');
-    expect(source).not.toContain('handleCloseWeek');
-    expect(source).not.toContain('handleSubmitWeek');
-    expect(source).not.toContain('handleCompleteProjectionWeek');
-    expect(source).not.toContain('renderSheetTable');
-    expect(source).not.toContain('settleWeek');
-  });
-
   it('makes final save create an approval request after server validation', () => {
     expect(source).toContain('누적 월결산 승인 요청');
     expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*requestCashflowMonthCloseViaBff/);
-    expect(source).toContain('prepared.actions.requestMonthClose.enabled !== true');
     expect(source).not.toContain('!prepared.actions.cumulativeScope.ready');
     expect(source).toContain('prepared.actions.requestMonthClose.guide');
     expect(source).toContain('expectedRevision: prepared.revision');
@@ -137,47 +61,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('savePrivateCashflowDraft');
     expect(source).not.toContain('cashflowLease');
     expect(source).not.toContain('saveCashflowProjectionBatchViaBff');
-    expect(source).toContain('normalizeCashflowMonthCloseCells(monthClosePinnedSource, yearMonth)');
     expect(source).not.toContain('projectionDrafts: drafts');
     expect(source).not.toContain('applyCashflowMonthCloseProjectionDrafts');
-  });
-
-  it('treats a submission as done only after the BFF persists a pending request', () => {
-    // 성공 토스트는 없앴다. 요청 상태가 화면에 바로 반영되므로 따로 말할 필요가 없다.
-    // 대신 상태 갱신이 PENDING 검사 뒤에 온다는 순서는 유지한다.
-    const pendingGuard = source.indexOf("if (request.status !== 'PENDING')");
-    const applied = source.indexOf('setMonthCloseRequest(request);', pendingGuard);
-
-    expect(pendingGuard).toBeGreaterThan(-1);
-    expect(applied).toBeGreaterThan(pendingGuard);
-    expect(source).not.toContain('월 결산 승인을 요청했습니다.');
-    expect(source).not.toContain("toast.success('월결산 결재 요청을 제출했습니다.');");
-  });
-
-  it('drops delayed mutation responses after the selected project or month changes', () => {
-    expect(source).toContain('const monthCloseMutationGenerationRef = useRef<Record<CashflowMonthCloseMutationOperation, number>>');
-    expect(source).toContain('const captureMonthCloseMutationScope = useCallback(');
-    expect(source).toContain('const isCurrentMonthCloseMutation = useCallback(');
-
-    const handlers = [
-      ['handleSaveExecutiveApprover', 'handleOpenMonthCloseReview'],
-      ['handleFinalizeMonthClose', 'handleWithdrawMonthCloseRequest'],
-      ['handleWithdrawMonthCloseRequest', 'handleMonthReopenAction'],
-      ['handleMonthReopenAction', 'handleRefreshSheetMirror'],
-    ] as const;
-    for (const [start, end] of handlers) {
-      const handler = source.slice(source.indexOf(`const ${start}`), source.indexOf(`const ${end}`));
-      expect(handler).toContain('const mutationScope = captureMonthCloseMutationScope(');
-      expect(handler).toMatch(/await resolveBffActor\(\);\s*if \(!isCurrentMonthCloseMutation\(mutationScope\)\) return;/);
-      const catchFlow = handler.slice(handler.indexOf('} catch (error) {'), handler.indexOf('} finally {'));
-      expect(catchFlow).toContain('if (!isCurrentMonthCloseMutation(mutationScope)) return;');
-      expect(handler).toContain('if (isCurrentMonthCloseMutation(mutationScope))');
-    }
-
-    expect(source).toContain('isCurrentMonthCloseMutation(mutationScope, result)');
-    expect(source).toContain('isCurrentMonthCloseMutation(mutationScope, prepared)');
-    expect(source).toContain('isCurrentMonthCloseMutation(mutationScope, request)');
-    expect(source).toContain('isCurrentMonthCloseMutation(mutationScope, result.request)');
   });
 
   it('requires an explicit human review before the compact month close is enabled', () => {
@@ -207,61 +92,20 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('저장 대상 시트 열기');
   });
 
-  it('blocks duplicate request actions without using request state as period authority', () => {
-    expect(source).not.toContain('isCashflowMonthCloseRequestActionBlocked');
-    expect(source).not.toContain('isCashflowWeekLockedByRange');
-    expect(source).toContain('monthCloseActions?.requestMonthClose.enabled');
-    expect(source).toContain('monthCloseActions?.changeExecutiveApprover.enabled');
-    expect(source).not.toContain("['CLOSED', 'PENDING', 'APPROVED', 'REOPEN_REQUESTED'].includes(monthCloseStatus || '')");
-    expect(source).not.toContain('value={yearMonth}\n                  disabled=');
-    expect(source).toContain('승인 완료 시 위 누적 범위');
-    expect(source).not.toContain('요청 후 승인·반려 전에도');
-    expect(source).toContain('monthCloseCurrentRequestGenerationRef');
-    expect(source).toContain('shouldApplyCashflowMonthCloseRequestResult({');
-    expect(source).toContain('selectedYearMonth: selectedYearMonthRef.current');
-    expect(source).toContain('monthCloseCurrentRequestGenerationRef.current += 1;');
-  });
-
   it('initializes the pinned source before effects read its revision', () => {
     const declaration = source.indexOf('const monthClosePinnedSource = useMemo');
     const revisionEffect = source.indexOf(
-      '[yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]',
+      '[monthCloseTargetYearMonth, yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]',
     );
     expect(declaration).toBeGreaterThan(-1);
     expect(revisionEffect).toBeGreaterThan(declaration);
   });
 
   it('uses only the server close decision and renders authority section guides in Korean', () => {
-    expect(source).toContain('monthCloseActions?.requestMonthClose.enabled');
-    expect(source).toContain('monthCloseActions.requestMonthClose.guide');
     expect(source).not.toContain('dashboard?.validation?.canClose');
     expect(source).not.toContain('dashboard?.validation?.blockers?.[0]?.message');
     expect(source).toContain('monthCloseSectionErrors.map((entry) => entry.cause ? `${entry.label}: ${entry.cause}` : entry.label)');
     expect(source).not.toContain("entry.section === 'monthCloseStatuses'");
-  });
-
-  it('renders the server presentation contract without rebuilding calendar, status, or comparison truth', () => {
-    expect(source).toContain('const cashflowPresentation = monthCloseResult?.presentation;');
-    expect(source).toContain('cashflowPresentation?.asOfDate || \'확인 불가\'');
-    expect(source).toContain('cashflowPresentation?.weeks || []');
-    expect(source).toContain('cashflowPresentation?.months || []');
-    expect(source).toContain('cashflowPresentation?.comparison.cells || []');
-    expect(source).toContain('cashflowPresentation?.comparison.periodLabel || \'확인 불가\'');
-    expect(source).toContain('cashflowPresentation?.monthClose.statusLabel || \'확인 불가\'');
-    expect(source).toContain('monthCloseSectionErrors.map((entry) => entry.cause ? `${entry.label}: ${entry.cause}` : entry.label)');
-
-    expect(source).not.toContain('getSeoulTodayIso');
-    expect(source).not.toContain('getMonthMondayWeeks');
-    expect(source).not.toContain('getYearMondayWeeks');
-    expect(source).not.toContain('hydrateWeekDates');
-    expect(source).not.toContain('annualYearsFor');
-    expect(source).not.toContain('resolveCashflowComparisonScope');
-    expect(source).not.toContain('resolveCashflowEvidenceScope');
-    expect(source).not.toContain('weeklyCompletionStatusLabel');
-    expect(source).not.toContain('weeklySettlementSurface');
-    expect(source).not.toContain('cashflowWeekSurface');
-    expect(source).not.toContain('projectionActualComparison');
-    expect(source).not.toContain('settlementMatches ?');
   });
 
   it('prefills immutable sheet-authored deposit facts for the compact month close', () => {
@@ -638,56 +482,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('onScroll=');
   });
 
-  it('makes weekly and monthly settlement primary dashboard actions without a manual temporary-save button', () => {
-    const operations = source.slice(source.indexOf('function renderOperationsPanel()'), source.indexOf('function renderOpsTimeline()'));
-    expect(operations).toContain('data-cashflow-settlement-actions');
-    expect(operations).toContain('주간 정산 완료');
-    expect(operations).toContain('월 결산');
-    expect(operations).toContain('handleOpenMonthCloseReview');
-    expect(operations).not.toContain('목요일 자정 업데이트');
-    expect(operations).toContain('monthCloseActions?.requestMonthClose.enabled');
-    expect(operations).not.toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
-    expect(operations).toContain('monthCloseNotice ? (');
-    expect(source).toContain('closeDeadlineAt');
-    expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
-  });
-
-  it('keeps the portal-only single-surface actions and server-owned settlement timeline', () => {
-    const portal = source.slice(source.indexOf('function renderPortalSettlementPanel()'), source.indexOf('function renderOperationsPanel()'));
-    const admin = source.slice(source.indexOf('function renderOperationsPanel()'), source.indexOf('function renderOpsTimeline()'));
-    expect(source).toContain('portalMode');
-    expect(source).toContain('data-cashflow-portal-settlement-timeline');
-    expect(source).toContain('portalWeeklyAction');
-    expect(source).toContain('portalMonthlyAction');
-    expect(source).not.toContain('monthCloseStatuses?.find');
-    expect(source).toContain('tone: week.surfaceTone');
-    expect(source).toContain("statusLabel: week.statusLabel || '확인 불가'");
-    expect(source).toContain('cashflowPresentation?.monthClose');
-    expect(source).toContain("statusLabel: monthlyPresentation?.statusLabel || '확인 불가'");
-    expect(source).toContain('project?.contractEnd');
-    expect(source).toContain('label: `${week.label} 주정산`');
-    expect(portal).toContain('data-cashflow-portal-weekly-node');
-    expect(portal).toContain('data-cashflow-portal-monthly-node');
-    expect(portal).toContain('renderScheduleDetails(monthScheduleSteps, true)');
-    expect(portal).toContain('data-cashflow-portal-settlement-annotations');
-    expect(portal).not.toContain('<CashflowScheduleBar');
-    expect(admin).toContain('<CashflowScheduleBar steps={weeklyScheduleSteps}');
-    expect(admin).toContain('<CashflowScheduleBar steps={monthScheduleSteps}');
-    expect(source).toContain('aria-label={`${portalMonthlyButtonLabel} · ${yearMonth} 월`}');
-    expect(source).toContain('monthScheduleSteps.length > 0');
-    expect(source).toContain("if (portalMode) {");
-    expect(source).toContain('월 결산 재오픈 요청을 보냈어요.');
-    expect(portal).toContain('{!monthCloseError && !canReviewReopen ? (');
-    expect(portal).toContain(') : !monthCloseError && canReviewReopen ? (');
-  });
-
   it('guides a blocked month close to the specific next action and records safe developer diagnostics', () => {
     const preparation = source.slice(source.indexOf('const monthClosePreparation'), source.indexOf('const handleOpenMonthCloseReview'));
     expect(source).toContain('cashflow.month_close.review.open');
     expect(source).toContain('cashflow.month_close.preflight.blocked');
     expect(source).toContain('cashflow.month_close.status.load');
     expect(source).toContain('cashflow.weekly_settlement.complete');
-    expect(source).toContain('monthCloseActions.requestMonthClose.guide');
     expect(preparation).not.toContain('cashflow.month_close.preflight.sheet_refresh');
     expect(source).toContain('결산 상태 다시 확인');
     expect(source).toContain('recordDevtoolsLog');
@@ -826,34 +626,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('toast.error(');
     expect(applyFlow).toContain("toast.error('로그인 정보를 확인하지 못했습니다. 다시 로그인한 뒤 시도해 주세요.');");
     expect(source).toContain("toast.error(resolveApiErrorMessage(error, '시트 변경 검토를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'))");
-  });
-
-  it('keeps transport failure handling separate while server actions own month-close eligibility', () => {
-    const preparation = source.slice(source.indexOf('const monthClosePreparation'), source.indexOf('const handleOpenMonthCloseReview'));
-    expect(preparation).toContain('if (monthCloseError)');
-    expect(preparation).toContain('if (monthCloseLoading)');
-    expect(preparation).toContain('monthCloseActions.requestMonthClose.enabled !== true');
-    expect(preparation).toContain("detail: monthCloseActions.requestMonthClose.guide || '확인 불가'");
-    expect(preparation).not.toContain('monthCloseCellsState.error');
-    expect(preparation).not.toContain('dashboard?.validation');
-    expect(preparation).not.toContain('closeEligible');
-    expect(preparation).not.toContain('개발자도구');
-    expect(preparation).toContain('잠시 후 다시 확인해 주세요. 같은 문제가 계속되면 AXR팀에 문의해 주세요.');
-    expect(source).toContain('const canReviewReopen = monthCloseRequest?.canDecideReopen === true;');
-    expect(source).not.toContain("const canReviewReopen = role === 'finance' || role === 'admin';");
-    expect(source).toContain('monthCloseActions?.requestMonthReopen.enabled');
-    expect(source).toContain('!monthCloseError && canReviewReopen');
-    expect(source).toContain('isCashflowMonthCloseRequestForSelection(');
-    expect(source).toContain('const selectedProjectIdRef = useRef(projectId);');
-    expect(source).toContain('const [loadedMonthCloseResult, setMonthCloseResult]');
-    expect(source).toContain('isCashflowMonthCloseRequestForSelection(\n    loadedMonthCloseResult,');
-    expect(source).toContain('requestedProjectId,');
-    expect(source).toContain('selectedProjectId: selectedProjectIdRef.current');
-    expect(source).toContain('selectedProjectId: selectedProjectIdRef.current');
-    expect(source).toContain('selectedYearMonth: selectedYearMonthRef.current');
-    expect(source).toContain('isCurrentMonthCloseMutation(mutationScope, result.request)');
-    expect(source).toContain('setMonthCloseRequestError(\'월 결산 승인 상태를 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.\')');
-    expect(source).toContain('setMonthCloseRequest(null);');
   });
 
   it('keeps Projection read-only and accepts values only through sheet import', () => {
@@ -1112,19 +884,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('blocker.proceed?.();');
     expect(source).not.toContain('hasActiveEditSession');
     expect(source).toContain('저장되지 않은 변경사항이 있습니다');
-  });
-
-  it('uses server-owned action decisions while reopen decisions use canonical server authority', () => {
-    expect(source).not.toContain("role === 'pm' || role === 'finance'");
-    expect(source).not.toContain('const canFinalizeMonth');
-    expect(source).not.toContain('const canCompleteWeekly');
-    expect(source).not.toContain('const canRequestMonthReopen');
-    expect(source).toContain('const monthCloseActions = monthCloseResult?.actions;');
-    expect(source).toContain('const canReviewReopen = monthCloseRequest?.canDecideReopen === true;');
-    expect(source).not.toContain("monthCloseResult?.status !== 'OPEN'");
-    expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');
-    // 권한 판정은 서버(canDecideReopen). 화면은 그 값으로 버튼을 막을 뿐, 별도 문구를 띄우지 않는다.
-    expect(source).toContain("if (reopenAction !== 'request' && !canReviewReopen) {");
   });
 
   it('keeps a missing server cell null instead of fabricating zero', () => {

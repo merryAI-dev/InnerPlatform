@@ -13,11 +13,6 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 
 class CashflowWeekDeadlineTest {
 
-    /**
-     * PARITY TABLE — BFF {@code cashflow-close-deadline.test.mjs} 의 FINANCE_WEEK_PARITY 와
-     * 같은 표다. 한쪽 규칙을 고치면 다른 쪽 표가 깨져야 한다. 표를 줄이거나 늘릴 때는
-     * 반드시 양쪽을 함께 고친다.
-     */
     @ParameterizedTest
     @CsvSource({
         "2026-08, 1, 2026-08-02T15:00:00Z",
@@ -31,7 +26,7 @@ class CashflowWeekDeadlineTest {
         // 2026-12-31 이 목요일이라 5주차 마감이 해를 넘긴다.
         "2026-12, 5, 2026-12-31T15:00:00Z",
     })
-    void matchesTheBffParityTable(String yearMonth, int weekNo, String expected) {
+    void calculatesPractitionerDeadlineAcrossCalendarBoundaries(String yearMonth, int weekNo, String expected) {
         assertThat(CashflowWeekDeadline.practitionerDeadlineAt(YearMonth.parse(yearMonth), weekNo))
             .isEqualTo(Instant.parse(expected));
     }

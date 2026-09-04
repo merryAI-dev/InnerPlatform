@@ -120,21 +120,6 @@ export async function mintFirebaseCanaryIdToken(options, fetchImpl = fetch) {
   return text(body.id_token);
 }
 
-function sameRequest(left, right) {
-  if (left == null || right == null) return left === right;
-  return text(left?.projectId) === text(right?.projectId)
-    && text(left?.requestId) === text(right?.requestId)
-    && text(left?.status) === text(right?.status)
-    && Number.isSafeInteger(left?.workflowRevision)
-    && left?.workflowRevision === right?.workflowRevision
-    && Number.isSafeInteger(left?.evidenceRevision)
-    && left?.evidenceRevision === right?.evidenceRevision
-    && text(left?.monthCloseTargetYearMonth) === text(right?.monthCloseTargetYearMonth)
-    && text(left?.cycleYearMonth) === text(right?.cycleYearMonth)
-    && text(left?.documentType) === text(right?.documentType)
-    && text(left?.contractVersion) === text(right?.contractVersion);
-}
-
 function matchesFixedFixture(request, options) {
   return request !== null
     && text(request?.projectId) === options.projectId
@@ -173,24 +158,18 @@ export async function verifyCashflowSettlementCandidate(source, dependencies = {
   const project = encodeURIComponent(options.projectId);
   const cycle = encodeURIComponent(options.cycleYearMonth);
   const detail = await request(
-    `/api/v1/cashflow/${project}/month-close?cycleYearMonth=${cycle}`,
+    `/api/v1/cashflow/${project}/month-close?yearMonth=${cycle}`,
     'Settlement detail canary',
-  );
-  const current = await request(
-    `/api/v1/cashflow/${project}/month-close/requests/current?yearMonth=${cycle}`,
-    'Settlement current-request canary',
   );
   if (text(detail.projectId) !== options.projectId
     || text(detail.yearMonth) !== options.cycleYearMonth
     || text(detail.settlementCycle?.cycleYearMonth) !== options.cycleYearMonth
     || text(detail.settlementCycle?.monthCloseTargetYearMonth) !== options.expectedTargetYearMonth
     || text(detail.settlementCycle?.health) !== 'OK'
-    || !detail.actions || typeof detail.actions !== 'object' || Array.isArray(detail.actions)
-    || !Object.prototype.hasOwnProperty.call(current, 'request')
-    || !sameRequest(detail.monthState ?? null, current.request ?? null)) {
-    throw new Error('Settlement candidate read models are not aligned.');
+    || !detail.actions || typeof detail.actions !== 'object' || Array.isArray(detail.actions)) {
+    throw new Error('Settlement candidate canonical read is invalid.');
   }
-  if (!matchesFixedFixture(current.request ?? null, options)) {
+  if (!matchesFixedFixture(detail.monthState ?? null, options)) {
     throw new Error('Settlement candidate does not match the fixed settlement fixture.');
   }
   const actionDecisions = Object.values(detail.actions);
@@ -208,7 +187,7 @@ export async function verifyCashflowSettlementCandidate(source, dependencies = {
     ok: true,
     projectId: options.projectId,
     cycleYearMonth: options.cycleYearMonth,
-    requestPresent: current.request !== null,
+    requestPresent: detail.monthState !== null,
   };
 }
 

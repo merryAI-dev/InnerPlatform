@@ -51,10 +51,12 @@ describeIfEmulator('cashflow settlement-cycle rollout inventory (Firestore emula
 
   it('classifies one consistent snapshot without mutating canonical documents', async () => {
     const before = await db.doc(`${paths[1]}/project-a`).get();
+    const statusBefore = await db.doc(`${paths[2]}/project-a-2026-08`).get();
 
     const inventory = await readSettlementCycleRolloutInventory({ db, tenantId });
 
     const after = await db.doc(`${paths[1]}/project-a`).get();
+    const statusAfter = await db.doc(`${paths[2]}/project-a-2026-08`).get();
     expect(inventory.counts).toMatchObject({
       legacyHeads: 1, canonicalHeads: 0, invalidHeads: 0, genericMonthDocuments: 1,
     });
@@ -63,5 +65,8 @@ describeIfEmulator('cashflow settlement-cycle rollout inventory (Firestore emula
     }]);
     expect(after.data()).toEqual(before.data());
     expect(after.updateTime?.toMillis()).toBe(before.updateTime?.toMillis());
+    expect(inventory.protectedSettlementStatuses).toHaveLength(1);
+    expect(statusAfter.data()).toEqual(statusBefore.data());
+    expect(statusAfter.updateTime?.toMillis()).toBe(statusBefore.updateTime?.toMillis());
   });
 });

@@ -50,6 +50,11 @@ function monthDashboardSource() {
     projectWarningCount: 0,
     snapshot: {},
   };
+  const commandCapabilities = Object.fromEntries([
+    'SUBMIT_MONTH_CLOSE', 'WITHDRAW_MONTH_CLOSE', 'APPROVE_MONTH_CLOSE', 'REJECT_MONTH_CLOSE',
+    'REQUEST_MONTH_REOPEN', 'APPROVE_MONTH_REOPEN', 'REJECT_MONTH_REOPEN', 'CANCEL_ACTIVE_CYCLE',
+  ].map((command) => [command, { allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE' }]));
+  commandCapabilities.SUBMIT_MONTH_CLOSE = { allowed: true, reasonCode: '' };
   return {
     monthClose,
     latestRun: monthClose,
@@ -75,6 +80,21 @@ function monthDashboardSource() {
       closeDeadline: '2026-06-10',
       closeEligible: false,
       late: false,
+    },
+    settlementStatuses: {
+      projectId: 'project-a',
+      yearMonth: '2026-06',
+      items: ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].map((period) => ({
+        period, status: 'WAITING_FOR_UPDATE', revision: 0,
+        submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '',
+        deadlineAt: '2026-06-10T15:00:00.000Z',
+        approverDeadlineAt: '2026-06-13T15:00:00.000Z',
+      })),
+    },
+    settlementCycle: {
+      cycleYearMonth: '2026-06', weeklyYearMonth: '2026-06', monthCloseTargetYearMonth: '2026-05',
+      closeDeadline: '2026-06-10', businessState: 'NOT_REQUESTED', health: 'OK', workflowRevision: 0,
+      monthCloseSettlement: null, provenance: null, supersededAttempt: null, commandCapabilities,
     },
     monthCloseCalendar: monthCloseCalendarFor('2026-06'),
     snapshotCompatibility: { status: 'LEGACY_EVIDENCE_ONLY', missingEvidence: ['OPENING_BALANCES', 'LEDGER_WEEKS'] },

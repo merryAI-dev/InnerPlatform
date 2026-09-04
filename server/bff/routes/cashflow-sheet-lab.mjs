@@ -65,7 +65,7 @@ const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
 //   2 → 3: annualCashflowTotals 가 항목별 lineStates 를 담고 주차 연도 항목을 만들지 않는다.
 const CASHFLOW_SHEET_MIRROR_SCHEMA_VERSION = 3;
 const CASHFLOW_SHEET_APPLY_COMMAND = 'weeklyExpense.cashflowSheetLab.apply';
-const CASHFLOW_ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'APPROVING', 'UNCERTAIN']);
+const CASHFLOW_ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'PENDING_APPROVAL', 'APPROVING', 'UNCERTAIN']);
 const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const FINANCIAL_YEAR_FIELDS = [
   'contractAmount',

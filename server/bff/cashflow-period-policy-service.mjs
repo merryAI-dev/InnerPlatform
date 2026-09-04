@@ -15,7 +15,7 @@ import {
 import { stableStringify } from './utils.mjs';
 
 const ACTIVE_MEMBER_STATUS = 'ACTIVE';
-const ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN']);
+const ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'PENDING_APPROVAL', 'REOPEN_REQUESTED', 'APPROVING', 'UNCERTAIN']);
 const YEAR_MONTH_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 const POSITIVE_STATUSES = new Set(['OK', 'AVAILABLE', 'ACTIVE', 'CLOSED', 'LINKED', 'MATCHED', 'ALIGNED', 'COMPLETE', 'COMPLETED']);
 const CRITICAL_STATUSES = new Set(['UNAVAILABLE', 'ERROR', 'INVALID', 'MISMATCH', 'BLOCKED', 'CRITICAL']);
@@ -446,7 +446,7 @@ function buildAuthority(head, storeAvailable, { tenantId, projectId }) {
     closedThroughLabel: closedThrough
       ? formatYearMonthLabel(closedThrough, '까지 마감')
       : '마감 범위 없음',
-    // 잠금은 결산 회차 연도 안에서 closedThrough 이하 월만 (cashflowCumulativeMonthLocked). 회차가 없으면 잠금도 없다.
+    // 잠금은 closedThrough 연도 안에서 그 이하 월만 (cashflowCumulativeMonthLocked). 회차가 없으면 잠금도 없다.
     settlementMonth,
     settlementMonthLabel: settlementMonth
       ? formatYearMonthLabel(settlementMonth, ' 회차')

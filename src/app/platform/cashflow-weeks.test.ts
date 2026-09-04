@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, isYearMonth, resolveFinanceWeekForDate } from './cashflow-weeks';
+import { findWeekForDate, getCashflowSettlementPeriodOrder, getMonthMondayWeeks, getYearMondayWeeks, isYearMonth, resolveFinanceWeekForDate } from './cashflow-weeks';
 
 describe('cashflow week buckets (finance month policy)', () => {
   it('validates YYYY-MM inputs', () => {
@@ -67,6 +67,22 @@ describe('cashflow week buckets (finance month policy)', () => {
       weekStart: '2026-08-24',
       weekEnd: '2026-08-31',
     });
+  });
+
+  it('places the previous-month settlement immediately before the week containing its server deadline', () => {
+    const periodOrder = (override: { yearMonth?: string; closeDeadline?: string } = {}) => (
+      getCashflowSettlementPeriodOrder({
+        yearMonth: '2026-09',
+        closeDeadline: '2026-09-10',
+        ...override,
+      })
+    );
+
+    expect(periodOrder()).toEqual(['WEEK_1', 'MONTH', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5']);
+    expect(periodOrder({ yearMonth: '2027-01', closeDeadline: '2027-01-10' }))
+      .toEqual(['WEEK_1', 'MONTH', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5']);
+    expect(periodOrder({ closeDeadline: '' }))
+      .toEqual(['WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5', 'MONTH']);
   });
 
   it('finds dates by their own finance month even when adjacent month ranges overlap', () => {
