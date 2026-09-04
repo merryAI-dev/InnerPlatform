@@ -59,7 +59,8 @@ function isPathOrChild(path, candidate) {
 export function classifyCashflowSettlementReleasePaths(paths, { rolloutSupportIsLive = false } = {}) {
   const normalized = [...new Set(paths.map((path) => String(path || '').trim()).filter(Boolean))];
   return {
-    jvm: normalized.filter((path) => path.startsWith(JVM_ROOT)),
+    jvm: normalized.filter((path) => path.startsWith(JVM_ROOT)
+      || path === 'scripts/verify-cashflow-settlement-cycle-projection.mjs'),
     bffFrontendCutover: normalized.filter((path) => (
       (!JVM_ROLLOUT_SUPPORT_PATHS.has(path) || rolloutSupportIsLive)
       &&
