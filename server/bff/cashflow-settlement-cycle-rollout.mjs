@@ -651,9 +651,7 @@ export async function verifySettlementCycleProjections({ targets = [], readProje
       cycleYearMonth: target.cycleYearMonth,
     });
     const projection = response?.settlementCycle;
-    const requestId = text(projection?.provenance?.requestId);
-    if (text(projection?.cycleYearMonth) !== target.cycleYearMonth
-      || requestId !== target.requestId) {
+    if (text(projection?.cycleYearMonth) !== target.cycleYearMonth) {
       throw new Error(`Settlement-cycle projection identity mismatch for ${target.projectId}`);
     }
     let context;
@@ -664,6 +662,10 @@ export async function verifySettlementCycleProjections({ targets = [], readProje
       });
     } catch {
       throw new Error(`Settlement-cycle projection contract is invalid for ${target.projectId}`);
+    }
+    const requestId = context.requestId;
+    if (requestId !== target.requestId) {
+      throw new Error(`Settlement-cycle projection identity mismatch for ${target.projectId}`);
     }
     const aligned = await readAlignedRequest({ projectId: target.projectId, context });
     if (!aligned
