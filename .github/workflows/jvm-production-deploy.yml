@@ -716,26 +716,37 @@ jobs:
             fi
             mutation="$(curl --silent --show-error "${bypass_header[@]}" \
               -X POST -H 'content-type: application/json' -d '{}' \
-              -w '\n%{http_code}' "${base_url}/api/v1/__maintenance_probe__")"
-            test "${mutation##*$'\n'}" = "503"
-            jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null
+              -w '\n%{http_code}' "${base_url}/api/v1/__maintenance_probe__")" || return 1
+            test "${mutation##*$'\n'}" = "503" || return 1
+            jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null || return 1
             worker="$(curl --silent --show-error "${bypass_header[@]}" \
-              -w '\n%{http_code}' "${base_url}/api/internal/workers/outbox/run")"
-            test "${worker##*$'\n'}" = "503"
-            jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null
+              -w '\n%{http_code}' "${base_url}/api/internal/workers/outbox/run")" || return 1
+            test "${worker##*$'\n'}" = "503" || return 1
+            jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null || return 1
           }
           assert_maintenance "${deployment_url}" "${VERCEL_AUTOMATION_BYPASS_SECRET}"
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${deployment_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
-          node scripts/verify-vercel-deployment-identity.mjs \
-            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
-            --expected-host "${deployment_host}" \
-            --expected-id "${deployment_id}" \
-            --expected-sha "${BFF_DEPLOYED_SHA}" \
-            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
-            --ancestor-of "${DEPLOY_SHA}" >/dev/null
-          assert_maintenance "https://${VERCEL_CANONICAL_PRODUCTION_HOST}"
+          maintenance_ready=false
+          for attempt in {1..10}; do
+            if node scripts/verify-vercel-deployment-identity.mjs \
+                --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+                --expected-host "${deployment_host}" \
+                --expected-id "${deployment_id}" \
+                --expected-sha "${BFF_DEPLOYED_SHA}" \
+                --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+                --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1 \
+              && assert_maintenance "https://${VERCEL_CANONICAL_PRODUCTION_HOST}"; then
+              maintenance_ready=true
+              break
+            fi
+            [ "${attempt}" = "10" ] || sleep 2
+          done
+          [ "${maintenance_ready}" = "true" ] || {
+            echo "Canonical maintenance alias did not become ready." >&2
+            exit 1
+          }
           {
             echo "deployment_host=${deployment_host}"
             echo "deployment_id=${deployment_id}"
