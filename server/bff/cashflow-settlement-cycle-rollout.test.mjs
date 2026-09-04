@@ -796,7 +796,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
     }));
     const readAlignedRequest = vi.fn(async () => ({
       requestId: 'project-a-2026-09', cycleYearMonth: '2026-09',
-      monthCloseTargetYearMonth: '2026-08', status: 'APPROVED', workflowRevision: 7,
+      monthCloseTargetYearMonth: '2026-08', status: 'APPROVED', workflowRevision: 6,
     }));
 
     await expect(verifySettlementCycleProjections({
