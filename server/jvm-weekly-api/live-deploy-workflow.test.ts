@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 
 import {
   advanceCashflowSettlementCutover,
@@ -71,6 +72,27 @@ function report(overrides: Record<string, unknown> = {}) {
 }
 
 describe('cashflow settlement atomic cutover decisions', () => {
+  it('compares legacy state while allowing the approved monthly deadline change', () => {
+    const core = (value: object) => execFileSync(
+      'jq', ['-S', '-c', '-f', 'scripts/cashflow-settlement-legacy-parity.jq'],
+      { input: JSON.stringify(value), encoding: 'utf8' },
+    ).trim();
+    const live = {
+      settlementCycle: null,
+      monthCloseCalendar: [{ yearMonth: '2026-08', approverDeadlineAt: 'old' }],
+      settlementStatuses: { items: [
+        { period: 'MONTH', status: 'COMPLETED', approverDeadlineAt: 'old' },
+        { period: 'WEEK_1', status: 'COMPLETED', approverDeadlineAt: 'same' },
+      ] },
+    };
+    const candidate = structuredClone(live);
+    candidate.monthCloseCalendar[0].approverDeadlineAt = 'new';
+    candidate.settlementStatuses.items[0].approverDeadlineAt = 'new';
+    expect(core(candidate)).toBe(core(live));
+    candidate.settlementStatuses.items[1].status = 'PENDING_APPROVAL';
+    expect(core(candidate)).not.toBe(core(live));
+  });
+
   it('freezes exact projects and permits only drain, migrate, promote, then web', () => {
     const initialReport = report();
     const frozen = buildCashflowSettlementCutoverPreflight(initialReport);
