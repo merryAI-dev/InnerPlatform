@@ -108,7 +108,7 @@ jobs:
       JVM_WEEKLY_FIRESTORE_PROJECT_ID: inner-platform-live-20260316
       JVM_WEEKLY_API_BASE_URL: ${{ vars.JVM_WEEKLY_API_BASE_URL_LIVE }}
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
-      JVM_SOURCE_PATHS: server/jvm-weekly-api .github/workflows/jvm-production-deploy.yml
+      JVM_SOURCE_PATHS: server/jvm-weekly-api
       JVM_PROJECT_ID: inner-platform-live-20260316
       JVM_REGION: us-central1
       JVM_SERVICE: innerplatform-jvm-weekly-api-live
