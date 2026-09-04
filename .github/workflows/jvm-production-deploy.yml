@@ -167,12 +167,12 @@ jobs:
       JVM_WEEKLY_FIRESTORE_PROJECT_ID: inner-platform-live-20260316
       JVM_WEEKLY_AUTH_MODE: strict
       SLACK_ALERT_CHANNEL_ID: C0BQ6980HR6
-      CUTOVER_STATE_FILE: ${{ runner.temp }}/cashflow-settlement-cutover-state.json
-      CUTOVER_PREFLIGHT_REPORT: ${{ runner.temp }}/cashflow-settlement-preflight-report.json
-      CUTOVER_PRE_MAINTENANCE_REPORT: ${{ runner.temp }}/cashflow-settlement-pre-maintenance-report.json
-      CUTOVER_POST_DRAIN_REPORT: ${{ runner.temp }}/cashflow-settlement-post-drain-report.json
-      CUTOVER_PLAN_FILE: ${{ runner.temp }}/cashflow-settlement-cutover-plan.json
-      PROTECTED_SNAPSHOT_FILE: ${{ runner.temp }}/cashflow-settlement-protected.json
+      CUTOVER_STATE_FILE: ${{ github.workspace }}/cashflow-settlement-cutover-state.json
+      CUTOVER_PREFLIGHT_REPORT: ${{ github.workspace }}/cashflow-settlement-preflight-report.json
+      CUTOVER_PRE_MAINTENANCE_REPORT: ${{ github.workspace }}/cashflow-settlement-pre-maintenance-report.json
+      CUTOVER_POST_DRAIN_REPORT: ${{ github.workspace }}/cashflow-settlement-post-drain-report.json
+      CUTOVER_PLAN_FILE: ${{ github.workspace }}/cashflow-settlement-cutover-plan.json
+      PROTECTED_SNAPSHOT_FILE: ${{ github.workspace }}/cashflow-settlement-protected.json
       DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
       CASHFLOW_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
       CASHFLOW_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
