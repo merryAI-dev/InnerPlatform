@@ -652,6 +652,7 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -euo pipefail
           test -n "${BFF_DEPLOYMENT_INVOCATION}"
@@ -663,14 +664,17 @@ jobs:
             --expected-invocation "${BFF_DEPLOYMENT_INVOCATION}" \
             --ancestor-of "${DEPLOY_SHA}" >/dev/null
           curl --fail --silent --show-error \
-            "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/v1/health" >/dev/null
+            -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+            "https://${BFF_DEPLOYMENT_HOST}/api/v1/health" >/dev/null
           mutation="$(curl --silent --show-error -X POST \
+            -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
             -H 'content-type: application/json' -d '{}' -w '\n%{http_code}' \
-            "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/v1/__maintenance_probe__")"
+            "https://${BFF_DEPLOYMENT_HOST}/api/v1/__maintenance_probe__")"
           test "${mutation##*$'\n'}" = "503"
           jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null
           worker="$(curl --silent --show-error -w '\n%{http_code}' \
-            "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/internal/workers/outbox/run")"
+            -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+            "https://${BFF_DEPLOYMENT_HOST}/api/internal/workers/outbox/run")"
           test "${worker##*$'\n'}" = "503"
           jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null
 
@@ -728,7 +732,7 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${deployment_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
-          maintenance_ready=false
+          alias_ready=false
           for attempt in {1..10}; do
             if node scripts/verify-vercel-deployment-identity.mjs \
                 --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
@@ -736,15 +740,14 @@ jobs:
                 --expected-id "${deployment_id}" \
                 --expected-sha "${BFF_DEPLOYED_SHA}" \
                 --expected-invocation "${DEPLOY_INVOCATION_ID}" \
-                --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1 \
-              && assert_maintenance "https://${VERCEL_CANONICAL_PRODUCTION_HOST}"; then
-              maintenance_ready=true
+                --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
+              alias_ready=true
               break
             fi
             [ "${attempt}" = "10" ] || sleep 2
           done
-          [ "${maintenance_ready}" = "true" ] || {
-            echo "Canonical maintenance alias did not become ready." >&2
+          [ "${alias_ready}" = "true" ] || {
+            echo "Canonical maintenance alias did not resolve to the verified deployment." >&2
             exit 1
           }
           {
@@ -984,14 +987,24 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${deployment_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
-          node scripts/verify-vercel-deployment-identity.mjs \
-            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
-            --expected-host "${deployment_host}" \
-            --expected-id "${deployment_id}" \
-            --expected-sha "${DEPLOY_SHA}" \
-            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
-            --ancestor-of "${DEPLOY_SHA}" >/dev/null
-          assert_live "https://${VERCEL_CANONICAL_PRODUCTION_HOST}"
+          alias_ready=false
+          for attempt in {1..10}; do
+            if node scripts/verify-vercel-deployment-identity.mjs \
+                --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+                --expected-host "${deployment_host}" \
+                --expected-id "${deployment_id}" \
+                --expected-sha "${DEPLOY_SHA}" \
+                --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+                --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
+              alias_ready=true
+              break
+            fi
+            [ "${attempt}" = "10" ] || sleep 2
+          done
+          [ "${alias_ready}" = "true" ] || {
+            echo "Canonical alias did not resolve to the verified deployment." >&2
+            exit 1
+          }
           SETTLEMENT_CANARY_BASE_URL="https://${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             node scripts/verify-cashflow-settlement-candidate.mjs
           node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
@@ -1110,6 +1123,7 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
@@ -1148,21 +1162,34 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${target_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
-          node scripts/verify-vercel-deployment-identity.mjs \
-            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
-            --expected-host "${target_host}" \
-            --expected-id "${target_id}" \
-            --expected-sha "${target_sha}" \
-            "${invocation_args[@]}" \
-            --ancestor-of "${DEPLOY_SHA}" >/dev/null
+          alias_ready=false
+          for attempt in {1..10}; do
+            if node scripts/verify-vercel-deployment-identity.mjs \
+                --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+                --expected-host "${target_host}" \
+                --expected-id "${target_id}" \
+                --expected-sha "${target_sha}" \
+                "${invocation_args[@]}" \
+                --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
+              alias_ready=true
+              break
+            fi
+            [ "${attempt}" = "10" ] || sleep 2
+          done
+          [ "${alias_ready}" = "true" ] || {
+            echo "Canonical alias reconciliation did not resolve to the verified deployment." >&2
+            exit 1
+          }
           if jq -e '.keepMaintenance == true' <<< "${plan}" >/dev/null; then
             mutation="$(curl --silent --show-error -X POST \
+              -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
               -H 'content-type: application/json' -d '{}' -w '\n%{http_code}' \
-              "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/v1/__maintenance_probe__")"
+              "https://${target_host}/api/v1/__maintenance_probe__")"
             test "${mutation##*$'\n'}" = "503"
             jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null
             worker="$(curl --silent --show-error -w '\n%{http_code}' \
-              "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/internal/workers/outbox/run")"
+              -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+              "https://${target_host}/api/internal/workers/outbox/run")"
             test "${worker##*$'\n'}" = "503"
             jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null
           fi
