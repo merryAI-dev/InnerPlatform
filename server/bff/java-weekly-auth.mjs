@@ -136,14 +136,14 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
 
 export async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccountJson, resolveIdentityToken, signal) {
   if (!audience) return '';
-  if (serviceAccountJson) {
-    if (typeof resolveIdentityToken === 'function') {
-      const token = await resolveIdentityToken({ audience, serviceAccountJson, signal });
-      if (!readOptionalText(token)) {
-        throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
-      }
-      return String(token).trim();
+  if (typeof resolveIdentityToken === 'function') {
+    const token = await resolveIdentityToken({ audience, serviceAccountJson, signal });
+    if (!readOptionalText(token)) {
+      throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
     }
+    return String(token).trim();
+  }
+  if (serviceAccountJson) {
     return fetchCredentialIdentityToken(audience, serviceAccountJson);
   }
   const tokenUrl = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(audience)}&format=full`;
