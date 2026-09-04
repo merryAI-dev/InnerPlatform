@@ -38,6 +38,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchReque
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleHeadMigrationResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleLegacyRequestNormalizationResponse;
 import dev.merryai.innerplatform.weekly.api.CancelCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
@@ -63,6 +64,7 @@ import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
 import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
+import dev.merryai.innerplatform.weekly.api.NormalizeLegacyCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
@@ -172,6 +174,8 @@ public class WeeklyExpenseCommandService {
         "cashflowSettlementCycle.cancelActive";
     public static final String MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND =
         "cashflowSettlementCycle.migrateHeadV2";
+    public static final String NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND =
+        "cashflowSettlementCycle.normalizeLegacyActiveRequest";
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
 
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
@@ -523,6 +527,81 @@ public class WeeklyExpenseCommandService {
             MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND, requestHash, writeJson(response)
         ));
         return response;
+    }
+
+    public CashflowSettlementCycleLegacyRequestNormalizationResponse normalizeLegacyCashflowSettlementCycleRequest(
+        TrustedActorContext actor,
+        String projectId,
+        NormalizeLegacyCashflowSettlementCycleRequest request
+    ) {
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND, actor, projectId
+        );
+        String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
+        Optional<CashflowSettlementCycleLegacyRequestNormalizationResponse> replay = request.dryRun()
+            ? Optional.empty()
+            : readIdempotentResponse(
+                writer.tenantId(), projectId,
+                NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND,
+                request.idempotencyKey(), requestHash,
+                CashflowSettlementCycleLegacyRequestNormalizationResponse.class
+            );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowSettlementCycleLegacyRequestNormalizationState saved =
+            persistence.normalizeLegacyCashflowSettlementCycleRequest(writer, projectId, request);
+        if (request.dryRun() || !saved.migrationRequired()) {
+            return legacyRequestNormalizationResponse(saved, "");
+        }
+        String auditId = "settlement-cycle-request-normalization-" + hashJson(Map.of(
+            "tenantId", writer.tenantId(),
+            "projectId", projectId,
+            "actorUid", writer.id(),
+            "idempotencyKey", request.idempotencyKey()
+        )).replace("sha256:", "");
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("cycleYearMonth", saved.cycleYearMonth());
+        metadata.put("monthCloseTargetYearMonth", saved.monthCloseTargetYearMonth());
+        metadata.put("requestId", saved.requestId());
+        metadata.put("workflowRevision", saved.workflowRevision());
+        metadata.put("evidenceRevision", saved.evidenceRevision());
+        metadata.put("migrationFingerprint", saved.migrationFingerprint());
+        metadata.put("reason", request.reason());
+        putActorMetadata(metadata, writer);
+        WeeklyExpenseAuditEventEntity audit = new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(), projectId, "settlement-cycle",
+            NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND,
+            writer.id(), normalizeRole(writer.role()), request.idempotencyKey(), writeJson(metadata)
+        );
+        audit.restorePersistenceState(auditId, audit.getCreatedAt());
+        persistence.saveAuditEvent(audit);
+        CashflowSettlementCycleLegacyRequestNormalizationResponse response =
+            legacyRequestNormalizationResponse(saved, auditId);
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(), projectId, request.idempotencyKey(),
+            NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND,
+            requestHash, writeJson(response)
+        ));
+        return response;
+    }
+
+    private CashflowSettlementCycleLegacyRequestNormalizationResponse legacyRequestNormalizationResponse(
+        WeeklyExpensePersistence.CashflowSettlementCycleLegacyRequestNormalizationState saved,
+        String auditId
+    ) {
+        return new CashflowSettlementCycleLegacyRequestNormalizationResponse(
+            true,
+            NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND,
+            saved.projectId(),
+            saved.cycleYearMonth(),
+            saved.monthCloseTargetYearMonth(),
+            saved.requestId(),
+            saved.workflowRevision(),
+            saved.evidenceRevision(),
+            saved.migrationFingerprint(),
+            saved.migrationRequired(),
+            auditId
+        );
     }
 
     private WeeklyExpenseAuditEventEntity saveSettlementCycleAudit(

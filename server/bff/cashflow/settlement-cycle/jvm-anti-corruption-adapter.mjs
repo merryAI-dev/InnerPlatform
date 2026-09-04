@@ -32,6 +32,54 @@ const SETTLEMENT_CYCLE_COMMANDS = Object.freeze([
   'CANCEL_ACTIVE_CYCLE',
 ]);
 
+export function buildHistoricalCashflowSettlementCycle(value, { projectId, cycleYearMonth }) {
+  const source = objectValue(value);
+  const items = Array.isArray(source?.items) ? source.items : [];
+  const month = items.find((item) => item?.period === 'MONTH');
+  const monthStatus = {
+    WAITING_FOR_UPDATE: 'WAITING_FOR_UPDATE',
+    PENDING_APPROVAL: 'SUBMITTED',
+    SUBMITTED: 'SUBMITTED',
+    COMPLETED: 'LOCKED',
+    LOCKED: 'LOCKED',
+  }[month?.status];
+  if (!monthStatus) throw responseInvalid();
+  const settlementStatuses = {
+    ...source,
+    items: items.map((item) => item === month ? { ...item, status: monthStatus } : item),
+  };
+  requireCashflowSettlementStatusesResult(settlementStatuses, {
+    projectId,
+    yearMonth: cycleYearMonth,
+  });
+  const canonicalMonth = settlementStatuses.items.find((item) => item.period === 'MONTH');
+  const businessState = {
+    WAITING_FOR_UPDATE: 'NOT_REQUESTED',
+    SUBMITTED: 'SUBMITTED',
+    LOCKED: 'LOCKED',
+  }[monthStatus];
+  const commandCapabilities = Object.fromEntries(SETTLEMENT_CYCLE_COMMANDS.map((command) => [
+    command,
+    { allowed: false, reasonCode: 'HISTORICAL_READ_ONLY' },
+  ]));
+  return {
+    settlementStatuses,
+    settlementCycle: {
+      cycleYearMonth,
+      weeklyYearMonth: cycleYearMonth,
+      monthCloseTargetYearMonth: previousYearMonth(cycleYearMonth),
+      closeDeadline: `${cycleYearMonth}-10`,
+      businessState,
+      health: 'OK',
+      workflowRevision: canonicalMonth.revision,
+      monthCloseSettlement: canonicalMonth,
+      provenance: null,
+      supersededAttempt: null,
+      commandCapabilities,
+    },
+  };
+}
+
 const COMMAND_ELIGIBLE_STATES = Object.freeze({
   SUBMIT_MONTH_CLOSE: ['NOT_REQUESTED', 'REOPENED', 'REJECTED', 'WITHDRAWN'],
   WITHDRAW_MONTH_CLOSE: ['SUBMITTED'],

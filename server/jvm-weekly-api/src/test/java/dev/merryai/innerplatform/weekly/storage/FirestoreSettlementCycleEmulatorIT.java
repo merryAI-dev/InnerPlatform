@@ -724,6 +724,72 @@ class FirestoreSettlementCycleEmulatorIT {
         assertThat(projectUpdateTimes(collision)).isEqualTo(updateTimesBeforeCollision);
     }
 
+    @Test
+    void legacyApprovalMigrationArchivesStaleActiveRequestBeforeCanonicalRecovery() throws Exception {
+        Harness harness = harness("it-stale-request", "project-stale-request");
+        seedCanonicalActorsAndProject(harness);
+        seedLegacyMigrationCandidate(harness, false, false);
+        String requestId = harness.projectId() + "-2026-09";
+        String requestPath = harness.requestPath(requestId);
+        Map<String, Object> staleRequest = new LinkedHashMap<>(document(requestPath));
+        staleRequest.remove("reviewIdempotencyKey");
+        staleRequest.remove("monthCloseResult");
+        staleRequest.put("documentType", "REQUEST");
+        staleRequest.put("status", "UNCERTAIN");
+        staleRequest.put("revision", 9L);
+        staleRequest.put("evidenceRevision", 9L);
+        staleRequest.put("manifestHash", "sha256:" + "b".repeat(64));
+        seedDocuments(Map.of(requestPath, staleRequest));
+        Map<String, Object> statusBefore = document(harness.settlementPath("2026-09"));
+        Map<String, Map<String, Map<String, Object>>> beforeDryRun = projectState(harness);
+
+        CashflowSettlementCycleHeadMigrationResponse validated = transaction(harness, () ->
+            harness.service().migrateCashflowSettlementCycleHeadV2(
+                harness.admin(), harness.projectId(), new MigrateCashflowSettlementCycleHeadV2Request(
+                    "settlement-cycle-v3:stale-request", 4, SOURCE_REVISION,
+                    "archive stale request and recover approval", true, ""
+                )
+            )
+        );
+        assertThat(projectState(harness)).isEqualTo(beforeDryRun);
+
+        MigrateCashflowSettlementCycleHeadV2Request apply =
+            new MigrateCashflowSettlementCycleHeadV2Request(
+                "settlement-cycle-v3:stale-request", 4, SOURCE_REVISION,
+                "archive stale request and recover approval", false,
+                validated.migrationFingerprint()
+            );
+        String archivePath = requestPath + "/migration_archives/stale-r9";
+        seedDocuments(Map.of(archivePath, Map.of("collision", true)));
+        assertThatThrownBy(() -> transaction(harness, () ->
+            harness.service().migrateCashflowSettlementCycleHeadV2(
+                harness.admin(), harness.projectId(), apply
+            )
+        ))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("archive collision");
+        assertThat(document(requestPath)).isEqualTo(staleRequest);
+        db.document(archivePath).delete().get(60, TimeUnit.SECONDS);
+
+        CashflowSettlementCycleHeadMigrationResponse migrated = transaction(harness, () ->
+            harness.service().migrateCashflowSettlementCycleHeadV2(
+                harness.admin(), harness.projectId(), apply
+            )
+        );
+
+        assertThat(document(archivePath))
+            .isEqualTo(staleRequest);
+        assertThat(document(requestPath))
+            .containsEntry("documentType", "REQUEST")
+            .containsEntry("status", "APPROVED")
+            .containsEntry("revision", 7L)
+            .containsEntry("evidenceRevision", 7L)
+            .containsEntry("manifestHash", SOURCE_REVISION)
+            .containsEntry("ledgerRevision", 3L)
+            .containsEntry("approvalVersionId", migrated.approvalVersionId());
+        assertThat(document(harness.settlementPath("2026-09"))).isEqualTo(statusBefore);
+    }
+
     private Harness harness(String tenantId, String projectId) {
         FirestoreInheritedWeeklyExpensePersistence persistence =
             new FirestoreInheritedWeeklyExpensePersistence(
@@ -875,6 +941,9 @@ class FirestoreSettlementCycleEmulatorIT {
             Map.entry("rootHash", SOURCE_REVISION),
             Map.entry("headRevision", 4L)
         ));
+        String closeIdempotencyKey = targetKeyed
+            ? "legacy-close"
+            : "cashflow-settlement:" + requestId + ":r7:approve";
         Map<String, Object> request = new LinkedHashMap<>(Map.ofEntries(
             Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
             Map.entry("requestId", requestId),
@@ -885,7 +954,7 @@ class FirestoreSettlementCycleEmulatorIT {
             Map.entry("status", "APPROVED"),
             Map.entry("revision", 7L),
             Map.entry("manifestHash", SOURCE_REVISION),
-            Map.entry("reviewIdempotencyKey", "legacy-close"),
+            Map.entry("reviewIdempotencyKey", closeIdempotencyKey),
             Map.entry("monthCloseResult", result)
         ));
         if (!targetKeyed) {
@@ -926,7 +995,7 @@ class FirestoreSettlementCycleEmulatorIT {
         Map<String, Object> receipt = new LinkedHashMap<>(Map.ofEntries(
             Map.entry("tenantId", harness.tenantId()),
             Map.entry("projectId", harness.projectId()),
-            Map.entry("idempotencyKey", "legacy-close"),
+            Map.entry("idempotencyKey", closeIdempotencyKey),
             Map.entry("commandName", WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND),
             Map.entry("requestHash", "sha256:legacy-request"),
             Map.entry("responseJson", JSON.writeValueAsString(result)),
@@ -972,7 +1041,7 @@ class FirestoreSettlementCycleEmulatorIT {
         ));
         String receiptId = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
             (harness.projectId() + "\n" + WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND
-                + "\nlegacy-close").getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                + "\n" + closeIdempotencyKey).getBytes(java.nio.charset.StandardCharsets.UTF_8)
         );
         documents.put("orgs/" + harness.tenantId() + "/weekly_api_idempotency/" + receiptId, receipt);
         if (headOnlyMarker) {

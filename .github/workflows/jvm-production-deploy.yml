@@ -348,12 +348,16 @@ jobs:
           plan="$(node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
             freeze-preflight "${CUTOVER_PREFLIGHT_REPORT}" "${CUTOVER_PLAN_FILE}")"
           candidates="$(jq -er '.migrationCandidateProjects | join(",")' <<< "${plan}")"
+          normalizations="$(jq -er '.normalizationProjects | join(",")' <<< "${plan}")"
           test -n "${candidates}"
+          test -n "${normalizations}"
           echo "candidate_projects=${candidates}" >> "${GITHUB_OUTPUT}"
+          echo "normalization_projects=${normalizations}" >> "${GITHUB_OUTPUT}"
           {
             echo "- Protected completed MONTH projects: $(jq '.protectedCompletedMonthProjects | length' <<< "${plan}")"
             echo "- Protected settlement status documents: $(jq '.protectedStatusDocumentCount' <<< "${plan}")"
             echo "- Migration candidates: $(jq '.migrationCandidateProjects | length' <<< "${plan}")"
+            echo "- Request normalization candidates: $(jq '.normalizationProjects | length' <<< "${plan}")"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Capture current live revision
@@ -773,9 +777,9 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
-            capture-protected "${PROJECT_ID}" mysc "${PROTECTED_SNAPSHOT_FILE}"
+            capture-protected "${PROJECT_ID}" mysc "${PROTECTED_SNAPSHOT_FILE}" "${CUTOVER_PLAN_FILE}"
 
-      - name: Dry-run all and apply frozen settlement head migrations
+      - name: Dry-run and apply frozen settlement migrations
         if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
         env:
           CANDIDATE_URL: ${{ steps.target.outputs.url }}
@@ -784,6 +788,7 @@ jobs:
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           SETTLEMENT_MIGRATION_PROJECTS: ${{ steps.settlement_preflight.outputs.candidate_projects }}
+          SETTLEMENT_NORMALIZATION_PROJECTS: ${{ steps.settlement_preflight.outputs.normalization_projects }}
           REVISION: ${{ steps.target.outputs.revision }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
@@ -807,6 +812,7 @@ jobs:
             --tenant mysc \
             --confirm-tenant mysc \
             --allow-projects "${SETTLEMENT_MIGRATION_PROJECTS}" \
+            --normalize-projects "${SETTLEMENT_NORMALIZATION_PROJECTS}" \
             --people-uid "${CASHFLOW_ACTOR_UID}" \
             --reason "Automatic atomic cutover for ${DEPLOY_SHA}" \
             --jvm-base-url "${CANDIDATE_URL}" \
@@ -821,6 +827,7 @@ jobs:
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           RELEASE_MODE: ${{ steps.release_boundary.outputs.release_mode }}
+          SETTLEMENT_NORMALIZATION_PROJECTS: ${{ steps.settlement_preflight.outputs.normalization_projects || 'p1773817948751,p1775209262483,p1780662870530' }}
         run: |
           set -euo pipefail
           test -n "${CASHFLOW_ACTOR_UID}"
@@ -832,12 +839,13 @@ jobs:
             --firebase-project "${PROJECT_ID}" \
             --tenant mysc \
             --verify-cutover \
+            --normalize-projects "${SETTLEMENT_NORMALIZATION_PROJECTS}" \
             --people-uid "${CASHFLOW_ACTOR_UID}" \
             --jvm-base-url "${verify_url}" \
             --jvm-audience "${JVM_AUDIENCE}"
           if [ "${RELEASE_MODE}" = "atomic_cutover" ]; then
             node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
-              verify-protected "${PROJECT_ID}" mysc "${PROTECTED_SNAPSHOT_FILE}"
+              verify-protected "${PROJECT_ID}" mysc "${PROTECTED_SNAPSHOT_FILE}" "${CUTOVER_PLAN_FILE}"
             node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
               advance "${CUTOVER_STATE_FILE}" inventory_verified
           fi

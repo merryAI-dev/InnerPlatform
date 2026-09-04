@@ -187,6 +187,12 @@
         "admin"
       ]
     },
+    "NORMALIZE_LEGACY_CASHFLOW_SETTLEMENT_CYCLE_REQUEST_COMMAND": {
+      "command": "cashflowSettlementCycle.normalizeLegacyActiveRequest",
+      "roles": [
+        "admin"
+      ]
+    },
     "READ_CASHFLOW_WEEKLY_UPDATE_COMMAND": {
       "command": "cashflowWeeklyUpdate.read",
       "roles": [

@@ -233,6 +233,27 @@ class WeeklyExpenseControllerTest {
         }
     }
 
+    @Test
+    void legacySettlementCycleRequestNormalizationIsCutoffBound() throws Exception {
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-a/settlement-cycle/normalize-legacy-active-request")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(Map.ofEntries(
+                        Map.entry("idempotencyKey", "normalize-outside-cutoff"),
+                        Map.entry("cycleYearMonth", "2027-01"),
+                        Map.entry("expectedRequestRevision", 1),
+                        Map.entry("expectedManifestHash", "sha256:" + "a".repeat(64)),
+                        Map.entry("reason", "cutoff validation"),
+                        Map.entry("dryRun", true),
+                        Map.entry("expectedMigrationFingerprint", "")
+                    ))),
+                "tenant-a",
+                "admin-1",
+                "admin"
+            ))
+            .andExpect(status().isBadRequest());
+    }
+
     private static MockHttpServletRequestBuilder asActor(
         MockHttpServletRequestBuilder request,
         String tenantId,

@@ -1,8 +1,13 @@
 import { requireCashflowSettlementCycleReadContext } from './cashflow/settlement-cycle/jvm-anti-corruption-adapter.mjs';
+import {
+  CASHFLOW_SETTLEMENT_CYCLE_CUTOFF_MONTH,
+  isHistoricalCashflowSettlementCycle,
+} from './cashflow/settlement-cycle/contract.mjs';
 import { sha256, stableStringify } from './utils.mjs';
 
 const CONTRACT_VERSION = 'cashflow-cumulative-close-v2';
 const MIGRATE_COMMAND = 'cashflowSettlementCycle.migrateHeadV2';
+const NORMALIZE_COMMAND = 'cashflowSettlementCycle.normalizeLegacyActiveRequest';
 const ACTIVE_REQUEST_STATES = new Set([
   'BUILDING', 'PENDING', 'PENDING_APPROVAL', 'APPROVING', 'UNCERTAIN', 'REOPEN_REQUESTED',
 ]);
@@ -14,11 +19,15 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const ROLLOUT_COUNT_NAMES = [
   'legacyHeads', 'canonicalHeads', 'recoverableHeads', 'invalidHeads',
   'unresolvedRequests', 'legacyActiveRequests', 'coordinators', 'activeCoordinators',
-  'invalidCoordinators', 'genericMonthDocuments',
+  'invalidCoordinators', 'historicalActiveRequests', 'normalizationCandidates',
+  'canonicalActiveRequests', 'invalidActiveRequests', 'genericMonthDocuments',
 ];
 const CUTOVER_BLOCKER_NAMES = [
-  'legacyHeads', 'invalidHeads', 'unresolvedRequests',
-  'legacyActiveRequests', 'activeCoordinators', 'invalidCoordinators',
+  'legacyHeads', 'invalidHeads', 'normalizationCandidates',
+  'invalidActiveRequests', 'invalidCoordinators',
+];
+const HEAD_MIGRATION_BLOCKER_NAMES = [
+  'invalidHeads', 'invalidActiveRequests', 'invalidCoordinators',
 ];
 
 function text(value) {
@@ -55,6 +64,7 @@ export function parseSettlementCycleRolloutArgs(args) {
     apply: false,
     verifyCutover: false,
     allowProjects: [],
+    normalizeProjects: [],
   };
   const valueFlags = new Map([
     ['--firebase-project', 'firebaseProjectId'],
@@ -62,6 +72,7 @@ export function parseSettlementCycleRolloutArgs(args) {
     ['--tenant', 'tenantId'],
     ['--confirm-tenant', 'confirmTenantId'],
     ['--allow-projects', 'allowProjects'],
+    ['--normalize-projects', 'normalizeProjects'],
     ['--people-uid', 'actorUid'],
     ['--reason', 'reason'],
     ['--jvm-base-url', 'jvmBaseUrl'],
@@ -86,7 +97,7 @@ export function parseSettlementCycleRolloutArgs(args) {
     if (!field || index + 1 >= args.length) throw new Error(`Unknown or incomplete option: ${arg}`);
     const value = args[index + 1];
     index += 1;
-    options[field] = field === 'allowProjects' ? parseCsv(value) : value;
+    options[field] = ['allowProjects', 'normalizeProjects'].includes(field) ? parseCsv(value) : value;
   }
   return options;
 }
@@ -103,6 +114,7 @@ export function validateSettlementCycleRolloutOptions(source) {
     jvmBaseUrl: text(source.jvmBaseUrl).replace(/\/$/, ''),
     jvmAudience: text(source.jvmAudience || source.jvmBaseUrl).replace(/\/$/, ''),
     allowProjects: parseCsv(source.allowProjects),
+    normalizeProjects: parseCsv(source.normalizeProjects),
   };
   if (!SAFE_ID.test(options.firebaseProjectId)) throw new Error('--firebase-project is required and must be exact.');
   if (!SAFE_ID.test(options.tenantId)) throw new Error('--tenant is required and must be exact.');
@@ -114,6 +126,10 @@ export function validateSettlementCycleRolloutOptions(source) {
   }
   if (options.verifyCutover && !SAFE_ID.test(options.actorUid)) {
     throw new Error('--verify-cutover requires an exact active --people-uid.');
+  }
+  if (options.verifyCutover && (options.normalizeProjects.length === 0
+    || options.normalizeProjects.some((projectId) => projectId === '*' || !SAFE_ID.test(projectId)))) {
+    throw new Error('--verify-cutover requires exact --normalize-projects without wildcard.');
   }
   if (!options.apply) return options;
   if (options.confirmProjectId !== options.firebaseProjectId) {
@@ -163,6 +179,53 @@ function canonicalActiveRequest(documentId, record) {
     && text(record.monthCloseTargetYearMonth) === previousYearMonth(cycleYearMonth)
     && text(record.requestId) === documentId
     && documentId === `${projectId}-${cycleYearMonth}`;
+}
+
+function requestCycle(record) {
+  return text(record.cycleYearMonth) || text(record.yearMonth);
+}
+
+function historicalActiveRequest(documentId, record) {
+  const projectId = text(record.projectId);
+  const cycleYearMonth = requestCycle(record);
+  return SAFE_ID.test(projectId)
+    && YEAR_MONTH.test(cycleYearMonth)
+    && isHistoricalCashflowSettlementCycle(cycleYearMonth)
+    && text(record.contractVersion) === CONTRACT_VERSION
+    && text(record.requestId) === documentId
+    && documentId === `${projectId}-${cycleYearMonth}`;
+}
+
+function normalizationCandidate(documentId, record) {
+  const projectId = text(record.projectId);
+  const cycleYearMonth = requestCycle(record);
+  const revision = Number(record.revision);
+  const manifestHash = text(record.manifestHash);
+  const requestedAt = text(record.requestedAt);
+  const requestedByUid = text(record.requestedByUid);
+  if (text(record.documentType)
+    || text(record.contractVersion) !== CONTRACT_VERSION
+    || !SAFE_ID.test(projectId)
+    || cycleYearMonth !== CASHFLOW_SETTLEMENT_CYCLE_CUTOFF_MONTH
+    || text(record.yearMonth) !== cycleYearMonth
+    || text(record.requestId) !== documentId
+    || documentId !== `${projectId}-${cycleYearMonth}`
+    || text(record.throughMonth) !== previousYearMonth(cycleYearMonth)
+    || text(record.status) !== 'PENDING'
+    || !Number.isSafeInteger(revision) || revision < 1
+    || !ROOT_HASH.test(manifestHash)
+    || !ISO_INSTANT.test(requestedAt)
+    || !SAFE_ID.test(requestedByUid)) return null;
+  return {
+    projectId,
+    requestId: documentId,
+    cycleYearMonth,
+    monthCloseTargetYearMonth: previousYearMonth(cycleYearMonth),
+    expectedRequestRevision: revision,
+    expectedManifestHash: manifestHash,
+    requestedAt,
+    requestedByUid,
+  };
 }
 
 function previousYearMonth(value) {
@@ -396,7 +459,12 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
 
   const unresolvedRequests = [];
   const legacyActiveRequests = [];
+  const historicalActiveRequests = [];
+  const normalizationCandidates = [];
+  const canonicalActiveRequests = [];
+  const invalidActiveRequests = [];
   const invalidCoordinators = [];
+  const activeCoordinatorRecords = [];
   let coordinatorCount = 0;
   let activeCoordinatorCount = 0;
   for (const document of requests) {
@@ -404,16 +472,61 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
     const documentType = text(record.documentType);
     if (documentType === 'ACTIVE_COORDINATOR') {
       coordinatorCount += 1;
-      if (ACTIVE_COORDINATOR_STATES.has(text(record.activeState))) activeCoordinatorCount += 1;
+      if (ACTIVE_COORDINATOR_STATES.has(text(record.activeState))) {
+        activeCoordinatorCount += 1;
+        activeCoordinatorRecords.push({
+          projectId: text(record.projectId),
+          cycleYearMonth: text(record.activeCycleYearMonth),
+          requestId: text(record.activeRequestId),
+          workflowRevision: Number(record.workflowRevision),
+        });
+      }
       if (coordinatorIsInvalid(record)) invalidCoordinators.push({ id: document.id, projectId: text(record.projectId) });
       continue;
     }
     const status = text(record.status);
     if (ACTIVE_REQUEST_STATES.has(status)) {
       unresolvedRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
-    }
-    if (ACTIVE_REQUEST_STATES.has(status) && !canonicalActiveRequest(document.id, record)) {
-      legacyActiveRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
+      if (!canonicalActiveRequest(document.id, record)) {
+        legacyActiveRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
+      }
+      const historical = historicalActiveRequest(document.id, record);
+      const candidate = normalizationCandidate(document.id, record);
+      if (historical) {
+        historicalActiveRequests.push({
+          requestId: document.id,
+          projectId: text(record.projectId),
+          status,
+          revision: Number(record.revision),
+          dataHash: `sha256:${sha256(stableStringify(record))}`,
+        });
+      } else if (candidate) {
+        normalizationCandidates.push(candidate);
+      } else if (canonicalActiveRequest(document.id, record)) {
+        const active = {
+          projectId: text(record.projectId),
+          requestId: document.id,
+          cycleYearMonth: requestCycle(record),
+          monthCloseTargetYearMonth: text(record.monthCloseTargetYearMonth),
+          workflowRevision: Number(record.workflowRevision),
+          evidenceRevision: Number(record.evidenceRevision),
+          manifestHash: text(record.manifestHash),
+          requestedAt: text(record.requestedAt),
+          requestedByUid: text(record.requestedByUid),
+          status,
+        };
+        canonicalActiveRequests.push(active);
+        verificationTargets.push({
+          projectId: active.projectId,
+          cycleYearMonth: active.cycleYearMonth,
+          requestId: active.requestId,
+          expectedBusinessState: status === 'PENDING' || status === 'PENDING_APPROVAL'
+            ? 'SUBMITTED' : status,
+          expectedRequestStatus: status,
+        });
+      } else {
+        invalidActiveRequests.push({ requestId: document.id, projectId: text(record.projectId), status });
+      }
     }
     if (documentType === 'REQUEST'
       && text(record.contractVersion) === CONTRACT_VERSION
@@ -446,6 +559,10 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
       coordinators: coordinatorCount,
       activeCoordinators: activeCoordinatorCount,
       invalidCoordinators: invalidCoordinators.length,
+      historicalActiveRequests: historicalActiveRequests.length,
+      normalizationCandidates: normalizationCandidates.length,
+      canonicalActiveRequests: canonicalActiveRequests.length,
+      invalidActiveRequests: invalidActiveRequests.length,
       genericMonthDocuments,
     },
     legacyHeads: legacyHeads.sort((left, right) => left.projectId.localeCompare(right.projectId)),
@@ -454,6 +571,11 @@ export function buildSettlementCycleRolloutInventory({ requests = [], heads = []
     unresolvedRequests: unresolvedRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
     legacyActiveRequests: legacyActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
     invalidCoordinators: invalidCoordinators.sort((left, right) => left.id.localeCompare(right.id)),
+    historicalActiveRequests: historicalActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    normalizationCandidates: normalizationCandidates.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    canonicalActiveRequests: canonicalActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    activeCoordinatorRecords: activeCoordinatorRecords.sort((left, right) => left.requestId.localeCompare(right.requestId)),
+    invalidActiveRequests: invalidActiveRequests.sort((left, right) => left.requestId.localeCompare(right.requestId)),
     verificationTargets: [...targetMap.values()].sort((left, right) => (
       left.projectId.localeCompare(right.projectId)
       || left.cycleYearMonth.localeCompare(right.cycleYearMonth)
@@ -489,6 +611,35 @@ export async function readSettlementCycleRolloutInventory({ db, tenantId }) {
   });
 }
 
+export function settlementCycleRequestNormalizationCandidates(inventory) {
+  const pending = Array.isArray(inventory?.normalizationCandidates)
+    ? inventory.normalizationCandidates : [];
+  const completed = (Array.isArray(inventory?.canonicalActiveRequests)
+    ? inventory.canonicalActiveRequests : [])
+    .filter((row) => row.cycleYearMonth === CASHFLOW_SETTLEMENT_CYCLE_CUTOFF_MONTH
+      && row.monthCloseTargetYearMonth === previousYearMonth(row.cycleYearMonth)
+      && row.status === 'PENDING_APPROVAL'
+      && Number.isSafeInteger(row.workflowRevision) && row.workflowRevision > 0
+      && Number.isSafeInteger(row.evidenceRevision) && row.evidenceRevision > 0
+      && ROOT_HASH.test(row.manifestHash)
+      && ISO_INSTANT.test(row.requestedAt)
+      && SAFE_ID.test(row.requestedByUid))
+    .map((row) => ({
+      projectId: row.projectId,
+      requestId: row.requestId,
+      cycleYearMonth: row.cycleYearMonth,
+      monthCloseTargetYearMonth: row.monthCloseTargetYearMonth,
+      expectedRequestRevision: row.evidenceRevision,
+      expectedManifestHash: row.manifestHash,
+      requestedAt: row.requestedAt,
+      requestedByUid: row.requestedByUid,
+      workflowRevision: row.workflowRevision,
+      alreadyNormalized: true,
+    }));
+  return [...pending, ...completed]
+    .sort((left, right) => left.projectId.localeCompare(right.projectId));
+}
+
 export async function verifySettlementCycleProjections({ targets = [], readProjection, readAlignedRequest }) {
   if (typeof readProjection !== 'function' || typeof readAlignedRequest !== 'function') {
     throw new Error('Settlement-cycle projection and BFF aligned-request readers are required.');
@@ -519,7 +670,7 @@ export async function verifySettlementCycleProjections({ targets = [], readProje
       || text(aligned.requestId) !== target.requestId
       || text(aligned.cycleYearMonth || aligned.yearMonth) !== context.requestCycleYearMonth
       || text(aligned.monthCloseTargetYearMonth || aligned.throughMonth) !== context.requestTargetYearMonth
-      || text(aligned.status) !== 'APPROVED'
+      || text(aligned.status) !== text(target.expectedRequestStatus || 'APPROVED')
       || Number(aligned.workflowRevision) !== context.workflowRevision) {
       throw new Error(`Settlement-cycle BFF read alignment mismatch for ${target.projectId}`);
     }
@@ -571,6 +722,15 @@ export async function createSettlementCycleJvmOperations({ client, tenantId, act
       retry: false,
       mutation: true,
     }),
+    normalize: ({ projectId, body }) => client.requestJson({
+      context,
+      method: 'POST',
+      path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-cycle/normalize-legacy-active-request`,
+      command: NORMALIZE_COMMAND,
+      body,
+      retry: false,
+      mutation: true,
+    }),
     readProjection: ({ projectId, cycleYearMonth }) => client.requestJson({
       context,
       method: 'GET',
@@ -591,6 +751,22 @@ export function buildSettlementCycleHeadMigrationBody({
     idempotencyKey: `settlement-cycle-v3:${tenantId}:${projectId}:r${expectedHeadRevision}:${digest}`,
     expectedHeadRevision,
     expectedHeadRootHash,
+    reason: text(reason),
+    dryRun,
+    expectedMigrationFingerprint,
+  };
+}
+
+export function buildSettlementCycleRequestNormalizationBody({
+  tenantId, projectId, cycleYearMonth, expectedRequestRevision, expectedManifestHash, reason,
+  dryRun = false, expectedMigrationFingerprint = '',
+}) {
+  const digest = text(expectedManifestHash).replace(/^sha256:/, '').slice(0, 16);
+  return {
+    idempotencyKey: `settlement-cycle-normalize-v1:${tenantId}:${projectId}:r${expectedRequestRevision}:${digest}`,
+    cycleYearMonth,
+    expectedRequestRevision,
+    expectedManifestHash,
     reason: text(reason),
     dryRun,
     expectedMigrationFingerprint,
@@ -621,14 +797,29 @@ function migrationResponseIsValid({ projectId, row, response, expected, dryRun }
 
 export async function executeSettlementCycleHeadMigrations({ inventory, options, migrate }) {
   if (!options.apply) return [];
-  const blockers = CUTOVER_BLOCKER_NAMES
-    .filter((name) => name !== 'legacyHeads' && Number(inventory?.counts?.[name] || 0) !== 0)
+  const blockers = HEAD_MIGRATION_BLOCKER_NAMES
+    .filter((name) => Number(inventory?.counts?.[name] || 0) !== 0)
     .map((name) => `${name}=${inventory.counts[name]}`);
   if (blockers.length > 0) {
     throw new Error(`Settlement-cycle migration is not ready: ${blockers.join(', ')}`);
   }
   const legacyByProject = new Map((inventory.legacyHeads || []).map((row) => [row.projectId, row]));
   const migratedByProject = new Map((inventory.recoverableHeads || []).map((row) => [row.projectId, row]));
+  const activeRequests = inventory.canonicalActiveRequests || [];
+  const activeCoordinators = inventory.activeCoordinatorRecords || [];
+  if (activeRequests.length || activeCoordinators.length) {
+    const activeKeys = activeRequests
+      .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`).sort();
+    const coordinatorKeys = activeCoordinators
+      .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`).sort();
+    if (legacyByProject.size || stableStringify(activeKeys) !== stableStringify(coordinatorKeys)
+      || stableStringify([...migratedByProject.keys()].sort())
+        !== stableStringify([...options.allowProjects].sort())
+      || [...migratedByProject.values()].some(({ tenantId }) => tenantId !== options.tenantId)) {
+      throw new Error('Settlement-cycle migration resume order is invalid.');
+    }
+    return [];
+  }
   const plans = options.allowProjects.map((projectId) => {
     const legacy = legacyByProject.get(projectId);
     const migrated = migratedByProject.get(projectId);
@@ -681,16 +872,130 @@ export async function executeSettlementCycleHeadMigrations({ inventory, options,
   return results;
 }
 
-export function assertSettlementCycleCutoverReady(inventory, projections) {
+function normalizationResponseIsValid({ projectId, row, response, expected, dryRun }) {
+  const migrationRequired = response?.migrationRequired;
+  return response?.ok === true
+    && text(response.commandName) === NORMALIZE_COMMAND
+    && text(response.projectId) === projectId
+    && text(response.cycleYearMonth) === row.cycleYearMonth
+    && text(response.monthCloseTargetYearMonth) === row.monthCloseTargetYearMonth
+    && text(response.requestId) === row.requestId
+    && Number.isSafeInteger(response.workflowRevision) && response.workflowRevision > 0
+    && (!row.workflowRevision || response.workflowRevision === row.workflowRevision)
+    && Number(response.evidenceRevision) === row.expectedRequestRevision
+    && typeof migrationRequired === 'boolean'
+    && (dryRun || migrationRequired)
+    && ROOT_HASH.test(text(response.migrationFingerprint))
+    && (dryRun ? !text(response.auditId) : Boolean(text(response.auditId)))
+    && (!expected || (
+      Number(response.workflowRevision) === Number(expected.workflowRevision)
+      && Number(response.evidenceRevision) === Number(expected.evidenceRevision)
+      && text(response.migrationFingerprint) === text(expected.migrationFingerprint)
+    ));
+}
+
+export async function executeSettlementCycleRequestNormalizations({
+  inventory, expectedCandidates = settlementCycleRequestNormalizationCandidates(inventory), options, normalize,
+}) {
+  if (!options.apply) return [];
+  const blockerNames = [
+    'legacyHeads', 'invalidHeads',
+    'invalidActiveRequests', 'invalidCoordinators',
+  ];
+  const blockers = blockerNames
+    .filter((name) => Number(inventory?.counts?.[name] || 0) !== 0)
+    .map((name) => `${name}=${inventory.counts[name]}`);
+  if (blockers.length > 0) {
+    throw new Error(`Settlement-cycle request normalization is not ready: ${blockers.join(', ')}`);
+  }
+  const currentCandidates = settlementCycleRequestNormalizationCandidates(inventory);
+  if (stableStringify(expectedCandidates) !== stableStringify(currentCandidates)) {
+    throw new Error('Settlement-cycle request normalization evidence changed after head migration.');
+  }
+  const completedKeys = currentCandidates.filter(({ alreadyNormalized }) => alreadyNormalized)
+    .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`)
+    .sort();
+  const coordinatorKeys = (inventory?.activeCoordinatorRecords || [])
+    .map((row) => `${row.projectId}\n${row.cycleYearMonth}\n${row.requestId}\n${row.workflowRevision}`)
+    .sort();
+  if (stableStringify(completedKeys) !== stableStringify(coordinatorKeys)) {
+    throw new Error('Settlement-cycle normalized request coordinator changed.');
+  }
+  const candidates = new Map(expectedCandidates.map((row) => [row.projectId, row]));
+  if (candidates.size !== expectedCandidates.length
+    || stableStringify([...candidates.keys()].sort())
+      !== stableStringify([...options.normalizeProjects].sort())) {
+    throw new Error('Request normalization candidates do not match the exact allowlist.');
+  }
+  const plans = options.normalizeProjects.map((projectId) => {
+    const row = candidates.get(projectId);
+    if (!row) throw new Error(`Allowlisted project is not eligible for request normalization: ${projectId}`);
+    return { projectId, row, body: buildSettlementCycleRequestNormalizationBody({
+      tenantId: options.tenantId,
+      projectId,
+      reason: options.reason,
+      ...row,
+    }) };
+  });
+  for (const plan of plans) {
+    const response = await normalize({
+      projectId: plan.projectId,
+      body: { ...plan.body, dryRun: true },
+    });
+    if (!normalizationResponseIsValid({ ...plan, response, dryRun: true })) {
+      throw new Error(`JVM returned an invalid request normalization dry-run response for ${plan.projectId}`);
+    }
+    plan.dryRunResponse = response;
+    plan.migrationRequired = response.migrationRequired;
+  }
+  const results = [];
+  for (const plan of plans.filter(({ migrationRequired }) => migrationRequired)) {
+    const response = await normalize({
+      projectId: plan.projectId,
+      body: {
+        ...plan.body,
+        expectedMigrationFingerprint: text(plan.dryRunResponse.migrationFingerprint),
+      },
+    });
+    if (!normalizationResponseIsValid({
+      ...plan, response, expected: plan.dryRunResponse, dryRun: false,
+    })) {
+      throw new Error(`JVM returned an invalid request normalization response for ${plan.projectId}`);
+    }
+    results.push({
+      projectId: plan.projectId,
+      cycleYearMonth: text(response.cycleYearMonth),
+      requestId: text(response.requestId),
+      workflowRevision: response.workflowRevision,
+      auditId: response.auditId,
+    });
+  }
+  return results;
+}
+
+export function assertSettlementCycleCutoverReady(inventory, projections, expectedActiveProjects = []) {
   const counts = inventory?.counts || {};
   const blockers = CUTOVER_BLOCKER_NAMES
     .map((name) => [name, counts[name]])
     .filter(([, count]) => Number(count || 0) !== 0);
   const invalidProjections = invalidProjectionCount(inventory, projections);
-  if (blockers.length > 0 || invalidProjections > 0) {
+  const activeRequests = (inventory?.canonicalActiveRequests || []).map((record) => (
+    `${record.projectId}\n${record.cycleYearMonth}\n${record.requestId}\n${record.workflowRevision}`
+  )).sort();
+  const activeCoordinators = (inventory?.activeCoordinatorRecords || []).map((record) => (
+    `${record.projectId}\n${record.cycleYearMonth}\n${record.requestId}\n${record.workflowRevision}`
+  )).sort();
+  const activeMismatch = stableStringify(activeRequests) !== stableStringify(activeCoordinators);
+  const activeProjects = (inventory?.canonicalActiveRequests || [])
+    .map(({ projectId }) => projectId).sort();
+  const unexpectedActive = expectedActiveProjects.length > 0
+    && stableStringify(activeProjects) !== stableStringify([...expectedActiveProjects].sort());
+  if (blockers.length > 0 || invalidProjections > 0 || activeMismatch || unexpectedActive) {
     const detail = [
       ...blockers.map(([name, count]) => `${name}=${count}`),
       ...(invalidProjections ? [`invalidProjections=${invalidProjections}`] : []),
+      ...(activeMismatch ? ['activeCoordinatorMismatch=1'] : []),
+      ...(unexpectedActive ? ['unexpectedActiveRequests=1'] : []),
     ].join(', ');
     throw new Error(`Settlement-cycle frontend cutover is not ready: ${detail}`);
   }
@@ -734,7 +1039,7 @@ function invalidProjectionCount(inventory, projections) {
       `${text(target.projectId)}\n${text(target.cycleYearMonth)}\n${text(target.requestId)}`,
     );
     return !projection
-      || text(projection.businessState) !== 'LOCKED'
+      || text(projection.businessState) !== text(target.expectedBusinessState || 'LOCKED')
       || text(projection.health) !== 'OK';
   }).length;
 }
@@ -752,6 +1057,7 @@ export function settlementCycleRolloutAuditSummary(report) {
     counts: {
       before,
       migrations: Array.isArray(report?.migrations) ? report.migrations.length : 0,
+      normalizations: Array.isArray(report?.normalizations) ? report.normalizations.length : 0,
       after,
       projections: Array.isArray(report?.projections) ? report.projections.length : 0,
       verifiedProjects: Number(report?.cutover?.verifiedProjects || 0),

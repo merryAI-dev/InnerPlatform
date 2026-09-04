@@ -12,6 +12,7 @@ import dev.merryai.innerplatform.weekly.service.port.CashflowMonthReopenPort;
 import dev.merryai.innerplatform.weekly.service.port.CashflowReadPort;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
+import dev.merryai.innerplatform.weekly.api.NormalizeLegacyCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.CancelCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.SubmitCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementCycleRequest;
@@ -358,6 +359,18 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
     ) {
     }
 
+    record CashflowSettlementCycleLegacyRequestNormalizationState(
+        String projectId,
+        String cycleYearMonth,
+        String monthCloseTargetYearMonth,
+        String requestId,
+        long workflowRevision,
+        long evidenceRevision,
+        String migrationFingerprint,
+        boolean migrationRequired
+    ) {
+    }
+
     default <T> T runCommandTransaction(Callable<T> action) {
         try {
             return action.call();
@@ -504,6 +517,18 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         TrustedActorContext actor,
         String projectId,
         MigrateCashflowSettlementCycleHeadV2Request request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_cycle_migration_backend_unavailable",
+            "Cashflow settlement cycle migration requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSettlementCycleLegacyRequestNormalizationState normalizeLegacyCashflowSettlementCycleRequest(
+        TrustedActorContext actor,
+        String projectId,
+        NormalizeLegacyCashflowSettlementCycleRequest request
     ) {
         throw new WeeklyExpenseEditLeaseException(
             503,

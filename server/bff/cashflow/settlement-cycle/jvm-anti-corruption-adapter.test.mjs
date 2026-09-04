@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildHistoricalCashflowSettlementCycle,
   readAlignedCashflowSettlementCycleRequest,
   requireCashflowSettlementCycleReadContext,
 } from './jvm-anti-corruption-adapter.mjs';
@@ -122,6 +123,34 @@ function monthSettlement(status) {
     approverDeadlineAt: '2026-09-30T15:00:00Z',
   };
 }
+
+it('adapts a historical MONTH without changing WEEK statuses', () => {
+  const statuses = projection().settlementStatuses;
+  statuses.yearMonth = '2026-08';
+  statuses.items[0] = {
+    ...statuses.items[0], status: 'PENDING_APPROVAL',
+    submittedAt: '2026-08-10T01:00:00Z', submittedBy: 'pm-1', revision: 1,
+  };
+  statuses.items[1] = { ...statuses.items[1], status: 'PENDING_APPROVAL' };
+
+  const result = buildHistoricalCashflowSettlementCycle(statuses, {
+    projectId: 'project-a',
+    cycleYearMonth: '2026-08',
+  });
+
+  expect(result.settlementStatuses.items[0].status).toBe('SUBMITTED');
+  expect(result.settlementStatuses.items[1].status).toBe('PENDING_APPROVAL');
+  expect(result.settlementCycle).toMatchObject({
+    cycleYearMonth: '2026-08',
+    weeklyYearMonth: '2026-08',
+    monthCloseTargetYearMonth: '2026-07',
+    closeDeadline: '2026-08-10',
+    businessState: 'SUBMITTED', health: 'OK', provenance: null,
+  });
+  expect(Object.values(result.settlementCycle.commandCapabilities)).toEqual(
+    Array.from({ length: 8 }, () => ({ allowed: false, reasonCode: 'HISTORICAL_READ_ONLY' })),
+  );
+});
 
 function approvalProvenance(requestId = 'project-a-2026-09') {
   return {

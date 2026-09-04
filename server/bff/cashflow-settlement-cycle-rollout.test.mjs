@@ -7,9 +7,11 @@ import {
   assertSettlementCycleInventoryStable,
   assertSettlementCycleCutoverReady,
   buildSettlementCycleHeadMigrationBody,
+  buildSettlementCycleRequestNormalizationBody,
   buildSettlementCycleRolloutInventory,
   createSettlementCycleJvmOperations,
   executeSettlementCycleHeadMigrations,
+  executeSettlementCycleRequestNormalizations,
   parseSettlementCycleRolloutArgs,
   readSettlementCycleRolloutInventory,
   settlementCycleRolloutAuditSummary,
@@ -191,53 +193,54 @@ describe('cashflow settlement-cycle rollout audit', () => {
     }]);
   });
 
-  it('blocks every raw active request state and active coordinator regardless of request shape', () => {
-    const activeStatuses = [
-      'PENDING', 'PENDING_APPROVAL', 'APPROVING', 'UNCERTAIN', 'BUILDING', 'REOPEN_REQUESTED',
-    ];
+  it('separates historical, Sep normalization, canonical, and invalid active requests', () => {
     const inventory = buildSettlementCycleRolloutInventory({
       requests: [
-        ...activeStatuses.flatMap((status, index) => {
-          const projectId = `canonical-${index}`;
-          return [
-            document(`${projectId}-2026-09`, {
-              documentType: 'REQUEST', contractVersion: 'cashflow-cumulative-close-v2',
-              requestId: `${projectId}-2026-09`, projectId, status,
-              cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
-            }),
-            document(`legacy-${index}`, { projectId: `legacy-${index}`, status, yearMonth: '2026-08' }),
-          ];
+        document('historical-2026-08', {
+          contractVersion: 'cashflow-cumulative-close-v2', requestId: 'historical-2026-08',
+          projectId: 'historical', status: 'UNCERTAIN', yearMonth: '2026-08', throughMonth: '2026-07',
         }),
-        document('__active__-valid', {
-          documentType: 'ACTIVE_COORDINATOR', projectId: 'project-a',
+        document('normalize-2026-09', {
+          contractVersion: 'cashflow-cumulative-close-v2', requestId: 'normalize-2026-09',
+          projectId: 'normalize', status: 'PENDING', yearMonth: '2026-09', throughMonth: '2026-08',
+          revision: 1, manifestHash: rootHash,
+          requestedAt: '2026-09-03T02:00:00Z', requestedByUid: 'pm-1',
+        }),
+        document('canonical-2026-09', {
+          documentType: 'REQUEST', contractVersion: 'cashflow-cumulative-close-v2',
+          requestId: 'canonical-2026-09', projectId: 'canonical', status: 'PENDING_APPROVAL',
+          cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+          workflowRevision: 2, evidenceRevision: 1, manifestHash: rootHash,
+          requestedAt: '2026-09-03T02:00:00Z', requestedByUid: 'pm-1',
+        }),
+        document('unexpected-2026-10', {
+          projectId: 'unexpected', requestId: 'unexpected-2026-10',
+          status: 'PENDING', yearMonth: '2026-10', throughMonth: '2026-09',
+        }),
+        document('__active__-canonical', {
+          documentType: 'ACTIVE_COORDINATOR', projectId: 'canonical',
           activeState: 'PENDING_APPROVAL', activeCycleYearMonth: '2026-09',
-          activeRequestId: 'project-a-2026-09', workflowRevision: 2,
-        }),
-        document('__active__-inactive', {
-          documentType: 'ACTIVE_COORDINATOR', projectId: 'project-b',
-          activeState: 'INACTIVE', workflowRevision: 2,
+          activeRequestId: 'canonical-2026-09', workflowRevision: 2,
         }),
       ],
     });
 
     expect(inventory.counts).toMatchObject({
-      unresolvedRequests: activeStatuses.length * 2,
-      legacyActiveRequests: activeStatuses.length,
-      coordinators: 2,
+      unresolvedRequests: 4,
+      historicalActiveRequests: 1,
+      normalizationCandidates: 1,
+      canonicalActiveRequests: 1,
+      invalidActiveRequests: 1,
+      coordinators: 1,
       activeCoordinators: 1,
       invalidCoordinators: 0,
     });
-    expect(new Set(inventory.unresolvedRequests.map(({ status }) => status))).toEqual(new Set(activeStatuses));
-
-    const coordinatorOnly = buildSettlementCycleRolloutInventory({
-      requests: [document('__active__-valid', {
-        documentType: 'ACTIVE_COORDINATOR', projectId: 'project-a',
-        activeState: 'PENDING_APPROVAL', activeCycleYearMonth: '2026-09',
-        activeRequestId: 'project-a-2026-09', workflowRevision: 2,
-      })],
+    expect(inventory.verificationTargets).toContainEqual({
+      projectId: 'canonical', cycleYearMonth: '2026-09', requestId: 'canonical-2026-09',
+      expectedBusinessState: 'SUBMITTED', expectedRequestStatus: 'PENDING_APPROVAL',
     });
-    expect(() => assertSettlementCycleCutoverReady(coordinatorOnly, []))
-      .toThrow(/activeCoordinators=1/);
+    expect(() => assertSettlementCycleCutoverReady(inventory, []))
+      .toThrow(/normalizationCandidates=1.*invalidActiveRequests=1/);
   });
 
   it('requires an explicit production identity, allowlist, actor, reason, and JVM endpoint before apply', () => {
@@ -257,8 +260,9 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(validateSettlementCycleRolloutOptions(parseSettlementCycleRolloutArgs([
       '--apply', '--firebase-project', 'live-project', '--confirm-project', 'live-project',
       '--tenant', 'mysc', '--confirm-tenant', 'mysc', '--allow-projects', 'project-a',
+      '--normalize-projects', 'project-b',
       '--people-uid', 'admin-1', '--reason', '승인된 이관', '--jvm-base-url', 'https://jvm.example',
-    ]))).toMatchObject({ apply: true, allowProjects: ['project-a'] });
+    ]))).toMatchObject({ apply: true, allowProjects: ['project-a'], normalizeProjects: ['project-b'] });
     expect(() => validateSettlementCycleRolloutOptions(parseSettlementCycleRolloutArgs([
       '--verify-cutover', '--firebase-project', 'live-project', '--tenant', 'mysc',
       '--jvm-base-url', 'https://jvm.example',
@@ -270,7 +274,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(validateSettlementCycleRolloutOptions(parseSettlementCycleRolloutArgs([
       '--verify-cutover', '--firebase-project', 'live-project', '--tenant', 'mysc',
       '--people-uid', 'admin-1', '--jvm-base-url', 'https://candidate.example',
-      '--jvm-audience', 'https://service.example',
+      '--jvm-audience', 'https://service.example', '--normalize-projects', 'project-a',
     ]))).toMatchObject({
       jvmBaseUrl: 'https://candidate.example', jvmAudience: 'https://service.example',
     });
@@ -313,7 +317,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
 
     await expect(executeSettlementCycleHeadMigrations({
       inventory: {
-        counts: { unresolvedRequests: 1 },
+        counts: { invalidActiveRequests: 1 },
         legacyHeads: [{ projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash }],
       },
       options: {
@@ -321,7 +325,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
         allowProjects: ['project-a'],
       },
       migrate,
-    })).rejects.toThrow(/unresolvedRequests=1/);
+    })).rejects.toThrow(/invalidActiveRequests=1/);
     expect(calls).toEqual([]);
 
     const result = await executeSettlementCycleHeadMigrations({
@@ -349,6 +353,35 @@ describe('cashflow settlement-cycle rollout audit', () => {
       { projectId: 'project-a', cycleYearMonth: '2026-09', headRevision: 5, auditId: 'audit-project-a' },
       { projectId: 'project-b', cycleYearMonth: '2026-09', headRevision: 3, auditId: 'audit-project-b' },
     ]);
+    const resumedInventory = {
+      recoverableHeads: ['project-a', 'project-b', 'project-c'].map((projectId) => ({
+        projectId, tenantId: 'mysc', expectedHeadRevision: 5, expectedHeadRootHash: rootHash,
+      })),
+      canonicalActiveRequests: [{
+        projectId: 'project-a', cycleYearMonth: '2026-09',
+        requestId: 'project-a-2026-09', workflowRevision: 1,
+      }],
+      activeCoordinatorRecords: [{
+        projectId: 'project-a', cycleYearMonth: '2026-09',
+        requestId: 'project-a-2026-09', workflowRevision: 1,
+      }],
+    };
+    const resumedOptions = {
+      apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
+      allowProjects: ['project-a', 'project-b', 'project-c'],
+    };
+    expect(await executeSettlementCycleHeadMigrations({
+      inventory: resumedInventory,
+      options: resumedOptions,
+      migrate,
+    })).toEqual([]);
+    expect(calls).toHaveLength(5);
+    resumedInventory.recoverableHeads[0].tenantId = 'other-tenant';
+    await expect(executeSettlementCycleHeadMigrations({
+      inventory: resumedInventory,
+      options: resumedOptions,
+      migrate,
+    })).rejects.toThrow(/resume order/i);
 
     calls.length = 0;
     migrate.mockImplementation(async ({ projectId, body }) => {
@@ -431,6 +464,87 @@ describe('cashflow settlement-cycle rollout audit', () => {
     }]);
   });
 
+  it('dry-runs every Sep request normalization before applying one project at a time', async () => {
+    const calls = [];
+    const normalize = vi.fn(async ({ projectId, body }) => {
+      calls.push(`${body.dryRun ? 'dry' : 'apply'}:${projectId}`);
+      return {
+        ok: true, commandName: 'cashflowSettlementCycle.normalizeLegacyActiveRequest', projectId,
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+        requestId: `${projectId}-2026-09`, workflowRevision: 1, evidenceRevision: 1,
+        migrationFingerprint: `sha256:${(projectId === 'project-a' ? 'c' : 'd').repeat(64)}`,
+        migrationRequired: true, auditId: body.dryRun ? '' : `audit-${projectId}`,
+      };
+    });
+    const rows = ['project-a', 'project-b'].map((projectId) => ({
+      projectId, requestId: `${projectId}-2026-09`, cycleYearMonth: '2026-09',
+      monthCloseTargetYearMonth: '2026-08', expectedRequestRevision: 1,
+      expectedManifestHash: rootHash,
+    }));
+
+    const result = await executeSettlementCycleRequestNormalizations({
+      inventory: { normalizationCandidates: rows },
+      options: {
+        apply: true, tenantId: 'mysc', reason: '승인된 이관',
+        normalizeProjects: rows.map(({ projectId }) => projectId),
+      },
+      normalize,
+    });
+
+    expect(calls).toEqual(['dry:project-a', 'dry:project-b', 'apply:project-a', 'apply:project-b']);
+    expect(normalize).toHaveBeenNthCalledWith(1, {
+      projectId: 'project-a',
+      body: { ...buildSettlementCycleRequestNormalizationBody({
+        tenantId: 'mysc', reason: '승인된 이관', ...rows[0],
+      }), dryRun: true },
+    });
+    expect(result).toHaveLength(2);
+
+    calls.length = 0;
+    normalize.mockImplementation(async ({ projectId, body }) => {
+      calls.push(`${body.dryRun ? 'dry' : 'apply'}:${projectId}`);
+      return {
+        ok: true, commandName: 'cashflowSettlementCycle.normalizeLegacyActiveRequest', projectId,
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+        requestId: `${projectId}-2026-09`, workflowRevision: projectId === 'project-a' ? 2 : 1,
+        evidenceRevision: 1,
+        migrationFingerprint: `sha256:${(projectId === 'project-a' ? 'c' : 'd').repeat(64)}`,
+        migrationRequired: projectId !== 'project-a', auditId: body.dryRun ? '' : `audit-${projectId}`,
+      };
+    });
+    await executeSettlementCycleRequestNormalizations({
+      inventory: {
+        normalizationCandidates: [rows[1]],
+        canonicalActiveRequests: [{
+          projectId: 'project-a', requestId: 'project-a-2026-09',
+          cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+          workflowRevision: 2, evidenceRevision: 1, manifestHash: rootHash,
+          requestedAt: '2026-09-03T02:00:00Z', requestedByUid: 'pm-1',
+          status: 'PENDING_APPROVAL',
+        }],
+        activeCoordinatorRecords: [{
+          projectId: 'project-a', requestId: 'project-a-2026-09',
+          cycleYearMonth: '2026-09', workflowRevision: 2,
+        }],
+      },
+      options: {
+        apply: true, tenantId: 'mysc', reason: '승인된 이관',
+        normalizeProjects: rows.map(({ projectId }) => projectId),
+      },
+      normalize,
+    });
+    expect(calls).toEqual(['dry:project-a', 'dry:project-b', 'apply:project-b']);
+
+    normalize.mockClear();
+    await expect(executeSettlementCycleRequestNormalizations({
+      inventory: { normalizationCandidates: rows },
+      expectedCandidates: [{ ...rows[0], expectedRequestRevision: 2 }, rows[1]],
+      options: { apply: true, normalizeProjects: rows.map(({ projectId }) => projectId) },
+      normalize,
+    })).rejects.toThrow(/evidence changed/i);
+    expect(normalize).not.toHaveBeenCalled();
+  });
+
   it('fails closed instead of replaying canonical evidence scoped to a different tenant', async () => {
     const inventory = buildSettlementCycleRolloutInventory({
       heads: [document('project-a', {
@@ -501,10 +615,15 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(Object.keys(summary)).toEqual([
       'counts', 'blockers', 'protectedSettlementStatuses', 'fingerprint',
     ]);
+    const newCounts = {
+      recoverableHeads: 0, historicalActiveRequests: 0, normalizationCandidates: 0,
+      canonicalActiveRequests: 0, invalidActiveRequests: 0,
+    };
     expect(summary.counts).toEqual({
-      before: { ...report.before.counts, recoverableHeads: 0, migrationCandidates: 1 },
+      before: { ...report.before.counts, ...newCounts, migrationCandidates: 1 },
       migrations: 1,
-      after: { ...report.after.counts, recoverableHeads: 0, migrationCandidates: 0 },
+      normalizations: 0,
+      after: { ...report.after.counts, ...newCounts, migrationCandidates: 0 },
       projections: 1,
       verifiedProjects: 1,
     });
@@ -565,6 +684,10 @@ describe('cashflow settlement-cycle rollout audit', () => {
       projectId: 'project-a', cycleYearMonth: '2026-09',
       businessState: 'LOCKED', health: 'OK', requestId: 'project-a-2026-09',
     }])).toEqual({ ready: true, verifiedProjects: 1 });
+    expect(() => assertSettlementCycleCutoverReady(inventory, [{
+      projectId: 'project-a', cycleYearMonth: '2026-09',
+      businessState: 'LOCKED', health: 'OK', requestId: 'project-a-2026-09',
+    }], ['project-a'])).toThrow(/unexpectedActiveRequests/);
     expect(() => assertSettlementCycleCutoverReady(inventory, [{
       projectId: 'project-a', cycleYearMonth: '2026-09',
       businessState: 'LOCKED', health: 'INCONSISTENT', requestId: 'project-a-2026-09',
@@ -717,6 +840,9 @@ describe('cashflow settlement-cycle rollout audit', () => {
       if (path.includes('/migrate-head-v2')) {
         return { ok: true, commandName: 'cashflowSettlementCycle.migrateHeadV2' };
       }
+      if (path.includes('/normalize-legacy-active-request')) {
+        return { ok: true, commandName: 'cashflowSettlementCycle.normalizeLegacyActiveRequest' };
+      }
       return {
         settlementCycle: {
           cycleYearMonth: '2026-09', businessState: 'LOCKED', health: 'OK',
@@ -729,6 +855,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
     });
 
     await operations.migrate({ projectId: 'project-a', body: { idempotencyKey: 'migration-1' } });
+    await operations.normalize({ projectId: 'project-a', body: { idempotencyKey: 'normalization-1' } });
     await operations.readProjection({ projectId: 'project-a', cycleYearMonth: '2026-09' });
 
     expect(requestJson).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -743,6 +870,12 @@ describe('cashflow settlement-cycle rollout audit', () => {
       context: expect.objectContaining({ tenantId: 'mysc', actorId: 'admin-1', actorRole: 'admin' }),
     }));
     expect(requestJson).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      method: 'POST',
+      path: '/api/v1/cashflow/project-a/settlement-cycle/normalize-legacy-active-request',
+      mutation: true,
+      body: { idempotencyKey: 'normalization-1' },
+    }));
+    expect(requestJson).toHaveBeenNthCalledWith(4, expect.objectContaining({
       method: 'GET',
       path: '/api/v1/cashflow/project-a/month-close/dashboard-source?yearMonth=2026-09&settlementCycle=true',
       mutation: false,
@@ -763,6 +896,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(stdout).toContain('--confirm-project');
     expect(stdout).toContain('--confirm-tenant');
     expect(stdout).toContain('--allow-projects');
+    expect(stdout).toContain('--normalize-projects');
     expect(stdout).toContain('--people-uid');
     expect(stdout).toContain('--reason');
     expect(stdout).toContain('--jvm-audience');

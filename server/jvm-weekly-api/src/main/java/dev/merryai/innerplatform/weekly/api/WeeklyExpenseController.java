@@ -546,6 +546,20 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/{projectId}/settlement-cycle/normalize-legacy-active-request")
+    public CashflowSettlementCycleLegacyRequestNormalizationResponse normalizeLegacyCashflowSettlementCycleRequest(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody NormalizeLegacyCashflowSettlementCycleRequest request
+    ) {
+        return commandService.normalizeLegacyCashflowSettlementCycleRequest(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
     @GetMapping("/cashflow/{projectId}/month-close/dashboard-source")
     public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
         @PathVariable String projectId,

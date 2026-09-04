@@ -10,8 +10,10 @@ import {
   assertSettlementCycleInventoryStable,
   createSettlementCycleJvmOperations,
   executeSettlementCycleHeadMigrations,
+  executeSettlementCycleRequestNormalizations,
   parseSettlementCycleRolloutArgs,
   readSettlementCycleRolloutInventory,
+  settlementCycleRequestNormalizationCandidates,
   settlementCycleRolloutAuditSummary,
   validateSettlementCycleRolloutOptions,
   verifySettlementCycleProjections,
@@ -31,15 +33,17 @@ function usage() {
   # JVM canonical projection까지 검증
   node scripts/audit-cashflow-settlement-cycle-rollout.mjs \\
     --firebase-project PROJECT_ID --tenant TENANT_ID \\
-    --verify-cutover --people-uid ACTIVE_ADMIN_UID --jvm-base-url CANDIDATE_URL \\
+    --verify-cutover --normalize-projects PROJECT_A[,PROJECT_B] \\
+    --people-uid ACTIVE_ADMIN_UID --jvm-base-url CANDIDATE_URL \\
     --jvm-audience CANONICAL_SERVICE_URL
 
-  # allowlist 전체 dry-run 후 프로젝트별 JVM transaction migration
+  # 두 allowlist를 각각 전체 dry-run 후 프로젝트별 JVM transaction migration
   node scripts/audit-cashflow-settlement-cycle-rollout.mjs \\
     --apply \\
     --firebase-project PROJECT_ID --confirm-project PROJECT_ID \\
     --tenant TENANT_ID --confirm-tenant TENANT_ID \\
     --allow-projects PROJECT_A[,PROJECT_B] \\
+    --normalize-projects PROJECT_C[,PROJECT_D] \\
     --people-uid ACTIVE_ADMIN_UID --reason "승인된 운영 이관 사유" \\
     --jvm-base-url CANDIDATE_URL --jvm-audience CANONICAL_SERVICE_URL
 
@@ -50,8 +54,8 @@ function usage() {
 안전장치:
   --apply 없이는 쓰지 않습니다. wildcard allowlist, 불일치하는 project/tenant 확인값,
   빈 People UID/사유, JVM capability 부재는 모두 중단합니다. 스크립트는 Firestore authority를
-  직접 고치지 않습니다. allowlist 전체의 JVM dry-run이 성공한 뒤에만 프로젝트별
-  CAS/idempotency transaction command를 호출합니다.`);
+  직접 고치지 않습니다. head 이관 후 request 정규화 순서로, 각 allowlist 전체의 JVM
+  dry-run이 성공한 뒤에만 프로젝트별 CAS/idempotency transaction command를 호출합니다.`);
 }
 
 async function runGcloud(args, signal) {
@@ -111,6 +115,7 @@ async function main() {
 
   let operations = null;
   let migrations = [];
+  let normalizations = [];
   if (options.apply || options.verifyCutover) {
     operations = await createJvmOperations(options);
   }
@@ -119,6 +124,13 @@ async function main() {
       inventory: before,
       options,
       migrate: operations.migrate,
+    });
+    const afterHeads = await readSettlementCycleRolloutInventory({ db, tenantId: options.tenantId });
+    normalizations = await executeSettlementCycleRequestNormalizations({
+      inventory: afterHeads,
+      expectedCandidates: settlementCycleRequestNormalizationCandidates(before),
+      options,
+      normalize: operations.normalize,
     });
   }
 
@@ -148,7 +160,7 @@ async function main() {
     const confirmed = await readSettlementCycleRolloutInventory({ db, tenantId: options.tenantId });
     assertSettlementCycleInventoryStable(after, confirmed);
     after = confirmed;
-    cutover = assertSettlementCycleCutoverReady(after, projections);
+    cutover = assertSettlementCycleCutoverReady(after, projections, options.normalizeProjects);
   }
 
   const report = {
@@ -157,6 +169,7 @@ async function main() {
     tenantId: options.tenantId,
     before,
     migrations,
+    normalizations,
     after,
     projections,
     cutover,

@@ -41,6 +41,7 @@ import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ConfirmCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
+import dev.merryai.innerplatform.weekly.api.NormalizeLegacyCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.observability.CashflowReadMetrics;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
@@ -1512,15 +1513,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         boolean cycleKeyedV1 = cycle.toString().equals(requestYearMonth)
             && (requestCycleYearMonth.isBlank() || cycle.toString().equals(requestCycleYearMonth))
             && closedThrough.toString().equals(requestThroughMonth);
-        if ((!documentType.isBlank() && !"REQUEST".equals(documentType))
-            || !optionalTextMatches(canonicalRequest.get("contractVersion"), CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION)
-            || !requestId.equals(text(canonicalRequest.get("requestId"), ""))
-            || !projectId.equals(text(canonicalRequest.get("projectId"), ""))
-            || !scopedTextMatches(canonicalRequest.get("tenantId"), actor.tenantId())
-            || (!targetKeyedLegacy && !cycleKeyedV1)
-            || !"APPROVED".equals(text(canonicalRequest.get("status"), ""))
-            || !request.expectedHeadRootHash().equals(text(canonicalRequest.get("manifestHash"), ""))
-            || !requestRevision.equals(storedRequestRevision)) {
+        boolean requestIdentityMatches = (documentType.isBlank() || "REQUEST".equals(documentType))
+            && optionalTextMatches(canonicalRequest.get("contractVersion"), CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION)
+            && requestId.equals(text(canonicalRequest.get("requestId"), ""))
+            && projectId.equals(text(canonicalRequest.get("projectId"), ""))
+            && scopedTextMatches(canonicalRequest.get("tenantId"), actor.tenantId())
+            && (targetKeyedLegacy || cycleKeyedV1);
+        boolean approvedRequestMatches = requestIdentityMatches
+            && "APPROVED".equals(text(canonicalRequest.get("status"), ""))
+            && request.expectedHeadRootHash().equals(text(canonicalRequest.get("manifestHash"), ""))
+            && requestRevision.equals(storedRequestRevision);
+        boolean staleActiveRequest = requestIdentityMatches
+            && cycleKeyedV1
+            && "UNCERTAIN".equals(text(canonicalRequest.get("status"), ""))
+            && storedRequestRevision != null
+            && storedRequestRevision > requestRevision
+            && !request.expectedHeadRootHash().equals(text(canonicalRequest.get("manifestHash"), ""));
+        if (!approvedRequestMatches && !staleActiveRequest) {
             throw new WeeklyExpenseConflictException("Legacy cumulative close approval evidence is inconsistent.");
         }
 
@@ -1533,10 +1542,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Legacy cumulative close approval evidence is incomplete.");
         }
         Map<String, Object> close = data(closeSnapshot);
-        Long ledgerRevision = canonicalPositiveLong(close.get("revision"));
+        Long currentLedgerRevision = canonicalPositiveLong(close.get("revision"));
         String versionId = text(close.get("latestVersionId"), "");
         String closeSnapshotHash = text(close.get("snapshotHash"), "");
-        if (ledgerRevision == null
+        if (currentLedgerRevision == null
             || !CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION.equals(text(close.get("contractVersion"), ""))
             || !actor.tenantId().equals(text(close.get("tenantId"), ""))
             || !projectId.equals(text(close.get("projectId"), ""))
@@ -1547,8 +1556,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Legacy cumulative close approval evidence is inconsistent.");
         }
         if (rangedHead && (!versionId.equals(text(existingRange.get("approvalVersionId"), ""))
-            || !requestId.equals(text(existingRange.get("requestId"), ""))
-            || ledgerRevision.longValue() != longValue(existingRange.get("ledgerRevision"), -1))) {
+            || !requestId.equals(text(existingRange.get("requestId"), "")))) {
             throw new WeeklyExpenseConflictException("Legacy cumulative close authority range is inconsistent.");
         }
 
@@ -1573,7 +1581,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !projectId.equals(text(version.get("projectId"), ""))
             || !evidenceYearMonth.equals(text(version.get("yearMonth"), ""))
             || !"CLOSED".equals(text(version.get("status"), ""))
-            || !ledgerRevision.equals(versionRevision)
+            || versionRevision == null
+            || currentLedgerRevision < versionRevision
             || !closeSnapshotHash.equals(text(version.get("snapshotHash"), ""))
             || !closeSnapshotHash.equals(hashCanonicalJson(snapshot))
             || !closedAt.equals(text(version.get("closedAt"), ""))
@@ -1589,6 +1598,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !approvalId.equals(text(snapshot.get("approvalId"), ""))
             || !operationId.equals(text(snapshot.get("operationId"), ""))) {
             throw new WeeklyExpenseConflictException("Legacy cumulative close version identity is inconsistent.");
+        }
+        long approvalLedgerRevision = versionRevision;
+        if (rangedHead
+            && approvalLedgerRevision != longValue(existingRange.get("ledgerRevision"), -1)) {
+            throw new WeeklyExpenseConflictException("Legacy cumulative close authority range is inconsistent.");
         }
 
         DocumentReference coordinatorRef = cashflowSettlementCycleCoordinatorRef(
@@ -1631,16 +1645,27 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         DocumentReference canonicalLedgerRef = db.document(monthlyClosePath(
             actor.tenantId(), projectId, cycle.toString()
         ));
-        DocumentSnapshot canonicalRequestSnapshot = targetKeyedLegacy
-            ? get(canonicalRequestRef) : requestSnapshot;
-        DocumentSnapshot canonicalLedgerSnapshot = targetKeyedLegacy
-            ? get(canonicalLedgerRef) : closeSnapshot;
-        String migratedVersionId = projectId + "-" + cycle + "-r" + ledgerRevision + "-migrated-v3";
+        boolean canonicalRequestIsSource = canonicalRequestRef.getPath().equals(requestRef.getPath());
+        boolean canonicalLedgerIsSource = canonicalLedgerRef.getPath().equals(closeRef.getPath());
+        DocumentSnapshot canonicalRequestSnapshot = canonicalRequestIsSource
+            ? requestSnapshot : get(canonicalRequestRef);
+        DocumentSnapshot canonicalLedgerSnapshot = canonicalLedgerIsSource
+            ? closeSnapshot : get(canonicalLedgerRef);
+        String migratedVersionId = projectId + "-" + cycle + "-r" + approvalLedgerRevision + "-migrated-v3";
         DocumentReference migratedVersionRef = db.document(monthlyCloseVersionPath(
             actor.tenantId(), migratedVersionId
         ));
         DocumentSnapshot migratedVersionSnapshot = versionId.equals(migratedVersionId)
             ? versionSnapshot : get(migratedVersionRef);
+        DocumentReference staleRequestArchiveRef = staleActiveRequest
+            ? requestRef.collection("migration_archives").document("stale-r" + storedRequestRevision)
+            : null;
+        DocumentSnapshot staleRequestArchiveSnapshot = staleRequestArchiveRef == null
+            ? null : get(staleRequestArchiveRef);
+        if (staleRequestArchiveSnapshot != null && staleRequestArchiveSnapshot.exists()
+            && !data(staleRequestArchiveSnapshot).equals(canonicalRequest)) {
+            throw new WeeklyExpenseConflictException("Legacy cumulative close request archive collision.");
+        }
 
         Map<String, Object> fingerprintInput = new LinkedHashMap<>();
         fingerprintInput.put("head", snapshotFingerprint(headSnapshot));
@@ -1652,6 +1677,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         fingerprintInput.put("canonicalRequest", snapshotFingerprint(canonicalRequestSnapshot));
         fingerprintInput.put("canonicalLedger", snapshotFingerprint(canonicalLedgerSnapshot));
         fingerprintInput.put("migratedVersion", snapshotFingerprint(migratedVersionSnapshot));
+        if (staleRequestArchiveSnapshot != null) {
+            fingerprintInput.put("staleRequestArchive", snapshotFingerprint(staleRequestArchiveSnapshot));
+        }
 
         if (versionSchema == 3 && snapshotSchema == 3) {
             String migrationFingerprint = hashCanonicalJson(fingerprintInput);
@@ -1685,7 +1713,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Legacy cumulative close commit receipt is inconsistent.");
         }
         Map<String, Object> monthCloseResult = nestedMap(canonicalRequest.get("monthCloseResult"));
-        String closeIdempotencyKey = text(canonicalRequest.get("reviewIdempotencyKey"), "");
+        String closeIdempotencyKey = staleActiveRequest
+            ? "cashflow-settlement:" + requestId + ":r" + requestRevision + ":approve"
+            : text(canonicalRequest.get("reviewIdempotencyKey"), "");
         if (closeIdempotencyKey.isBlank()) {
             throw new WeeklyExpenseConflictException("Legacy cumulative close commit receipt is inconsistent.");
         }
@@ -1704,13 +1734,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !projectId.equals(text(receipt.get("projectId"), ""))
             || !closeIdempotencyKey.equals(text(receipt.get("idempotencyKey"), ""))
             || !CASHFLOW_MONTH_CLOSE_COMMAND.equals(text(receipt.get("commandName"), ""))
-            || !legacyCloseResultMatches(
+            || (!staleActiveRequest && !legacyCloseResultMatches(
                 monthCloseResult, projectId, evidenceYearMonth, requestId, requestRevision,
-                ledgerRevision, request.expectedHeadRootHash(), evidenceHeadRevision
-            )
+                approvalLedgerRevision, request.expectedHeadRootHash(), evidenceHeadRevision
+            ))
             || !legacyCloseResultMatches(
                 receiptResponse, projectId, evidenceYearMonth, requestId, requestRevision,
-                ledgerRevision, request.expectedHeadRootHash(), evidenceHeadRevision
+                approvalLedgerRevision, request.expectedHeadRootHash(), evidenceHeadRevision
             )) {
             throw new WeeklyExpenseConflictException("Legacy cumulative close commit receipt is inconsistent.");
         }
@@ -1725,7 +1755,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Map<String, Object> ledgerSnapshot = nestedMap(close.get("snapshot"));
         if ((!ledgerSnapshot.isEmpty() && !closeSnapshotHash.equals(hashCanonicalJson(ledgerSnapshot)))
-            || (targetKeyedLegacy && (canonicalRequestSnapshot.exists() || canonicalLedgerSnapshot.exists()))
+            || (!canonicalRequestIsSource && canonicalRequestSnapshot.exists())
+            || (!canonicalLedgerIsSource && canonicalLedgerSnapshot.exists())
             || migratedVersionSnapshot.exists()) {
             throw new WeeklyExpenseConflictException("Canonical settlement cycle destination already exists or is inconsistent.");
         }
@@ -1743,7 +1774,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         canonicalSnapshot.put("affectedThroughMonth", closedThrough.toString());
         String migratedSnapshotHash = hashCanonicalJson(canonicalSnapshot);
 
-        Map<String, Object> migratedRequest = new LinkedHashMap<>(canonicalRequest);
+        Map<String, Object> migratedRequest = staleActiveRequest
+            ? new LinkedHashMap<>() : new LinkedHashMap<>(canonicalRequest);
         migratedRequest.remove("monthCloseResult");
         migratedRequest.put("documentType", "REQUEST");
         migratedRequest.put("contractVersion", CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION);
@@ -1760,12 +1792,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         migratedRequest.put("evidenceRevision", requestRevision);
         migratedRequest.put("workflowRevision", migratedWorkflowRevision);
         migratedRequest.put("manifestHash", request.expectedHeadRootHash());
-        migratedRequest.put("ledgerRevision", ledgerRevision);
+        migratedRequest.put("ledgerRevision", currentLedgerRevision);
         migratedRequest.put("approvalVersionId", migratedVersionId);
         migratedRequest.put("approvalId", approvalId);
         migratedRequest.put("operationId", operationId);
+        migratedRequest.put("reviewIdempotencyKey", closeIdempotencyKey);
         migratedRequest.putIfAbsent("requestedAt", closedAt);
         migratedRequest.putIfAbsent("requestedByUid", closedByUid);
+        migratedRequest.putIfAbsent("approverUid", closedByUid);
         migratedRequest.putIfAbsent("reviewedAt", closedAt);
         migratedRequest.putIfAbsent("reviewedByUid", closedByUid);
 
@@ -1776,7 +1810,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         migratedLedger.put("projectId", projectId);
         migratedLedger.put("yearMonth", cycle.toString());
         migratedLedger.put("status", "CLOSED");
-        migratedLedger.put("revision", ledgerRevision);
+        migratedLedger.put("revision", currentLedgerRevision);
         migratedLedger.putIfAbsent("reopenCount", 0L);
         migratedLedger.put("snapshot", canonicalSnapshot);
         migratedLedger.put("snapshotHash", migratedSnapshotHash);
@@ -1790,7 +1824,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         migratedVersion.put("projectId", projectId);
         migratedVersion.put("yearMonth", cycle.toString());
         migratedVersion.put("status", "CLOSED");
-        migratedVersion.put("revision", ledgerRevision);
+        migratedVersion.put("revision", approvalLedgerRevision);
         migratedVersion.put("reopenCount", longValue(close.get("reopenCount"), 0));
         migratedVersion.put("snapshot", canonicalSnapshot);
         migratedVersion.put("snapshotHash", migratedSnapshotHash);
@@ -1812,7 +1846,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         range.put("closedByCycleYearMonth", cycle.toString());
         range.put("approvalVersionId", migratedVersionId);
         range.put("requestId", canonicalRequestId);
-        range.put("ledgerRevision", ledgerRevision);
+        range.put("ledgerRevision", approvalLedgerRevision);
         range.put("rootHash", request.expectedHeadRootHash());
         List<Map<String, Object>> closedRanges = canonicalClosedRanges(List.of(range));
         Instant migratedAt = clock.instant();
@@ -1824,12 +1858,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         migrated.put("migratedAt", migratedAt.toString());
         migrated.put("migratedByUid", actor.id());
         if (!request.dryRun()) {
-            if (targetKeyedLegacy) {
-                create(canonicalRequestRef, migratedRequest);
-                create(canonicalLedgerRef, migratedLedger);
-            } else {
+            if (staleRequestArchiveRef != null && !staleRequestArchiveSnapshot.exists()) {
+                create(staleRequestArchiveRef, canonicalRequest);
+            }
+            if (canonicalRequestSnapshot.exists()) {
                 replaceDocument(canonicalRequestRef, migratedRequest);
+            } else {
+                create(canonicalRequestRef, migratedRequest);
+            }
+            if (canonicalLedgerSnapshot.exists()) {
                 replaceDocument(canonicalLedgerRef, migratedLedger);
+            } else {
+                create(canonicalLedgerRef, migratedLedger);
             }
             create(migratedVersionRef, migratedVersion);
             replaceDocument(headRef, migrated);
@@ -1843,6 +1883,246 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return new CashflowSettlementCycleHeadMigrationState(
             projectId, closedThrough.toString(), cycle.toString(), migratedVersionId,
             nextRevision, migrationFingerprint, true
+        );
+    }
+
+    @Override
+    public CashflowSettlementCycleLegacyRequestNormalizationState normalizeLegacyCashflowSettlementCycleRequest(
+        TrustedActorContext actor,
+        String projectId,
+        NormalizeLegacyCashflowSettlementCycleRequest request
+    ) {
+        if (!"2026-09".equals(request.cycleYearMonth())) {
+            throw new WeeklyExpenseConflictException("Legacy request normalization is limited to the 2026-09 cutover.");
+        }
+        CashflowSettlementCyclePolicy.Identity identity = CashflowSettlementCyclePolicy.identity(
+            request.cycleYearMonth()
+        );
+        requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
+        String requestId = projectId + "-" + identity.cycleYearMonth();
+        DocumentReference requestRef = db.document(
+            "orgs/" + actor.tenantId() + "/cashflow_month_close_requests/" + requestId
+        );
+        DocumentReference coordinatorRef = cashflowSettlementCycleCoordinatorRef(
+            actor.tenantId(), projectId
+        );
+        DocumentReference projectRef = db.document(
+            "orgs/" + actor.tenantId() + "/projects/" + projectId
+        );
+        DocumentReference settlementRef = settlementStatusRef(
+            actor.tenantId(), projectId, identity.cycleYearMonth()
+        );
+        DocumentSnapshot requestSnapshot = get(requestRef);
+        DocumentSnapshot coordinatorSnapshot = get(coordinatorRef);
+        DocumentSnapshot projectSnapshot = get(projectRef);
+        DocumentSnapshot settlementSnapshot = get(settlementRef);
+        if (!requestSnapshot.exists() || !projectSnapshot.exists()) {
+            throw new WeeklyExpenseConflictException("Legacy cashflow settlement request evidence is unavailable.");
+        }
+        Map<String, Object> rawRequest = data(requestSnapshot);
+        Map<String, Object> project = data(projectSnapshot);
+        String requesterUid = text(rawRequest.get("requestedByUid"), "");
+        String approverUid = text(rawRequest.get("approverUid"), "");
+        String requestedAt = text(rawRequest.get("requestedAt"), "");
+        Long evidenceRevision = canonicalPositiveLong(rawRequest.get("revision"));
+        Long storedEvidenceRevision = canonicalPositiveLong(rawRequest.get("evidenceRevision"));
+        Long storedWorkflowRevision = canonicalPositiveLong(rawRequest.get("workflowRevision"));
+        Long monthCount = canonicalPositiveLong(rawRequest.get("monthCount"));
+        boolean legacyCycleIdentity = identity.cycleYearMonth().equals(text(rawRequest.get("yearMonth"), ""))
+            && optionalTextMatches(rawRequest.get("cycleYearMonth"), identity.cycleYearMonth())
+            && optionalTextMatches(
+                rawRequest.get("monthCloseTargetYearMonth"), identity.monthCloseTargetYearMonth()
+            )
+            && identity.monthCloseTargetYearMonth().equals(text(rawRequest.get("throughMonth"), ""));
+        boolean commonRequestIdentity = CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION.equals(
+                text(rawRequest.get("contractVersion"), "")
+            )
+            && scopedTextMatches(rawRequest.get("tenantId"), actor.tenantId())
+            && projectId.equals(text(rawRequest.get("projectId"), ""))
+            && requestId.equals(text(rawRequest.get("requestId"), ""))
+            && legacyCycleIdentity
+            && evidenceRevision != null
+            && evidenceRevision == request.expectedRequestRevision()
+            && request.expectedManifestHash().equals(text(rawRequest.get("manifestHash"), ""))
+            && monthCount != null
+            && monthCount == 44
+            && !requesterUid.isBlank()
+            && !approverUid.isBlank()
+            && !requestedAt.isBlank();
+        boolean legacyRawRequest = text(rawRequest.get("documentType"), "").isBlank()
+            && "PENDING".equals(text(rawRequest.get("status"), ""))
+            && !rawRequest.containsKey("evidenceRevision")
+            && !rawRequest.containsKey("workflowRevision");
+        boolean canonicalRequest = "REQUEST".equals(text(rawRequest.get("documentType"), ""))
+            && "PENDING_APPROVAL".equals(text(rawRequest.get("status"), ""))
+            && identity.cycleYearMonth().equals(text(rawRequest.get("cycleYearMonth"), ""))
+            && identity.monthCloseTargetYearMonth().equals(
+                text(rawRequest.get("monthCloseTargetYearMonth"), "")
+            )
+            && evidenceRevision.equals(storedEvidenceRevision)
+            && storedWorkflowRevision != null
+            && !text(rawRequest.get("updatedAt"), "").isBlank();
+        if (!commonRequestIdentity || (!legacyRawRequest && !canonicalRequest)) {
+            throw new WeeklyExpenseConflictException("Legacy cashflow settlement request changed or is not eligible.");
+        }
+        if (!actor.tenantId().equals(text(project.get("tenantId"), ""))
+            || !projectId.equals(text(project.get("id"), ""))
+            || !approverUid.equals(text(project.get("executiveApproverId"), ""))) {
+            throw new WeeklyExpenseConflictException("Cashflow settlement cycle approver changed.");
+        }
+        DocumentSnapshot requesterSnapshot = get(db.document(
+            "orgs/" + actor.tenantId() + "/members/" + requesterUid
+        ));
+        DocumentSnapshot approverSnapshot = requesterUid.equals(approverUid)
+            ? requesterSnapshot : get(db.document(
+                "orgs/" + actor.tenantId() + "/members/" + approverUid
+            ));
+        if (!requesterSnapshot.exists() || !approverSnapshot.exists()) {
+            throw new WeeklyExpenseConflictException("Cashflow settlement cycle member evidence is unavailable.");
+        }
+        Map<String, Object> requester = data(requesterSnapshot);
+        Map<String, Object> approver = data(approverSnapshot);
+        if (!requesterUid.equals(text(requester.get("uid"), ""))
+            || !"ACTIVE".equals(text(requester.get("status"), ""))
+            || !approverUid.equals(text(approver.get("uid"), ""))
+            || !"ACTIVE".equals(text(approver.get("status"), ""))) {
+            throw new WeeklyExpenseConflictException("Cashflow settlement cycle member evidence changed.");
+        }
+
+        verifyStagedCumulativeEvidence(
+            actor.tenantId(),
+            projectId,
+            new SubmitCashflowSettlementCycleRequest(
+                request.idempotencyKey(), identity.cycleYearMonth(),
+                identity.monthCloseTargetYearMonth(), requestId, "legacy-normalization",
+                evidenceRevision, request.expectedManifestHash(), 0, approverUid, 0
+            ),
+            Map.of(
+                "contractVersion", CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION,
+                "fromMonth", CASHFLOW_CUMULATIVE_BASELINE.toString(),
+                "monthCount", monthCount
+            )
+        );
+        CashflowSettlementCycleWorkflow.Coordinator current = cashflowSettlementCycleCoordinator(
+            coordinatorSnapshot, actor.tenantId(), projectId
+        );
+        Map<String, Object> settlement = settlementSnapshot.exists()
+            ? new LinkedHashMap<>(data(settlementSnapshot)) : new LinkedHashMap<>();
+        requireSettlementScope(
+            settlement, settlementSnapshot.exists(), actor.tenantId(), projectId,
+            identity.cycleYearMonth()
+        );
+        Map<String, Object> periods = nestedMap(settlement.get("periods"));
+
+        Map<String, Object> fingerprintInput = new LinkedHashMap<>();
+        fingerprintInput.put("request", snapshotFingerprint(requestSnapshot));
+        fingerprintInput.put("coordinator", snapshotFingerprint(coordinatorSnapshot));
+        fingerprintInput.put("project", snapshotFingerprint(projectSnapshot));
+        fingerprintInput.put("requester", snapshotFingerprint(requesterSnapshot));
+        fingerprintInput.put("approver", snapshotFingerprint(approverSnapshot));
+        fingerprintInput.put("status", snapshotFingerprint(settlementSnapshot));
+        String migrationFingerprint = hashCanonicalJson(fingerprintInput);
+        if (canonicalRequest) {
+            Map<String, Object> coordinator = data(coordinatorSnapshot);
+            Map<String, Object> month = nestedMap(periods.get("MONTH"));
+            String normalizedAt = text(rawRequest.get("updatedAt"), "");
+            boolean coordinatorMatches = coordinatorSnapshot.exists()
+                && coordinator.keySet().equals(Set.of(
+                    "documentType", "tenantId", "projectId", "activeCycleYearMonth",
+                    "activeRequestId", "activeState", "workflowRevision", "updatedAt"
+                ))
+                && current.activeState() == CashflowSettlementCycleWorkflow.ActiveState.PENDING_APPROVAL
+                && identity.cycleYearMonth().equals(current.activeCycleYearMonth())
+                && requestId.equals(current.activeRequestId())
+                && current.workflowRevision() == storedWorkflowRevision
+                && normalizedAt.equals(text(coordinator.get("updatedAt"), ""));
+            boolean monthMatches = settlementSnapshot.exists()
+                && month.keySet().equals(Set.of(
+                    "status", "revision", "submittedAt", "submittedBy", "approvedAt", "approvedBy"
+                ))
+                && "SUBMITTED".equals(text(month.get("status"), ""))
+                && longValue(month.get("revision"), -1) == 1
+                && requestedAt.equals(text(month.get("submittedAt"), ""))
+                && requesterUid.equals(text(month.get("submittedBy"), ""))
+                && text(month.get("approvedAt"), "").isBlank()
+                && text(month.get("approvedBy"), "").isBlank()
+                && normalizedAt.equals(text(settlement.get("updatedAt"), ""));
+            if (!request.dryRun()
+                || !request.expectedMigrationFingerprint().isBlank()
+                || !coordinatorMatches
+                || !monthMatches) {
+                throw new WeeklyExpenseConflictException("Canonical cashflow settlement request is inconsistent.");
+            }
+            return new CashflowSettlementCycleLegacyRequestNormalizationState(
+                projectId,
+                identity.cycleYearMonth(),
+                identity.monthCloseTargetYearMonth(),
+                requestId,
+                storedWorkflowRevision,
+                evidenceRevision,
+                migrationFingerprint,
+                false
+            );
+        }
+        if (current.activeState() != CashflowSettlementCycleWorkflow.ActiveState.INACTIVE) {
+            throw new WeeklyExpenseConflictException("Another cashflow settlement cycle request is active.");
+        }
+        if (periods.containsKey("MONTH")) {
+            throw new WeeklyExpenseConflictException("Cashflow month settlement is already active.");
+        }
+        CashflowSettlementCycleWorkflow.Coordinator next = CashflowSettlementCycleWorkflow.submit(
+            current, identity.cycleYearMonth(), requestId, current.workflowRevision()
+        );
+        if (request.dryRun()) {
+            if (!request.expectedMigrationFingerprint().isBlank()) {
+                throw new WeeklyExpenseConflictException("Migration dry-run fingerprint must be blank.");
+            }
+        } else if (!migrationFingerprint.equals(request.expectedMigrationFingerprint())) {
+            throw new WeeklyExpenseConflictException("Cashflow settlement cycle migration fingerprint changed.");
+        }
+
+        Instant normalizedAt = clock.instant();
+        Map<String, Object> normalizedRequest = new LinkedHashMap<>(rawRequest);
+        normalizedRequest.put("documentType", "REQUEST");
+        normalizedRequest.put("tenantId", actor.tenantId());
+        normalizedRequest.put("yearMonth", identity.cycleYearMonth());
+        normalizedRequest.put("cycleYearMonth", identity.cycleYearMonth());
+        normalizedRequest.put("monthCloseTargetYearMonth", identity.monthCloseTargetYearMonth());
+        normalizedRequest.put("throughMonth", identity.monthCloseTargetYearMonth());
+        normalizedRequest.put("status", "PENDING_APPROVAL");
+        normalizedRequest.put("revision", evidenceRevision);
+        normalizedRequest.put("evidenceRevision", evidenceRevision);
+        normalizedRequest.put("workflowRevision", next.workflowRevision());
+        normalizedRequest.put("updatedAt", normalizedAt.toString());
+        periods.put("MONTH", Map.of(
+            "status", "SUBMITTED",
+            "revision", 1L,
+            "submittedAt", requestedAt,
+            "submittedBy", requesterUid,
+            "approvedAt", "",
+            "approvedBy", ""
+        ));
+        settlement.put("tenantId", actor.tenantId());
+        settlement.put("projectId", projectId);
+        settlement.put("yearMonth", identity.cycleYearMonth());
+        settlement.put("periods", periods);
+        settlement.put("updatedAt", normalizedAt.toString());
+        if (!request.dryRun()) {
+            replaceDocument(requestRef, normalizedRequest);
+            set(coordinatorRef, cashflowSettlementCycleCoordinatorDocument(
+                actor.tenantId(), projectId, next, normalizedAt
+            ));
+            replaceDocument(settlementRef, settlement);
+        }
+        return new CashflowSettlementCycleLegacyRequestNormalizationState(
+            projectId,
+            identity.cycleYearMonth(),
+            identity.monthCloseTargetYearMonth(),
+            requestId,
+            next.workflowRevision(),
+            evidenceRevision,
+            migrationFingerprint,
+            true
         );
     }
 
