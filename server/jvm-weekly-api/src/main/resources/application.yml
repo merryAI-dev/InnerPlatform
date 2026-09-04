@@ -22,3 +22,6 @@ weekly:
   firestore-project-id: ${JVM_WEEKLY_FIRESTORE_PROJECT_ID:${weekly.firebase-project-id}}
   project-access-backend: ${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:firestore}
   allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://myscube.myscguard.app}
+station:
+  registry-credits-url: ${STATION_REGISTRY_CREDITS_URL:}
+  registry-credits-audience: ${STATION_REGISTRY_CREDITS_AUDIENCE:${STATION_REGISTRY_CREDITS_URL:}}
