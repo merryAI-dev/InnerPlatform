@@ -30,7 +30,7 @@ permissions:
   id-token: write
 
 env:
-  JVM_SOURCE_PATHS: server/jvm-weekly-api scripts/verify-cashflow-settlement-cycle-projection.mjs .github/workflows/jvm-production-deploy.yml
+  JVM_SOURCE_PATHS: server/jvm-weekly-api scripts/cashflow-settlement-legacy-parity.jq scripts/verify-cashflow-settlement-cycle-projection.mjs .github/workflows/jvm-production-deploy.yml
 
 jobs:
   preflight:
@@ -589,8 +589,8 @@ jobs:
 
           if [ "${RELEASE_MODE}" = "atomic_cutover" ]; then
             legacy_path="/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"
-            live="$(read_jvm "${SERVICE_URL}" "${legacy_path}" | jq -S -c 'del(.settlementCycle)')"
-            candidate="$(read_jvm "${CANDIDATE_URL}" "${legacy_path}" | jq -S -c 'del(.settlementCycle)')"
+            live="$(read_jvm "${SERVICE_URL}" "${legacy_path}" | jq -S -c -f scripts/cashflow-settlement-legacy-parity.jq)"
+            candidate="$(read_jvm "${CANDIDATE_URL}" "${legacy_path}" | jq -S -c -f scripts/cashflow-settlement-legacy-parity.jq)"
             test "${candidate}" = "${live}"
             node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
               advance "${CUTOVER_STATE_FILE}" candidate_verified
