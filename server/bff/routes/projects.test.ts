@@ -1211,6 +1211,42 @@ describe('project route helpers', () => {
     expect(idempotencyService.complete).not.toHaveBeenCalled();
   });
 
+  it('collects distinct custom staffing roles from stored projects, most used first', async () => {
+    const projects = [
+      { staffing: { others: [{ role: '멘토' }, { role: '강사' }] } },
+      { staffing: { others: [{ role: ' 멘토 ' }, { role: '' }, { role: '촉진자' }] } },
+      { staffing: { operators: [] } },
+      {},
+    ];
+    const db = {
+      collection: vi.fn(() => ({
+        select: vi.fn(() => ({
+          get: vi.fn(async () => ({ docs: projects.map((data) => ({ data: () => data })) })),
+        })),
+      })),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc', actorId: 'member-a', actorRole: 'pm',
+        actorEmail: 'member-a@example.com', requestId: 'request-a',
+      };
+      next();
+    });
+    mountProjectRoutes(app, { db, now: () => '2026-09-04T00:00:00.000Z' } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).get('/api/v1/projects/staffing-roles');
+
+    expect(response.status).toBe(200);
+    // 멘토는 두 사업에서 쓰였으므로 먼저. 나머지는 가나다순. 빈 역할명은 목록에 없다.
+    expect(response.body.roles).toEqual(['멘토', '강사', '촉진자']);
+    expect(db.collection).toHaveBeenCalledWith('orgs/mysc/projects');
+  });
+
   it('requires a participation sheet link when an admin creates a project directly', async () => {
     const db = {
       doc: vi.fn(() => ({ get: vi.fn(async () => ({ exists: false, data: () => undefined })) })),

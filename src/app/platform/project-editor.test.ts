@@ -696,7 +696,7 @@ describe('project editor draft mapping', () => {
       },
       {
         key: 'registeredByName',
-        label: '사업 담당자',
+        label: '최종 보고자 (실무책임자)',
         before: '김다은',
         after: '변민욱',
       },
@@ -992,11 +992,47 @@ describe('실제 투입인력 (staffing)', () => {
         lead: { personId: 'p-1', name: '김신영', nickname: '가든' },
         pm: null,
         operators: [],
+        others: [{ role: '멘토', slot: { personId: 'p-9', name: '박하늘', nickname: '하늘' } }],
         settlementSupport: '써니',
       },
     });
     const payload = buildProjectRequestPayloadFromDraft(draft);
     expect(payload.staffing?.lead?.personId).toBe('p-1');
-    expect(formatProjectStaffingSummary(payload.staffing)).toBe('총괄 가든 / 실무 미정 / 운영 미정 / 정산지원 써니');
+    expect(payload.staffing?.others).toEqual([
+      { role: '멘토', slot: { personId: 'p-9', name: '박하늘', nickname: '하늘' } },
+    ]);
+    expect(formatProjectStaffingSummary(payload.staffing))
+      .toBe('총괄 가든 / 실무 미정 / 운영 미정 / 멘토 하늘 / 정산지원 써니');
+  });
+
+  it('기타 역할은 역할명이 있어야 남고, 사람은 미정이어도 된다', async () => {
+    const { normalizeProjectStaffing } = await import('./project-editor');
+    const staffing = normalizeProjectStaffing({
+      others: [
+        { role: '  멘토  ', slot: { personId: 'p-1', name: '김신영', nickname: '가든' } },
+        { role: '강 사', slot: null },
+        { role: '', slot: { personId: 'p-2', name: '최유진', nickname: '고야' } },
+        { slot: { personId: 'p-3' } },
+      ],
+    });
+    expect(staffing.others).toEqual([
+      { role: '멘토', slot: { personId: 'p-1', name: '김신영', nickname: '가든' } },
+      { role: '강 사', slot: null },
+    ]);
+  });
+
+  it('기타 역할명은 20자로 자르고 10개를 넘기지 않는다', async () => {
+    const { normalizeProjectStaffing, PROJECT_STAFFING_OTHERS_MAX, PROJECT_STAFFING_ROLE_MAX_LENGTH } =
+      await import('./project-editor');
+    const staffing = normalizeProjectStaffing({
+      others: Array.from({ length: PROJECT_STAFFING_OTHERS_MAX + 3 }, (_unused, index) => ({
+        role: `역${index}`.padEnd(PROJECT_STAFFING_ROLE_MAX_LENGTH + 5, '가'),
+        slot: null,
+      })),
+    });
+    expect(staffing.others).toHaveLength(PROJECT_STAFFING_OTHERS_MAX);
+    for (const item of staffing.others) {
+      expect(item.role.length).toBe(PROJECT_STAFFING_ROLE_MAX_LENGTH);
+    }
   });
 });

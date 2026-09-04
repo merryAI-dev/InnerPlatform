@@ -101,21 +101,21 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('uses a member select for project owner instead of free text manager input', () => {
-    expect(source).toContain('사업 담당자');
+    expect(source).toContain('최종 보고자 (실무책임자)');
     expect(source).toContain('registeredById');
     expect(source).toContain('registeredByName: member.label.replace(');
     expect(source).not.toContain('<Input value={draft.managerName}');
   });
 
   it('lets project registration and edit choose a designated executive approver from the member directory', () => {
-    expect(source).toContain('label="최종 결재자 지정 (사업총괄)"');
+    expect(source).toContain('label="최종 결재자 (총괄책임자)"');
     expect(source).toContain('const selectedExecutiveApprover = useMemo');
     expect(source).toContain('const executiveApproverOptions = useMemo');
     expect(source).not.toContain('requesterId?: string');
     expect(portalRegisterSource).not.toContain('requesterId={actor.uid}');
     expect(source).not.toContain('member.uid !== draft.registeredById && member.uid !== requesterId');
     expect(source).not.toContain('const isSelfExecutiveApprover = Boolean(');
-    expect(source).not.toContain('사업 담당자와 최종 결재자는 달라야 합니다.');
+    expect(source).not.toContain('최종 보고자 (실무책임자)와 최종 결재자 (총괄책임자)는 달라야 합니다.');
   });
 
   it('drops only members marked inactive, so members without a status still appear', () => {

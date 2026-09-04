@@ -898,6 +898,17 @@ export interface ProjectStaffingSlot {
   nickname: string;
 }
 
+/**
+ * 고정 역할(총괄·실무·운영) 밖의 역할. 역할명은 사용자가 직접 적는다 - 멘토, 강사처럼
+ * 사업마다 다르기 때문이다. 적힌 역할명은 프로젝트 문서에 그대로 남고, 다음 사람이
+ * 고를 수 있게 목록으로 모아 준다 (별도 사전 컬렉션을 두지 않는다 - 원천이 둘이 되면 갈린다).
+ */
+export interface ProjectStaffingOtherRole {
+  /** 역할명. 예: 멘토, 강사 */
+  role: string;
+  slot: ProjectStaffingSlot | null;
+}
+
 /** 실제 투입인력. 슬롯이 비어 있으면(null) "미정" 상태다 - 채용 전 자리를 허용한다. */
 export interface ProjectStaffing {
   /** 총괄책임자 - 사업 최종 책임자 */
@@ -906,6 +917,8 @@ export interface ProjectStaffing {
   pm: ProjectStaffingSlot | null;
   /** 운영 매니저 (1인 이상, 가변) */
   operators: ProjectStaffingSlot[];
+  /** 기타 역할 - 역할명을 직접 적는다 */
+  others: ProjectStaffingOtherRole[];
   /** 정산지원 - 도담/써니 중 택1, 해당 없으면 빈 문자열 */
   settlementSupport: string;
 }

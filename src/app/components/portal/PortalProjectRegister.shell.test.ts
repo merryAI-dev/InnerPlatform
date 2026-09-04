@@ -76,7 +76,7 @@ describe('PortalProjectRegister private draft session', () => {
   });
 
   it('names the organization-head review destination explicitly', () => {
-    expect(source).toContain('최종 결재자 (사업총괄)의 조직장 검토 화면');
+    expect(source).toContain('최종 결재자 (총괄책임자)의 조직장 검토 화면');
     expect(source).not.toContain('관리자 검토 화면');
   });
 });

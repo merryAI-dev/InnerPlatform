@@ -35,7 +35,7 @@ describe('ProjectListPage shell contract', () => {
   });
 
   it('shows the business owner from registeredBy fields', () => {
-    expect(source).toContain('사업 담당자');
+    expect(source).toContain('최종 보고자 (실무책임자)');
     expect(source).toContain('p.registeredByName || p.managerName');
   });
 
