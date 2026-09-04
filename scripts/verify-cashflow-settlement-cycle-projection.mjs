@@ -93,13 +93,15 @@ function safeApprovalVersionId(value) {
 
 function validateProvenance(provenance, projectId, cycleYearMonth, targetYearMonth) {
   if (!sameKeys(provenance, PROVENANCE_KEYS)) fail('provenance has an invalid shape');
-  if (provenance.requestId !== `${projectId}-${cycleYearMonth}`) {
+  if (provenance.requestId !== `${projectId}-${provenance.closedByCycleYearMonth}`) {
     fail('provenance requestId does not identify this cycle');
   }
-  if (provenance.affectedThroughMonth !== targetYearMonth) {
+  if (provenance.affectedThroughMonth !== previousYearMonth(provenance.closedByCycleYearMonth)
+    || provenance.affectedFromMonth > targetYearMonth
+    || targetYearMonth > provenance.affectedThroughMonth) {
     fail('provenance affectedThroughMonth does not identify the target');
   }
-  if (provenance.closedByCycleYearMonth !== cycleYearMonth) {
+  if (provenance.closedByCycleYearMonth < cycleYearMonth) {
     fail('provenance closedByCycleYearMonth does not identify this cycle');
   }
   if (!YEAR_MONTH.test(provenance.affectedFromMonth)
