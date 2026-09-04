@@ -17,7 +17,7 @@ const PROVENANCE_STATES = new Set(['LOCKED', 'REOPEN_REQUESTED']);
 const COMMAND_RULES = Object.freeze({
   SUBMIT_MONTH_CLOSE: {
     states: new Set(['NOT_REQUESTED', 'REOPENED', 'REJECTED', 'WITHDRAWN']),
-    denialReasons: new Set(['PROJECT_WRITE_FORBIDDEN']),
+    denialReasons: new Set(['ACTIVE_CYCLE_EXISTS', 'PROJECT_WRITE_FORBIDDEN']),
   },
   WITHDRAW_MONTH_CLOSE: {
     states: new Set(['SUBMITTED']),
@@ -33,7 +33,9 @@ const COMMAND_RULES = Object.freeze({
   },
   REQUEST_MONTH_REOPEN: {
     states: new Set(['LOCKED']),
-    denialReasons: new Set(['PROJECT_WRITE_FORBIDDEN']),
+    denialReasons: new Set([
+      'ACTIVE_CYCLE_EXISTS', 'LATEST_APPROVAL_REQUIRED', 'PROJECT_WRITE_FORBIDDEN',
+    ]),
   },
   APPROVE_MONTH_REOPEN: {
     states: new Set(['REOPEN_REQUESTED']),
