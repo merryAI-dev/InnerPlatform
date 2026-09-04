@@ -89,7 +89,10 @@ describe('cashflow settlement Vercel candidate canary', () => {
           cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
         },
         monthState: canonicalRequest,
-        actions: { withdrawRequest: { enabled: false } },
+        actions: {
+          withdrawRequest: { enabled: false },
+          cumulativeScope: { ready: true, guide: '' },
+        },
       });
     });
     await expect(verifyCashflowSettlementCandidate(base, {

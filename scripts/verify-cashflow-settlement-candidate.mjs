@@ -172,8 +172,10 @@ export async function verifyCashflowSettlementCandidate(source, dependencies = {
   if (!matchesFixedFixture(detail.monthState ?? null, options)) {
     throw new Error('Settlement candidate does not match the fixed settlement fixture.');
   }
-  const actionDecisions = Object.values(detail.actions);
-  const actionNames = Object.keys(detail.actions).sort();
+  const actionEntries = Object.entries(detail.actions)
+    .filter(([name]) => name !== 'cumulativeScope');
+  const actionDecisions = actionEntries.map(([, decision]) => decision);
+  const actionNames = actionEntries.map(([name]) => name).sort();
   if (JSON.stringify(actionNames) !== JSON.stringify(options.expectedActions)
     || actionDecisions.some((decision) => (
     !decision
