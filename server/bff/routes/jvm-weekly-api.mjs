@@ -383,15 +383,12 @@ function cashflowSectionErrorsForResponse(sectionErrors) {
 // JVM 이 내는 주간 준수 상태는 ON_TIME · COMPLETED_LATE · MISSED · PENDING 넷이다
 // (FirestoreInheritedWeeklyExpensePersistence). 예전 이 표는 존재하지 않는 COMPLETED 를
 // 기다리고 ON_TIME 을 몰라서, 기한 내 완료한 주차를 "확인 필요" 로 그렸다.
-// lockState: SUBMITTED = 완료 요청됨(조직장 확정 대기). LOCKED = 조직장 확정됨.
+// lockState 는 확정 버튼과 색상에만 쓴다. 주정산 결과 라벨은 실무자의 완료 여부가 우선이다.
 // 빈 값을 여기서 재해석하지 않는다 - 판정 주체는 JVM 이고, 값이 없는 옛 기록을 무엇으로
 // 볼지는 JVM 이 정한다(FirestoreInheritedWeeklyExpensePersistence 의 기본값). 그 판정을
 // BFF 가 한 번 더 하면 두 곳이 조용히 갈린다.
-export function cashflowWeeklyStatusLabel(status, available, lockState = '', approverDeadline = '', nowIso = new Date().toISOString()) {
+export function cashflowWeeklyStatusLabel(status, available) {
   if (!available) return '주간 정산 상태 확인 필요';
-  if (lockState === 'SUBMITTED') {
-    return Date.parse(nowIso) > Date.parse(approverDeadline) ? '확정 기한 초과' : '확정 대기';
-  }
   if (!status) return '';
   if (status === 'ON_TIME') return '기한 내 완료';
   if (status === 'COMPLETED_LATE') return '기한 후 완료';
@@ -536,9 +533,7 @@ function buildCashflowMonthClosePresentation({
       ? readOptionalText(weeklyEntry.status) || null
       : null;
     const weeklyLockState = weeklyStatusesAvailable && weeklyEntry ? readOptionalText(weeklyEntry.lockState) : '';
-    const weeklyStatusLabel = cashflowWeeklyStatusLabel(
-      weeklyStatus, weeklyStatusesAvailable, weeklyLockState, readOptionalText(weeklyEntry?.approverDeadline),
-    );
+    const weeklyStatusLabel = cashflowWeeklyStatusLabel(weeklyStatus, weeklyStatusesAvailable);
     const isCurrent = week.yearMonth === effectiveAsOfWeek?.yearMonth
       && week.weekNo === effectiveAsOfWeek?.weekNo;
     const statusLabel = month.tone === 'unavailable'
@@ -3984,10 +3979,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       ...result,
       items: result.items.map((item) => ({
         ...item,
-        statusLabel: cashflowWeeklyStatusLabel(
-          readOptionalText(item?.status), true, readOptionalText(item?.lockState),
-          cashflowWeeklyApproverDeadlineAt(item?.deadline),
-        ),
+        statusLabel: cashflowWeeklyStatusLabel(readOptionalText(item?.status), true),
       })),
     };
   }
