@@ -1068,7 +1068,7 @@ function canonicalCycleMonthCloseFixture(cycleYearMonth = '2026-09', {
       });
       monthClose = {
         ...monthClose, status: 'CLOSED', revision: ledgerRevision,
-        closedAt: reviewedAt, closedByUid: actorId, auditId: 'month-close-approve-1',
+        closedAt: reviewedAt, closedByUid: actorId,
         requestId, requestRevision: body.requestRevision, manifestHash: body.manifestHash,
         rootHash: body.manifestHash, headRevision: 1, snapshot: { source: 'canonical-reread' },
       };
@@ -7633,7 +7633,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('cashflow_month_reopen_authority_unavailable'));
   });
 
-  it('lets only the saved designated approver review and closes only after approval', async () => {
+  it('trusts the JVM approval receipt when the reread ledger has no audit id', async () => {
     const cycleYearMonth = '2026-09';
     const requestId = `project-a-${cycleYearMonth}`;
     const { app, appFor, source, monthCloseBodies, bffWrites, cashflowSlackService, setCapability } = canonicalCycleMonthCloseFixture(

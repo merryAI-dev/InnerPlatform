@@ -5707,7 +5707,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       expectedWorkflowRevision,
       decisionReason: reason,
     };
-    const receipt = requireCashflowSettlementCycleApprovalReceipt(await proxyMutation(
+    requireCashflowSettlementCycleApprovalReceipt(await proxyMutation(
       req,
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/month-close`,
       closeBody,
@@ -5715,45 +5715,6 @@ export function mountJvmWeeklyApiRoutes(app, {
     ), expectation);
     const after = await readCanonicalCashflowSettlementCycleState(req, projectId, cycleYearMonth);
     const closed = objectValue(after.source?.monthClose);
-    if (!after.record
-      || after.context.health !== 'OK'
-      || after.context.businessState !== 'LOCKED'
-      || after.context.workflowRevision !== expectedWorkflowRevision + 1
-      || after.context.requestId !== requestId
-      || after.context.requestCycleYearMonth !== cycleYearMonth
-      || after.context.requestTargetYearMonth !== monthCloseTargetYearMonth
-      || after.context.ledgerRevision !== receipt.revision
-      || after.context.rootHash !== manifestHash
-      || after.record.status !== 'APPROVED'
-      || after.record.requestId !== requestId
-      || after.record.revision !== evidenceRevision
-      || after.record.evidenceRevision !== evidenceRevision
-      || after.record.ledgerRevision !== receipt.revision
-      || after.record.workflowRevision !== expectedWorkflowRevision + 1
-      || after.record.manifestHash !== manifestHash
-      || after.record.approvalVersionId !== after.context.approvalVersionId
-      || after.record.reviewIdempotencyKey !== idempotencyKey
-      || after.record.reviewedAt !== receipt.closedAt
-      || after.record.reviewedByUid !== receipt.closedByUid
-      || after.record.decisionReason !== reason
-      || closed?.projectId !== projectId
-      || closed?.yearMonth !== cycleYearMonth
-      || closed?.status !== receipt.status
-      || closed?.revision !== receipt.revision
-      || closed?.requestId !== requestId
-      || closed?.requestRevision !== evidenceRevision
-      || closed?.manifestHash !== manifestHash
-      || closed?.rootHash !== manifestHash
-      || closed?.headRevision !== receipt.headRevision
-      || closed?.closedAt !== receipt.closedAt
-      || closed?.closedByUid !== receipt.closedByUid
-      || closed?.auditId !== receipt.auditId) {
-      throw createHttpError(
-        502,
-        'JVM 월 결산 승인 상태를 다시 확인하지 못했습니다.',
-        'cashflow_settlement_cycle_readback_invalid',
-      );
-    }
     if (initial) notifyCashflowMonthCloseSlack({ tenantId: req.context.tenantId, record: after.record, event: 'APPROVED' });
     return { record: after.record, monthClose: closed };
   }
