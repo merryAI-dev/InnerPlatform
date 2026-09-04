@@ -387,9 +387,11 @@ function cashflowSectionErrorsForResponse(sectionErrors) {
 // 빈 값을 여기서 재해석하지 않는다 - 판정 주체는 JVM 이고, 값이 없는 옛 기록을 무엇으로
 // 볼지는 JVM 이 정한다(FirestoreInheritedWeeklyExpensePersistence 의 기본값). 그 판정을
 // BFF 가 한 번 더 하면 두 곳이 조용히 갈린다.
-export function cashflowWeeklyStatusLabel(status, available, lockState = '') {
+export function cashflowWeeklyStatusLabel(status, available, lockState = '', approverDeadline = '', nowIso = new Date().toISOString()) {
   if (!available) return '주간 정산 상태 확인 필요';
-  if (lockState === 'SUBMITTED') return '확정 대기';
+  if (lockState === 'SUBMITTED') {
+    return Date.parse(nowIso) > Date.parse(approverDeadline) ? '확정 기한 초과' : '확정 대기';
+  }
   if (!status) return '';
   if (status === 'ON_TIME') return '기한 내 완료';
   if (status === 'COMPLETED_LATE') return '기한 후 완료';
@@ -534,7 +536,9 @@ function buildCashflowMonthClosePresentation({
       ? readOptionalText(weeklyEntry.status) || null
       : null;
     const weeklyLockState = weeklyStatusesAvailable && weeklyEntry ? readOptionalText(weeklyEntry.lockState) : '';
-    const weeklyStatusLabel = cashflowWeeklyStatusLabel(weeklyStatus, weeklyStatusesAvailable, weeklyLockState);
+    const weeklyStatusLabel = cashflowWeeklyStatusLabel(
+      weeklyStatus, weeklyStatusesAvailable, weeklyLockState, readOptionalText(weeklyEntry?.approverDeadline),
+    );
     const isCurrent = week.yearMonth === effectiveAsOfWeek?.yearMonth
       && week.weekNo === effectiveAsOfWeek?.weekNo;
     const statusLabel = month.tone === 'unavailable'
@@ -3980,7 +3984,10 @@ export function mountJvmWeeklyApiRoutes(app, {
       ...result,
       items: result.items.map((item) => ({
         ...item,
-        statusLabel: cashflowWeeklyStatusLabel(readOptionalText(item?.status), true, readOptionalText(item?.lockState)),
+        statusLabel: cashflowWeeklyStatusLabel(
+          readOptionalText(item?.status), true, readOptionalText(item?.lockState),
+          cashflowWeeklyApproverDeadlineAt(item?.deadline),
+        ),
       })),
     };
   }

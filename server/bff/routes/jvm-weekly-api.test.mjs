@@ -59,6 +59,7 @@ describe('cashflow section error presentation', () => {
   // 여기서 한 번 더 판정하면 두 곳이 조용히 갈린다.
   it('maps lockState it receives without reinterpreting a blank one', () => {
     expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED')).toBe('확정 대기');
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED', '2026-09-04T04:00:00.000Z', '2026-09-04T04:00:00.001Z')).toBe('확정 기한 초과');
     expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'LOCKED')).toBe('기한 내 완료');
     expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, '')).toBe('기한 내 완료');
   });
