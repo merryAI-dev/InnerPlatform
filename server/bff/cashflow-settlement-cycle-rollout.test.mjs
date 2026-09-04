@@ -684,7 +684,16 @@ describe('cashflow settlement-cycle rollout audit', () => {
       projectId: 'project-a', cycleYearMonth: '2026-09',
       businessState: 'LOCKED', health: 'OK', requestId: 'project-a-2026-09',
     }])).toEqual({ ready: true, verifiedProjects: 1 });
-    expect(() => assertSettlementCycleCutoverReady(inventory, [{
+    expect(assertSettlementCycleCutoverReady(inventory, [{
+      projectId: 'project-a', cycleYearMonth: '2026-09',
+      businessState: 'LOCKED', health: 'OK', requestId: 'project-a-2026-09',
+    }], ['project-a'])).toEqual({ ready: true, verifiedProjects: 1 });
+    const unexpectedInventory = {
+      ...inventory,
+      canonicalActiveRequests: [{ projectId: 'project-b' }],
+      activeCoordinatorRecords: [{ projectId: 'project-b' }],
+    };
+    expect(() => assertSettlementCycleCutoverReady(unexpectedInventory, [{
       projectId: 'project-a', cycleYearMonth: '2026-09',
       businessState: 'LOCKED', health: 'OK', requestId: 'project-a-2026-09',
     }], ['project-a'])).toThrow(/unexpectedActiveRequests/);
