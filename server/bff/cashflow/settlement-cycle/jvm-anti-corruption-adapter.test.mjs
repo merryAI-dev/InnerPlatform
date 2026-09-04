@@ -57,6 +57,7 @@ function cycle(overrides = {}) {
     cycleYearMonth: '2026-09',
     weeklyYearMonth: '2026-09',
     monthCloseTargetYearMonth: '2026-08',
+    closeDeadline: '2026-09-10',
     businessState: 'NOT_REQUESTED',
     health: 'OK',
     workflowRevision: 0,
@@ -456,6 +457,9 @@ describe('cashflow settlement-cycle JVM anti-corruption adapter', () => {
     }],
     ['MONTH status that disagrees with the cycle state', {
       monthCloseSettlement: monthSettlement('LOCKED'),
+    }],
+    ['a close deadline outside the cycle identity', {
+      closeDeadline: '2026-09-24',
     }],
   ])('rejects a SUBMITTED projection with %s', (_label, overrides) => {
     expectInvalid(projection({

@@ -9,8 +9,10 @@ import com.google.cloud.firestore.FirestoreOptions;
 import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.WriteBatch;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleHeadMigrationResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementCycleCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
+import dev.merryai.innerplatform.weekly.api.MigrateCashflowSettlementCycleHeadV2Request;
 import dev.merryai.innerplatform.weekly.api.SubmitCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementCycleRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
@@ -533,132 +535,193 @@ class FirestoreSettlementCycleEmulatorIT {
 
     @Test
     @SuppressWarnings("unchecked")
-    void legacyOldBffCloseAndReopenRemainReadableAcrossTheJvmFirstCutover() throws Exception {
-        Harness harness = harness("it-legacy-cutover", "project-legacy-cutover");
-        seedCanonicalActorsAndProject(harness);
-        String cycleYearMonth = "2026-09";
-        String targetYearMonth = "2026-08";
-        String priorYearMonth = "2026-07";
-        String emptyTargetRevision = FirestoreInheritedWeeklyExpensePersistence
-            .computeCashflowTargetRevision(List.of());
-        Evidence evidence = seedLegacyApprovalEvidence(
-            harness, cycleYearMonth, 1, emptyTargetRevision, "legacy-close"
-        );
-        Map<String, Object> liveShapedHead = new LinkedHashMap<>();
-        liveShapedHead.put("contractVersion", "cashflow-cumulative-close-v2");
-        liveShapedHead.put("tenantId", harness.tenantId());
-        liveShapedHead.put("projectId", harness.projectId());
-        liveShapedHead.put("status", "CLOSED");
-        liveShapedHead.put("fromMonth", "2023-01");
-        liveShapedHead.put("closedThrough", priorYearMonth);
-        liveShapedHead.put("settlementMonth", targetYearMonth);
-        liveShapedHead.put("rootHash", SOURCE_REVISION);
-        liveShapedHead.put("revision", 3L);
-        liveShapedHead.put("requestId", harness.projectId() + "-" + targetYearMonth);
-        liveShapedHead.put("approvalId", "");
-        liveShapedHead.put("operationId", "");
-        liveShapedHead.put("rollbackSentinel", "preserve-pre-b7-merge");
-        liveShapedHead.put("updatedAt", NOW.minusSeconds(120).toString());
-        Map<String, Object> completedSettlement = new LinkedHashMap<>();
-        completedSettlement.put("tenantId", harness.tenantId());
-        completedSettlement.put("projectId", harness.projectId());
-        completedSettlement.put("yearMonth", targetYearMonth);
-        completedSettlement.put("periods", Map.of(
-            "MONTH", Map.of("status", "COMPLETED", "revision", 2L),
-            "WEEK_1", Map.of("status", "COMPLETED", "revision", 2L)
-        ));
-        completedSettlement.put("updatedAt", NOW.minusSeconds(60).toString());
-        seedDocuments(Map.of(
-            harness.headPath(), liveShapedHead,
-            harness.settlementPath(targetYearMonth), completedSettlement
-        ));
-        seedLockedWeeklyCompletions(harness, priorYearMonth, targetYearMonth);
-        Map<String, Object> priorCompletion = document(harness.weeklyCompletionPath(priorYearMonth, 1));
-
-        CashflowMonthCloseResponse closed = transaction(harness, () ->
-            harness.service().closeCashflowMonth(
-                harness.approver(), harness.projectId(), null,
-                evidence.directApproval("legacy-close", 0)
-            )
-        );
-
-        assertThat(closed.status()).isEqualTo("CLOSED");
-        String versionId = harness.projectId() + "-" + cycleYearMonth + "-r1";
-        Map<String, Object> ledger = document(harness.monthlyClosePath(cycleYearMonth));
-        Map<String, Object> version = document(harness.monthlyCloseVersionPath(versionId));
-        Map<String, Object> snapshot = nestedMap(ledger.get("snapshot"));
-        Map<String, Object> headAfterClose = document(harness.headPath());
-        assertThat(ledger)
-            .containsEntry("contractVersion", "cashflow-month-close-v1")
-            .containsEntry("latestVersionId", versionId)
-            .containsEntry("revision", 1L);
-        assertThat(snapshot)
-            .containsEntry("schemaVersion", 2L)
-            .doesNotContainKeys(
-                "approvalVersionId", "previousAuthorityExists", "preApprovalAuthority",
-                "affectedFromMonth", "affectedThroughMonth"
+    void legacyApprovalMigrationBuildsOneCanonicalCycleWithoutTouchingStatus() throws Exception {
+        for (boolean targetKeyed : List.of(true, false)) {
+            Harness harness = harness(
+                targetKeyed ? "it-target-v1" : "it-cycle-v1",
+                targetKeyed ? "project-target-v1" : "project-cycle-v1"
             );
-        assertThat(version)
-            .containsEntry("schemaVersion", 1L)
-            .doesNotContainKeys(
-                "previousAuthorityExists", "preApprovalAuthority",
-                "affectedFromMonth", "affectedThroughMonth"
+            seedCanonicalActorsAndProject(harness);
+            seedLegacyMigrationCandidate(harness, targetKeyed, targetKeyed);
+            long expectedHeadRevision = targetKeyed ? 5 : 4;
+            String sourceMonth = targetKeyed ? "2026-08" : "2026-09";
+            String sourceVersionId = harness.projectId() + "-" + sourceMonth + "-r3";
+            String migratedVersionId = harness.projectId() + "-2026-09-r3-migrated-v3";
+            Map<String, Object> oldRequest = document(harness.requestPath(
+                harness.projectId() + "-" + sourceMonth
+            ));
+            Map<String, Object> oldLedger = document(harness.monthlyClosePath(sourceMonth));
+            Map<String, Object> oldVersion = document(harness.monthlyCloseVersionPath(sourceVersionId));
+            Map<String, Map<String, Object>> oldReceipts = projectDocuments(
+                harness, "weekly_api_idempotency"
             );
-        assertThat(headAfterClose)
-            .containsEntry("rollbackSentinel", "preserve-pre-b7-merge")
-            .containsEntry("closedThrough", targetYearMonth)
-            .containsEntry("settlementMonth", cycleYearMonth)
-            .containsEntry("revision", 4L)
-            .containsEntry("approvalId", "approval-" + evidence.requestId() + "-r1")
-            .containsEntry("operationId", "operation-" + evidence.requestId() + "-r1")
-            .doesNotContainKeys("authorityExists", "closedRanges");
+            assertThat(oldReceipts).hasSize(targetKeyed ? 2 : 1);
+            DocumentSnapshot statusBefore = db.document(harness.settlementPath("2026-09"))
+                .get().get(60, TimeUnit.SECONDS);
+            Map<String, Map<String, Map<String, Object>>> beforeDryRun = projectState(harness);
+            Map<String, String> updateTimesBeforeDryRun = projectUpdateTimes(harness);
 
-        CashflowMonthCloseResponse requested = transaction(harness, () ->
-            harness.service().requestCashflowMonthReopen(
-                harness.approver(), harness.projectId(), DATA_PROJECT_ID,
-                new CashflowMonthReopenCommands.RequestReopen(
-                    "legacy-reopen-request", cycleYearMonth, closed.revision(), "레거시 정정"
+            CashflowSettlementCycleHeadMigrationResponse validated = transaction(harness, () ->
+                harness.service().migrateCashflowSettlementCycleHeadV2(
+                    harness.admin(), harness.projectId(),
+                    new MigrateCashflowSettlementCycleHeadV2Request(
+                        "settlement-cycle-v3:" + harness.projectId(), expectedHeadRevision,
+                        SOURCE_REVISION, "canonical v3 migration", true, ""
+                    )
                 )
-            )
-        );
-        Map<String, Object> settlementBeforeDecision = document(harness.settlementPath(targetYearMonth));
-        CashflowMonthCloseResponse reopened = transaction(harness, () ->
-            harness.service().decideCashflowMonthReopen(
-                harness.approver(), harness.projectId(), DATA_PROJECT_ID,
-                new CashflowMonthReopenCommands.DecideReopen(
-                    "legacy-reopen-approve", cycleYearMonth, requested.revision(),
-                    "APPROVE", "레거시 회수 승인"
-                )
-            )
-        );
+            );
+            assertThat(validated.auditId()).isEmpty();
+            assertThat(validated.migrationRequired()).isTrue();
+            assertThat(validated.migrationFingerprint()).matches("sha256:[0-9a-f]{64}");
+            assertThat(projectState(harness)).isEqualTo(beforeDryRun);
+            assertThat(projectUpdateTimes(harness)).isEqualTo(updateTimesBeforeDryRun);
 
-        assertThat(reopened.status()).isEqualTo("OPEN");
-        assertThat(document(harness.headPath()))
-            .containsEntry("status", "CLOSED")
-            .containsEntry("closedThrough", priorYearMonth)
-            .containsEntry("settlementMonth", targetYearMonth)
-            .containsEntry("revision", 5L)
-            .containsEntry("rollbackSentinel", "preserve-pre-b7-merge")
-            .doesNotContainKeys("authorityExists", "closedRanges");
-        assertThat(document(harness.monthlyClosePath(cycleYearMonth)))
-            .containsEntry("status", "OPEN")
-            .containsEntry("revision", 3L);
-        assertThat(document(harness.monthlyCloseVersionPath(versionId)))
-            .as("The frozen pre-b7 close version remains immutable during legacy reopen")
-            .isEqualTo(version);
-        for (int weekNo = 1; weekNo <= 5; weekNo++) {
-            assertThat(document(harness.weeklyCompletionPath(targetYearMonth, weekNo)))
-                .containsEntry("status", "OPEN")
-                .containsEntry("revision", 2L)
-                .containsEntry("reopenSource", "MONTH_REOPEN_APPROVAL");
+            MigrateCashflowSettlementCycleHeadV2Request apply =
+                new MigrateCashflowSettlementCycleHeadV2Request(
+                    "settlement-cycle-v3:" + harness.projectId(), expectedHeadRevision,
+                    SOURCE_REVISION, "canonical v3 migration", false,
+                    validated.migrationFingerprint()
+                );
+            CashflowSettlementCycleHeadMigrationResponse migrated = transaction(harness, () ->
+                harness.service().migrateCashflowSettlementCycleHeadV2(
+                    harness.admin(), harness.projectId(), apply
+                )
+            );
+
+            Map<String, Object> request = document(harness.requestPath(harness.projectId() + "-2026-09"));
+            Map<String, Object> ledger = document(harness.monthlyClosePath("2026-09"));
+            Map<String, Object> version = document(harness.monthlyCloseVersionPath(migratedVersionId));
+            assertThat(migrated.approvalVersionId()).isEqualTo(migratedVersionId);
+            assertThat(migrated.migrationRequired()).isTrue();
+            assertThat(request)
+                .containsEntry("documentType", "REQUEST")
+                .containsEntry("cycleYearMonth", "2026-09")
+                .containsEntry("monthCloseTargetYearMonth", "2026-08")
+                .containsEntry("approvalVersionId", migratedVersionId)
+                .containsEntry("ledgerRevision", 3L);
+            assertThat(ledger)
+                .containsEntry("yearMonth", "2026-09")
+                .containsEntry("latestVersionId", migratedVersionId)
+                .containsEntry("snapshotHash", version.get("snapshotHash"));
+            assertThat(version)
+                .containsEntry("schemaVersion", 3L)
+                .containsEntry("yearMonth", "2026-09")
+                .containsEntry("revision", 3L);
+            assertThat(nestedMap(version.get("snapshot")))
+                .containsEntry("schemaVersion", 3L)
+                .containsEntry("approvalVersionId", migratedVersionId)
+                .containsEntry("headRevision", expectedHeadRevision + 1);
+            assertThat(harness.persistence().hashCanonicalJson(nestedMap(version.get("snapshot"))))
+                .isEqualTo(version.get("snapshotHash"));
+            assertThat(document(harness.monthlyCloseVersionPath(sourceVersionId))).isEqualTo(oldVersion);
+            assertThat(projectDocuments(harness, "weekly_api_idempotency"))
+                .containsAllEntriesOf(oldReceipts);
+            if (targetKeyed) {
+                assertThat(document(harness.requestPath(harness.projectId() + "-2026-08")))
+                    .isEqualTo(oldRequest);
+                assertThat(document(harness.monthlyClosePath("2026-08"))).isEqualTo(oldLedger);
+            }
+            DocumentSnapshot statusAfter = db.document(harness.settlementPath("2026-09"))
+                .get().get(60, TimeUnit.SECONDS);
+            assertThat(statusAfter.getData()).isEqualTo(statusBefore.getData());
+            assertThat(statusAfter.getUpdateTime()).isEqualTo(statusBefore.getUpdateTime());
+            WeeklyExpensePersistence.CashflowSettlementCycleRecord projected = harness.persistence()
+                .findCashflowSettlementCyclesBatch(
+                    harness.admin(), List.of(harness.projectId()), "2026-09", "2026-08"
+                ).get(harness.projectId());
+            assertThat(projected.projection().businessState())
+                .isEqualTo(dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy.BusinessState.LOCKED);
+            assertThat(projected.projection().health())
+                .isEqualTo(dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy.Health.OK);
+            assertThat(projected.projection().provenance())
+                .extracting(
+                    dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy.ApprovalProvenance::requestId,
+                    dev.merryai.innerplatform.weekly.domain.CashflowSettlementCyclePolicy.ApprovalProvenance::approvalVersionId
+                )
+                .containsExactly(harness.projectId() + "-2026-09", migratedVersionId);
+            Map<String, Map<String, Map<String, Object>>> beforeReplay = projectState(harness);
+            Map<String, String> updateTimesBeforeReplay = projectUpdateTimes(harness);
+            assertThat(transaction(harness, () -> harness.service().migrateCashflowSettlementCycleHeadV2(
+                harness.admin(), harness.projectId(), apply
+            ))).isEqualTo(migrated);
+            assertThat(projectState(harness)).isEqualTo(beforeReplay);
+            assertThat(projectUpdateTimes(harness)).isEqualTo(updateTimesBeforeReplay);
+
+            CashflowSettlementCycleHeadMigrationResponse canonical = transaction(harness, () ->
+                harness.service().migrateCashflowSettlementCycleHeadV2(
+                    harness.admin(), harness.projectId(), new MigrateCashflowSettlementCycleHeadV2Request(
+                        "settlement-cycle-v3:verify:" + harness.projectId(), expectedHeadRevision + 1,
+                        SOURCE_REVISION, "canonical classification", true, ""
+                    )
+                )
+            );
+            assertThat(canonical.migrationRequired()).isFalse();
+            assertThat(canonical.headRevision()).isEqualTo(expectedHeadRevision + 1);
+            assertThat(projectState(harness)).isEqualTo(beforeReplay);
+            assertThat(projectUpdateTimes(harness)).isEqualTo(updateTimesBeforeReplay);
         }
-        assertThat(document(harness.weeklyCompletionPath(priorYearMonth, 1)))
-            .isEqualTo(priorCompletion);
-        assertThat(document(harness.settlementPath(targetYearMonth)))
-            .isEqualTo(settlementBeforeDecision);
-        assertThat(projectDocuments(harness, "cashflow_weekly_update_completion_versions"))
-            .as("Legacy reopen keeps pre-b7 merge semantics and writes no v3 completion versions")
-            .isEmpty();
+
+        Harness collision = harness("it-v3-collision", "project-v3-collision");
+        seedCanonicalActorsAndProject(collision);
+        seedLegacyMigrationCandidate(collision, true, false);
+        CashflowSettlementCycleHeadMigrationResponse validated = transaction(collision, () ->
+            collision.service().migrateCashflowSettlementCycleHeadV2(
+                collision.admin(), collision.projectId(),
+                new MigrateCashflowSettlementCycleHeadV2Request(
+                    "settlement-cycle-v3:collision", 4, SOURCE_REVISION,
+                    "collision guard", true, ""
+                )
+            )
+        );
+        Map<String, Object> unchangedStatus = document(collision.settlementPath("2026-09"));
+        DocumentSnapshot statusBeforeTouch = db.document(collision.settlementPath("2026-09"))
+            .get().get(60, TimeUnit.SECONDS);
+        Map<String, Object> touchedStatus = new LinkedHashMap<>(unchangedStatus);
+        touchedStatus.put("fingerprintProbe", true);
+        seedDocuments(Map.of(collision.settlementPath("2026-09"), touchedStatus));
+        seedDocuments(Map.of(collision.settlementPath("2026-09"), unchangedStatus));
+        DocumentSnapshot statusAfterTouch = db.document(collision.settlementPath("2026-09"))
+            .get().get(60, TimeUnit.SECONDS);
+        assertThat(statusAfterTouch.getData()).isEqualTo(statusBeforeTouch.getData());
+        assertThat(statusAfterTouch.getUpdateTime()).isNotEqualTo(statusBeforeTouch.getUpdateTime());
+        Map<String, Map<String, Map<String, Object>>> afterStatusTouch = projectState(collision);
+        Map<String, String> updateTimesAfterStatusTouch = projectUpdateTimes(collision);
+        assertThatThrownBy(() -> transaction(collision, () ->
+            collision.service().migrateCashflowSettlementCycleHeadV2(
+                collision.admin(), collision.projectId(), new MigrateCashflowSettlementCycleHeadV2Request(
+                    "settlement-cycle-v3:collision", 4, SOURCE_REVISION,
+                    "collision guard", false, validated.migrationFingerprint()
+                )
+            )
+        )).isInstanceOf(WeeklyExpenseConflictException.class);
+        assertThat(projectState(collision)).isEqualTo(afterStatusTouch);
+        assertThat(projectUpdateTimes(collision)).isEqualTo(updateTimesAfterStatusTouch);
+
+        CashflowSettlementCycleHeadMigrationResponse revalidated = transaction(collision, () ->
+            collision.service().migrateCashflowSettlementCycleHeadV2(
+                collision.admin(), collision.projectId(), new MigrateCashflowSettlementCycleHeadV2Request(
+                    "settlement-cycle-v3:collision", 4, SOURCE_REVISION,
+                    "collision guard", true, ""
+                )
+            )
+        );
+        seedDocuments(Map.of(
+            collision.monthlyCloseVersionPath(collision.projectId() + "-2026-09-r3-migrated-v3"),
+            Map.of("projectId", collision.projectId(), "collision", true)
+        ));
+        Map<String, Map<String, Map<String, Object>>> beforeCollision = projectState(collision);
+        Map<String, String> updateTimesBeforeCollision = projectUpdateTimes(collision);
+        assertThatThrownBy(() -> transaction(collision, () ->
+            collision.service().migrateCashflowSettlementCycleHeadV2(
+                collision.admin(), collision.projectId(),
+                new MigrateCashflowSettlementCycleHeadV2Request(
+                    "settlement-cycle-v3:collision", 4, SOURCE_REVISION,
+                    "collision guard", false, revalidated.migrationFingerprint()
+                )
+            )
+        )).isInstanceOf(WeeklyExpenseConflictException.class);
+        assertThat(projectState(collision)).isEqualTo(beforeCollision);
+        assertThat(projectUpdateTimes(collision)).isEqualTo(updateTimesBeforeCollision);
     }
 
     private Harness harness(String tenantId, String projectId) {
@@ -776,23 +839,174 @@ class FirestoreSettlementCycleEmulatorIT {
         return evidence;
     }
 
-    private Evidence seedLegacyApprovalEvidence(
+    private void seedLegacyMigrationCandidate(
         Harness harness,
-        String cycleYearMonth,
-        long evidenceRevision,
-        String targetRevision,
-        String idempotencyKey
+        boolean targetKeyed,
+        boolean headOnlyMarker
     ) throws Exception {
-        Evidence evidence = evidence(harness, cycleYearMonth, evidenceRevision, targetRevision);
-        Map<String, Map<String, Object>> documents = new LinkedHashMap<>(evidence.shards());
-        Map<String, Object> header = new LinkedHashMap<>(evidence.header());
-        header.remove("cycleYearMonth");
-        header.remove("monthCloseTargetYearMonth");
-        header.put("status", "APPROVING");
-        header.put("reviewIdempotencyKey", idempotencyKey);
-        documents.put(harness.requestPath(evidence.requestId()), header);
+        String cycleYearMonth = "2026-09";
+        String targetYearMonth = "2026-08";
+        String sourceMonth = targetKeyed ? targetYearMonth : cycleYearMonth;
+        String requestId = harness.projectId() + "-" + sourceMonth;
+        String versionId = harness.projectId() + "-" + sourceMonth + "-r3";
+        Map<String, Object> snapshot = new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("schemaVersion", 2L),
+            Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("yearMonth", sourceMonth),
+            Map.entry("requestId", requestId),
+            Map.entry("requestRevision", 7L),
+            Map.entry("manifestHash", SOURCE_REVISION),
+            Map.entry("rootHash", SOURCE_REVISION),
+            Map.entry("headRevision", 4L),
+            Map.entry("approvalId", ""),
+            Map.entry("operationId", "")
+        ));
+        String snapshotHash = harness.persistence().hashCanonicalJson(snapshot);
+        Map<String, Object> result = new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("commandName", WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("yearMonth", sourceMonth),
+            Map.entry("status", "CLOSED"),
+            Map.entry("revision", 3L),
+            Map.entry("requestId", requestId),
+            Map.entry("requestRevision", 7L),
+            Map.entry("manifestHash", SOURCE_REVISION),
+            Map.entry("rootHash", SOURCE_REVISION),
+            Map.entry("headRevision", 4L)
+        ));
+        Map<String, Object> request = new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
+            Map.entry("requestId", requestId),
+            Map.entry("tenantId", harness.tenantId()),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("yearMonth", sourceMonth),
+            Map.entry("fromMonth", "2023-01"),
+            Map.entry("status", "APPROVED"),
+            Map.entry("revision", 7L),
+            Map.entry("manifestHash", SOURCE_REVISION),
+            Map.entry("reviewIdempotencyKey", "legacy-close"),
+            Map.entry("monthCloseResult", result)
+        ));
+        if (!targetKeyed) {
+            request.put("cycleYearMonth", cycleYearMonth);
+            request.put("throughMonth", targetYearMonth);
+        }
+        Map<String, Object> head = new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("contractVersion", "cashflow-cumulative-close-v2"),
+            Map.entry("tenantId", harness.tenantId()),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("status", "CLOSED"),
+            Map.entry("fromMonth", "2023-01"),
+            Map.entry("closedThrough", targetYearMonth),
+            Map.entry("settlementMonth", cycleYearMonth),
+            Map.entry("rootHash", SOURCE_REVISION),
+            Map.entry("revision", headOnlyMarker ? 5L : 4L),
+            Map.entry("requestId", requestId),
+            Map.entry("requestRevision", 7L),
+            Map.entry("approvalId", ""),
+            Map.entry("operationId", ""),
+            Map.entry("closedAt", NOW.minusSeconds(60).toString()),
+            Map.entry("closedByUid", harness.approver().id())
+        ));
+        if (headOnlyMarker) {
+            head.put("authorityExists", true);
+            head.put("closedRanges", List.of(Map.ofEntries(
+                Map.entry("affectedFromMonth", "2023-01"),
+                Map.entry("affectedThroughMonth", targetYearMonth),
+                Map.entry("closedByCycleYearMonth", cycleYearMonth),
+                Map.entry("approvalVersionId", versionId),
+                Map.entry("requestId", requestId),
+                Map.entry("ledgerRevision", 3L),
+                Map.entry("rootHash", SOURCE_REVISION)
+            )));
+            head.put("migratedAt", NOW.minusSeconds(30).toString());
+            head.put("migratedByUid", harness.admin().id());
+        }
+        Map<String, Object> receipt = new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("tenantId", harness.tenantId()),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("idempotencyKey", "legacy-close"),
+            Map.entry("commandName", WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND),
+            Map.entry("requestHash", "sha256:legacy-request"),
+            Map.entry("responseJson", JSON.writeValueAsString(result)),
+            Map.entry("createdAt", NOW.minusSeconds(60).toString())
+        ));
+        Map<String, Map<String, Object>> documents = new LinkedHashMap<>();
+        documents.put(harness.headPath(), head);
+        documents.put(harness.requestPath(requestId), request);
+        documents.put(harness.monthlyClosePath(sourceMonth), Map.ofEntries(
+            Map.entry("id", harness.projectId() + "-" + sourceMonth),
+            Map.entry("contractVersion", "cashflow-month-close-v1"),
+            Map.entry("tenantId", harness.tenantId()),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("yearMonth", sourceMonth),
+            Map.entry("status", "CLOSED"),
+            Map.entry("revision", 3L),
+            Map.entry("snapshot", snapshot),
+            Map.entry("snapshotHash", snapshotHash),
+            Map.entry("latestVersionId", versionId),
+            Map.entry("closedAt", NOW.minusSeconds(60).toString()),
+            Map.entry("closedByUid", harness.approver().id())
+        ));
+        documents.put(harness.monthlyCloseVersionPath(versionId), Map.ofEntries(
+            Map.entry("id", versionId),
+            Map.entry("contractVersion", "cashflow-month-close-v1"),
+            Map.entry("schemaVersion", 1L),
+            Map.entry("tenantId", harness.tenantId()),
+            Map.entry("projectId", harness.projectId()),
+            Map.entry("yearMonth", sourceMonth),
+            Map.entry("status", "CLOSED"),
+            Map.entry("revision", 3L),
+            Map.entry("snapshot", snapshot),
+            Map.entry("snapshotHash", snapshotHash),
+            Map.entry("closedAt", NOW.minusSeconds(60).toString()),
+            Map.entry("closedByUid", harness.approver().id())
+        ));
+        documents.put(harness.settlementPath(cycleYearMonth), Map.of(
+            "tenantId", harness.tenantId(),
+            "projectId", harness.projectId(),
+            "yearMonth", cycleYearMonth,
+            "periods", Map.of("MONTH", Map.of("status", "COMPLETED", "revision", 2L)),
+            "updatedAt", NOW.minusSeconds(60).toString()
+        ));
+        String receiptId = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+            (harness.projectId() + "\n" + WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND
+                + "\nlegacy-close").getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+        documents.put("orgs/" + harness.tenantId() + "/weekly_api_idempotency/" + receiptId, receipt);
+        if (headOnlyMarker) {
+            String oldMigrationKey = "settlement-cycle-head-v2:" + harness.projectId();
+            String oldMigrationReceiptId = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                (harness.projectId() + "\n"
+                    + WeeklyExpenseCommandService.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND
+                    + "\n" + oldMigrationKey).getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            );
+            documents.put(
+                "orgs/" + harness.tenantId() + "/weekly_api_idempotency/" + oldMigrationReceiptId,
+                Map.ofEntries(
+                    Map.entry("tenantId", harness.tenantId()),
+                    Map.entry("projectId", harness.projectId()),
+                    Map.entry("idempotencyKey", oldMigrationKey),
+                    Map.entry("commandName",
+                        WeeklyExpenseCommandService.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND),
+                    Map.entry("requestHash", "sha256:old-head-only-migration"),
+                    Map.entry("responseJson", JSON.writeValueAsString(Map.ofEntries(
+                        Map.entry("ok", true),
+                        Map.entry("commandName",
+                            WeeklyExpenseCommandService.MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND),
+                        Map.entry("projectId", harness.projectId()),
+                        Map.entry("closedThrough", targetYearMonth),
+                        Map.entry("cycleYearMonth", cycleYearMonth),
+                        Map.entry("approvalVersionId", versionId),
+                        Map.entry("headRevision", 5L),
+                        Map.entry("auditId", "old-head-only-audit")
+                    ))),
+                    Map.entry("createdAt", NOW.minusSeconds(30).toString())
+                )
+            );
+        }
         seedDocuments(documents);
-        return evidence;
     }
 
     private Evidence evidence(
@@ -1006,6 +1220,19 @@ class FirestoreSettlementCycleEmulatorIT {
             documents.put(snapshot.getId(), new LinkedHashMap<>(snapshot.getData()));
         }
         return documents;
+    }
+
+    private Map<String, String> projectUpdateTimes(Harness harness) throws Exception {
+        Map<String, String> updateTimes = new TreeMap<>();
+        for (String collection : PROJECT_STATE_COLLECTIONS) {
+            for (QueryDocumentSnapshot snapshot : db.collection(
+                "orgs/" + harness.tenantId() + "/" + collection
+            ).whereEqualTo("projectId", harness.projectId()).get()
+                .get(60, TimeUnit.SECONDS).getDocuments()) {
+                updateTimes.put(collection + "/" + snapshot.getId(), snapshot.getUpdateTime().toString());
+            }
+        }
+        return updateTimes;
     }
 
     private Map<String, Object> document(String path) throws Exception {

@@ -57,10 +57,10 @@ import {
   type CashflowSettlementStatusesResult,
   reopenCashflowWeeklyUpdateViaBff,
   requestCashflowMonthCloseViaBff,
-  fetchCurrentCashflowMonthCloseRequestViaBff,
   fetchPendingCashflowMonthCloseRequestsViaBff,
   fetchCashflowMonthCloseRequestMonthsViaBff,
   reviewCashflowMonthCloseRequestViaBff,
+  withdrawCashflowMonthCloseRequestViaBff,
   requestCashflowMonthReopenViaBff,
   decideCashflowMonthReopenViaBff,
   readWeeklyExpenseSheetViaBff,
@@ -89,7 +89,7 @@ function cashflowWeeklyOverviewCycle(
 ): CashflowSettlementCycle {
   const submitted = monthCloseSettlement !== null;
   return {
-    cycleYearMonth: '2026-08', weeklyYearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07',
+    cycleYearMonth: '2026-08', weeklyYearMonth: '2026-08', monthCloseTargetYearMonth: '2026-07', closeDeadline: '2026-08-10',
     businessState: submitted ? 'SUBMITTED' : 'NOT_REQUESTED', health: 'OK', workflowRevision: submitted ? 1 : 0,
     monthCloseSettlement, provenance: null, supersededAttempt: null,
     commandCapabilities: {
@@ -265,25 +265,19 @@ describe('platform-bff-client', () => {
     });
   });
 
-  it('uses the same JVM status transition hook for MONTH and WEEK approvals', async () => {
+  it('uses the JVM status transition hook for WEEK approvals', async () => {
     const status = { projectId: 'p001', yearMonth: '2026-08', items: [] };
     const client = asMockClient({
       get: vi.fn(),
-      post: vi.fn()
-        .mockResolvedValueOnce({ data: status })
-        .mockResolvedValueOnce({ data: status }),
+      post: vi.fn().mockResolvedValueOnce({ data: status }),
       request: vi.fn(),
     });
     const common = { tenantId: 'mysc', actor: { uid: 'head-1', role: 'admin' }, projectId: 'p001', yearMonth: '2026-08', client };
 
-    await transitionCashflowSettlementStatusViaBff({ ...common, period: 'MONTH', action: 'APPROVE' });
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'WEEK_2', action: 'APPROVE' });
 
     expect(client.get).not.toHaveBeenCalled();
-    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
-      body: { yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' },
-    }));
-    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
       body: { yearMonth: '2026-08', period: 'WEEK_2', action: 'APPROVE' },
     }));
   });
@@ -714,7 +708,7 @@ describe('platform-bff-client', () => {
     }));
   });
 
-  it('uses the approval-backed month-close contract for request, review, and reopen', async () => {
+  it('uses the approval-backed month-close contract for request, review, withdrawal, and reopen', async () => {
     const client = asMockClient({
       get: vi.fn(async () => ({ data: {
         ok: true,
@@ -722,12 +716,12 @@ describe('platform-bff-client', () => {
         yearMonth: '2026-06',
         status: 'CLOSED',
       } })),
-      post: vi.fn(async () => ({ data: {
+      post: vi.fn(async (path: string) => ({ data: {
         ok: true,
         projectId: 'p001',
         yearMonth: '2026-06',
         status: 'CLOSED',
-        request: { status: 'APPROVED' },
+        request: { status: path.endsWith('/withdraw') ? 'WITHDRAWN' : 'APPROVED' },
       } })),
       request: vi.fn(),
     });
@@ -742,6 +736,7 @@ describe('platform-bff-client', () => {
         contractVersion: 'cashflow-cumulative-close-v2',
         yearMonth: '2026-06',
         expectedRevision: 2,
+        expectedWorkflowRevision: 3,
         expectedApproverUid: 'head-1',
         expectedProjectVersion: 4,
         expectedOpeningBalances: {
@@ -752,9 +747,6 @@ describe('platform-bff-client', () => {
         closeInput: { yearMonth: '2026-06' } as never,
       },
       client,
-    });
-    await fetchCurrentCashflowMonthCloseRequestViaBff({
-      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', client,
     });
     await fetchPendingCashflowMonthCloseRequestsViaBff({
       tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, client,
@@ -767,6 +759,16 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, projectId: 'p001',
       requestId: 'p001-2026-06', idempotencyKey: 'month-close-review-1',
       payload: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' }, client,
+    });
+    await withdrawCashflowMonthCloseRequestViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', requestId: 'p001-2026-06',
+      idempotencyKey: 'month-close-withdraw-1',
+      payload: {
+        cycleYearMonth: '2026-06', monthCloseTargetYearMonth: '2026-05',
+        expectedRevision: 1, expectedManifestHash: 'sha256:manifest',
+        expectedWorkflowRevision: 3, reason: '다시 확인',
+      },
+      client,
     });
     await requestCashflowMonthReopenViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'reopen-request-1',
@@ -791,6 +793,8 @@ describe('platform-bff-client', () => {
         contractVersion: 'cashflow-cumulative-close-v2',
         yearMonth: '2026-06',
         expectedRevision: 2,
+        expectedWorkflowRevision: 3,
+        settlementCycle: true,
         closeInput: { yearMonth: '2026-06' },
       }),
     }));
@@ -799,41 +803,48 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/month-close/requests',
       expect.not.objectContaining({ headers: expect.anything() }),
     );
-    expect(client.get).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/current?yearMonth=2026-06', expect.objectContaining({ retries: 0 }));
-    expect(client.get).toHaveBeenNthCalledWith(3, '/api/v1/cashflow/month-close/requests/pending', expect.objectContaining({ retries: 0 }));
+    expect(client.get).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/month-close/requests/pending', expect.objectContaining({ retries: 0 }));
     expect(client.get).toHaveBeenNthCalledWith(
-      4,
+      3,
       '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/months?limit=12&cursor=2023-12',
       expect.objectContaining({ retries: 0 }),
     );
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/status-review', expect.objectContaining({
       idempotencyKey: 'month-close-review-1',
-      body: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' },
+      body: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료', settlementCycle: true },
       timeoutMs: 12_000,
     }));
     expect(client.post).toHaveBeenNthCalledWith(
       3,
-      '/api/v1/cashflow/p001/month-close/reopen-request',
+      '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/withdraw',
       expect.objectContaining({
-        idempotencyKey: 'reopen-request-1',
-        body: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
+        idempotencyKey: 'month-close-withdraw-1',
+        body: expect.objectContaining({ settlementCycle: true }),
       }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
-      3,
+      4,
+      '/api/v1/cashflow/p001/month-close/reopen-request',
+      expect.objectContaining({
+        idempotencyKey: 'reopen-request-1',
+        body: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요', settlementCycle: true },
+      }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(
+      4,
       '/api/v1/cashflow/p001/month-close/reopen-request',
       expect.not.objectContaining({ headers: expect.anything() }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
-      4,
+      5,
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.objectContaining({
         idempotencyKey: 'reopen-decision-1',
-        body: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
+        body: { requestId: 'p001-2026-06', yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료', settlementCycle: true },
       }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
-      4,
+      5,
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.not.objectContaining({ headers: expect.anything() }),
     );

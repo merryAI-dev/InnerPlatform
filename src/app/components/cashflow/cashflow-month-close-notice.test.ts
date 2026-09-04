@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { pickCashflowMonthCloseNotice } from './cashflow-month-close-notice';
 
 const base = {
-  requestStatus: 'PENDING',
+  requestStatus: 'PENDING_APPROVAL',
   requestedByUid: 'uid-kwon',
   requestedByName: '권혁준',
   approverName: '김조직',

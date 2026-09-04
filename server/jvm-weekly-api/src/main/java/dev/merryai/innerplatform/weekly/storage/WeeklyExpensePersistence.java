@@ -287,13 +287,12 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
             this(
                 projectId, cycleYearMonth, monthCloseTargetYearMonth, weeklySettlements,
                 monthSettlement, projection,
-                new CashflowSettlementCycleAuthority(false, false, false, false, false, false, true, true)
+                new CashflowSettlementCycleAuthority(false, false, false, false, false, true, true)
             );
         }
     }
 
     record CashflowSettlementCycleAuthority(
-        boolean legacyReadOnly,
         boolean activeMember,
         boolean projectWriter,
         boolean currentApprover,
@@ -303,7 +302,6 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         boolean latestApprovalAuthority
     ) {
         public CashflowSettlementCycleAuthority(
-            boolean legacyReadOnly,
             boolean activeMember,
             boolean projectWriter,
             boolean currentApprover,
@@ -312,13 +310,12 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
             boolean coordinatorInactive
         ) {
             this(
-                legacyReadOnly, activeMember, projectWriter, currentApprover,
+                activeMember, projectWriter, currentApprover,
                 requester, recoveryAdmin, coordinatorInactive, true
             );
         }
 
         public CashflowSettlementCycleAuthority(
-            boolean legacyReadOnly,
             boolean activeMember,
             boolean projectWriter,
             boolean currentApprover,
@@ -326,7 +323,7 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
             boolean recoveryAdmin
         ) {
             this(
-                legacyReadOnly, activeMember, projectWriter, currentApprover,
+                activeMember, projectWriter, currentApprover,
                 requester, recoveryAdmin, true, true
             );
         }
@@ -355,7 +352,9 @@ public interface WeeklyExpensePersistence extends CashflowMonthReopenPort, Cashf
         String closedThrough,
         String cycleYearMonth,
         String approvalVersionId,
-        long headRevision
+        long headRevision,
+        String migrationFingerprint,
+        boolean migrationRequired
     ) {
     }
 

@@ -36,6 +36,7 @@ public record CashflowWeeklyOverviewResponse(
         String cycleYearMonth,
         String weeklyYearMonth,
         String monthCloseTargetYearMonth,
+        String closeDeadline,
         String businessState,
         String health,
         long workflowRevision,

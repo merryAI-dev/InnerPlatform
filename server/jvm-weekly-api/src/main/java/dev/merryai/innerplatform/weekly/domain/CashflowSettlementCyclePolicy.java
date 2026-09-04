@@ -190,7 +190,6 @@ public final class CashflowSettlementCyclePolicy {
     }
 
     private static String globalCapabilityDenial(CapabilityFacts facts) {
-        if (facts.legacyReadOnly()) return "LEGACY_READ_ONLY";
         if (facts.projection() == null
             || facts.projection().health() != Health.OK
             || facts.projection().businessState() == BusinessState.INCONSISTENT) {
@@ -311,7 +310,6 @@ public final class CashflowSettlementCyclePolicy {
 
     public record CapabilityFacts(
         Projection projection,
-        boolean legacyReadOnly,
         boolean activeMember,
         boolean projectWriter,
         boolean currentApprover,
@@ -322,7 +320,6 @@ public final class CashflowSettlementCyclePolicy {
     ) {
         public CapabilityFacts(
             Projection projection,
-            boolean legacyReadOnly,
             boolean activeMember,
             boolean projectWriter,
             boolean currentApprover,
@@ -331,14 +328,13 @@ public final class CashflowSettlementCyclePolicy {
             boolean coordinatorInactive
         ) {
             this(
-                projection, legacyReadOnly, activeMember, projectWriter, currentApprover,
+                projection, activeMember, projectWriter, currentApprover,
                 requester, recoveryAdmin, coordinatorInactive, true
             );
         }
 
         public CapabilityFacts(
             Projection projection,
-            boolean legacyReadOnly,
             boolean activeMember,
             boolean projectWriter,
             boolean currentApprover,
@@ -346,7 +342,7 @@ public final class CashflowSettlementCyclePolicy {
             boolean recoveryAdmin
         ) {
             this(
-                projection, legacyReadOnly, activeMember, projectWriter, currentApprover,
+                projection, activeMember, projectWriter, currentApprover,
                 requester, recoveryAdmin, true, true
             );
         }

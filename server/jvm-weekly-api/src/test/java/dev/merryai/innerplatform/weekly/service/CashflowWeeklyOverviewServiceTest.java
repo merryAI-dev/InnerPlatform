@@ -81,7 +81,7 @@ class CashflowWeeklyOverviewServiceTest {
                     ""
                 ),
                 new WeeklyExpensePersistence.CashflowSettlementCycleAuthority(
-                    false, true, true, false, true, false
+                    true, true, false, true, false
                 )
             ),
             "project-b", new WeeklyExpensePersistence.CashflowSettlementCycleRecord(
@@ -94,7 +94,7 @@ class CashflowWeeklyOverviewServiceTest {
                     ""
                 ),
                 new WeeklyExpensePersistence.CashflowSettlementCycleAuthority(
-                    false, true, true, true, false, false
+                    true, true, true, false, false
                 )
             )
         ));
@@ -128,6 +128,7 @@ class CashflowWeeklyOverviewServiceTest {
                 org.assertj.core.groups.Tuple.tuple("WEEK_5", "PENDING_APPROVAL")
             );
         assertThat(response.items().get(0).settlementCycle().monthCloseTargetYearMonth()).isEqualTo("2026-07");
+        assertThat(response.items().get(0).settlementCycle().closeDeadline()).isEqualTo("2026-08-10");
         assertThat(response.items().get(0).settlementCycle().businessState()).isEqualTo("LOCKED");
         assertThat(response.items().get(0).settlementCycle().monthCloseSettlement().approvedAt())
             .isEqualTo("2026-08-14T01:00:00Z");

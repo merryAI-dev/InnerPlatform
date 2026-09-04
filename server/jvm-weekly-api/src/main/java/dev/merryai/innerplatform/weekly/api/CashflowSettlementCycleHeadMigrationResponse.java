@@ -8,5 +8,7 @@ public record CashflowSettlementCycleHeadMigrationResponse(
     String cycleYearMonth,
     String approvalVersionId,
     long headRevision,
+    String migrationFingerprint,
+    boolean migrationRequired,
     String auditId
 ) {}

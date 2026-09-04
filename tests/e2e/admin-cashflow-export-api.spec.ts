@@ -140,6 +140,7 @@ async function openCashflowExportWithPlatformApi(
         sheetCapturedAt: projectId === 'cashflow-e2e-a' ? '2026-08-25T07:48:00.000Z' : null,
         settlementCycle: {
           cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+          closeDeadline: '2026-09-10',
           businessState: 'NOT_REQUESTED', health: 'OK', workflowRevision: 0,
           monthCloseSettlement: null, provenance: null, supersededAttempt: null, commandCapabilities,
         },
@@ -256,10 +257,6 @@ async function openCashflowExportWithPlatformApi(
         source: url.searchParams.get('source') || undefined,
         events: [], errors: [], nextCursor: null,
       });
-      return;
-    }
-    if (url.pathname.endsWith('/month-close/requests/current')) {
-      await fulfillJson(route, { request: null });
       return;
     }
     if (url.pathname.endsWith('/month-close')) {

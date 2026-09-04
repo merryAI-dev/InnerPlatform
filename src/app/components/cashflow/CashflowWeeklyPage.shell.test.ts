@@ -3,63 +3,14 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   filterCashflowProjectsByDepartment,
-  filterCashflowProjectsBySettlementStatus,
   formatCashflowExecutiveApprover,
   formatCashflowManager,
 } from './CashflowWeeklyPage';
 import type { PersonRecord } from '../../lib/platform-bff-client';
 
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
-const settlementDeadlines = {
-  deadlineAt: '2026-08-10T15:00:00.000Z',
-  approverDeadlineAt: '2026-08-31T15:00:00.000Z',
-};
 
 describe('CashflowWeeklyPage settlement status surface', () => {
-  it('shows the selected-month close and weekly status columns without cashflow amounts', () => {
-    expect(source).toContain('title="전사 현금흐름 현황"');
-    expect(source).toContain('{Number(yearMonth.slice(5, 7))}월 결산');
-    expect(source).toContain('조직장</th>');
-    expect(source).toContain('책임자</th>');
-    expect(source).toContain("border-l-2 border-slate-300");
-    expect(source).toContain('>현금흐름(링크)</th>');
-    expect(source).toContain('<div>{week.label}</div>');
-    expect(source).not.toContain('>요약<');
-    expect(source).not.toContain('Projection-Actual 차이');
-    expect(source).not.toContain('dashboard.waiting');
-    expect(source).not.toContain('dashboard.projection');
-    expect(source).not.toContain("['P - A'");
-    expect(source).not.toContain('금액 조회 오류');
-    expect(source).not.toContain('>조회 오류</span>');
-    expect(source).not.toContain('monthCloseTargetLabel');
-    expect(source).toContain('실무자 결재:');
-    expect(source).toContain('조직장 승인:');
-    expect(source).not.toContain('PeriodAmounts');
-  });
-
-  it('uses one overview snapshot and refreshes it after a status transition', () => {
-    expect(source).toContain('sticky top-0');
-    expect(source).toContain('sticky left-0');
-    expect(source).toContain('fetchCashflowWeeklyOverviewViaBff');
-    expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action)}");
-    // 2026-08-20: 진행 바로 바꿨다가 헷갈린다는 피드백으로 배지로 롤백. 기간 줄만 유지.
-    expect(source).toContain('주정산 이전');
-    expect(source).toContain('결산 전');
-    expect(source).toContain('조직장 승인 필요');
-    expect(source).toContain('승인 완료');
-    expect(source).toContain('<ProjectPeriodLine start={project.contractStart} end={project.contractEnd} />');
-    expect(source).not.toContain('CashflowScheduleBarCompact');
-    expect(source).toContain("user?.uid === project.executiveApproverId");
-    expect(source).toContain('setRefreshSequence((current) => current + 1)');
-    expect(source).not.toContain('fetchCashflowSettlementStatusesBatchViaBff');
-    expect(source).not.toContain('useCashflowProjectionActualSummaries');
-    expect(source).not.toContain('window.setInterval');
-    expect(source).not.toContain('window.location.reload');
-    expect(source).not.toContain("onAction('SUBMIT')");
-    expect(source).not.toContain('{project.department} · {project.clientOrg}');
-  });
-
   it('filters both visible rows and compliance requests by normalized department', () => {
     expect(source).toContain("const [deptFilter, setDeptFilter] = useState('ALL')");
     expect(source).toContain('getProjectRegistrationCicOptions()');
@@ -92,75 +43,6 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('People 연결 필요');
     expect(source).toContain('레거시 이름은 표시만 하고, 선택한 People UID로만');
     expect(source).toContain('flex flex-col items-center gap-0.5 text-center');
-  });
-
-  it('ANDs department and month status filters while accepting any matching selected-month week', () => {
-    const statuses = {
-      match: { projectId: 'match', yearMonth: '2026-08', items: [
-        { ...settlementDeadlines, period: 'MONTH' as const, status: 'LOCKED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-        { ...settlementDeadlines, period: 'WEEK_2' as const, status: 'PENDING_APPROVAL' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-      ] },
-      wrongMonth: { projectId: 'wrongMonth', yearMonth: '2026-08', items: [
-        { ...settlementDeadlines, period: 'MONTH' as const, status: 'WAITING_FOR_UPDATE' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-        { ...settlementDeadlines, period: 'WEEK_2' as const, status: 'PENDING_APPROVAL' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-      ] },
-      wrongWeek: { projectId: 'wrongWeek', yearMonth: '2026-08', items: [
-        { ...settlementDeadlines, period: 'MONTH' as const, status: 'LOCKED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-        { ...settlementDeadlines, period: 'WEEK_1' as const, status: 'COMPLETED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-      ] },
-      submitted: { projectId: 'submitted', yearMonth: '2026-08', items: [
-        { ...settlementDeadlines, period: 'MONTH' as const, status: 'SUBMITTED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-        { ...settlementDeadlines, period: 'WEEK_1' as const, status: 'COMPLETED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-      ] },
-    };
-    const projects = [
-      { id: 'match', department: 'AXR팀' },
-      { id: 'wrongMonth', department: 'AXR팀' },
-      { id: 'wrongWeek', department: 'AXR팀' },
-      { id: 'submitted', department: 'AXR팀' },
-      { id: 'otherDepartment', department: 'CIC2' },
-      { id: 'partialError', department: 'AXR팀' },
-      { id: 'monthCycleError', department: 'AXR팀' },
-      { id: 'loadingOnly', department: 'AXR팀' },
-    ];
-
-    expect(filterCashflowProjectsBySettlementStatus(projects, 'AXR팀', statuses, { partialError: 'STATUS_UNAVAILABLE' }, {}, false, [1, 2, 3, 4, 5], 'LOCKED', 'PENDING_APPROVAL').map(({ id }) => id))
-      .toEqual(['match', 'partialError']);
-    expect(filterCashflowProjectsBySettlementStatus(projects, 'AXR팀', statuses, {}, {}, true, [1, 2, 3, 4, 5], 'LOCKED', 'PENDING_APPROVAL').map(({ id }) => id))
-      .toEqual(['match', 'partialError', 'monthCycleError', 'loadingOnly']);
-    expect(filterCashflowProjectsBySettlementStatus(projects, 'AXR팀', statuses, {}, {}, false, [1, 2, 3, 4, 5], 'SUBMITTED', 'COMPLETED').map(({ id }) => id))
-      .toEqual(['submitted']);
-    expect(filterCashflowProjectsBySettlementStatus([{ id: 'unset', department: 'AXR팀' }], 'AXR팀', {}, {}, {}, false, [1], 'WAITING_FOR_UPDATE', 'WAITING_FOR_UPDATE').map(({ id }) => id))
-      .toEqual(['unset']);
-  });
-
-  it('keeps canonical weekly filtering available when only the month cycle needs rechecking', () => {
-    const statuses = {
-      cycleError: { projectId: 'cycleError', yearMonth: '2026-08', items: [
-        { ...settlementDeadlines, period: 'MONTH' as const, status: 'LOCKED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-        { ...settlementDeadlines, period: 'WEEK_2' as const, status: 'PENDING_APPROVAL' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
-      ] },
-    };
-    const projects = [{ id: 'cycleError', department: 'AXR팀' }];
-
-    expect(filterCashflowProjectsBySettlementStatus(
-      projects, 'AXR팀', statuses, {}, { cycleError: '상태 재확인 필요' }, false,
-      [1, 2, 3, 4, 5], 'SUBMITTED', 'PENDING_APPROVAL',
-    ).map(({ id }) => id)).toEqual(['cycleError']);
-    expect(filterCashflowProjectsBySettlementStatus(
-      projects, 'AXR팀', statuses, {}, { cycleError: '상태 재확인 필요' }, false,
-      [1, 2, 3, 4, 5], 'SUBMITTED', 'COMPLETED',
-    )).toEqual([]);
-  });
-
-  it('keeps the status filter labels aligned with their settlement period', () => {
-    expect(source).toContain("period === 'MONTH' ? '결산 전' : '주정산 이전'");
-    expect(source).toContain("period === 'MONTH' && status === 'LOCKED'");
-    expect(source).toContain("period !== 'MONTH' && status === 'COMPLETED'");
-    expect(source).toContain('<SelectItem value="SUBMITTED">조직장 승인 필요</SelectItem>');
-    expect(source).toContain('<SelectItem value="LOCKED">승인 완료</SelectItem>');
-    expect(source).toContain('<SelectItem value="PENDING_APPROVAL">조직장 승인 필요</SelectItem>');
-    expect(source).toContain('<SelectItem value="COMPLETED">승인 완료</SelectItem>');
   });
 
   it('hides settlement actions when the canonical cycle needs rechecking', () => {

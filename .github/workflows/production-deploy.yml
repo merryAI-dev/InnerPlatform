@@ -105,6 +105,7 @@ jobs:
       BFF_MAINTENANCE_READ_ONLY: 'false'
       BFF_ALLOWED_ORIGINS: https://myscube.myscguard.app
       JVM_WEEKLY_AUTH_MODE: strict
+      JVM_WEEKLY_FIRESTORE_PROJECT_ID: inner-platform-live-20260316
       JVM_WEEKLY_API_BASE_URL: ${{ vars.JVM_WEEKLY_API_BASE_URL_LIVE }}
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
       JVM_SOURCE_PATHS: server/jvm-weekly-api .github/workflows/jvm-production-deploy.yml
@@ -194,15 +195,18 @@ jobs:
           const changedPaths = changedPathsBetween(aliasBase, head);
           const { releaseMode, bffFrontendCutover } = classifyCashflowSettlementProductionRelease(
             changedPaths,
-            { rolloutSupportIsLive: isJvmRolloutSupportLiveAt(head) },
+            {
+              rolloutSupportIsLive: isJvmRolloutSupportLiveAt(head),
+              alreadyDeployed: aliasBase === head,
+            },
           );
           process.stdout.write(JSON.stringify({
             releaseMode,
-            settlementCutover: bffFrontendCutover.length > 0,
+            settlementCutover: releaseMode === 'web' && bffFrontendCutover.length > 0,
           }));
           NODE
           )"
-          release_mode="$(jq -er '.releaseMode | select(. == "jvm_only" or . == "web")' \
+          release_mode="$(jq -er '.releaseMode | select(. == "jvm_only" or . == "web" or . == "atomic_cutover" or . == "already_deployed")' \
             <<< "${release_classification}")"
           settlement_cutover="$(jq -er '
             .settlementCutover
@@ -212,7 +216,7 @@ jobs:
               end
           ' <<< "${release_classification}")"
           case "${release_mode}" in
-            jvm_only|web) ;;
+            jvm_only|web|atomic_cutover|already_deployed) ;;
             *) echo "Unexpected production release mode: ${release_mode}" >&2; exit 1 ;;
           esac
           {
@@ -233,6 +237,20 @@ jobs:
             printf '%s\n' "- Result: JVM-only release; Vercel production intentionally skipped."
             printf '%s\n' "- Commit: ${DEPLOY_SHA}"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Skip Production for atomic settlement cutover
+        if: steps.release_mode.outputs.release_mode == 'atomic_cutover'
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          echo "Atomic settlement cutover is owned by JVM Production Deploy."
+          echo "- Commit: ${DEPLOY_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Skip Production already completed by atomic owner
+        if: steps.release_mode.outputs.release_mode == 'already_deployed'
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
+        run: echo "Production alias already points to ${DEPLOY_SHA}; no duplicate deploy."
 
       - name: Authenticate JVM release verifier
         if: steps.release_mode.outputs.settlement_cutover == 'true'
@@ -321,7 +339,7 @@ jobs:
           echo "jvm_deployed_sha=${jvm_deployed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify Vercel deploy author policy
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.release_mode == 'web'
         run: |
           set -euo pipefail
           author_email="$(git show -s --format=%ae HEAD)"
@@ -335,7 +353,7 @@ jobs:
           esac
 
       - name: Verify Vercel credentials are configured
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.release_mode == 'web'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -465,7 +483,7 @@ jobs:
 
       - name: Deploy to Vercel production
         id: vercel_deploy
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.release_mode == 'web'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -475,52 +493,20 @@ jobs:
           SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
         run: |
           set -euo pipefail
-          output_file="$(mktemp)"
           commit_sha="$(git rev-parse HEAD)"
-          npx --yes "${VERCEL_CLI_PACKAGE}" deploy --prod --yes --skip-domain --token "${VERCEL_TOKEN}" \
-            --build-env VITE_PLATFORM_API_ENABLED=true \
-            --build-env VITE_FIRESTORE_CORE_ENABLED=false \
-            --build-env VITE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
-            --env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}" \
-            --env BFF_AUTH_MODE="${BFF_AUTH_MODE}" \
-            --env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}" \
-            --env BFF_WORKERS_ENABLED="${BFF_WORKERS_ENABLED}" \
-            --env BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER}" \
-            --env BFF_MAINTENANCE_READ_ONLY="${BFF_MAINTENANCE_READ_ONLY}" \
-            --env BFF_ALLOWED_ORIGINS="${BFF_ALLOWED_ORIGINS}" \
-            --env MYSCUBE_MCP_OAUTH_ISSUER="https://myscube.myscguard.app" \
-            --env MYSCUBE_MCP_PUBLIC_ORIGIN="https://myscube.myscguard.app" \
-            --env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
-            --env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
-            --env BFF_LIVE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
-            --env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
-            --env JVM_WEEKLY_AUTH_MODE="${JVM_WEEKLY_AUTH_MODE}" \
-            --env JVM_WEEKLY_API_BASE_URL="${JVM_WEEKLY_API_BASE_URL}" \
-            --env JVM_WEEKLY_API_ID_TOKEN_AUDIENCE="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}" \
-            --env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
-            --env JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON="${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" \
-            --env SLACK_ALERT_WEBHOOK_URL= \
-            --env SLACK_ALERT_BOT_TOKEN="${SLACK_ALERT_BOT_TOKEN}" \
-            --env SLACK_ALERT_CHANNEL_ID="${SLACK_ALERT_CHANNEL_ID}" \
-            --env PROJECT_REGISTRATION_SLACK_WEBHOOK_URL= \
-            --env PROJECT_REGISTRATION_SLACK_BOT_TOKEN= \
-            --env PROJECT_REGISTRATION_SLACK_CHANNEL_ID= \
-            --meta maintenanceReadOnly=false \
-            --meta githubCommitSha="${commit_sha}" \
-            --meta githubActionsInvocation="${DEPLOY_INVOCATION_ID}" \
-            2>&1 | tee "${output_file}"
-          deployment_url="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "${output_file}" | tail -n 1 || true)"
-          if [ -z "${deployment_url}" ]; then
-            echo "Could not parse Vercel deployment URL" >&2
-            exit 1
-          fi
-          deployment_host="${deployment_url#https://}"
+          deployment="$(node scripts/deploy-vercel-production-candidate.mjs \
+            --source-dir . \
+            --commit-sha "${commit_sha}" \
+            --invocation "${DEPLOY_INVOCATION_ID}" \
+            --maintenance false)"
+          deployment_url="$(jq -er .deploymentUrl <<< "${deployment}")"
+          deployment_host="$(jq -er .deploymentHost <<< "${deployment}")"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify Vercel candidate identity
         id: candidate_identity
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.release_mode == 'web'
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
@@ -540,7 +526,7 @@ jobs:
           echo "deployment_id=${deployment_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify production surface before alias
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.release_mode == 'web'
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
@@ -623,7 +609,7 @@ jobs:
 
       - name: Capture current canonical alias
         id: previous_alias
-        if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
+        if: steps.release_mode.outputs.release_mode == 'web' && needs.preflight.outputs.promote == 'true'
         env:
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
@@ -652,7 +638,7 @@ jobs:
 
       - name: Promote canonical production alias
         id: alias_promotion
-        if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
+        if: steps.release_mode.outputs.release_mode == 'web' && needs.preflight.outputs.promote == 'true'
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
@@ -666,7 +652,7 @@ jobs:
 
       - name: Verify canonical alias target
         id: canonical_alias
-        if: steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true'
+        if: steps.release_mode.outputs.release_mode == 'web' && needs.preflight.outputs.promote == 'true'
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
           CANDIDATE_DEPLOYMENT_ID: ${{ steps.candidate_identity.outputs.deployment_id }}
@@ -693,7 +679,7 @@ jobs:
           exit 1
 
       - name: Reconcile canonical alias or roll back
-        if: always() && steps.release_mode.outputs.release_mode != 'jvm_only' && needs.preflight.outputs.promote == 'true' && steps.vercel_deploy.outcome == 'success' && steps.previous_alias.outcome == 'success'
+        if: always() && steps.release_mode.outputs.release_mode == 'web' && needs.preflight.outputs.promote == 'true' && steps.vercel_deploy.outcome == 'success' && steps.previous_alias.outcome == 'success'
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
           PREVIOUS_DEPLOYMENT_HOST: ${{ steps.previous_alias.outputs.deployment_host }}
@@ -783,7 +769,7 @@ jobs:
           exit 1
 
       - name: Release summary
-        if: steps.release_mode.outputs.release_mode != 'jvm_only'
+        if: steps.release_mode.outputs.release_mode == 'web'
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
         run: |

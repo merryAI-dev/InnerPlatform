@@ -8,17 +8,6 @@ function isYearMonth(value) {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
-function lockRange(record) {
-  const scope = record?.scope && typeof record.scope === 'object' && !Array.isArray(record.scope)
-    ? record.scope
-    : {};
-  const fromMonth = readOptionalText(scope.fromMonth) || readOptionalText(record?.fromMonth) || readOptionalText(record?.yearMonth);
-  const throughMonth = readOptionalText(scope.throughMonth) || readOptionalText(record?.throughMonth) || readOptionalText(record?.yearMonth);
-  return isYearMonth(fromMonth) && isYearMonth(throughMonth) && fromMonth <= throughMonth
-    ? { fromMonth, throughMonth }
-    : null;
-}
-
 const MONTH_CLOSE_COUNTERS = [
   'revision',
   'reopenCount',
@@ -72,12 +61,6 @@ function isPristineOpenMonthClose(close) {
   ))) return false;
   return !Object.hasOwn(close, 'lastAmendmentPostDeadline')
     || close.lastAmendmentPostDeadline === false;
-}
-
-export function cashflowMonthRequestCovers(record, { projectId, yearMonth }) {
-  if (readOptionalText(record?.projectId) !== projectId) return false;
-  const range = lockRange(record);
-  return Boolean(range && yearMonth >= range.fromMonth && yearMonth <= range.throughMonth);
 }
 
 export async function assertCashflowMonthWritable({ db, transaction, tenantId, projectId, yearMonth }) {

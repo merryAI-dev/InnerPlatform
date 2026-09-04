@@ -218,6 +218,7 @@ export function requireCashflowSettlementCycleReadContext(source, { projectId, c
     || cycle.cycleYearMonth !== cycleYearMonth
     || cycle.weeklyYearMonth !== cycleYearMonth
     || cycle.monthCloseTargetYearMonth !== targetYearMonth
+    || cycle.closeDeadline !== `${cycleYearMonth}-10`
     || !['NOT_REQUESTED', 'SUBMITTED', 'LOCKED', 'REOPEN_REQUESTED', 'REOPENED', 'REJECTED', 'WITHDRAWN', 'INCONSISTENT']
       .includes(businessState)
     || !['OK', 'RECONCILING', 'UNAVAILABLE'].includes(health)

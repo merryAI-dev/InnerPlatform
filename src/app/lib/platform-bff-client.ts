@@ -1250,7 +1250,6 @@ export interface CashflowMonthCloseDashboard {
     cycleYearMonth?: string;
     targetYearMonth?: string;
     closeDeadline: string | null;
-    // 진행 바용 시각 표현(KST). closeDeadlineAt = 익월 11일 0시, approverDeadlineAt = 14일 0시.
     closeDeadlineAt?: string | null;
     approverDeadlineAt?: string | null;
     late: boolean;
@@ -1275,13 +1274,14 @@ export interface CloseCashflowMonthPayload {
   contractVersion?: 'cashflow-cumulative-close-v2';
   yearMonth: string;
   expectedRevision: number;
+  expectedWorkflowRevision: number;
   expectedApproverUid: string;
   expectedProjectVersion: number;
   expectedOpeningBalances: CashflowOpeningBalances;
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REOPEN_REQUESTED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'PENDING_APPROVAL' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REOPEN_REQUESTED' | 'REJECTED' | 'REOPENED' | 'WITHDRAWN';
 
 export interface CashflowMonthCloseStoredSource {
   sourceRevision: string | null;
@@ -1372,11 +1372,14 @@ export interface CashflowMonthCloseRequest {
   requestId: string;
   projectId: string;
   yearMonth: string;
+  cycleYearMonth?: string;
+  monthCloseTargetYearMonth?: string;
   throughMonth?: string;
   status: CashflowMonthCloseRequestStatus;
   canDecideReopen: boolean;
   reopenAuthorityAvailability?: 'ALLOWED' | 'FORBIDDEN' | 'UNAVAILABLE';
   revision: number;
+  workflowRevision?: number;
   ledgerRevision?: number;
   fromMonth?: string;
   manifestHash?: string;
@@ -1586,6 +1589,13 @@ export interface CashflowMonthCloseResult {
   commandName: string;
   projectId: string;
   yearMonth: string;
+  cycleYearMonth: string;
+  targetYearMonth: string;
+  closeDeadline: string;
+  closeDeadlineAt: string;
+  approverDeadlineAt: string;
+  monthState: CashflowMonthCloseRequest | null;
+  settlementCycle: CashflowSettlementCycle;
   status: CashflowMonthCloseStatus;
   revision: number;
   reopenCount: number;
@@ -1741,6 +1751,7 @@ export interface CashflowSettlementCycle {
   cycleYearMonth: string;
   weeklyYearMonth: string;
   monthCloseTargetYearMonth: string;
+  closeDeadline?: string;
   businessState: 'NOT_REQUESTED' | 'SUBMITTED' | 'LOCKED' | 'REOPEN_REQUESTED' | 'REOPENED' | 'REJECTED' | 'WITHDRAWN' | 'INCONSISTENT';
   health: 'OK' | 'RECONCILING' | 'UNAVAILABLE';
   workflowRevision: number;
@@ -3716,6 +3727,17 @@ function isCashflowSettlementInstant(value: unknown): value is string {
     && Number.isFinite(Date.parse(value));
 }
 
+function isIsoCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || value.trim() !== value) return false;
+  const match = /^(20\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
 function isCashflowSettlementStatusItem(value: unknown): value is CashflowSettlementStatusItem {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
@@ -3795,7 +3817,7 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
   actor: ActorLike;
   projectId: string;
   yearMonth: string;
-  period: CashflowSettlementPeriod;
+  period: Exclude<CashflowSettlementPeriod, 'MONTH'>;
   action: 'SUBMIT' | 'APPROVE';
   client?: PlatformApiClientLike;
 }): Promise<CashflowSettlementStatusesResult> {
@@ -3920,6 +3942,7 @@ export async function fetchCashflowWeeklyOverviewViaBff(params: {
       && source?.cycleYearMonth === params.yearMonth
       && source?.weeklyYearMonth === params.yearMonth
       && source?.monthCloseTargetYearMonth === result.monthCloseTargetYearMonth
+      && isIsoCalendarDate(source?.closeDeadline)
       && ['NOT_REQUESTED', 'SUBMITTED', 'LOCKED', 'REOPEN_REQUESTED', 'REOPENED', 'REJECTED', 'WITHDRAWN', 'INCONSISTENT'].includes(source?.businessState)
       && ['OK', 'RECONCILING', 'UNAVAILABLE'].includes(source?.health)
       && Number.isSafeInteger(source?.workflowRevision)
@@ -4075,7 +4098,7 @@ export async function requestCashflowMonthCloseViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 27_000,
@@ -4104,25 +4127,6 @@ export async function saveCashflowMonthCloseApproverViaBff(params: {
     },
   );
   return response.data;
-}
-
-export async function fetchCurrentCashflowMonthCloseRequestViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  yearMonth: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseRequest | null> {
-  const response = await resolveClient(params.client).get<{ request: CashflowMonthCloseRequest | null }>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/current?yearMonth=${encodeURIComponent(params.yearMonth)}`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      retries: 0,
-      timeoutMs: 12000,
-    },
-  );
-  return response.data.request;
 }
 
 export async function fetchPendingCashflowMonthCloseRequestsViaBff(params: {
@@ -4203,7 +4207,7 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12_000,
@@ -4235,7 +4239,14 @@ export async function withdrawCashflowMonthCloseRequestViaBff(params: {
   actor: ActorLike;
   projectId: string;
   requestId: string;
-  payload: { expectedRevision: number; expectedManifestHash: string; reason?: string };
+  payload: {
+    cycleYearMonth: string;
+    monthCloseTargetYearMonth: string;
+    expectedRevision: number;
+    expectedManifestHash: string;
+    expectedWorkflowRevision: number;
+    reason: string;
+  };
   idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<{ request: CashflowMonthCloseRequest }> {
@@ -4244,7 +4255,7 @@ export async function withdrawCashflowMonthCloseRequestViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -4269,7 +4280,7 @@ export async function requestCashflowMonthReopenViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -4291,7 +4302,7 @@ export async function decideCashflowMonthReopenViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { ...params.payload, settlementCycle: true },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,

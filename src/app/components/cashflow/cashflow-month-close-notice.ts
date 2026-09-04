@@ -37,7 +37,7 @@ function who(name: string | null | undefined, uid: string | null | undefined): s
 export function pickCashflowMonthCloseNotice(input: CashflowMonthCloseNoticeInput): CashflowMonthCloseNotice | null {
   const status = (input.requestStatus || '').toUpperCase();
 
-  if (['PENDING', 'APPROVING', 'UNCERTAIN'].includes(status)) {
+  if (['PENDING_APPROVAL', 'PENDING', 'APPROVING', 'UNCERTAIN'].includes(status)) {
     // 승인 대기 중: 관건은 "누가 움직일 수 있나". 본인이 요청자면 버튼이 있으니 말할 게 없다.
     if (input.canWithdraw) return null;
     const mine = Boolean(input.currentUid) && input.currentUid === input.requestedByUid;

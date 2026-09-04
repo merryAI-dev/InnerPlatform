@@ -30,8 +30,10 @@ const JVM_ONLY_RELEASE_SUPPORT_PATHS = new Set([
   'deploy-prod-align.mjs',
   'policies/jvm-command-roles.json',
   'scripts/audit-cashflow-settlement-cycle-rollout.mjs',
+  'scripts/deploy-vercel-production-candidate.mjs',
   'scripts/extract_jvm_command_roles.mjs',
   'scripts/verify-cashflow-settlement-candidate.mjs',
+  'scripts/verify-cashflow-settlement-cutover-sequence.mjs',
   'scripts/verify-cashflow-settlement-cycle-projection.mjs',
   'scripts/verify-vercel-deployment-identity.mjs',
   'scripts/verify-cashflow-settlement-release-boundary.mjs',
@@ -66,18 +68,20 @@ export function classifyCashflowSettlementReleasePaths(paths, { rolloutSupportIs
   };
 }
 
-export function classifyCashflowSettlementProductionRelease(paths, options) {
+export function classifyCashflowSettlementProductionRelease(paths, options = {}) {
   const normalized = [...new Set(paths.map((path) => String(path || '').trim()).filter(Boolean))];
   const { jvm, bffFrontendCutover } = classifyCashflowSettlementReleasePaths(normalized, options);
   const unexpectedPaths = normalized.filter((path) => (
     !path.startsWith(JVM_ROOT) && !JVM_ONLY_RELEASE_SUPPORT_PATHS.has(path)
   ));
   return {
-    releaseMode: jvm.length > 0
-      && bffFrontendCutover.length === 0
-      && unexpectedPaths.length === 0
-      ? 'jvm_only'
-      : 'web',
+    releaseMode: options.alreadyDeployed
+      ? 'already_deployed'
+      : jvm.length > 0 && bffFrontendCutover.length > 0
+        ? 'atomic_cutover'
+        : jvm.length > 0 && unexpectedPaths.length === 0
+          ? 'jvm_only'
+          : 'web',
     jvm,
     bffFrontendCutover,
     unexpectedPaths,
@@ -85,16 +89,7 @@ export function classifyCashflowSettlementProductionRelease(paths, options) {
 }
 
 export function assertCashflowSettlementReleaseBoundary(paths, options) {
-  const classified = classifyCashflowSettlementReleasePaths(paths, options);
-  if (classified.jvm.length > 0 && classified.bffFrontendCutover.length > 0) {
-    throw new Error([
-      'Cashflow settlement release boundary violation.',
-      'Land and verify the JVM-only release before the BFF/frontend cutover release.',
-      `JVM paths: ${classified.jvm.join(', ')}`,
-      `BFF/frontend paths: ${classified.bffFrontendCutover.join(', ')}`,
-    ].join('\n'));
-  }
-  return classified;
+  return classifyCashflowSettlementProductionRelease(paths, options);
 }
 
 export function isJvmRolloutSupportLiveAt(head, execFile = execFileSync) {

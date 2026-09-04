@@ -54,7 +54,7 @@ class CashflowSettlementStatusDeadlineServiceTest {
             settlements.stream().filter(item -> "MONTH".equals(item.period())).findFirst().orElse(null),
             new CashflowSettlementCyclePolicy.Projection(businessState, health, 1, null, ""),
             new WeeklyExpensePersistence.CashflowSettlementCycleAuthority(
-                false, false, false, false, false, false
+                false, false, false, false, false
             )
         );
     }

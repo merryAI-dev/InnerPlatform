@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { execFile } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 import {
+  assertProtectedSettlementStatusesUnchanged,
   assertSettlementCycleCutoverReady,
   assertSettlementCycleInventoryStable,
   createSettlementCycleJvmOperations,
@@ -32,7 +34,7 @@ function usage() {
     --verify-cutover --people-uid ACTIVE_ADMIN_UID --jvm-base-url CANDIDATE_URL \\
     --jvm-audience CANONICAL_SERVICE_URL
 
-  # 검증된 v1 head만 JVM transaction command로 migration
+  # allowlist 전체 dry-run 후 프로젝트별 JVM transaction migration
   node scripts/audit-cashflow-settlement-cycle-rollout.mjs \\
     --apply \\
     --firebase-project PROJECT_ID --confirm-project PROJECT_ID \\
@@ -48,7 +50,8 @@ function usage() {
 안전장치:
   --apply 없이는 쓰지 않습니다. wildcard allowlist, 불일치하는 project/tenant 확인값,
   빈 People UID/사유, JVM capability 부재는 모두 중단합니다. 스크립트는 Firestore authority를
-  직접 고치지 않고 JVM의 CAS/idempotency transaction command만 호출합니다.`);
+  직접 고치지 않습니다. allowlist 전체의 JVM dry-run이 성공한 뒤에만 프로젝트별
+  CAS/idempotency transaction command를 호출합니다.`);
 }
 
 async function runGcloud(args, signal) {
@@ -122,6 +125,13 @@ async function main() {
   let after = options.apply
     ? await readSettlementCycleRolloutInventory({ db, tenantId: options.tenantId })
     : before;
+  if (options.apply) {
+    assertProtectedSettlementStatusesUnchanged(
+      before,
+      after,
+      migrations.map(({ projectId, cycleYearMonth }) => `${projectId}-${cycleYearMonth}`),
+    );
+  }
   let projections = [];
   let cutover = null;
   if (options.verifyCutover) {
@@ -151,6 +161,13 @@ async function main() {
     projections,
     cutover,
   };
+  if (options.outputPath) {
+    writeFileSync(options.outputPath, `${JSON.stringify(report)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  }
   console.log(JSON.stringify(settlementCycleRolloutAuditSummary(report), null, 2));
 }
 

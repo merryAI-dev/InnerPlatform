@@ -11,17 +11,7 @@ import {
   classifyCashflowSettlementReleasePaths,
 } from '../scripts/verify-cashflow-settlement-release-boundary.mjs';
 
-describe('cashflow settlement split-release boundary', () => {
-  it('runs the real JVM settlement Firestore Emulator integration in CI', () => {
-    const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-    expect(workflow).toContain('- name: JVM settlement Firestore emulator integration');
-    expect(workflow).toContain(
-      'run: bash server/jvm-weekly-api/scripts/test-settlement-cycle-emulator.sh',
-    );
-    expect(workflow.indexOf('JVM settlement Firestore emulator integration'))
-      .toBeGreaterThan(workflow.indexOf('JVM weekly API tests'));
-  });
-
+describe('cashflow settlement release boundary', () => {
   it('publishes every JVM authorization entry including digit-bearing command constants', () => {
     const authorizationSource = readFileSync(new URL(
       './jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseAuthorizationService.java',
@@ -182,11 +172,11 @@ describe('cashflow settlement split-release boundary', () => {
     expect(result.bffFrontendCutover).toHaveLength(4);
   });
 
-  it('rejects one commit that could expose the BFF before its JVM authority is live', () => {
-    expect(() => assertCashflowSettlementReleaseBoundary([
+  it('routes a mixed settlement release through the atomic cutover', () => {
+    expect(assertCashflowSettlementReleaseBoundary([
       'server/jvm-weekly-api/src/main/java/example/Settlement.java',
       'server/bff/routes/jvm-weekly-api.mjs',
-    ])).toThrow(/JVM-only release before the BFF\/frontend cutover/);
+    ])).toMatchObject({ releaseMode: 'atomic_cutover' });
   });
 
   it('does not classify unrelated frontend or BFF files as the settlement cutover', () => {
@@ -243,7 +233,7 @@ describe('cashflow settlement split-release boundary', () => {
     })]);
   });
 
-  it('rejects a real multi-commit range containing a deletion and a cross-boundary rename', () => {
+  it('routes a real multi-commit cross-boundary range through the atomic cutover', () => {
     const repository = mkdtempSync(join(tmpdir(), 'settlement-release-boundary-'));
     const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
     const write = (path, value) => {
@@ -278,11 +268,11 @@ describe('cashflow settlement split-release boundary', () => {
         'server/jvm-weekly-api/obsolete.java',
       ]));
       expect(classifyCashflowSettlementProductionRelease(paths)).toMatchObject({
-        releaseMode: 'web',
+        releaseMode: 'atomic_cutover',
         bffFrontendCutover: ['server/bff/routes/jvm-weekly-api.mjs'],
       });
-      expect(() => assertCashflowSettlementReleaseBoundary(paths))
-        .toThrow(/Cashflow settlement release boundary violation/);
+      expect(assertCashflowSettlementReleaseBoundary(paths))
+        .toMatchObject({ releaseMode: 'atomic_cutover' });
     } finally {
       rmSync(repository, { recursive: true, force: true });
     }

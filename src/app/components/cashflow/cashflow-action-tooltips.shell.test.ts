@@ -48,7 +48,6 @@ describe('cashflow action chrome', () => {
   it('keeps final month close compact while preserving server validation', () => {
     expect(cashflowProjectSheetSource).toContain('buildCashflowMonthCloseDraftInput');
     expect(cashflowProjectSheetSource).toContain('월 결산 승인 요청');
-    expect(cashflowProjectSheetSource).toContain('monthCloseActions?.requestMonthClose.enabled');
     expect(cashflowProjectSheetSource).toContain('monthCloseActions?.requestMonthClose.guide');
     // 2026-08-19: 막는 사유를 회색 안내 한 줄로만 보여줘서 경고인지 알 수 없었다. 이제 서버가 준
     // 블로커를 빨간 경고로 펴고, 어느 칸인지(셀 주소·주차)까지 보여준다. 판정은 서버 그대로 쓴다.

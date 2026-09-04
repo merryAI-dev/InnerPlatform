@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import {
+  assertProtectedSettlementStatusesUnchanged,
   assertSettlementCycleInventoryStable,
   assertSettlementCycleCutoverReady,
   buildSettlementCycleHeadMigrationBody,
@@ -57,8 +58,8 @@ function lockedSettlementStatuses() {
   };
 }
 
-function document(id, data) {
-  return { id, data };
+function document(id, data, updateTime) {
+  return { id, data, ...(updateTime ? { updateTime } : {}) };
 }
 
 describe('cashflow settlement-cycle rollout audit', () => {
@@ -84,7 +85,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
           status: 'CLOSED', closedThrough: '2026-08', settlementMonth: '2026-09',
           fromMonth: '2023-01', revision: 4, rootHash,
           requestId: 'project-a-2026-09', requestRevision: 2,
-          approvalId: 'approval-a', operationId: 'operation-a',
+          approvalId: '', operationId: '',
         }),
         document('project-b', {
           contractVersion: 'cashflow-cumulative-close-v2', projectId: 'project-b',
@@ -151,12 +152,15 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(invalid.verificationTargets).toEqual([]);
   });
 
-  it('accepts only the two verified request identities for a migrated authority range', () => {
+  it('accepts only the cycle-keyed request identity for a canonical authority range', () => {
     const targetKeyed = buildSettlementCycleRolloutInventory({
       heads: [document('project-a', {
-        contractVersion: 'cashflow-cumulative-close-v2', projectId: 'project-a',
+        contractVersion: 'cashflow-cumulative-close-v2', tenantId: 'mysc', projectId: 'project-a',
         status: 'CLOSED', authorityExists: true, revision: 3, rootHash,
         fromMonth: '2023-01', closedThrough: '2026-08', settlementMonth: '2026-09',
+        requestId: 'project-a-2026-08', requestRevision: 2,
+        approvalId: '', operationId: '',
+        migratedAt: '2026-08-27T03:04:05Z', migratedByUid: 'admin-1',
         closedRanges: [{
           affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
           closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
@@ -164,12 +168,13 @@ describe('cashflow settlement-cycle rollout audit', () => {
         }],
       })],
     });
-    expect(targetKeyed.verificationTargets).toEqual([{
-      projectId: 'project-a', cycleYearMonth: '2026-09', requestId: 'project-a-2026-08',
-    }]);
+    expect(targetKeyed.counts.invalidHeads).toBe(0);
+    expect(targetKeyed.recoverableHeads).toEqual([expect.objectContaining({
+      projectId: 'project-a', expectedHeadRevision: 3, expectedHeadRootHash: rootHash,
+    })]);
+    expect(targetKeyed.verificationTargets).toEqual([]);
 
-    const foreign = structuredClone(targetKeyed);
-    expect(buildSettlementCycleRolloutInventory({
+    const cycleKeyed = buildSettlementCycleRolloutInventory({
       heads: [document('project-a', {
         contractVersion: 'cashflow-cumulative-close-v2', projectId: 'project-a',
         status: 'CLOSED', authorityExists: true, revision: 3, rootHash,
@@ -177,39 +182,62 @@ describe('cashflow settlement-cycle rollout audit', () => {
         closedRanges: [{
           affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
           closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-          requestId: 'project-b-2026-09', ledgerRevision: 2, rootHash,
+          requestId: 'project-a-2026-09', ledgerRevision: 2, rootHash,
         }],
       })],
-    }).counts.invalidHeads).toBe(1);
-    expect(foreign.counts.invalidHeads).toBe(0);
+    });
+    expect(cycleKeyed.verificationTargets).toEqual([{
+      projectId: 'project-a', cycleYearMonth: '2026-09', requestId: 'project-a-2026-09',
+    }]);
   });
 
-  it('classifies active requests by canonical shape and accepts only JVM coordinator states', () => {
+  it('blocks every raw active request state and active coordinator regardless of request shape', () => {
+    const activeStatuses = [
+      'PENDING', 'PENDING_APPROVAL', 'APPROVING', 'UNCERTAIN', 'BUILDING', 'REOPEN_REQUESTED',
+    ];
     const inventory = buildSettlementCycleRolloutInventory({
       requests: [
-        document('legacy-v2-pending', {
-          contractVersion: 'cashflow-cumulative-close-v2', projectId: 'project-a',
-          status: 'PENDING_APPROVAL', cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+        ...activeStatuses.flatMap((status, index) => {
+          const projectId = `canonical-${index}`;
+          return [
+            document(`${projectId}-2026-09`, {
+              documentType: 'REQUEST', contractVersion: 'cashflow-cumulative-close-v2',
+              requestId: `${projectId}-2026-09`, projectId, status,
+              cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+            }),
+            document(`legacy-${index}`, { projectId: `legacy-${index}`, status, yearMonth: '2026-08' }),
+          ];
         }),
         document('__active__-valid', {
           documentType: 'ACTIVE_COORDINATOR', projectId: 'project-a',
           activeState: 'PENDING_APPROVAL', activeCycleYearMonth: '2026-09',
           activeRequestId: 'project-a-2026-09', workflowRevision: 2,
         }),
-        document('__active__-invalid', {
+        document('__active__-inactive', {
           documentType: 'ACTIVE_COORDINATOR', projectId: 'project-b',
-          activeState: 'SUBMITTED', activeCycleYearMonth: '2026-09',
-          activeRequestId: 'project-b-2026-09', workflowRevision: 2,
+          activeState: 'INACTIVE', workflowRevision: 2,
         }),
       ],
     });
 
-    expect(inventory.legacyActiveRequests).toEqual([{
-      requestId: 'legacy-v2-pending', projectId: 'project-a', status: 'PENDING_APPROVAL',
-    }]);
-    expect(inventory.invalidCoordinators).toEqual([{
-      id: '__active__-invalid', projectId: 'project-b',
-    }]);
+    expect(inventory.counts).toMatchObject({
+      unresolvedRequests: activeStatuses.length * 2,
+      legacyActiveRequests: activeStatuses.length,
+      coordinators: 2,
+      activeCoordinators: 1,
+      invalidCoordinators: 0,
+    });
+    expect(new Set(inventory.unresolvedRequests.map(({ status }) => status))).toEqual(new Set(activeStatuses));
+
+    const coordinatorOnly = buildSettlementCycleRolloutInventory({
+      requests: [document('__active__-valid', {
+        documentType: 'ACTIVE_COORDINATOR', projectId: 'project-a',
+        activeState: 'PENDING_APPROVAL', activeCycleYearMonth: '2026-09',
+        activeRequestId: 'project-a-2026-09', workflowRevision: 2,
+      })],
+    });
+    expect(() => assertSettlementCycleCutoverReady(coordinatorOnly, []))
+      .toThrow(/activeCoordinators=1/);
   });
 
   it('requires an explicit production identity, allowlist, actor, reason, and JVM endpoint before apply', () => {
@@ -253,26 +281,93 @@ describe('cashflow settlement-cycle rollout audit', () => {
       tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
       projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash,
     })).toEqual({
-      idempotencyKey: `settlement-head-v2:mysc:project-a:r4:${'a'.repeat(16)}`,
+      idempotencyKey: `settlement-cycle-v3:mysc:project-a:r4:${'a'.repeat(16)}`,
       expectedHeadRevision: 4,
       expectedHeadRootHash: rootHash,
       reason: '승인된 이관',
+      dryRun: false,
+      expectedMigrationFingerprint: '',
     });
   });
 
-  it('migrates only exact allowlisted legacy heads and validates the canonical JVM response', async () => {
-    const migrate = vi.fn(async ({ projectId, body }) => ({
-      ok: true,
-      commandName: 'cashflowSettlementCycle.migrateHeadV2',
-      projectId,
-      closedThrough: '2026-08',
-      cycleYearMonth: '2026-09',
-      approvalVersionId: 'version-1',
-      headRevision: body.expectedHeadRevision + 1,
-      auditId: 'settlement-cycle-head-migration-1',
-    }));
+  it('dry-runs every allowlisted project before applying them one project at a time', async () => {
+    const calls = [];
+    const migrate = vi.fn(async ({ projectId, body }) => {
+      calls.push(`${body.dryRun ? 'dry' : 'apply'}:${projectId}`);
+      const migrationFingerprint = `sha256:${(projectId === 'project-a' ? 'c' : 'd').repeat(64)}`;
+      if (!body.dryRun) expect(body.expectedMigrationFingerprint).toBe(migrationFingerprint);
+      const migrationRequired = projectId !== 'project-c';
+      return {
+        ok: true,
+        commandName: 'cashflowSettlementCycle.migrateHeadV2',
+        projectId,
+        closedThrough: '2026-08',
+        cycleYearMonth: '2026-09',
+        approvalVersionId: 'version-1',
+        headRevision: body.expectedHeadRevision + (migrationRequired ? 1 : 0),
+        migrationRequired,
+        migrationFingerprint,
+        auditId: body.dryRun ? '' : `audit-${projectId}`,
+      };
+    });
+
+    await expect(executeSettlementCycleHeadMigrations({
+      inventory: {
+        counts: { unresolvedRequests: 1 },
+        legacyHeads: [{ projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash }],
+      },
+      options: {
+        apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
+        allowProjects: ['project-a'],
+      },
+      migrate,
+    })).rejects.toThrow(/unresolvedRequests=1/);
+    expect(calls).toEqual([]);
 
     const result = await executeSettlementCycleHeadMigrations({
+      inventory: {
+        legacyHeads: [
+          { projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash },
+          { projectId: 'project-b', expectedHeadRevision: 2, expectedHeadRootHash: `sha256:${'b'.repeat(64)}` },
+        ],
+        recoverableHeads: [{
+          projectId: 'project-c', tenantId: 'mysc',
+          expectedHeadRevision: 7, expectedHeadRootHash: `sha256:${'e'.repeat(64)}`,
+        }],
+      },
+      options: {
+        apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
+        allowProjects: ['project-a', 'project-b', 'project-c'],
+      },
+      migrate,
+    });
+
+    expect(calls).toEqual([
+      'dry:project-a', 'dry:project-b', 'dry:project-c', 'apply:project-a', 'apply:project-b',
+    ]);
+    expect(result).toEqual([
+      { projectId: 'project-a', cycleYearMonth: '2026-09', headRevision: 5, auditId: 'audit-project-a' },
+      { projectId: 'project-b', cycleYearMonth: '2026-09', headRevision: 3, auditId: 'audit-project-b' },
+    ]);
+
+    calls.length = 0;
+    migrate.mockImplementation(async ({ projectId, body }) => {
+      calls.push(`${body.dryRun ? 'dry' : 'apply'}:${projectId}`);
+      if (body.dryRun && projectId === 'project-b') throw new Error('legacy evidence invalid');
+      return {
+        ok: true,
+        commandName: 'cashflowSettlementCycle.migrateHeadV2',
+        projectId,
+        closedThrough: '2026-08',
+        cycleYearMonth: '2026-09',
+        approvalVersionId: 'version-1',
+        headRevision: body.expectedHeadRevision + 1,
+        migrationRequired: true,
+        migrationFingerprint: `sha256:${'c'.repeat(64)}`,
+        auditId: body.dryRun ? '' : `audit-${projectId}`,
+      };
+    });
+    await expect(executeSettlementCycleHeadMigrations({
       inventory: {
         legacyHeads: [
           { projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash },
@@ -281,23 +376,14 @@ describe('cashflow settlement-cycle rollout audit', () => {
       },
       options: {
         apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
-        allowProjects: ['project-a'],
+        allowProjects: ['project-a', 'project-b'],
       },
       migrate,
-    });
-
-    expect(migrate).toHaveBeenCalledTimes(1);
-    expect(migrate).toHaveBeenCalledWith({
-      projectId: 'project-a',
-      body: buildSettlementCycleHeadMigrationBody({
-        tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
-        projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash,
-      }),
-    });
-    expect(result).toEqual([{ projectId: 'project-a', headRevision: 5, auditId: 'settlement-cycle-head-migration-1' }]);
+    })).rejects.toThrow(/legacy evidence invalid/i);
+    expect(calls).toEqual(['dry:project-a', 'dry:project-b']);
   });
 
-  it('reaches the JVM immutable receipt when an allowlisted head was already migrated after response loss', async () => {
+  it('repairs a head-only migration marker with its current head revision', async () => {
     const inventory = buildSettlementCycleRolloutInventory({
       heads: [document('project-a', {
         contractVersion: 'cashflow-cumulative-close-v2', tenantId: 'mysc', projectId: 'project-a',
@@ -313,17 +399,14 @@ describe('cashflow settlement-cycle rollout audit', () => {
         }],
       })],
     });
-    const immutableReceipt = {
-      ok: true,
-      commandName: 'cashflowSettlementCycle.migrateHeadV2',
-      projectId: 'project-a',
-      closedThrough: '2026-08',
-      cycleYearMonth: '2026-09',
-      approvalVersionId: 'version-a',
-      headRevision: 5,
-      auditId: 'settlement-cycle-head-migration-immutable',
-    };
-    const migrate = vi.fn(async () => immutableReceipt);
+    const migrationFingerprint = `sha256:${'c'.repeat(64)}`;
+    const migrate = vi.fn(async ({ body }) => ({
+      ok: true, commandName: 'cashflowSettlementCycle.migrateHeadV2',
+      projectId: 'project-a', closedThrough: '2026-08', cycleYearMonth: '2026-09',
+      approvalVersionId: 'project-a-2026-09-r3-migrated-v3', headRevision: 6,
+      migrationRequired: true, migrationFingerprint,
+      auditId: body.dryRun ? '' : 'settlement-cycle-v3-migration',
+    }));
 
     const result = await executeSettlementCycleHeadMigrations({
       inventory,
@@ -334,51 +417,18 @@ describe('cashflow settlement-cycle rollout audit', () => {
       migrate,
     });
 
-    expect(migrate).toHaveBeenCalledOnce();
-    expect(migrate).toHaveBeenCalledWith({
+    expect(migrate).toHaveBeenCalledTimes(2);
+    expect(migrate).toHaveBeenNthCalledWith(1, {
       projectId: 'project-a',
-      body: buildSettlementCycleHeadMigrationBody({
+      body: { ...buildSettlementCycleHeadMigrationBody({
         tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
-        projectId: 'project-a', expectedHeadRevision: 4, expectedHeadRootHash: rootHash,
-      }),
+        projectId: 'project-a', expectedHeadRevision: 5, expectedHeadRootHash: rootHash,
+      }), dryRun: true },
     });
     expect(result).toEqual([{
-      projectId: 'project-a', headRevision: 5,
-      auditId: 'settlement-cycle-head-migration-immutable',
+      projectId: 'project-a', cycleYearMonth: '2026-09', headRevision: 6,
+      auditId: 'settlement-cycle-v3-migration',
     }]);
-  });
-
-  it('fails closed instead of replaying a migrated head bound to a different actor', async () => {
-    const inventory = buildSettlementCycleRolloutInventory({
-      heads: [document('project-a', {
-        contractVersion: 'cashflow-cumulative-close-v2', tenantId: 'mysc', projectId: 'project-a',
-        status: 'CLOSED', authorityExists: true, revision: 5, rootHash,
-        fromMonth: '2023-01', closedThrough: '2026-08', settlementMonth: '2026-09',
-        requestId: 'project-a-2026-08', requestRevision: 3,
-        approvalId: 'approval-a', operationId: 'operation-a',
-        migratedAt: '2026-08-27T03:04:05Z', migratedByUid: 'admin-2',
-        closedRanges: [{
-          affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
-          closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-          requestId: 'project-a-2026-08', ledgerRevision: 3, rootHash,
-        }],
-      })],
-    });
-    const migrate = vi.fn();
-
-    expect(inventory.migratedHeads).toEqual([expect.objectContaining({
-      projectId: 'project-a', migratedByUid: 'admin-2',
-      expectedHeadRevision: 4, expectedHeadRootHash: rootHash,
-    })]);
-    await expect(executeSettlementCycleHeadMigrations({
-      inventory,
-      options: {
-        apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
-        allowProjects: ['project-a'],
-      },
-      migrate,
-    })).rejects.toThrow(/actor|eligible/i);
-    expect(migrate).not.toHaveBeenCalled();
   });
 
   it('fails closed instead of replaying canonical evidence scoped to a different tenant', async () => {
@@ -410,89 +460,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(migrate).not.toHaveBeenCalled();
   });
 
-  it('does not replay a migration after the canonical head entered a reopen workflow', async () => {
-    const inventory = buildSettlementCycleRolloutInventory({
-      heads: [document('project-a', {
-        contractVersion: 'cashflow-cumulative-close-v2', tenantId: 'mysc', projectId: 'project-a',
-        status: 'REOPEN_REQUESTED', authorityExists: true, revision: 6, rootHash,
-        fromMonth: '2023-01', closedThrough: '2026-08', settlementMonth: '2026-09',
-        requestId: 'project-a-2026-08', requestRevision: 3,
-        approvalId: 'approval-a', operationId: 'operation-a',
-        migratedAt: '2026-08-27T03:04:05Z', migratedByUid: 'admin-1',
-        closedRanges: [{
-          affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
-          closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-          requestId: 'project-a-2026-08', ledgerRevision: 3, rootHash,
-        }],
-      })],
-    });
-    const migrate = vi.fn();
-
-    expect(inventory.migratedHeads).toEqual([]);
-    await expect(executeSettlementCycleHeadMigrations({
-      inventory,
-      options: {
-        apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
-        allowProjects: ['project-a'],
-      },
-      migrate,
-    })).rejects.toThrow(/not eligible/i);
-    expect(migrate).not.toHaveBeenCalled();
-  });
-
-  it('does not treat a loosely parseable migration timestamp as canonical replay evidence', () => {
-    const inventory = buildSettlementCycleRolloutInventory({
-      heads: [document('project-a', {
-        contractVersion: 'cashflow-cumulative-close-v2', tenantId: 'mysc', projectId: 'project-a',
-        status: 'CLOSED', authorityExists: true, revision: 5, rootHash,
-        fromMonth: '2023-01', closedThrough: '2026-08', settlementMonth: '2026-09',
-        requestId: 'project-a-2026-08', requestRevision: 3,
-        approvalId: 'approval-a', operationId: 'operation-a',
-        migratedAt: '0', migratedByUid: 'admin-1',
-        closedRanges: [{
-          affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
-          closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-          requestId: 'project-a-2026-08', ledgerRevision: 3, rootHash,
-        }],
-      })],
-    });
-
-    expect(inventory.migratedHeads).toEqual([]);
-    expect(inventory.counts.replayableMigratedHeads).toBe(0);
-  });
-
-  it('fails closed when a replay receipt does not match the already-migrated canonical evidence', async () => {
-    const inventory = buildSettlementCycleRolloutInventory({
-      heads: [document('project-a', {
-        contractVersion: 'cashflow-cumulative-close-v2', tenantId: 'mysc', projectId: 'project-a',
-        status: 'CLOSED', authorityExists: true, revision: 5, rootHash,
-        fromMonth: '2023-01', closedThrough: '2026-08', settlementMonth: '2026-09',
-        requestId: 'project-a-2026-08', requestRevision: 3,
-        approvalId: 'approval-a', operationId: 'operation-a',
-        migratedAt: '2026-08-27T03:04:05Z', migratedByUid: 'admin-1',
-        closedRanges: [{
-          affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
-          closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-          requestId: 'project-a-2026-08', ledgerRevision: 3, rootHash,
-        }],
-      })],
-    });
-
-    await expect(executeSettlementCycleHeadMigrations({
-      inventory,
-      options: {
-        apply: true, tenantId: 'mysc', actorUid: 'admin-1', reason: '승인된 이관',
-        allowProjects: ['project-a'],
-      },
-      migrate: async () => ({
-        ok: true, commandName: 'cashflowSettlementCycle.migrateHeadV2',
-        projectId: 'project-a', closedThrough: '2026-07', cycleYearMonth: '2026-08',
-        approvalVersionId: 'version-other', headRevision: 5, auditId: 'audit-other',
-      }),
-    })).rejects.toThrow(/invalid migration response/i);
-  });
-
-  it('emits only aggregate counts, blockers, and a full-state fingerprint for rollout audit logs', () => {
+  it('emits the protected status baseline without exposing the other Firestore payloads', () => {
     const report = {
       mode: 'APPLY',
       firebaseProjectId: 'secret-firebase-project',
@@ -501,20 +469,25 @@ describe('cashflow settlement-cycle rollout audit', () => {
         counts: {
           legacyHeads: 1, canonicalHeads: 2, invalidHeads: 0,
           unresolvedRequests: 0, legacyActiveRequests: 0,
-          coordinators: 2, invalidCoordinators: 0, genericMonthDocuments: 4,
+          coordinators: 2, activeCoordinators: 0, invalidCoordinators: 0, genericMonthDocuments: 4,
         },
         canonicalState: {
           heads: [{ projectId: 'secret-project', rootHash: 'secret-root-hash', migratedByUid: 'secret-actor' }],
           requests: [{ requestId: 'secret-request', submittedAt: 'secret-request-time' }],
           settlements: [{ month: { approvedBy: 'secret-approver', approvedAt: 'secret-approval-time' } }],
         },
+        protectedSettlementStatuses: [{
+          documentId: 'project-a-2026-09',
+          dataHash: `sha256:${'f'.repeat(64)}`,
+          updateTime: { seconds: 123, nanoseconds: 456 },
+        }],
       },
       migrations: [{ projectId: 'secret-project', auditId: 'secret-audit-id', headRevision: 5 }],
       after: {
         counts: {
           legacyHeads: 0, canonicalHeads: 3, invalidHeads: 0,
           unresolvedRequests: 0, legacyActiveRequests: 0,
-          coordinators: 2, invalidCoordinators: 0, genericMonthDocuments: 4,
+          coordinators: 2, activeCoordinators: 0, invalidCoordinators: 0, genericMonthDocuments: 4,
         },
         canonicalState: { heads: [{ migratedAt: 'secret-migrated-time' }] },
       },
@@ -525,20 +498,26 @@ describe('cashflow settlement-cycle rollout audit', () => {
     const summary = settlementCycleRolloutAuditSummary(report);
     const serialized = JSON.stringify(summary);
 
-    expect(Object.keys(summary)).toEqual(['counts', 'blockers', 'fingerprint']);
+    expect(Object.keys(summary)).toEqual([
+      'counts', 'blockers', 'protectedSettlementStatuses', 'fingerprint',
+    ]);
     expect(summary.counts).toEqual({
-      before: { ...report.before.counts, replayableMigratedHeads: 0 },
+      before: { ...report.before.counts, recoverableHeads: 0, migrationCandidates: 1 },
       migrations: 1,
-      after: { ...report.after.counts, replayableMigratedHeads: 0 },
+      after: { ...report.after.counts, recoverableHeads: 0, migrationCandidates: 0 },
       projections: 1,
       verifiedProjects: 1,
     });
     expect(summary.blockers).toEqual({});
+    expect(summary.protectedSettlementStatuses).toEqual({
+      count: 1,
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     expect(summary.fingerprint).toBe(settlementCycleRolloutFingerprint(report));
     for (const secret of [
       'secret-firebase-project', 'secret-tenant', 'secret-project', 'secret-root-hash',
       'secret-actor', 'secret-request', 'secret-request-time', 'secret-approver',
-      'secret-approval-time', 'secret-audit-id', 'secret-migrated-time',
+      'secret-approval-time', 'secret-audit-id', 'secret-migrated-time', 'project-a-2026-09',
     ]) {
       expect(serialized).not.toContain(secret);
     }
@@ -625,13 +604,35 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(canonicalAfter.counts).toEqual(canonicalBefore.counts);
     expect(canonicalAfter.verificationTargets).toEqual(canonicalBefore.verificationTargets);
     expect(() => assertSettlementCycleInventoryStable(canonicalBefore, canonicalAfter)).toThrow(/changed/i);
+
+    const protectedAfter = structuredClone(canonicalBefore);
+    canonicalBefore.protectedSettlementStatuses = [{
+      documentId: 'project-a-2026-09', dataHash: rootHash,
+      updateTime: { seconds: 123, nanoseconds: 456 },
+    }, {
+      documentId: 'unrelated-2026-09', dataHash: rootHash,
+      updateTime: { seconds: 123, nanoseconds: 456 },
+    }];
+    protectedAfter.protectedSettlementStatuses = structuredClone(canonicalBefore.protectedSettlementStatuses);
+    protectedAfter.protectedSettlementStatuses[1].updateTime.nanoseconds += 1;
+    expect(assertProtectedSettlementStatusesUnchanged(
+      canonicalBefore, protectedAfter, ['project-a-2026-09'],
+    )).toEqual({ stable: true });
+    protectedAfter.protectedSettlementStatuses[0].updateTime.nanoseconds += 1;
+    expect(() => assertProtectedSettlementStatusesUnchanged(
+      canonicalBefore, protectedAfter, ['project-a-2026-09'],
+    )).toThrow(/status/i);
   });
 
-  it('reads the three canonical Firestore collections once for one inventory snapshot', async () => {
+  it('reads one snapshot with the protected settlement fingerprints and migration evidence', async () => {
     const collections = {
       'orgs/mysc/cashflow_month_close_requests': [document('request-1', { status: 'APPROVED' })],
       'orgs/mysc/cashflow_cumulative_close_heads': [document('project-a', { projectId: 'project-a' })],
-      'orgs/mysc/cashflow_settlement_statuses': [document('project-a-2026-08', { periods: {} })],
+      'orgs/mysc/cashflow_settlement_statuses': [document(
+        'project-a-2026-09',
+        { projectId: 'project-a', yearMonth: '2026-09', periods: {} },
+        { seconds: 123, nanoseconds: 456 },
+      )],
     };
     const get = vi.fn(async (query) => ({ docs: collections[query.path] }));
     const runTransaction = vi.fn(async (callback) => callback({ get }));
@@ -644,6 +645,11 @@ describe('cashflow settlement-cycle rollout audit', () => {
     expect(runTransaction).toHaveBeenCalledTimes(1);
     expect(runTransaction).toHaveBeenCalledWith(expect.any(Function), { readOnly: true });
     expect(inventory.counts.invalidHeads).toBe(1);
+    expect(inventory.protectedSettlementStatuses).toEqual([{
+      documentId: 'project-a-2026-09',
+      dataHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      updateTime: { seconds: 123, nanoseconds: 456 },
+    }]);
   });
 
   it('verifies each approved projection against the exact project, cycle, and request provenance', async () => {
@@ -654,6 +660,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
       settlementStatuses: lockedSettlementStatuses(),
       settlementCycle: {
         cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+        closeDeadline: '2026-09-10',
         businessState: 'LOCKED', health: 'OK', workflowRevision: 7,
         monthCloseSettlement: lockedMonthCloseSettlement(), supersededAttempt: null,
         commandCapabilities: lockedCapabilities(),
@@ -688,6 +695,7 @@ describe('cashflow settlement-cycle rollout audit', () => {
         settlementStatuses: lockedSettlementStatuses(),
         settlementCycle: {
           cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
+          closeDeadline: '2026-09-10',
           businessState: 'LOCKED', health: 'OK', workflowRevision: 7,
           monthCloseSettlement: lockedMonthCloseSettlement(), supersededAttempt: null,
           commandCapabilities: lockedCapabilities(),

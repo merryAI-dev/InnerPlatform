@@ -19,22 +19,9 @@ on:
         description: Resume the exact zero-traffic candidate for the current main SHA
         required: false
         type: string
-      apply_settlement_migrations:
-        description: Apply explicitly approved v1 head migrations through the resumed JVM candidate
-        required: false
-        default: false
-        type: boolean
-      settlement_migration_projects:
-        description: Exact comma-separated project IDs approved for migration
-        required: false
-        type: string
-      settlement_migration_reason:
-        description: Audit reason for the approved migration
-        required: false
-        type: string
 
 concurrency:
-  group: inner-platform-jvm-production
+  group: inner-platform-production
   cancel-in-progress: false
 
 permissions:
@@ -58,7 +45,6 @@ jobs:
       proceed: ${{ steps.resolve.outputs.proceed }}
       sha: ${{ steps.resolve.outputs.sha }}
       resume_revision: ${{ steps.resolve.outputs.resume_revision }}
-      apply_migrations: ${{ steps.resolve.outputs.apply_migrations }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -74,9 +60,6 @@ jobs:
           DISPATCH_SHA: ${{ github.sha }}
           FORCE: ${{ inputs.force }}
           RESUME_CANDIDATE_REVISION: ${{ inputs.resume_candidate_revision }}
-          APPLY_SETTLEMENT_MIGRATIONS: ${{ inputs.apply_settlement_migrations }}
-          SETTLEMENT_MIGRATION_PROJECTS: ${{ inputs.settlement_migration_projects }}
-          SETTLEMENT_MIGRATION_REASON: ${{ inputs.settlement_migration_reason }}
           CI_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
@@ -100,7 +83,6 @@ jobs:
             exit 0
           fi
           resume_revision="${RESUME_CANDIDATE_REVISION:-}"
-          apply_migrations="${APPLY_SETTLEMENT_MIGRATIONS:-false}"
           if [ -n "${resume_revision}" ]; then
             if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
               echo "A candidate can only be resumed through the exceptional manual path." >&2
@@ -111,31 +93,16 @@ jobs:
               echo "Candidate ${resume_revision} does not match current main ${expected_revision}." >&2
               exit 1
             fi
-            if [ "${apply_migrations}" = "true" ]; then
-              if ! [[ "${SETTLEMENT_MIGRATION_PROJECTS}" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*(,[A-Za-z0-9][A-Za-z0-9._:-]*)*$ ]]; then
-                echo "Migration requires exact comma-separated project IDs." >&2
-                exit 1
-              fi
-              if [ -z "${SETTLEMENT_MIGRATION_REASON}" ] || [ "${#SETTLEMENT_MIGRATION_REASON}" -gt 1000 ]; then
-                echo "Migration reason must be 1..1000 characters." >&2
-                exit 1
-              fi
-            fi
             {
               echo "proceed=true"
               echo "sha=${sha}"
               echo "resume_revision=${resume_revision}"
-              echo "apply_migrations=${apply_migrations}"
             } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          if [ "${apply_migrations}" = "true" ]; then
-            echo "Migration writes require resume_candidate_revision so the verified candidate is not rebuilt." >&2
-            exit 1
-          fi
           if [ "${FORCE}" = "true" ]; then
             echo "Forced deploy of ${sha}."
-            printf 'proceed=true\nsha=%s\nresume_revision=\napply_migrations=false\n' "${sha}" >> "${GITHUB_OUTPUT}"
+            printf 'proceed=true\nsha=%s\nresume_revision=\n' "${sha}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           # 워크플로 자체가 success 여도 deploy job 은 skip 일 수 있다. 실제 deploy job 이
@@ -167,14 +134,14 @@ jobs:
             echo "JVM sources changed since ${last}:"
             git diff --name-only "${last}" "${sha}" -- ${JVM_SOURCE_PATHS}
           fi
-          printf 'proceed=true\nsha=%s\nresume_revision=\napply_migrations=false\n' "${sha}" >> "${GITHUB_OUTPUT}"
+          printf 'proceed=true\nsha=%s\nresume_revision=\n' "${sha}" >> "${GITHUB_OUTPUT}"
 
   deploy:
     name: Deploy JVM candidate and promote
     needs: preflight
     if: needs.preflight.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: Production
     env:
       PROJECT_ID: inner-platform-live-20260316
@@ -191,13 +158,26 @@ jobs:
       IMAGE: asia-northeast3-docker.pkg.dev/inner-platform-live-20260316/jvm-images/innerplatform-jvm-weekly-api-live
       VERCEL_CANONICAL_PRODUCTION_HOST: myscube.myscguard.app
       VERCEL_CLI_PACKAGE: vercel@50.14.0
+      DEPLOY_INVOCATION_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316
+      BFF_DEPLOY_ENV: live
+      BFF_AUTH_MODE: firebase_required
+      BFF_EDIT_LEASES_ENABLED: 'true'
+      BFF_ALLOWED_ORIGINS: https://myscube.myscguard.app
+      JVM_WEEKLY_FIRESTORE_PROJECT_ID: inner-platform-live-20260316
+      JVM_WEEKLY_AUTH_MODE: strict
+      SLACK_ALERT_CHANNEL_ID: C0BQ6980HR6
+      CUTOVER_STATE_FILE: ${{ runner.temp }}/cashflow-settlement-cutover-state.json
+      CUTOVER_PREFLIGHT_REPORT: ${{ runner.temp }}/cashflow-settlement-preflight-report.json
+      CUTOVER_PRE_MAINTENANCE_REPORT: ${{ runner.temp }}/cashflow-settlement-pre-maintenance-report.json
+      CUTOVER_POST_DRAIN_REPORT: ${{ runner.temp }}/cashflow-settlement-post-drain-report.json
+      CUTOVER_PLAN_FILE: ${{ runner.temp }}/cashflow-settlement-cutover-plan.json
+      PROTECTED_SNAPSHOT_FILE: ${{ runner.temp }}/cashflow-settlement-protected.json
       DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
       CASHFLOW_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
       CASHFLOW_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
       CASHFLOW_ACTOR_UID: ${{ vars.JVM_SETTLEMENT_CANARY_ACTOR_UID_LIVE }}
       RESUME_CANDIDATE_REVISION: ${{ needs.preflight.outputs.resume_revision }}
-      SETTLEMENT_MIGRATION_PROJECTS: ${{ inputs.settlement_migration_projects }}
-      SETTLEMENT_MIGRATION_REASON: ${{ inputs.settlement_migration_reason }}
 
     steps:
       - uses: actions/checkout@v5
@@ -246,6 +226,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v3
 
       - name: Verify cashflow settlement split-release boundary
+        id: release_boundary
         env:
           DEPLOY_SHA: ${{ needs.preflight.outputs.sha }}
           JVM_SPLIT_RELEASE_BASE_SHA: ${{ vars.JVM_SPLIT_RELEASE_BASE_SHA_LIVE }}
@@ -324,10 +305,53 @@ jobs:
           done
           JVM_DEPLOY_BASE_SHA="${jvm_deployed_sha}"
           BFF_DEPLOY_BASE_SHA="${bff_deployed_sha}"
-          node scripts/verify-cashflow-settlement-release-boundary.mjs \
+          boundary_json="$(node scripts/verify-cashflow-settlement-release-boundary.mjs \
             --jvm-base "${JVM_DEPLOY_BASE_SHA}" \
             --bff-base "${BFF_DEPLOY_BASE_SHA}" \
-            --head "${DEPLOY_SHA}"
+            --head "${DEPLOY_SHA}")"
+          if [ -n "${RESUME_CANDIDATE_REVISION}" ] \
+            && [ "${live_revision}" = "${RESUME_CANDIDATE_REVISION}" ] \
+            && [ "${jvm_deployed_sha}" = "${DEPLOY_SHA}" ]; then
+            jq -e '.releaseMode == "web" and (.bffFrontendCutover | length > 0)' \
+              <<< "${boundary_json}" >/dev/null
+            expected_digest="$(gcloud artifacts docker images describe \
+              "${IMAGE}:${DEPLOY_SHA}" --format='value(image_summary.digest)')"
+            test "${live_digest}" = "${expected_digest}"
+            release_mode=final_web_resume
+          else
+            release_mode="$(jq -er \
+              '.releaseMode | select(. == "jvm_only" or . == "atomic_cutover")' \
+              <<< "${boundary_json}")"
+          fi
+          {
+            echo "release_mode=${release_mode}"
+            echo "bff_deployed_sha=${bff_deployed_sha}"
+            echo "bff_deployment_host=$(jq -er .host <<< "${bff_identity}")"
+            echo "bff_deployment_id=$(jq -er .id <<< "${bff_identity}")"
+            echo "bff_deployment_invocation=$(jq -er '.invocation // ""' <<< "${bff_identity}")"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Block atomic cutover while settlement work is active
+        id: settlement_preflight
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --firebase-project "${PROJECT_ID}" \
+            --tenant mysc \
+            --output "${CUTOVER_PREFLIGHT_REPORT}"
+          plan="$(node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            freeze-preflight "${CUTOVER_PREFLIGHT_REPORT}" "${CUTOVER_PLAN_FILE}")"
+          candidates="$(jq -er '.migrationCandidateProjects | join(",")' <<< "${plan}")"
+          test -n "${candidates}"
+          echo "candidate_projects=${candidates}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "- Protected completed MONTH projects: $(jq '.protectedCompletedMonthProjects | length' <<< "${plan}")"
+            echo "- Protected settlement status documents: $(jq '.protectedStatusDocumentCount' <<< "${plan}")"
+            echo "- Migration candidates: $(jq '.migrationCandidateProjects | length' <<< "${plan}")"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Capture current live revision
         id: previous
@@ -410,10 +434,11 @@ jobs:
           echo "service_url=${service_url}" >> "${GITHUB_OUTPUT}"
           echo "service url (BFF JVM_WEEKLY_API_BASE_URL_LIVE / _ID_TOKEN_AUDIENCE_LIVE 는 이 값): ${service_url}"
 
-      - name: Resolve existing zero-traffic candidate
+      - name: Resolve existing candidate
         id: resumed_candidate
         if: needs.preflight.outputs.resume_revision != ''
         env:
+          RELEASE_MODE: ${{ steps.release_boundary.outputs.release_mode }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
@@ -431,13 +456,17 @@ jobs:
           candidate_percent="$(jq -r --arg revision "${revision}" \
             '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
             <<< "${service_json}")"
-          test "${candidate_percent}" = "0"
-          positive_revision_count="$(jq -r --arg revision "${revision}" \
-            '[.status.traffic[] | select((.percent // 0) > 0 and .revisionName != $revision) | .revisionName]
-              | unique | length' <<< "${service_json}")"
+          positive_revision_count="$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")"
           total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${service_json}")"
           test "${positive_revision_count}" = "1"
           test "${total_percent}" = "100"
+          if [ "${RELEASE_MODE}" = "final_web_resume" ]; then
+            test "${candidate_percent}" = "100"
+          else
+            test "${candidate_percent}" = "0"
+          fi
           service_url="$(jq -er '.status.url' <<< "${service_json}")"
           {
             echo "revision=${revision}"
@@ -508,18 +537,31 @@ jobs:
           id_token_audience: ${{ steps.target.outputs.service_url }}
           export_environment_variables: false
 
-      - name: Verify candidate against legacy live read
+      - name: Initialize atomic cutover sequence
+        id: cutover_sequence
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover' || steps.release_boundary.outputs.release_mode == 'final_web_resume'
+        env:
+          RELEASE_MODE: ${{ steps.release_boundary.outputs.release_mode }}
+        run: |
+          if [ "${RELEASE_MODE}" = "final_web_resume" ]; then
+            node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+              resume-final-web "${CUTOVER_STATE_FILE}"
+          else
+            node scripts/verify-cashflow-settlement-cutover-sequence.mjs init "${CUTOVER_STATE_FILE}"
+          fi
+
+      - name: Verify settlement candidate before migration
         env:
           CANDIDATE_URL: ${{ steps.target.outputs.url }}
           SERVICE_URL: ${{ steps.target.outputs.service_url }}
           ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          RELEASE_MODE: ${{ steps.release_boundary.outputs.release_mode }}
         run: |
           set -euo pipefail
           test -n "${CASHFLOW_PROJECT_ID}"
           test -n "${CASHFLOW_YEAR_MONTH}"
           test -n "${CASHFLOW_ACTOR_UID}"
-          test -n "${SERVICE_URL}"
 
           read_jvm() {
             local base_url="$1"
@@ -538,123 +580,223 @@ jobs:
             "${CANDIDATE_URL}/api/v1/health" \
             | jq -e '.ok == true and .service == "jvm-weekly-api" and (.capabilities | index("settlement-cycle-v1") != null)' >/dev/null
 
-          legacy_dashboard_path="/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"
-          canonical_legacy_dashboard="$(read_jvm "${SERVICE_URL}" "${legacy_dashboard_path}")"
-          candidate_legacy_dashboard="$(read_jvm "${CANDIDATE_URL}" "${legacy_dashboard_path}")"
-          assert_legacy_dashboard_shape() {
-            jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
-                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
-                and (.cashflow == null or .cashflow.projectId == env.CASHFLOW_PROJECT_ID)
-                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)'
+          if [ "${RELEASE_MODE}" = "atomic_cutover" ]; then
+            legacy_path="/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}"
+            live="$(read_jvm "${SERVICE_URL}" "${legacy_path}" | jq -S -c 'del(.settlementCycle)')"
+            candidate="$(read_jvm "${CANDIDATE_URL}" "${legacy_path}" | jq -S -c 'del(.settlementCycle)')"
+            test "${candidate}" = "${live}"
+            node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+              advance "${CUTOVER_STATE_FILE}" candidate_verified
+          else
+            strict_url="${CANDIDATE_URL}"
+            if [ "${RELEASE_MODE}" = "final_web_resume" ]; then
+              strict_url="${SERVICE_URL}"
+            fi
+            candidate_cycle_dashboard="$(read_jvm "${strict_url}" \
+              "/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true")"
+            node scripts/verify-cashflow-settlement-cycle-projection.mjs \
+              "${CASHFLOW_PROJECT_ID}" \
+              "${CASHFLOW_YEAR_MONTH}" \
+              <<< "${candidate_cycle_dashboard}" >/dev/null
+          fi
+
+      - name: Verify a ready Firestore backup exists
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        env:
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          backups="$(gcloud firestore backups list \
+            --project "${PROJECT_ID}" \
+            --location nam5 \
+            --format=json)"
+          jq -e --arg database "projects/${PROJECT_ID}/databases/(default)" \
+            'def create_epoch:
+              .createTime
+              | select(type == "string")
+              | select(test("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"))
+              | sub("\\.[0-9]+Z$"; "Z")
+              | fromdateiso8601?;
+            now as $now
+            | [.[]
+                | select(.database == $database and .state == "READY")
+                | create_epoch
+                | select(. >= ($now - 172800) and . <= $now)]
+            | length > 0' \
+            <<< "${backups}" >/dev/null
+
+      - name: Recheck frozen inventory before maintenance
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --firebase-project "${PROJECT_ID}" \
+            --tenant mysc \
+            --output "${CUTOVER_PRE_MAINTENANCE_REPORT}"
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            verify-preflight "${CUTOVER_PLAN_FILE}" "${CUTOVER_PRE_MAINTENANCE_REPORT}"
+
+      - name: Verify current maintenance web for final resume
+        if: steps.release_boundary.outputs.release_mode == 'final_web_resume'
+        env:
+          BFF_DEPLOYED_SHA: ${{ steps.release_boundary.outputs.bff_deployed_sha }}
+          BFF_DEPLOYMENT_HOST: ${{ steps.release_boundary.outputs.bff_deployment_host }}
+          BFF_DEPLOYMENT_ID: ${{ steps.release_boundary.outputs.bff_deployment_id }}
+          BFF_DEPLOYMENT_INVOCATION: ${{ steps.release_boundary.outputs.bff_deployment_invocation }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          test -n "${BFF_DEPLOYMENT_INVOCATION}"
+          node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --expected-host "${BFF_DEPLOYMENT_HOST}" \
+            --expected-id "${BFF_DEPLOYMENT_ID}" \
+            --expected-sha "${BFF_DEPLOYED_SHA}" \
+            --expected-invocation "${BFF_DEPLOYMENT_INVOCATION}" \
+            --ancestor-of "${DEPLOY_SHA}" >/dev/null
+          curl --fail --silent --show-error \
+            "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/v1/health" >/dev/null
+          mutation="$(curl --silent --show-error -X POST \
+            -H 'content-type: application/json' -d '{}' -w '\n%{http_code}' \
+            "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/v1/__maintenance_probe__")"
+          test "${mutation##*$'\n'}" = "503"
+          jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null
+          worker="$(curl --silent --show-error -w '\n%{http_code}' \
+            "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/internal/workers/outbox/run")"
+          test "${worker##*$'\n'}" = "503"
+          jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null
+
+      - name: Activate current web maintenance alias
+        id: maintenance_web
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        env:
+          BFF_DEPLOYED_SHA: ${{ steps.release_boundary.outputs.bff_deployed_sha }}
+          CANDIDATE_URL: ${{ steps.target.outputs.url }}
+          JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ steps.target.outputs.service_url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+          SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          source_dir="${RUNNER_TEMP}/cashflow-settlement-b0"
+          git worktree add --detach "${source_dir}" "${BFF_DEPLOYED_SHA}"
+          deployment="$(JVM_WEEKLY_API_BASE_URL="${CANDIDATE_URL}" \
+            node scripts/deploy-vercel-production-candidate.mjs \
+              --source-dir "${source_dir}" \
+              --commit-sha "${BFF_DEPLOYED_SHA}" \
+              --invocation "${DEPLOY_INVOCATION_ID}" \
+              --maintenance true)"
+          deployment_url="$(jq -er .deploymentUrl <<< "${deployment}")"
+          deployment_host="$(jq -er .deploymentHost <<< "${deployment}")"
+          identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --host "${deployment_host}" \
+            --expected-sha "${BFF_DEPLOYED_SHA}" \
+            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          deployment_id="$(jq -er .id <<< "${identity}")"
+
+          assert_maintenance() {
+            local base_url="$1"
+            local bypass_header=()
+            if [ -n "${2:-}" ]; then
+              bypass_header=(-H "x-vercel-protection-bypass: $2")
+            fi
+            mutation="$(curl --silent --show-error "${bypass_header[@]}" \
+              -X POST -H 'content-type: application/json' -d '{}' \
+              -w '\n%{http_code}' "${base_url}/api/v1/__maintenance_probe__")"
+            test "${mutation##*$'\n'}" = "503"
+            jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null
+            worker="$(curl --silent --show-error "${bypass_header[@]}" \
+              -w '\n%{http_code}' "${base_url}/api/internal/workers/outbox/run")"
+            test "${worker##*$'\n'}" = "503"
+            jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null
           }
-          for dashboard in "${canonical_legacy_dashboard}" "${candidate_legacy_dashboard}"; do
-            assert_legacy_dashboard_shape <<< "${dashboard}" >/dev/null
-          done
-          legacy_dashboard_core() {
-            jq -S -c 'del(.settlementCycle)'
-          }
-          canonical_legacy_dashboard_core="$(legacy_dashboard_core \
-            <<< "${canonical_legacy_dashboard}")"
-          candidate_legacy_dashboard_core="$(legacy_dashboard_core \
-            <<< "${candidate_legacy_dashboard}")"
-          test "${candidate_legacy_dashboard_core}" = "${canonical_legacy_dashboard_core}"
+          assert_maintenance "${deployment_url}" "${VERCEL_AUTOMATION_BYPASS_SECRET}"
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
+            "${deployment_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
+          node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --expected-host "${deployment_host}" \
+            --expected-id "${deployment_id}" \
+            --expected-sha "${BFF_DEPLOYED_SHA}" \
+            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+            --ancestor-of "${DEPLOY_SHA}" >/dev/null
+          assert_maintenance "https://${VERCEL_CANONICAL_PRODUCTION_HOST}"
+          {
+            echo "deployment_host=${deployment_host}"
+            echo "deployment_id=${deployment_id}"
+            echo "deployment_invocation=${DEPLOY_INVOCATION_ID}"
+          } >> "${GITHUB_OUTPUT}"
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            advance "${CUTOVER_STATE_FILE}" maintenance_aliased
 
-          weekly_overview_request="$(jq -cn \
-            --arg projectId "${CASHFLOW_PROJECT_ID}" \
-            --arg yearMonth "${CASHFLOW_YEAR_MONTH}" \
-            '{projectIds: [$projectId], yearMonth: $yearMonth}')"
-          canonical_weekly_overview="$(curl --fail --silent --show-error \
-            --request POST \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
-            -H 'x-tenant-id: mysc' \
-            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
-            -H 'x-actor-role: ADMIN' \
-            -H 'content-type: application/json' \
-            --data-binary "${weekly_overview_request}" \
-            "${SERVICE_URL}/api/v1/cashflow/weekly-overview")"
-          candidate_weekly_overview="$(curl --fail --silent --show-error \
-            --request POST \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
-            -H 'x-tenant-id: mysc' \
-            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
-            -H 'x-actor-role: ADMIN' \
-            -H 'content-type: application/json' \
-            --data-binary "${weekly_overview_request}" \
-            "${CANDIDATE_URL}/api/v1/cashflow/weekly-overview")"
-          jq -e '.version == "1"
-              and .yearMonth == env.CASHFLOW_YEAR_MONTH
-              and ([.items[]?
-                | select(.projectId == env.CASHFLOW_PROJECT_ID)
-                | .settlementStatuses.items[]?
-                | select(.period == "MONTH")] | length == 1)' \
-            <<< "${canonical_weekly_overview}" >/dev/null
-          jq -e '.version == "1"
-              and .yearMonth == env.CASHFLOW_YEAR_MONTH
-              and ([.items[]?
-                | select(.projectId == env.CASHFLOW_PROJECT_ID)
-                | .settlementStatuses.items[]?
-                | select(.period == "MONTH")] | length == 1)' \
-            <<< "${candidate_weekly_overview}" >/dev/null
-          legacy_weekly_overview_core() {
-            jq -S -c '.'
-          }
-          canonical_weekly_overview_core="$(legacy_weekly_overview_core \
-            <<< "${canonical_weekly_overview}")"
-          candidate_weekly_overview_core="$(legacy_weekly_overview_core \
-            <<< "${candidate_weekly_overview}")"
-          test "${candidate_weekly_overview_core}" = "${canonical_weekly_overview_core}"
+      - name: Drain pre-maintenance Vercel invocations
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        run: |
+          set -euo pipefail
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            wait-vercel-drain vercel.json
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            advance "${CUTOVER_STATE_FILE}" legacy_invocations_drained
 
-          weekly_overview_cycle_request="$(jq -cn \
-            --arg projectId "${CASHFLOW_PROJECT_ID}" \
-            --arg yearMonth "${CASHFLOW_YEAR_MONTH}" \
-            '{projectIds: [$projectId], yearMonth: $yearMonth, settlementCycle: true}')"
-          candidate_cycle_weekly_overview="$(curl --fail --silent --show-error \
-            --request POST \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
-            -H 'x-tenant-id: mysc' \
-            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
-            -H 'x-actor-role: ADMIN' \
-            -H 'content-type: application/json' \
-            --data-binary "${weekly_overview_cycle_request}" \
-            "${CANDIDATE_URL}/api/v1/cashflow/weekly-overview")"
-          jq -e '.version == "2"
-              and .yearMonth == env.CASHFLOW_YEAR_MONTH
-              and ([.items[]?
-                | select(.projectId == env.CASHFLOW_PROJECT_ID)
-                | .settlementStatuses.items[]?
-                | select(.period == "MONTH")] | length == 1)' \
-            <<< "${candidate_cycle_weekly_overview}" >/dev/null
+      - name: Verify frozen inventory after drain
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
+            --firebase-project "${PROJECT_ID}" \
+            --tenant mysc \
+            --output "${CUTOVER_POST_DRAIN_REPORT}"
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            verify-preflight "${CUTOVER_PLAN_FILE}" "${CUTOVER_POST_DRAIN_REPORT}"
 
-          candidate_cycle_item="$(jq -e -c '
-            [.items[]? | select(.projectId == env.CASHFLOW_PROJECT_ID)]
-            | if length == 1 then .[0] else error("canonical project item is missing or duplicated") end
-          ' <<< "${candidate_cycle_weekly_overview}")"
-          candidate_cycle_item_projection="$(node scripts/verify-cashflow-settlement-cycle-projection.mjs \
-            "${CASHFLOW_PROJECT_ID}" \
-            "${CASHFLOW_YEAR_MONTH}" \
-            <<< "${candidate_cycle_item}")"
+      - name: Capture protected settlement and weekly completion state
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            capture-protected "${PROJECT_ID}" mysc "${PROTECTED_SNAPSHOT_FILE}"
 
-          candidate_cycle_dashboard="$(read_jvm "${CANDIDATE_URL}" \
-            "/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}&settlementCycle=true")"
-          candidate_cycle_dashboard_projection="$(node scripts/verify-cashflow-settlement-cycle-projection.mjs \
-            "${CASHFLOW_PROJECT_ID}" \
-            "${CASHFLOW_YEAR_MONTH}" \
-            <<< "${candidate_cycle_dashboard}")"
-          test "${candidate_cycle_item_projection}" = "${candidate_cycle_dashboard_projection}"
-
-      - name: Apply explicitly approved settlement head migrations
-        if: needs.preflight.outputs.apply_migrations == 'true'
+      - name: Dry-run all and apply frozen settlement head migrations
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
         env:
           CANDIDATE_URL: ${{ steps.target.outputs.url }}
           JVM_AUDIENCE: ${{ steps.target.outputs.service_url }}
           JVM_WEEKLY_API_ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          SETTLEMENT_MIGRATION_PROJECTS: ${{ steps.settlement_preflight.outputs.candidate_projects }}
+          REVISION: ${{ steps.target.outputs.revision }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
+          service_json="$(gcloud run services describe "${SERVICE}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
+          test "$(jq -r --arg revision "${REVISION}" \
+            '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "${service_json}")" = "0"
+          test "$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' \
+            <<< "${service_json}")" = "100"
+          test "$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")" = "1"
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            advance "${CUTOVER_STATE_FILE}" migration_started
           node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
             --apply \
             --firebase-project "${PROJECT_ID}" \
@@ -663,31 +805,43 @@ jobs:
             --confirm-tenant mysc \
             --allow-projects "${SETTLEMENT_MIGRATION_PROJECTS}" \
             --people-uid "${CASHFLOW_ACTOR_UID}" \
-            --reason "${SETTLEMENT_MIGRATION_REASON}" \
+            --reason "Automatic atomic cutover for ${DEPLOY_SHA}" \
             --jvm-base-url "${CANDIDATE_URL}" \
             --jvm-audience "${JVM_AUDIENCE}"
 
       - name: Verify settlement-cycle inventory and BFF read compatibility
-        if: needs.preflight.outputs.apply_migrations == 'true'
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover' || steps.release_boundary.outputs.release_mode == 'final_web_resume'
         env:
           CANDIDATE_URL: ${{ steps.target.outputs.url }}
           JVM_AUDIENCE: ${{ steps.target.outputs.service_url }}
           JVM_WEEKLY_API_ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          RELEASE_MODE: ${{ steps.release_boundary.outputs.release_mode }}
         run: |
           set -euo pipefail
           test -n "${CASHFLOW_ACTOR_UID}"
+          verify_url="${CANDIDATE_URL}"
+          if [ "${RELEASE_MODE}" = "final_web_resume" ]; then
+            verify_url="${JVM_AUDIENCE}"
+          fi
           node scripts/audit-cashflow-settlement-cycle-rollout.mjs \
             --firebase-project "${PROJECT_ID}" \
             --tenant mysc \
             --verify-cutover \
             --people-uid "${CASHFLOW_ACTOR_UID}" \
-            --jvm-base-url "${CANDIDATE_URL}" \
+            --jvm-base-url "${verify_url}" \
             --jvm-audience "${JVM_AUDIENCE}"
+          if [ "${RELEASE_MODE}" = "atomic_cutover" ]; then
+            node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+              verify-protected "${PROJECT_ID}" mysc "${PROTECTED_SNAPSHOT_FILE}"
+            node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+              advance "${CUTOVER_STATE_FILE}" inventory_verified
+          fi
 
       - name: Promote verified candidate
         id: promote
+        if: steps.release_boundary.outputs.release_mode != 'final_web_resume'
         env:
           REVISION: ${{ steps.target.outputs.revision }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
@@ -702,14 +856,26 @@ jobs:
       - name: Verify canonical service after promotion
         id: canonical_canary
         env:
+          REVISION: ${{ steps.target.outputs.revision }}
           ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          ATOMIC_CUTOVER: ${{ steps.release_boundary.outputs.release_mode == 'atomic_cutover' }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
 
-          canonical_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
+          service_json="$(gcloud run services describe "${SERVICE}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
+          test "$(jq -r --arg revision "${REVISION}" \
+            '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "${service_json}")" = "100"
+          test "$(jq -r \
+            '[.status.traffic[] | select((.percent // 0) > 0) | .revisionName] | unique | length' \
+            <<< "${service_json}")" = "1"
+          test "$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' \
+            <<< "${service_json}")" = "100"
+          canonical_url="$(jq -er '.status.url' <<< "${service_json}")"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${canonical_url}/api/v1/health" \
@@ -725,16 +891,106 @@ jobs:
             "${CASHFLOW_PROJECT_ID}" \
             "${CASHFLOW_YEAR_MONTH}" \
             <<< "${canonical_cycle_dashboard}" >/dev/null
+          if [ "${ATOMIC_CUTOVER}" = "true" ]; then
+            node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+              advance "${CUTOVER_STATE_FILE}" jvm_promoted
+          fi
+
+      - name: Deploy and activate canonical web
+        id: final_web
+        if: steps.release_boundary.outputs.release_mode == 'atomic_cutover' || steps.release_boundary.outputs.release_mode == 'final_web_resume'
+        env:
+          SERVICE_URL: ${{ steps.target.outputs.service_url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+          JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
+          SLACK_ALERT_BOT_TOKEN: ${{ secrets.SLACK_ALERT_BOT_TOKEN }}
+          SETTLEMENT_CANARY_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY_LIVE }}
+          SETTLEMENT_CANARY_FIREBASE_REFRESH_TOKEN: ${{ secrets.FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE }}
+          SETTLEMENT_CANARY_ACTOR_UID: ${{ vars.SETTLEMENT_READ_CANARY_ACTOR_UID_LIVE }}
+          SETTLEMENT_CANARY_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
+          SETTLEMENT_CANARY_CYCLE_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_REQUEST_ID: ${{ vars.SETTLEMENT_CANARY_EXPECTED_REQUEST_ID_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_STATUS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_STATUS_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH: ${{ vars.SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH_LIVE }}
+          SETTLEMENT_CANARY_EXPECTED_ACTIONS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_ACTIONS_LIVE }}
+          SETTLEMENT_CANARY_TENANT_ID: mysc
+          SETTLEMENT_CANARY_CANONICAL_ORIGIN: https://myscube.myscguard.app
+        run: |
+          set -euo pipefail
+          author_email="$(git show -s --format=%ae HEAD)"
+          test "${author_email}" = "ai@mysc.co.kr"
+          deployment="$(JVM_WEEKLY_API_BASE_URL="${SERVICE_URL}" \
+            JVM_WEEKLY_API_ID_TOKEN_AUDIENCE="${SERVICE_URL}" \
+            node scripts/deploy-vercel-production-candidate.mjs \
+              --source-dir . \
+              --commit-sha "${DEPLOY_SHA}" \
+              --invocation "${DEPLOY_INVOCATION_ID}" \
+              --maintenance false)"
+          deployment_url="$(jq -er .deploymentUrl <<< "${deployment}")"
+          deployment_host="$(jq -er .deploymentHost <<< "${deployment}")"
+          identity="$(node scripts/verify-vercel-deployment-identity.mjs \
+            --host "${deployment_host}" \
+            --expected-sha "${DEPLOY_SHA}" \
+            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+            --ancestor-of "${DEPLOY_SHA}")"
+          deployment_id="$(jq -er .id <<< "${identity}")"
+
+          assert_live() {
+            local base_url="$1"
+            local bypass_header=()
+            if [ -n "${2:-}" ]; then
+              bypass_header=(-H "x-vercel-protection-bypass: $2")
+            fi
+            curl --fail --silent --show-error "${bypass_header[@]}" \
+              "${base_url}/api/v1/health" \
+              | jq -e '.projectId == env.LIVE_FIREBASE_PROJECT_ID and .authMode == "firebase_required"' >/dev/null
+            mutation="$(curl --silent --show-error "${bypass_header[@]}" \
+              -X POST -H 'content-type: application/json' -d '{}' \
+              -w '\n%{http_code}' "${base_url}/api/v1/__maintenance_probe__")"
+            test "${mutation##*$'\n'}" = "400"
+            test "$(jq -r '.error // ""' <<< "${mutation%$'\n'*}")" != "maintenance_read_only"
+            worker="$(curl --silent --show-error "${bypass_header[@]}" \
+              -w '\n%{http_code}' "${base_url}/api/internal/workers/outbox/run")"
+            test "${worker##*$'\n'}" = "401"
+            jq -e '.error == "unauthorized_worker"' <<< "${worker%$'\n'*}" >/dev/null
+          }
+          assert_live "${deployment_url}" "${VERCEL_AUTOMATION_BYPASS_SECRET}"
+          SETTLEMENT_CANARY_BASE_URL="${deployment_url}" \
+            node scripts/verify-cashflow-settlement-candidate.mjs
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
+            "${deployment_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
+          node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --expected-host "${deployment_host}" \
+            --expected-id "${deployment_id}" \
+            --expected-sha "${DEPLOY_SHA}" \
+            --expected-invocation "${DEPLOY_INVOCATION_ID}" \
+            --ancestor-of "${DEPLOY_SHA}" >/dev/null
+          assert_live "https://${VERCEL_CANONICAL_PRODUCTION_HOST}"
+          SETTLEMENT_CANARY_BASE_URL="https://${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            node scripts/verify-cashflow-settlement-candidate.mjs
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            advance "${CUTOVER_STATE_FILE}" final_web_aliased
 
       # update-traffic 이 서버에 반영된 뒤 CLI 응답만 유실될 수 있다. step outcome만 믿지 않고
       # 실제 traffic을 다시 읽어 성공이면 candidate 100%, 실패면 이전 revision 100%를 강제한다.
       - name: Reconcile promotion traffic or roll back
-        if: always() && steps.target.outcome == 'success'
+        if: always() && steps.target.outcome == 'success' && steps.promote.outcome != 'skipped'
         env:
           CANDIDATE_REVISION: ${{ steps.target.outputs.revision }}
           PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
           PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
           CANARY_OUTCOME: ${{ steps.canonical_canary.outcome }}
+          FINAL_WEB_OUTCOME: ${{ steps.final_web.outcome }}
+          ATOMIC_CUTOVER: ${{ steps.release_boundary.outputs.release_mode == 'atomic_cutover' }}
           ID_TOKEN: ${{ steps.service_auth.outputs.id_token }}
           JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
@@ -764,7 +1020,9 @@ jobs:
             total_percent="$(jq -r '[.status.traffic[] | (.percent // 0)] | add // 0' <<< "${traffic_json}")"
           }
 
-          if [ "${PROMOTE_OUTCOME}" = "success" ] && [ "${CANARY_OUTCOME}" = "success" ]; then
+          if [ "${PROMOTE_OUTCOME}" = "success" ] \
+            && [ "${CANARY_OUTCOME}" = "success" ] \
+            && { [ "${ATOMIC_CUTOVER}" != "true" ] || [ "${FINAL_WEB_OUTCOME}" = "success" ]; }; then
             for attempt in {1..10}; do
               if read_traffic \
                 && [ "${candidate_percent}" = "100" ] \
@@ -774,6 +1032,11 @@ jobs:
               fi
               [ "${attempt}" = "10" ] || sleep 3
             done
+          fi
+
+          if [ "${ATOMIC_CUTOVER}" = "true" ]; then
+            echo "Atomic migration started; JVM rollback is unsafe and maintenance remains active." >&2
+            exit 1
           fi
 
           if [ -z "${PREVIOUS_REVISION}" ]; then
@@ -803,31 +1066,86 @@ jobs:
           test "${positive_revision_count}" = "1"
           test "${total_percent}" = "100"
 
-          echo "Verify restored canonical service after rollback"
-          assert_legacy_health() {
-            jq -e '.ok == true and .service == "jvm-weekly-api" and .runtime == "spring-boot"'
-          }
-          assert_legacy_dashboard_shape() {
-            jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID
-                and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH
-                and (.cashflow == null or .cashflow.projectId == env.CASHFLOW_PROJECT_ID)
-                and ([.settlementStatuses.items[]? | select(.period == "MONTH")] | length == 1)'
-          }
           canonical_url="$(gcloud run services describe "${SERVICE}" \
             --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             "${canonical_url}/api/v1/health" \
-            | assert_legacy_health >/dev/null
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
-            -H 'x-tenant-id: mysc' \
-            -H "x-actor-id: ${CASHFLOW_ACTOR_UID}" \
-            -H 'x-actor-role: ADMIN' \
-            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
-            | assert_legacy_dashboard_shape >/dev/null
+            | jq -e '.ok == true and .service == "jvm-weekly-api" and .runtime == "spring-boot"' >/dev/null
           if [ "${rollback_status}" != "0" ]; then
             echo "Traffic rollback command lost its response, but the restored topology and canary were verified." >&2
           fi
           exit 1
+
+      - name: Reconcile atomic web alias after failure
+        if: always() && steps.cutover_sequence.outcome == 'success'
+        env:
+          PREVIOUS_DEPLOYMENT_HOST: ${{ steps.release_boundary.outputs.bff_deployment_host }}
+          PREVIOUS_DEPLOYMENT_ID: ${{ steps.release_boundary.outputs.bff_deployment_id }}
+          PREVIOUS_DEPLOYMENT_SHA: ${{ steps.release_boundary.outputs.bff_deployed_sha }}
+          MAINTENANCE_DEPLOYMENT_HOST: ${{ steps.maintenance_web.outputs.deployment_host || steps.release_boundary.outputs.bff_deployment_host }}
+          MAINTENANCE_DEPLOYMENT_ID: ${{ steps.maintenance_web.outputs.deployment_id || steps.release_boundary.outputs.bff_deployment_id }}
+          MAINTENANCE_DEPLOYMENT_INVOCATION: ${{ steps.maintenance_web.outputs.deployment_invocation || steps.release_boundary.outputs.bff_deployment_invocation }}
+          CANDIDATE_REVISION: ${{ steps.target.outputs.revision }}
+          PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
+          BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          plan="$(node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            failure-plan "${CUTOVER_STATE_FILE}")"
+          if jq -e '.restoreOriginalAlias == false and .keepMaintenance == false' \
+            <<< "${plan}" >/dev/null; then
+            exit 0
+          fi
+          if jq -e '.restoreOriginalAlias == true' <<< "${plan}" >/dev/null; then
+            target_host="${PREVIOUS_DEPLOYMENT_HOST}"
+            target_id="${PREVIOUS_DEPLOYMENT_ID}"
+            target_sha="${PREVIOUS_DEPLOYMENT_SHA}"
+            invocation_args=(--legacy-missing-invocation-sha "${BFF_SPLIT_RELEASE_BASE_SHA}")
+            service_json="$(gcloud run services describe "${SERVICE}" \
+              --project "${PROJECT_ID}" --region "${REGION}" --format=json)"
+            candidate_percent="$(jq -r --arg revision "${CANDIDATE_REVISION}" \
+              '[.status.traffic[] | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+              <<< "${service_json}")"
+            if [ "${candidate_percent}" != "0" ]; then
+              gcloud run services update-traffic "${SERVICE}" \
+                --project "${PROJECT_ID}" --region "${REGION}" \
+                --to-revisions "${PREVIOUS_REVISION}=100" \
+                --set-tags "candidate=${CANDIDATE_REVISION}"
+            fi
+          else
+            target_host="${MAINTENANCE_DEPLOYMENT_HOST}"
+            target_id="${MAINTENANCE_DEPLOYMENT_ID}"
+            target_sha="${PREVIOUS_DEPLOYMENT_SHA}"
+            test -n "${MAINTENANCE_DEPLOYMENT_INVOCATION}"
+            invocation_args=(--expected-invocation "${MAINTENANCE_DEPLOYMENT_INVOCATION}")
+          fi
+          test -n "${target_host}"
+          test -n "${target_id}"
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
+            "${target_host}" "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --token "${VERCEL_TOKEN}" --scope merryai-devs-projects
+          node scripts/verify-vercel-deployment-identity.mjs \
+            --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --expected-host "${target_host}" \
+            --expected-id "${target_id}" \
+            --expected-sha "${target_sha}" \
+            "${invocation_args[@]}" \
+            --ancestor-of "${DEPLOY_SHA}" >/dev/null
+          if jq -e '.keepMaintenance == true' <<< "${plan}" >/dev/null; then
+            mutation="$(curl --silent --show-error -X POST \
+              -H 'content-type: application/json' -d '{}' -w '\n%{http_code}' \
+              "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/v1/__maintenance_probe__")"
+            test "${mutation##*$'\n'}" = "503"
+            jq -e '.error == "maintenance_read_only"' <<< "${mutation%$'\n'*}" >/dev/null
+            worker="$(curl --silent --show-error -w '\n%{http_code}' \
+              "https://${VERCEL_CANONICAL_PRODUCTION_HOST}/api/internal/workers/outbox/run")"
+            test "${worker##*$'\n'}" = "503"
+            jq -e '.error == "worker_scheduler_disabled"' <<< "${worker%$'\n'*}" >/dev/null
+          fi

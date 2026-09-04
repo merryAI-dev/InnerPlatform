@@ -182,7 +182,7 @@ class CashflowSettlementCyclePolicyTest {
         Map<CashflowSettlementCyclePolicy.Command, CashflowSettlementCyclePolicy.CommandCapability>
             requesterCapabilities = CashflowSettlementCyclePolicy.commandCapabilities(
                 new CashflowSettlementCyclePolicy.CapabilityFacts(
-                    pending, false, true, true, false, true, false
+                    pending, true, true, false, true, false
                 )
             );
         assertThat(requesterCapabilities.get(CashflowSettlementCyclePolicy.Command.WITHDRAW_MONTH_CLOSE))
@@ -193,7 +193,7 @@ class CashflowSettlementCyclePolicyTest {
         Map<CashflowSettlementCyclePolicy.Command, CashflowSettlementCyclePolicy.CommandCapability>
             approverCapabilities = CashflowSettlementCyclePolicy.commandCapabilities(
                 new CashflowSettlementCyclePolicy.CapabilityFacts(
-                    pending, false, true, true, true, false, false
+                    pending, true, true, true, false, false
                 )
             );
         assertThat(approverCapabilities.get(CashflowSettlementCyclePolicy.Command.APPROVE_MONTH_CLOSE).allowed())
@@ -261,7 +261,7 @@ class CashflowSettlementCyclePolicyTest {
     }
 
     @Test
-    void legacyUnhealthyOrInactiveReadsFailClosedForEveryCommand() {
+    void unhealthyOrInactiveReadsFailClosedForEveryCommand() {
         CashflowSettlementCyclePolicy.Projection approved = new CashflowSettlementCyclePolicy.Projection(
             CashflowSettlementCyclePolicy.BusinessState.LOCKED,
             CashflowSettlementCyclePolicy.Health.OK,
@@ -272,19 +272,11 @@ class CashflowSettlementCyclePolicyTest {
         assertAllDenied(
             CashflowSettlementCyclePolicy.commandCapabilities(
                 new CashflowSettlementCyclePolicy.CapabilityFacts(
-                    approved, true, true, true, false, false, false
-                )
-            ),
-            "LEGACY_READ_ONLY"
-        );
-        assertAllDenied(
-            CashflowSettlementCyclePolicy.commandCapabilities(
-                new CashflowSettlementCyclePolicy.CapabilityFacts(
                     new CashflowSettlementCyclePolicy.Projection(
                         approved.businessState(), CashflowSettlementCyclePolicy.Health.RECONCILING,
                         approved.workflowRevision(), approved.provenance(), ""
                     ),
-                    false, true, true, false, false, false
+                    true, true, false, false, false
                 )
             ),
             "PROJECTION_NOT_READY"
@@ -292,7 +284,7 @@ class CashflowSettlementCyclePolicyTest {
         assertAllDenied(
             CashflowSettlementCyclePolicy.commandCapabilities(
                 new CashflowSettlementCyclePolicy.CapabilityFacts(
-                    approved, false, false, false, false, false, false
+                    approved, false, false, false, false, false
                 )
             ),
             "ACTOR_INACTIVE"
@@ -325,7 +317,6 @@ class CashflowSettlementCyclePolicyTest {
             new CashflowSettlementCyclePolicy.Projection(
                 state, CashflowSettlementCyclePolicy.Health.OK, 1, null, ""
             ),
-            false,
             activeMember,
             projectWriter,
             currentApprover,

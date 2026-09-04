@@ -28,6 +28,23 @@ export function getMonthMondayWeeks(yearMonth: string): MonthMondayWeek[] {
   return getMonthFinanceWeeks(yearMonth);
 }
 
+export function getCashflowSettlementPeriodOrder(input: {
+  yearMonth: string;
+  closeDeadline: string | null | undefined;
+}): Array<'MONTH' | `WEEK_${1 | 2 | 3 | 4 | 5}`> {
+  const deadlineWeek = resolveFinanceWeekForDate(input.closeDeadline || '');
+  const monthWeekNo = deadlineWeek?.yearMonth === input.yearMonth ? deadlineWeek.weekNo : null;
+  const weeks = getMonthMondayWeeks(input.yearMonth)
+    .map((week) => `WEEK_${week.weekNo}` as `WEEK_${1 | 2 | 3 | 4 | 5}`);
+  if (monthWeekNo === null) return [...weeks, 'MONTH'];
+  const result: Array<'MONTH' | `WEEK_${1 | 2 | 3 | 4 | 5}`> = [];
+  for (const period of weeks) {
+    if (period === `WEEK_${monthWeekNo}`) result.push('MONTH');
+    result.push(period);
+  }
+  return result;
+}
+
 export function isYearMonth(value: unknown): value is string {
   return isCashflowYearMonth(value);
 }

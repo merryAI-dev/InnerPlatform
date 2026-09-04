@@ -461,14 +461,30 @@ public class WeeklyExpenseCommandService {
             MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND, actor, projectId
         );
         String requestHash = hashJson(Map.of("actorUid", writer.id(), "request", request));
-        Optional<CashflowSettlementCycleHeadMigrationResponse> replay = readIdempotentResponse(
-            writer.tenantId(), projectId, MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND,
-            request.idempotencyKey(), requestHash, CashflowSettlementCycleHeadMigrationResponse.class
-        );
+        Optional<CashflowSettlementCycleHeadMigrationResponse> replay = request.dryRun()
+            ? Optional.empty()
+            : readIdempotentResponse(
+                writer.tenantId(), projectId, MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND,
+                request.idempotencyKey(), requestHash, CashflowSettlementCycleHeadMigrationResponse.class
+            );
         if (replay.isPresent()) return replay.get();
 
         WeeklyExpensePersistence.CashflowSettlementCycleHeadMigrationState saved =
             persistence.migrateCashflowSettlementCycleHeadV2(writer, projectId, request);
+        if (request.dryRun() || !saved.migrationRequired()) {
+            return new CashflowSettlementCycleHeadMigrationResponse(
+                true,
+                MIGRATE_CASHFLOW_SETTLEMENT_CYCLE_HEAD_V2_COMMAND,
+                saved.projectId(),
+                saved.closedThrough(),
+                saved.cycleYearMonth(),
+                saved.approvalVersionId(),
+                saved.headRevision(),
+                saved.migrationFingerprint(),
+                saved.migrationRequired(),
+                ""
+            );
+        }
         String auditId = "settlement-cycle-head-migration-" + hashJson(Map.of(
             "tenantId", writer.tenantId(),
             "projectId", projectId,
@@ -480,6 +496,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("cycleYearMonth", saved.cycleYearMonth());
         metadata.put("approvalVersionId", saved.approvalVersionId());
         metadata.put("headRevision", saved.headRevision());
+        metadata.put("migrationFingerprint", saved.migrationFingerprint());
         metadata.put("reason", request.reason());
         putActorMetadata(metadata, writer);
         WeeklyExpenseAuditEventEntity audit = new WeeklyExpenseAuditEventEntity(
@@ -497,6 +514,8 @@ public class WeeklyExpenseCommandService {
                 saved.cycleYearMonth(),
                 saved.approvalVersionId(),
                 saved.headRevision(),
+                saved.migrationFingerprint(),
+                true,
                 auditId
             );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
@@ -862,7 +881,6 @@ public class WeeklyExpenseCommandService {
         CashflowSettlementCyclePolicy.commandCapabilities(
             new CashflowSettlementCyclePolicy.CapabilityFacts(
                 projection,
-                authority.legacyReadOnly(),
                 authority.activeMember(),
                 authority.projectWriter(),
                 authority.currentApprover(),
@@ -879,6 +897,7 @@ public class WeeklyExpenseCommandService {
         ));
         return new CashflowWeeklyOverviewResponse.SettlementCycle(
             cycle.cycleYearMonth(), cycle.cycleYearMonth(), cycle.monthCloseTargetYearMonth(),
+            CashflowCloseDeadline.forCumulativeCycle(YearMonth.parse(cycle.cycleYearMonth())).toString(),
             projection.businessState().name(), projection.health().name(),
             projection.workflowRevision(),
             cycle.monthSettlement() == null

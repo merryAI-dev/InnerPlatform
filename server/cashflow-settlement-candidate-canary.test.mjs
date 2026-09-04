@@ -71,7 +71,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     expect(String(fetchImpl.mock.calls[0][1].body)).toContain('refresh_token=dedicated-read-only-refresh-token');
   });
 
-  it('checks authenticated detail and current reads against the same canonical request', async () => {
+  it('checks the authenticated canonical detail read and its month state', async () => {
     const canonicalRequest = {
       projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
       workflowRevision: 3, evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
@@ -83,7 +83,6 @@ describe('cashflow settlement Vercel candidate canary', () => {
       expect(init.headers['x-tenant-id']).toBe('mysc');
       expect(init.headers['x-vercel-protection-bypass']).toBe('bypass-secret');
       expect(init.redirect).toBe('error');
-      if (String(url).includes('/requests/current')) return response({ request: canonicalRequest });
       return response({
         projectId: 'project-a', yearMonth: '2026-09',
         settlementCycle: {
@@ -99,46 +98,23 @@ describe('cashflow settlement Vercel candidate canary', () => {
     })).resolves.toEqual({
       ok: true, projectId: 'project-a', cycleYearMonth: '2026-09', requestPresent: true,
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0][0])).toBe(
+      'https://candidate.vercel.app/api/v1/cashflow/project-a/month-close?yearMonth=2026-09',
+    );
   });
 
-  it('rejects an empty or cross-wired state instead of accepting any healthy project', async () => {
-    const emptyFetch = vi.fn(async (url) => response(String(url).includes('/requests/current')
-      ? { request: null }
-      : {
-          projectId: 'project-a', yearMonth: '2026-09',
-          settlementCycle: {
-            cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
-          },
-          monthState: null, actions: {},
-        }));
+  it('rejects an empty month state instead of accepting any healthy project', async () => {
+    const emptyFetch = vi.fn(async () => response({
+      projectId: 'project-a', yearMonth: '2026-09',
+      settlementCycle: {
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
+      },
+      monthState: null, actions: {},
+    }));
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl: emptyFetch, mintIdToken: async () => 'token',
     })).rejects.toThrow(/fixed settlement fixture/);
-
-    const mismatchedFetch = vi.fn(async (url) => response(String(url).includes('/requests/current')
-      ? { request: {
-          projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
-          workflowRevision: 4, evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
-          cycleYearMonth: '2026-09', documentType: 'REQUEST',
-          contractVersion: 'cashflow-cumulative-close-v2',
-        } }
-      : {
-          projectId: 'project-a', yearMonth: '2026-09',
-          settlementCycle: {
-            cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
-          },
-          monthState: {
-            projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
-            workflowRevision: 3, evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
-            cycleYearMonth: '2026-09', documentType: 'REQUEST',
-            contractVersion: 'cashflow-cumulative-close-v2',
-          },
-          actions: {},
-        }));
-    await expect(verifyCashflowSettlementCandidate(base, {
-      fetchImpl: mismatchedFetch, mintIdToken: async () => 'token',
-    })).rejects.toThrow(/not aligned/);
   });
 
   it('rejects a healthy read whose request does not match the approved fixture', async () => {
@@ -148,16 +124,14 @@ describe('cashflow settlement Vercel candidate canary', () => {
       cycleYearMonth: '2026-09', documentType: 'REQUEST',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
-    const fetchImpl = vi.fn(async (url) => response(String(url).includes('/requests/current')
-      ? { request: wrongFixture }
-      : {
-          projectId: 'project-a', yearMonth: '2026-09',
-          settlementCycle: {
-            cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
-          },
-          monthState: wrongFixture,
-          actions: {},
-        }));
+    const fetchImpl = vi.fn(async () => response({
+      projectId: 'project-a', yearMonth: '2026-09',
+      settlementCycle: {
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
+      },
+      monthState: wrongFixture,
+      actions: {},
+    }));
 
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl, mintIdToken: async () => 'token',
@@ -171,16 +145,14 @@ describe('cashflow settlement Vercel candidate canary', () => {
       cycleYearMonth: '2026-09', documentType: 'REQUEST',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
-    const fetchImpl = vi.fn(async (url) => response(String(url).includes('/requests/current')
-      ? { request }
-      : {
-          projectId: 'project-a', yearMonth: '2026-09',
-          settlementCycle: {
-            cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
-          },
-          monthState: request,
-          actions: { approveMonthClose: { enabled: true } },
-        }));
+    const fetchImpl = vi.fn(async () => response({
+      projectId: 'project-a', yearMonth: '2026-09',
+      settlementCycle: {
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
+      },
+      monthState: request,
+      actions: { approveMonthClose: { enabled: true } },
+    }));
 
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl, mintIdToken: async () => 'token',
@@ -194,31 +166,27 @@ describe('cashflow settlement Vercel candidate canary', () => {
       cycleYearMonth: '2026-09', documentType: 'REQUEST',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
-    const coercedRevisionFetch = vi.fn(async (url) => response(String(url).includes('/requests/current')
-      ? { request }
-      : {
-          projectId: 'project-a', yearMonth: '2026-09',
-          settlementCycle: {
-            cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
-          },
-          monthState: request,
-          actions: { withdrawRequest: { enabled: false } },
-        }));
+    const coercedRevisionFetch = vi.fn(async () => response({
+      projectId: 'project-a', yearMonth: '2026-09',
+      settlementCycle: {
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
+      },
+      monthState: request,
+      actions: { withdrawRequest: { enabled: false } },
+    }));
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl: coercedRevisionFetch, mintIdToken: async () => 'token',
-    })).rejects.toThrow(/not aligned|fixed settlement fixture/);
+    })).rejects.toThrow(/fixed settlement fixture/);
 
     const integerRequest = { ...request, workflowRevision: 3 };
-    const malformedActionFetch = vi.fn(async (url) => response(String(url).includes('/requests/current')
-      ? { request: integerRequest }
-      : {
-          projectId: 'project-a', yearMonth: '2026-09',
-          settlementCycle: {
-            cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
-          },
-          monthState: integerRequest,
-          actions: { withdrawRequest: { enabled: false }, approveMonthClose: {} },
-        }));
+    const malformedActionFetch = vi.fn(async () => response({
+      projectId: 'project-a', yearMonth: '2026-09',
+      settlementCycle: {
+        cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
+      },
+      monthState: integerRequest,
+      actions: { withdrawRequest: { enabled: false }, approveMonthClose: {} },
+    }));
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl: malformedActionFetch, mintIdToken: async () => 'token',
     })).rejects.toThrow(/read-only/);

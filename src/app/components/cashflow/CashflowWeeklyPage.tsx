@@ -13,15 +13,18 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  fetchCashflowMonthCloseViaBff,
   fetchCashflowWeeklyOverviewViaBff,
+  reviewCashflowMonthCloseRequestViaBff,
   transitionCashflowSettlementStatusViaBff,
+  type CashflowSettlementCycle,
   type CashflowSettlementPeriod,
   type CashflowSettlementStatus,
   type CashflowSettlementStatusItem,
   type CashflowSettlementStatusesResult,
   type CashflowWeeklyOverviewResult,
 } from '../../lib/platform-bff-client';
-import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { getCashflowSettlementPeriodOrder, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
 import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-transaction-log';
 import type { PersonRecord } from '../../lib/platform-bff-client';
@@ -32,6 +35,7 @@ export function filterCashflowProjectsByDepartment<T extends { department?: unkn
 }
 
 type SettlementStatusFilter = 'ALL' | CashflowSettlementStatus;
+type MonthSettlementStatusFilter = 'ALL' | CashflowSettlementCycle['businessState'];
 
 export interface CashflowOwnerOption {
   uid: string;
@@ -76,11 +80,12 @@ export function filterCashflowProjectsBySettlementStatus<T extends { id: string;
   projects: T[],
   department: string,
   statuses: Record<string, CashflowSettlementStatusesResult>,
+  cycles: Record<string, CashflowSettlementCycle>,
   statusErrors: Record<string, string>,
   monthStatusErrors: Record<string, string>,
   statusesLoading: boolean,
   weekNos: number[],
-  monthStatusFilter: SettlementStatusFilter,
+  monthStatusFilter: MonthSettlementStatusFilter,
   weekStatusFilter: SettlementStatusFilter,
 ): T[] {
   return filterCashflowProjectsByDepartment(projects, department).filter((project) => {
@@ -89,7 +94,7 @@ export function filterCashflowProjectsBySettlementStatus<T extends { id: string;
     const matches = (period: CashflowSettlementPeriod, filter: SettlementStatusFilter) => (
       filter === 'ALL' || (statusItem(projectStatuses, period)?.status || 'WAITING_FOR_UPDATE') === filter
     );
-    return (Boolean(monthStatusErrors[project.id]) || matches('MONTH', monthStatusFilter))
+    return (Boolean(monthStatusErrors[project.id]) || monthStatusFilter === 'ALL' || cycles[project.id]?.businessState === monthStatusFilter)
       && (weekStatusFilter === 'ALL' || weekNos.some((weekNo) => matches(`WEEK_${weekNo}` as CashflowSettlementPeriod, weekStatusFilter)));
   });
 }
@@ -100,23 +105,21 @@ function statusItem(result: CashflowSettlementStatusesResult | undefined, period
 
 function SettlementStatusButton({
   item,
-  period,
   loading,
   canApprove,
   onAction,
 }: {
   item?: CashflowSettlementStatusItem;
-  period: CashflowSettlementPeriod;
   loading: boolean;
   canApprove: boolean;
   onAction: (action: 'SUBMIT' | 'APPROVE') => void;
 }) {
   const status = item?.status || 'WAITING_FOR_UPDATE';
-  if ((period === 'MONTH' && status === 'LOCKED') || (period !== 'MONTH' && status === 'COMPLETED')) {
+  if (status === 'COMPLETED') {
     return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />승인 완료</span>;
   }
   if (status === 'WAITING_FOR_UPDATE') {
-    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 font-semibold text-red-700"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />{period === 'MONTH' ? '결산 전' : '주정산 이전'}</span>;
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 font-semibold text-red-700"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />주정산 이전</span>;
   }
   return (
     <Button
@@ -133,6 +136,52 @@ function SettlementStatusButton({
   );
 }
 
+function MonthSettlementStatusButton({
+  cycle,
+  deadlineKnown,
+  loading,
+  onApprove,
+}: {
+  cycle?: CashflowSettlementCycle;
+  deadlineKnown: boolean;
+  loading: boolean;
+  onApprove: () => void;
+}) {
+  if (!cycle || cycle.health !== 'OK' || cycle.businessState === 'INCONSISTENT') {
+    return <span className="text-amber-700">상태 재확인 필요</span>;
+  }
+  if (cycle.businessState === 'LOCKED') {
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />승인 완료</span>;
+  }
+  if (cycle.businessState === 'SUBMITTED') {
+    const capability = cycle.commandCapabilities.APPROVE_MONTH_CLOSE;
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="min-h-8 gap-1.5 whitespace-normal rounded-full border-amber-200 bg-amber-50 px-2.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+        disabled={loading || !deadlineKnown || !capability.allowed}
+        title={!deadlineKnown ? '월 결산 마감을 확인한 뒤 승인할 수 있습니다.' : undefined}
+        onClick={onApprove}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+        {loading ? '처리 중…' : '조직장 승인 필요'}
+      </Button>
+    );
+  }
+  const label = cycle.businessState === 'REOPEN_REQUESTED'
+    ? '재오픈 승인 대기'
+    : cycle.businessState === 'REOPENED'
+      ? '재결산 필요'
+      : cycle.businessState === 'REJECTED'
+        ? '월 결산 반려'
+        : cycle.businessState === 'WITHDRAWN'
+          ? '요청 회수'
+          : '결산 전';
+  return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 font-semibold text-red-700"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />{label}</span>;
+}
+
 function ProjectPeriodLine({ start, end }: { start?: string | null; end?: string | null }) {
   const period = formatProjectPeriod(start, end);
   if (!period) return null;
@@ -141,12 +190,10 @@ function ProjectPeriodLine({ start, end }: { start?: string | null; end?: string
 
 function SettlementStatusFilterSelect({
   label,
-  period,
   value,
   onValueChange,
 }: {
   label: string;
-  period: CashflowSettlementPeriod;
   value: SettlementStatusFilter;
   onValueChange: (value: SettlementStatusFilter) => void;
 }) {
@@ -157,18 +204,37 @@ function SettlementStatusFilterSelect({
         <SelectTrigger><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="ALL">전체 상태</SelectItem>
-          <SelectItem value="WAITING_FOR_UPDATE">{period === 'MONTH' ? '결산 전' : '주정산 이전'}</SelectItem>
-          {period === 'MONTH' ? (
-            <>
-              <SelectItem value="SUBMITTED">조직장 승인 필요</SelectItem>
-              <SelectItem value="LOCKED">승인 완료</SelectItem>
-            </>
-          ) : (
-            <>
-              <SelectItem value="PENDING_APPROVAL">조직장 승인 필요</SelectItem>
-              <SelectItem value="COMPLETED">승인 완료</SelectItem>
-            </>
-          )}
+          <SelectItem value="WAITING_FOR_UPDATE">주정산 이전</SelectItem>
+          <SelectItem value="PENDING_APPROVAL">조직장 승인 필요</SelectItem>
+          <SelectItem value="COMPLETED">승인 완료</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function MonthSettlementStatusFilterSelect({
+  value,
+  onValueChange,
+}: {
+  value: MonthSettlementStatusFilter;
+  onValueChange: (value: MonthSettlementStatusFilter) => void;
+}) {
+  return (
+    <div className="w-[140px]">
+      <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">월결산 상태</Label>
+      <Select value={value} onValueChange={(next) => onValueChange(next as MonthSettlementStatusFilter)}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="ALL">전체 상태</SelectItem>
+          <SelectItem value="NOT_REQUESTED">결산 전</SelectItem>
+          <SelectItem value="SUBMITTED">조직장 승인 필요</SelectItem>
+          <SelectItem value="LOCKED">승인 완료</SelectItem>
+          <SelectItem value="REOPEN_REQUESTED">재오픈 승인 대기</SelectItem>
+          <SelectItem value="REOPENED">재결산 필요</SelectItem>
+          <SelectItem value="REJECTED">월 결산 반려</SelectItem>
+          <SelectItem value="WITHDRAWN">요청 회수</SelectItem>
+          <SelectItem value="INCONSISTENT">상태 재확인 필요</SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -212,7 +278,7 @@ export function CashflowWeeklyPage() {
   const [actionKey, setActionKey] = useState('');
   const [ownerLinkingKey, setOwnerLinkingKey] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
-  const [monthStatusFilter, setMonthStatusFilter] = useState<SettlementStatusFilter>('ALL');
+  const [monthStatusFilter, setMonthStatusFilter] = useState<MonthSettlementStatusFilter>('ALL');
   const [weekStatusFilter, setWeekStatusFilter] = useState<SettlementStatusFilter>('ALL');
   const departments = useMemo(() => Array.from(new Set([
     ...getProjectRegistrationCicOptions(),
@@ -249,6 +315,22 @@ export function CashflowWeeklyPage() {
   const statuses = useMemo<Record<string, CashflowSettlementStatusesResult>>(() => Object.fromEntries(
     (overview?.items || []).flatMap((item) => item.settlementStatuses ? [[item.projectId, item.settlementStatuses]] : []),
   ), [overview]);
+  const cycles = useMemo<Record<string, CashflowSettlementCycle>>(() => Object.fromEntries(
+    (overview?.items || []).map((item) => [item.projectId, item.settlementCycle]),
+  ), [overview]);
+  const closeDeadline = overview?.items[0]?.settlementCycle.closeDeadline || '';
+  const settlementPeriodOrder = useMemo(() => getCashflowSettlementPeriodOrder({
+    yearMonth,
+    closeDeadline,
+  }), [closeDeadline, yearMonth]);
+  const monthDeadlineKnown = settlementPeriodOrder.at(-1) !== 'MONTH';
+  const monthCloseTargetYearMonth = overview?.monthCloseTargetYearMonth || '';
+  const monthCloseTargetLabel = /^20\d{2}-(0[1-9]|1[0-2])$/.test(monthCloseTargetYearMonth)
+    ? `${monthCloseTargetYearMonth.slice(0, 4) === yearMonth.slice(0, 4) ? '' : `${monthCloseTargetYearMonth.slice(0, 4)}년 `}${Number(monthCloseTargetYearMonth.slice(5, 7))}월분 결산`
+    : '월결산';
+  const monthCloseDeadlineLabel = monthDeadlineKnown
+    ? `${Number(closeDeadline.slice(5, 7))}/${Number(closeDeadline.slice(8, 10))} 마감`
+    : '마감 확인 필요';
   const statusErrors = useMemo<Record<string, string>>(() => {
     if (overviewError) return Object.fromEntries(overviewProjectIds.map((projectId) => [projectId, '상태 재확인 필요']));
     return {};
@@ -262,13 +344,14 @@ export function CashflowWeeklyPage() {
     projects,
     deptFilter,
     statuses,
+    cycles,
     statusErrors,
     monthStatusErrors,
     overviewLoading,
     monthWeeks.map((week) => week.weekNo),
     monthStatusFilter,
     weekStatusFilter,
-  ), [deptFilter, monthStatusErrors, monthStatusFilter, monthWeeks, overviewLoading, projects, statusErrors, statuses, weekStatusFilter]);
+  ), [cycles, deptFilter, monthStatusErrors, monthStatusFilter, monthWeeks, overviewLoading, projects, statusErrors, statuses, weekStatusFilter]);
 
   useEffect(() => {
     const projectIds = JSON.parse(overviewProjectIdsKey) as string[];
@@ -329,7 +412,7 @@ export function CashflowWeeklyPage() {
     return () => { active = false; window.clearTimeout(requestTimer); };
   }, [orgId, overviewActor, overviewProjectIdsKey, refreshSequence, yearMonth]);
 
-  async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE', targetYearMonth = yearMonth) {
+  async function transition(projectId: string, period: Exclude<CashflowSettlementPeriod, 'MONTH'>, action: 'SUBMIT' | 'APPROVE', targetYearMonth = yearMonth) {
     if (!user?.idToken) return;
     const key = `${projectId}:${period}`;
     setActionKey(key);
@@ -339,6 +422,39 @@ export function CashflowWeeklyPage() {
       toast.success(action === 'APPROVE' ? '정산을 승인했습니다.' : '조직장 승인 대기로 변경했습니다.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '결산 상태를 변경하지 못했습니다.');
+    } finally {
+      setActionKey('');
+    }
+  }
+
+  async function approveMonthClose(projectId: string) {
+    if (!user?.idToken || !monthDeadlineKnown) return;
+    const key = `${projectId}:MONTH`;
+    setActionKey(key);
+    try {
+      const current = await fetchCashflowMonthCloseViaBff({ tenantId: orgId, actor: user, projectId, yearMonth });
+      const request = current.monthState;
+      if (current.projectId !== projectId
+        || current.cycleYearMonth !== yearMonth
+        || current.settlementCycle.health !== 'OK'
+        || current.settlementCycle.commandCapabilities.APPROVE_MONTH_CLOSE.allowed !== true
+        || !request?.manifestHash
+        || !Number.isSafeInteger(request.revision)) {
+        throw new Error('월 결산 승인 상태를 다시 확인해 주세요.');
+      }
+      await reviewCashflowMonthCloseRequestViaBff({
+        tenantId: orgId,
+        actor: user,
+        projectId,
+        requestId: request.requestId,
+        payload: { decision: 'APPROVE', expectedRevision: request.revision, expectedManifestHash: request.manifestHash },
+        idempotencyKey: `cashflow-month-close-review:${request.requestId}:approve:r${request.revision}`,
+      });
+      await fetchCashflowMonthCloseViaBff({ tenantId: orgId, actor: user, projectId, yearMonth });
+      setRefreshSequence((currentSequence) => currentSequence + 1);
+      toast.success('월 결산을 승인했습니다.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '월 결산을 승인하지 못했습니다.');
     } finally {
       setActionKey('');
     }
@@ -398,8 +514,8 @@ export function CashflowWeeklyPage() {
             </SelectContent>
           </Select>
         </div>
-        <SettlementStatusFilterSelect label="월결산 상태" period="MONTH" value={monthStatusFilter} onValueChange={setMonthStatusFilter} />
-        <SettlementStatusFilterSelect label="주정산 상태" period="WEEK_1" value={weekStatusFilter} onValueChange={setWeekStatusFilter} />
+        <MonthSettlementStatusFilterSelect value={monthStatusFilter} onValueChange={setMonthStatusFilter} />
+        <SettlementStatusFilterSelect label="주정산 상태" value={weekStatusFilter} onValueChange={setWeekStatusFilter} />
         <span className="pb-2 text-[11px] text-muted-foreground">{filteredProjects.length}개 프로젝트</span>
       </div>
 
@@ -443,14 +559,23 @@ export function CashflowWeeklyPage() {
                   <th className="sticky left-0 top-0 z-40 min-w-[180px] border-b bg-slate-50 px-3 py-2 text-left font-bold">프로젝트</th>
                   <th className="sticky left-[180px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">조직장</th>
                   <th className="sticky left-[284px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">책임자</th>
-                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">{Number(yearMonth.slice(5, 7))}월 결산</th>
                   <th className="sticky top-0 z-30 min-w-[140px] border-b border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
-                  {monthWeeks.map((week) => (
-                    <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
-                      <div>{week.label}</div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">{week.weekStart}~{week.weekEnd}</div>
-                    </th>
-                  ))}
+                  {settlementPeriodOrder.map((period) => {
+                    if (period === 'MONTH') {
+                      return (
+                        <th key={period} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
+                          <div>{monthCloseTargetLabel} · <span className="text-[10px] text-muted-foreground">{monthCloseDeadlineLabel}</span></div>
+                        </th>
+                      );
+                    }
+                    const week = monthWeeks.find((candidate) => period === `WEEK_${candidate.weekNo}`);
+                    return week ? (
+                      <th key={period} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
+                        <div>{week.label}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">{week.weekStart}~{week.weekEnd}</div>
+                      </th>
+                    ) : null;
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -468,33 +593,32 @@ export function CashflowWeeklyPage() {
                       </td>
                       <td className="sticky left-[180px] z-20 bg-white px-2 py-2 font-medium">{executiveApprover.label || <span className="text-red-700">연결 필요</span>}</td>
                       <td className="sticky left-[284px] z-20 bg-white px-2 py-2 font-medium">{manager.label || <span className="text-red-700">연결 필요</span>}</td>
-                      <td className="px-3 py-3 text-center">
-                        {statusErrors[project.id] || monthStatusErrors[project.id] ? <span className="text-amber-700">{statusErrors[project.id] || monthStatusErrors[project.id]}</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
-                          <SettlementStatusButton
-                            item={statusItem(projectStatuses, 'MONTH')}
-                            period="MONTH"
-                            loading={actionKey === `${project.id}:MONTH`}
-                            canApprove={canApprove}
-                            onAction={(action) => void transition(project.id, 'MONTH', action)}
-                          />
-                        )}
-                        {!statusErrors[project.id] && !monthStatusErrors[project.id]
-                          ? <SettlementApprovalTimes item={statusItem(projectStatuses, 'MONTH')} />
-                          : null}
-                      </td>
                       <td className="border-l-2 border-slate-300 px-3 py-3 text-center">
                         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-[11px]" onClick={() => openProject(project.id)}>
                           <ExternalLink className="h-3.5 w-3.5" /> 현금흐름 보기
                         </Button>
                       </td>
-                      {monthWeeks.map((week) => {
-                        const period = `WEEK_${week.weekNo}` as CashflowSettlementPeriod;
+                      {settlementPeriodOrder.map((period) => {
+                        if (period === 'MONTH') {
+                          const cycle = cycles[project.id];
+                          return (
+                            <td key={period} className="px-3 py-3 text-center">
+                              {statusErrors[project.id] || monthStatusErrors[project.id]
+                                ? <span className="text-amber-700">{statusErrors[project.id] || monthStatusErrors[project.id]}</span>
+                                : (overviewLoading && !cycle)
+                                  ? <span className="text-muted-foreground">확인 중…</span>
+                                  : <MonthSettlementStatusButton cycle={cycle} deadlineKnown={monthDeadlineKnown} loading={actionKey === `${project.id}:MONTH`} onApprove={() => void approveMonthClose(project.id)} />}
+                              {!statusErrors[project.id] && !monthStatusErrors[project.id]
+                                ? <SettlementApprovalTimes item={cycle?.monthCloseSettlement || undefined} />
+                                : null}
+                            </td>
+                          );
+                        }
                         return (
-                          <td key={week.weekNo} className="px-3 py-3 text-center">
+                          <td key={period} className="px-3 py-3 text-center">
                             {statusErrors[project.id] ? <span className="text-amber-700">{statusErrors[project.id]}</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                               <SettlementStatusButton
                                 item={statusItem(projectStatuses, period)}
-                                period={period}
                                 loading={actionKey === `${project.id}:${period}`}
                                 canApprove={canApprove}
                                 onAction={(action) => void transition(project.id, period, action)}
@@ -508,7 +632,7 @@ export function CashflowWeeklyPage() {
                   );
                 })}
                 {filteredProjects.length === 0 ? (
-                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={5 + monthWeeks.length}>프로젝트가 없습니다.</td></tr>
+                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={4 + settlementPeriodOrder.length}>프로젝트가 없습니다.</td></tr>
                 ) : null}
               </tbody>
             </table>
