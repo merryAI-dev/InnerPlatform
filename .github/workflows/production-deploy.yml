@@ -694,28 +694,8 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
           BFF_SPLIT_RELEASE_BASE_SHA: ${{ vars.BFF_SPLIT_RELEASE_BASE_SHA_LIVE }}
-          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          SETTLEMENT_CUTOVER: ${{ steps.release_mode.outputs.settlement_cutover }}
-          SETTLEMENT_CANARY_BASE_URL: https://myscube.myscguard.app
-          SETTLEMENT_CANARY_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY_LIVE }}
-          SETTLEMENT_CANARY_FIREBASE_REFRESH_TOKEN: ${{ steps.release_mode.outputs.settlement_cutover == 'true' && secrets.FIREBASE_SETTLEMENT_READ_CANARY_REFRESH_TOKEN_LIVE || '' }}
-          SETTLEMENT_CANARY_ACTOR_UID: ${{ vars.SETTLEMENT_READ_CANARY_ACTOR_UID_LIVE }}
-          SETTLEMENT_CANARY_PROJECT_ID: ${{ vars.JVM_SETTLEMENT_CANARY_PROJECT_ID_LIVE }}
-          SETTLEMENT_CANARY_CYCLE_YEAR_MONTH: ${{ vars.JVM_SETTLEMENT_CANARY_CYCLE_YEAR_MONTH_LIVE }}
-          SETTLEMENT_CANARY_EXPECTED_REQUEST_ID: ${{ vars.SETTLEMENT_CANARY_EXPECTED_REQUEST_ID_LIVE }}
-          SETTLEMENT_CANARY_EXPECTED_STATUS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_STATUS_LIVE }}
-          SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_WORKFLOW_REVISION_LIVE }}
-          SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION: ${{ vars.SETTLEMENT_CANARY_EXPECTED_EVIDENCE_REVISION_LIVE }}
-          SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH: ${{ vars.SETTLEMENT_CANARY_EXPECTED_TARGET_YEAR_MONTH_LIVE }}
-          SETTLEMENT_CANARY_EXPECTED_ACTIONS: ${{ vars.SETTLEMENT_CANARY_EXPECTED_ACTIONS_LIVE }}
-          SETTLEMENT_CANARY_TENANT_ID: mysc
-          SETTLEMENT_CANARY_CANONICAL_ORIGIN: https://myscube.myscguard.app
         run: |
           set -euo pipefail
-          case "${SETTLEMENT_CUTOVER}" in
-            true|false) ;;
-            *) echo "Missing or invalid settlement cutover classification." >&2; exit 1 ;;
-          esac
           if node scripts/verify-vercel-deployment-identity.mjs \
             --alias-host "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --expected-host "${DEPLOYMENT_HOST}" \
@@ -723,12 +703,7 @@ jobs:
             --expected-sha "${DEPLOY_SHA}" \
             --expected-invocation "${DEPLOY_INVOCATION_ID}" \
             --ancestor-of "${DEPLOY_SHA}" >/dev/null 2>&1; then
-            if [ "${SETTLEMENT_CUTOVER}" != "true" ]; then
-              exit 0
-            fi
-            if node scripts/verify-cashflow-settlement-candidate.mjs; then
-              exit 0
-            fi
+            exit 0
           fi
 
           test -n "${PREVIOUS_DEPLOYMENT_HOST}" || {
@@ -762,9 +737,6 @@ jobs:
             [ "${attempt}" = "10" ] || sleep 2
           done
           test "${restored}" = "true"
-          if [ "${SETTLEMENT_CUTOVER}" = "true" ]; then
-            node scripts/verify-cashflow-settlement-candidate.mjs
-          fi
           if [ "${rollback_alias_status}" != "0" ]; then
             echo "Alias rollback command lost its response, but the restored target and authenticated read were verified." >&2
           fi

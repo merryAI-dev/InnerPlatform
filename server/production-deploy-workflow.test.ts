@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { buildVercelProductionDeployArgs } from '../scripts/deploy-vercel-production-candidate.mjs';
@@ -24,6 +25,11 @@ const env = {
 };
 
 describe('production deployment decisions', () => {
+  it('runs the settlement behavior canary only against the verified direct deployment', () => {
+    const workflow = readFileSync('.github/workflows/production-deploy.yml', 'utf8');
+    expect(workflow.match(/node scripts\/verify-cashflow-settlement-candidate\.mjs/g)).toHaveLength(1);
+  });
+
   it('routes mixed settlement code only through the atomic cutover owner', () => {
     expect(classifyCashflowSettlementProductionRelease([
       'server/jvm-weekly-api/src/main/java/example/Settlement.java',
