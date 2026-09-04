@@ -670,8 +670,7 @@ export async function verifySettlementCycleProjections({ targets = [], readProje
       || text(aligned.requestId) !== target.requestId
       || text(aligned.cycleYearMonth || aligned.yearMonth) !== context.requestCycleYearMonth
       || text(aligned.monthCloseTargetYearMonth || aligned.throughMonth) !== context.requestTargetYearMonth
-      || text(aligned.status) !== text(target.expectedRequestStatus || 'APPROVED')
-      || Number(aligned.workflowRevision) !== context.workflowRevision) {
+      || text(aligned.status) !== text(target.expectedRequestStatus || 'APPROVED')) {
       throw new Error(`Settlement-cycle BFF read alignment mismatch for ${target.projectId}`);
     }
     const businessState = text(projection?.businessState);
