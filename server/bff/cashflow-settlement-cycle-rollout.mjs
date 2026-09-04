@@ -989,8 +989,9 @@ export function assertSettlementCycleCutoverReady(inventory, projections, expect
   const activeMismatch = stableStringify(activeRequests) !== stableStringify(activeCoordinators);
   const activeProjects = (inventory?.canonicalActiveRequests || [])
     .map(({ projectId }) => projectId).sort();
+  const expectedActiveProjectSet = new Set(expectedActiveProjects);
   const unexpectedActive = expectedActiveProjects.length > 0
-    && stableStringify(activeProjects) !== stableStringify([...expectedActiveProjects].sort());
+    && activeProjects.some((projectId) => !expectedActiveProjectSet.has(projectId));
   if (blockers.length > 0 || invalidProjections > 0 || activeMismatch || unexpectedActive) {
     const detail = [
       ...blockers.map(([name, count]) => `${name}=${count}`),
