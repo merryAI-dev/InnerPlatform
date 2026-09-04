@@ -181,9 +181,9 @@ export async function verifyCashflowSettlementCandidate(source, dependencies = {
     !decision
     || typeof decision !== 'object'
     || Array.isArray(decision)
-    || decision.enabled !== false
+    || typeof decision.enabled !== 'boolean'
   ))) {
-    throw new Error('Settlement canary principal must be read-only.');
+    throw new Error('Settlement candidate actions are invalid.');
   }
   return {
     ok: true,
