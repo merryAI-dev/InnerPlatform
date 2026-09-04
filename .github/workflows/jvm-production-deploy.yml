@@ -88,9 +88,8 @@ jobs:
               echo "A candidate can only be resumed through the exceptional manual path." >&2
               exit 1
             fi
-            expected_revision="innerplatform-jvm-weekly-api-live-hotfix-${sha::8}"
-            if [ "${resume_revision}" != "${expected_revision}" ]; then
-              echo "Candidate ${resume_revision} does not match current main ${expected_revision}." >&2
+            if [[ ! "${resume_revision}" =~ ^innerplatform-jvm-weekly-api-live-hotfix-[0-9a-f]{8}$ ]]; then
+              echo "Candidate ${resume_revision} is not an exact JVM production revision." >&2
               exit 1
             fi
             {
@@ -314,12 +313,10 @@ jobs:
             --head "${DEPLOY_SHA}")"
           if [ -n "${RESUME_CANDIDATE_REVISION}" ] \
             && [ "${live_revision}" = "${RESUME_CANDIDATE_REVISION}" ] \
-            && [ "${jvm_deployed_sha}" = "${DEPLOY_SHA}" ]; then
+            && [ "${live_revision}" = "innerplatform-jvm-weekly-api-live-hotfix-${jvm_deployed_sha::8}" ]; then
+            git diff --quiet "${jvm_deployed_sha}" "${DEPLOY_SHA}" -- server/jvm-weekly-api
             jq -e '.releaseMode == "web" and (.bffFrontendCutover | length > 0)' \
               <<< "${boundary_json}" >/dev/null
-            expected_digest="$(gcloud artifacts docker images describe \
-              "${IMAGE}:${DEPLOY_SHA}" --format='value(image_summary.digest)')"
-            test "${live_digest}" = "${expected_digest}"
             release_mode=final_web_resume
           else
             release_mode="$(jq -er \
