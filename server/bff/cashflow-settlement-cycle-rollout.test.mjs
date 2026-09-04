@@ -775,35 +775,45 @@ describe('cashflow settlement-cycle rollout audit', () => {
     }]);
   });
 
-  it('verifies each approved projection against the exact project, cycle, and request provenance', async () => {
+  it('verifies each projection against the exact project, cycle, and request identity', async () => {
     const targets = [
-      { projectId: 'project-a', cycleYearMonth: '2026-09', requestId: 'project-a-2026-09' },
+      {
+        projectId: 'project-a', cycleYearMonth: '2026-09', requestId: 'project-a-2026-09',
+        expectedRequestStatus: 'PENDING_APPROVAL',
+      },
     ];
+    const submittedMonth = {
+      ...lockedMonthCloseSettlement(), status: 'SUBMITTED', revision: 1, approvedAt: '', approvedBy: '',
+    };
     const readProjection = vi.fn(async () => ({
-      settlementStatuses: lockedSettlementStatuses(),
+      settlementStatuses: {
+        ...lockedSettlementStatuses(),
+        items: [submittedMonth, ...lockedSettlementStatuses().items.slice(1)],
+      },
       settlementCycle: {
         cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
         closeDeadline: '2026-09-10',
-        businessState: 'LOCKED', health: 'OK', workflowRevision: 7,
-        monthCloseSettlement: lockedMonthCloseSettlement(), supersededAttempt: null,
-        commandCapabilities: lockedCapabilities(),
-        provenance: {
-          affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
-          closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-          requestId: 'project-a-2026-09', ledgerRevision: 2, rootHash,
+        businessState: 'SUBMITTED', health: 'OK', workflowRevision: 7,
+        monthCloseSettlement: submittedMonth, supersededAttempt: null,
+        commandCapabilities: {
+          ...Object.fromEntries(settlementCycleCommands.map((command) => [command, {
+            allowed: false, reasonCode: 'BUSINESS_STATE_NOT_ELIGIBLE',
+          }])),
+          WITHDRAW_MONTH_CLOSE: { allowed: true, reasonCode: '' },
         },
+        provenance: null,
       },
     }));
     const readAlignedRequest = vi.fn(async () => ({
       requestId: 'project-a-2026-09', cycleYearMonth: '2026-09',
-      monthCloseTargetYearMonth: '2026-08', status: 'APPROVED', workflowRevision: 6,
+      monthCloseTargetYearMonth: '2026-08', status: 'PENDING_APPROVAL', workflowRevision: 7,
     }));
 
     await expect(verifySettlementCycleProjections({
       targets, readProjection, readAlignedRequest,
     })).resolves.toEqual([{
       projectId: 'project-a', cycleYearMonth: '2026-09',
-      requestId: 'project-a-2026-09', businessState: 'LOCKED', health: 'OK',
+      requestId: 'project-a-2026-09', businessState: 'SUBMITTED', health: 'OK',
     }]);
     expect(readProjection).toHaveBeenCalledWith({ projectId: 'project-a', cycleYearMonth: '2026-09' });
     expect(readAlignedRequest).toHaveBeenCalledWith(expect.objectContaining({
@@ -812,23 +822,9 @@ describe('cashflow settlement-cycle rollout audit', () => {
     }));
 
     await expect(verifySettlementCycleProjections({
-      targets,
+      targets: [{ ...targets[0], requestId: 'project-b-2026-09' }],
       readAlignedRequest,
-      readProjection: async () => ({
-        settlementStatuses: lockedSettlementStatuses(),
-        settlementCycle: {
-          cycleYearMonth: '2026-09', weeklyYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08',
-          closeDeadline: '2026-09-10',
-          businessState: 'LOCKED', health: 'OK', workflowRevision: 7,
-          monthCloseSettlement: lockedMonthCloseSettlement(), supersededAttempt: null,
-          commandCapabilities: lockedCapabilities(),
-          provenance: {
-            affectedFromMonth: '2023-01', affectedThroughMonth: '2026-08',
-            closedByCycleYearMonth: '2026-09', approvalVersionId: 'version-a',
-            requestId: 'project-b-2026-09', ledgerRevision: 2, rootHash,
-          },
-        },
-      }),
+      readProjection,
     })).rejects.toThrow(/identity/i);
   });
 
