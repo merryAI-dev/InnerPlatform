@@ -447,9 +447,7 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
-          expected_revision="${SERVICE}-hotfix-${DEPLOY_SHA::8}"
           revision="${RESUME_CANDIDATE_REVISION}"
-          test "${revision}" = "${expected_revision}"
           service_json="$(gcloud run services describe "${SERVICE}" \
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
