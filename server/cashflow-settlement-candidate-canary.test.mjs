@@ -141,7 +141,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     })).rejects.toThrow(/fixed settlement fixture/);
   });
 
-  it('rejects a canary principal that can mutate the fixed fixture', async () => {
+  it('accepts canonical actions for the fixed fixture without invoking them', async () => {
     const request = {
       projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
       workflowRevision: 3, evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
@@ -154,12 +154,12 @@ describe('cashflow settlement Vercel candidate canary', () => {
         cycleYearMonth: '2026-09', monthCloseTargetYearMonth: '2026-08', health: 'OK',
       },
       monthState: request,
-      actions: { approveMonthClose: { enabled: true } },
+      actions: { withdrawRequest: { enabled: true } },
     }));
 
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl, mintIdToken: async () => 'token',
-    })).rejects.toThrow(/read-only/);
+    })).resolves.toMatchObject({ ok: true, requestPresent: true });
   });
 
   it('rejects coerced revisions and malformed action decisions', async () => {
@@ -192,7 +192,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     }));
     await expect(verifyCashflowSettlementCandidate(base, {
       fetchImpl: malformedActionFetch, mintIdToken: async () => 'token',
-    })).rejects.toThrow(/read-only/);
+    })).rejects.toThrow(/actions are invalid/);
   });
 
   it('fails without exposing an upstream response body when auth or reads fail', async () => {
