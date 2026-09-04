@@ -500,6 +500,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Verify candidate image and commit identity
+        if: needs.preflight.outputs.resume_revision == ''
         env:
           REVISION: ${{ steps.target.outputs.revision }}
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
