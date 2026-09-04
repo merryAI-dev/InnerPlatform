@@ -1504,6 +1504,14 @@ function assertTrustedProjectInfoDocumentReferences(
 }
 
 
+export const PROJECT_STAFFING_ROLE_MAX_LENGTH = 20;
+export const PROJECT_STAFFING_OTHERS_MAX = 10;
+
+/** 기타 역할명 표기 통일. src/app/platform/project-editor.ts 의 같은 이름 함수와 같은 규칙이다. */
+export function normalizeProjectStaffingRoleName(value) {
+  return readOptionalText(value).replace(/\s+/g, ' ').slice(0, PROJECT_STAFFING_ROLE_MAX_LENGTH);
+}
+
 /** 실제 투입인력 정규화. personId 없는 슬롯은 미정(null) - 명부 밖 인물은 담지 않는다. */
 function normalizeProjectStaffingForWrite(value) {
   const source = value && typeof value === 'object' ? value : {};
@@ -1520,10 +1528,19 @@ function normalizeProjectStaffingForWrite(value) {
   const operators = (Array.isArray(source.operators) ? source.operators : [])
     .map((item) => slot(item))
     .filter(Boolean);
+  // 기타 역할: 역할명이 비면 담지 않는다 - 사람만 있고 역할이 없으면 읽는 쪽이 뜻을 알 수 없다.
+  const others = [];
+  for (const item of Array.isArray(source.others) ? source.others : []) {
+    const role = normalizeProjectStaffingRoleName(item && typeof item === 'object' ? item.role : '');
+    if (!role) continue;
+    others.push({ role, slot: slot(item && typeof item === 'object' ? item.slot : null) });
+    if (others.length >= PROJECT_STAFFING_OTHERS_MAX) break;
+  }
   return {
     lead: slot(source.lead),
     pm: slot(source.pm),
     operators,
+    others,
     settlementSupport: readOptionalText(source.settlementSupport),
   };
 }
@@ -2095,8 +2112,8 @@ const PROJECT_INFO_CHANGE_LABELS = {
   laborSettlementBasis: '인건비 정산 기준',
   laborTransferPlan: 'MYSC 인건비 이관 계획',
   fundInputMode: '자금 입력 방식',
-  registeredByName: '사업 담당자',
-  executiveApproverName: '최종 결재자 지정 (사업총괄)',
+  registeredByName: '최종 보고자 (실무책임자)',
+  executiveApproverName: '최종 결재자 (총괄책임자)',
   teamName: '사내기업팀',
   teamMembersDetailed: '서류상 참여인력',
   staffing: '실제 투입인력',
@@ -2167,6 +2184,9 @@ function projectStaffingChangeValue(value) {
     `총괄 ${slotLabel(staffing.lead)}`,
     `실무 ${slotLabel(staffing.pm)}`,
     `운영 ${staffing.operators.length ? staffing.operators.map((slot) => slot.nickname || slot.name || slot.personId).join('·') : '미정'}`,
+    ...(staffing.others.length
+      ? [staffing.others.map((item) => `${item.role} ${slotLabel(item.slot)}`).join(' / ')]
+      : []),
     `정산지원 ${staffing.settlementSupport || '해당 없음'}`,
   ].join(' / ');
 }
@@ -3088,6 +3108,33 @@ export function mountProjectRoutes(app, {
     const snap = await query.get();
     const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(buildListResponse(items, limit));
+  }));
+
+  /*
+   * 기타 역할명 목록. 별도의 사전 컬렉션을 두지 않는다 - 역할명의 원천은 프로젝트 문서이고,
+   * 사전을 따로 쓰기 시작하면 두 곳이 조용히 갈린다. 여기서는 이미 저장된 값을 모아 준다.
+   * staffing 필드만 select 해서 문서 전체를 읽지 않는다.
+   */
+  app.get('/api/v1/projects/staffing-roles', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read project staffing roles');
+    const snap = await db.collection(`orgs/${tenantId}/projects`).select('staffing').get();
+    const counts = new Map();
+    for (const doc of snap.docs) {
+      const others = doc.data()?.staffing?.others;
+      if (!Array.isArray(others)) continue;
+      for (const item of others) {
+        const role = normalizeProjectStaffingRoleName(item && typeof item === 'object' ? item.role : '');
+        if (!role) continue;
+        counts.set(role, (counts.get(role) || 0) + 1);
+      }
+    }
+    // 많이 쓰인 역할이 먼저. 같은 횟수면 가나다순 - 목록 순서가 매번 바뀌면 고르기 어렵다.
+    const roles = [...counts.entries()]
+      .sort((left, right) => (right[1] - left[1]) || left[0].localeCompare(right[0], 'ko-KR'))
+      .map(([role]) => role);
+    res.setHeader('cache-control', 'private, max-age=60');
+    res.status(200).json({ roles });
   }));
 
   app.get('/api/v1/project-requests/assigned-to-me', asyncHandler(async (req, res) => {

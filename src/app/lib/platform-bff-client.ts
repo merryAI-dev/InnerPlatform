@@ -2719,6 +2719,31 @@ export async function deepSyncAuthGovernanceUsersViaBff(params: {
   return response.data;
 }
 
+/**
+ * 기타 역할명 후보. 원천은 프로젝트 문서에 이미 저장된 값이고, 서버가 모아서 돌려준다.
+ * 실패해도 화면은 그대로 쓴다 - 직접 입력이 본래 동작이고 목록은 편의다.
+ */
+export async function fetchProjectStaffingRolesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  signal?: AbortSignal;
+  client?: PlatformApiClientLike;
+}): Promise<string[]> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<{ roles: unknown }>(
+    '/api/v1/projects/staffing-roles',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      signal: params.signal,
+      timeoutMs: 10000,
+    },
+  );
+  const roles = response.data?.roles;
+  if (!Array.isArray(roles)) throw new Error('역할 목록 응답이 올바르지 않습니다.');
+  return roles.filter((role): role is string => typeof role === 'string' && role.trim() !== '');
+}
+
 // ── 인력 명부 (persons) ──
 // 명부는 BFF 를 통해서만 읽고 쓴다. 화면이 Firestore 를 직접 만지면 감사 기록이 남지 않고,
 // 명부는 참여율·정산 서류의 근거라 누가 언제 계약을 바꿨는지가 반드시 남아야 한다.

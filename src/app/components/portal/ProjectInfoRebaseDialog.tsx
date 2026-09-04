@@ -47,7 +47,7 @@ const FIELD_LABELS: Record<string, string> = {
   settlementGuide: '정산 안내',
   note: '특이사항',
   managerName: 'PM',
-  executiveApproverName: '최종 결재자 (사업총괄)',
+  executiveApproverName: '최종 결재자 (총괄책임자)',
   teamName: '팀',
   teamMembersDetailed: '참여인력',
   participantCondition: '참여 조건',
