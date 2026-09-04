@@ -57,9 +57,8 @@ describe('cashflow section error presentation', () => {
   // JVM 이 없는 값을 LOCKED 로 읽어, 확정한 적 없는 주가 "완료" 로 보이고 회수까지 막혔다.
   // 고친 자리는 JVM 이다. BFF 는 받은 값을 옮기기만 하고 빈 값을 재해석하지 않는다 -
   // 여기서 한 번 더 판정하면 두 곳이 조용히 갈린다.
-  it('maps lockState it receives without reinterpreting a blank one', () => {
-    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED')).toBe('확정 대기');
-    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED', '2026-09-04T04:00:00.000Z', '2026-09-04T04:00:00.001Z')).toBe('확정 기한 초과');
+  it('keeps practitioner completion above manager confirmation state', () => {
+    expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'SUBMITTED')).toBe('기한 내 완료');
     expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, 'LOCKED')).toBe('기한 내 완료');
     expect(jvmWeeklyApiModule.cashflowWeeklyStatusLabel('ON_TIME', true, '')).toBe('기한 내 완료');
   });
