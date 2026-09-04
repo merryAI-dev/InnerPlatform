@@ -62,4 +62,10 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('#projection-actual-comparison');
     expect(source).toContain('현금흐름 보기');
   });
+
+  it('keeps month close in its separate admin column', () => {
+    expect(source).toContain('<div>{monthCloseTargetLabel} ·');
+    expect(source).toContain('{monthWeeks.map((week) => (');
+    expect(source).not.toContain('{settlementPeriodOrder.map((period) => {');
+  });
 });

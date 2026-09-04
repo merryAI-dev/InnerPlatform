@@ -24,7 +24,7 @@ import {
   type CashflowSettlementStatusesResult,
   type CashflowWeeklyOverviewResult,
 } from '../../lib/platform-bff-client';
-import { getCashflowSettlementPeriodOrder, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
 import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-transaction-log';
 import type { PersonRecord } from '../../lib/platform-bff-client';
@@ -319,11 +319,7 @@ export function CashflowWeeklyPage() {
     (overview?.items || []).map((item) => [item.projectId, item.settlementCycle]),
   ), [overview]);
   const closeDeadline = overview?.items[0]?.settlementCycle.closeDeadline || '';
-  const settlementPeriodOrder = useMemo(() => getCashflowSettlementPeriodOrder({
-    yearMonth,
-    closeDeadline,
-  }), [closeDeadline, yearMonth]);
-  const monthDeadlineKnown = settlementPeriodOrder.at(-1) !== 'MONTH';
+  const monthDeadlineKnown = closeDeadline === `${yearMonth}-10`;
   const monthCloseTargetYearMonth = overview?.monthCloseTargetYearMonth || '';
   const monthCloseTargetLabel = /^20\d{2}-(0[1-9]|1[0-2])$/.test(monthCloseTargetYearMonth)
     ? `${monthCloseTargetYearMonth.slice(0, 4) === yearMonth.slice(0, 4) ? '' : `${monthCloseTargetYearMonth.slice(0, 4)}년 `}${Number(monthCloseTargetYearMonth.slice(5, 7))}월분 결산`
@@ -450,7 +446,6 @@ export function CashflowWeeklyPage() {
         payload: { decision: 'APPROVE', expectedRevision: request.revision, expectedManifestHash: request.manifestHash },
         idempotencyKey: `cashflow-month-close-review:${request.requestId}:approve:r${request.revision}`,
       });
-      await fetchCashflowMonthCloseViaBff({ tenantId: orgId, actor: user, projectId, yearMonth });
       setRefreshSequence((currentSequence) => currentSequence + 1);
       toast.success('월 결산을 승인했습니다.');
     } catch (error) {
@@ -559,23 +554,16 @@ export function CashflowWeeklyPage() {
                   <th className="sticky left-0 top-0 z-40 min-w-[180px] border-b bg-slate-50 px-3 py-2 text-left font-bold">프로젝트</th>
                   <th className="sticky left-[180px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">조직장</th>
                   <th className="sticky left-[284px] top-0 z-40 min-w-[104px] border-b bg-slate-50 px-2 py-2 text-left font-bold">책임자</th>
+                  <th className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
+                    <div>{monthCloseTargetLabel} · <span className="text-[10px] text-muted-foreground">{monthCloseDeadlineLabel}</span></div>
+                  </th>
                   <th className="sticky top-0 z-30 min-w-[140px] border-b border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
-                  {settlementPeriodOrder.map((period) => {
-                    if (period === 'MONTH') {
-                      return (
-                        <th key={period} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
-                          <div>{monthCloseTargetLabel} · <span className="text-[10px] text-muted-foreground">{monthCloseDeadlineLabel}</span></div>
-                        </th>
-                      );
-                    }
-                    const week = monthWeeks.find((candidate) => period === `WEEK_${candidate.weekNo}`);
-                    return week ? (
-                      <th key={period} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
-                        <div>{week.label}</div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{week.weekStart}~{week.weekEnd}</div>
-                      </th>
-                    ) : null;
-                  })}
+                  {monthWeeks.map((week) => (
+                    <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
+                      <div>{week.label}</div>
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">{week.weekStart}~{week.weekEnd}</div>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -593,27 +581,23 @@ export function CashflowWeeklyPage() {
                       </td>
                       <td className="sticky left-[180px] z-20 bg-white px-2 py-2 font-medium">{executiveApprover.label || <span className="text-red-700">연결 필요</span>}</td>
                       <td className="sticky left-[284px] z-20 bg-white px-2 py-2 font-medium">{manager.label || <span className="text-red-700">연결 필요</span>}</td>
+                      <td className="px-3 py-3 text-center">
+                        {statusErrors[project.id] || monthStatusErrors[project.id]
+                          ? <span className="text-amber-700">{statusErrors[project.id] || monthStatusErrors[project.id]}</span>
+                          : (overviewLoading && !cycles[project.id])
+                            ? <span className="text-muted-foreground">확인 중…</span>
+                            : <MonthSettlementStatusButton cycle={cycles[project.id]} deadlineKnown={monthDeadlineKnown} loading={actionKey === `${project.id}:MONTH`} onApprove={() => void approveMonthClose(project.id)} />}
+                        {!statusErrors[project.id] && !monthStatusErrors[project.id]
+                          ? <SettlementApprovalTimes item={cycles[project.id]?.monthCloseSettlement || undefined} />
+                          : null}
+                      </td>
                       <td className="border-l-2 border-slate-300 px-3 py-3 text-center">
                         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-[11px]" onClick={() => openProject(project.id)}>
                           <ExternalLink className="h-3.5 w-3.5" /> 현금흐름 보기
                         </Button>
                       </td>
-                      {settlementPeriodOrder.map((period) => {
-                        if (period === 'MONTH') {
-                          const cycle = cycles[project.id];
-                          return (
-                            <td key={period} className="px-3 py-3 text-center">
-                              {statusErrors[project.id] || monthStatusErrors[project.id]
-                                ? <span className="text-amber-700">{statusErrors[project.id] || monthStatusErrors[project.id]}</span>
-                                : (overviewLoading && !cycle)
-                                  ? <span className="text-muted-foreground">확인 중…</span>
-                                  : <MonthSettlementStatusButton cycle={cycle} deadlineKnown={monthDeadlineKnown} loading={actionKey === `${project.id}:MONTH`} onApprove={() => void approveMonthClose(project.id)} />}
-                              {!statusErrors[project.id] && !monthStatusErrors[project.id]
-                                ? <SettlementApprovalTimes item={cycle?.monthCloseSettlement || undefined} />
-                                : null}
-                            </td>
-                          );
-                        }
+                      {monthWeeks.map((week) => {
+                        const period = `WEEK_${week.weekNo}` as Exclude<CashflowSettlementPeriod, 'MONTH'>;
                         return (
                           <td key={period} className="px-3 py-3 text-center">
                             {statusErrors[project.id] ? <span className="text-amber-700">{statusErrors[project.id]}</span> : (overviewLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
@@ -632,7 +616,7 @@ export function CashflowWeeklyPage() {
                   );
                 })}
                 {filteredProjects.length === 0 ? (
-                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={4 + settlementPeriodOrder.length}>프로젝트가 없습니다.</td></tr>
+                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={5 + monthWeeks.length}>프로젝트가 없습니다.</td></tr>
                 ) : null}
               </tbody>
             </table>
