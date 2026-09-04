@@ -131,7 +131,7 @@ function matchesFixedFixture(request, options) {
     && request.evidenceRevision === options.expectedEvidenceRevision
     && text(request?.monthCloseTargetYearMonth) === options.expectedTargetYearMonth
     && text(request?.cycleYearMonth) === options.cycleYearMonth
-    && text(request?.documentType) === 'REQUEST'
+    && text(request?.documentType) === 'MONTHLY_CLOSE'
     && text(request?.contractVersion) === 'cashflow-cumulative-close-v2';
 }
 
