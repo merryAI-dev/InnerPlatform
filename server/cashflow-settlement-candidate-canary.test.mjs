@@ -75,7 +75,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     const canonicalRequest = {
       projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
       workflowRevision: 3, evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
-      cycleYearMonth: '2026-09', documentType: 'REQUEST',
+      cycleYearMonth: '2026-09', documentType: 'MONTHLY_CLOSE',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
     const fetchImpl = vi.fn(async (url, init) => {
@@ -124,7 +124,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     const wrongFixture = {
       projectId: 'project-a', requestId: 'project-a-2026-09', status: 'APPROVED',
       workflowRevision: 3, evidenceRevision: 3, monthCloseTargetYearMonth: '2026-08',
-      cycleYearMonth: '2026-09', documentType: 'REQUEST',
+      cycleYearMonth: '2026-09', documentType: 'MONTHLY_CLOSE',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
     const fetchImpl = vi.fn(async () => response({
@@ -145,7 +145,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     const request = {
       projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
       workflowRevision: 3, evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
-      cycleYearMonth: '2026-09', documentType: 'REQUEST',
+      cycleYearMonth: '2026-09', documentType: 'MONTHLY_CLOSE',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
     const fetchImpl = vi.fn(async () => response({
@@ -166,7 +166,7 @@ describe('cashflow settlement Vercel candidate canary', () => {
     const request = {
       projectId: 'project-a', requestId: 'project-a-2026-09', status: 'PENDING_APPROVAL',
       workflowRevision: '3', evidenceRevision: 2, monthCloseTargetYearMonth: '2026-08',
-      cycleYearMonth: '2026-09', documentType: 'REQUEST',
+      cycleYearMonth: '2026-09', documentType: 'MONTHLY_CLOSE',
       contractVersion: 'cashflow-cumulative-close-v2',
     };
     const coercedRevisionFetch = vi.fn(async () => response({
