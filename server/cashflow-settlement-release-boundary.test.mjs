@@ -62,20 +62,23 @@ describe('cashflow settlement release boundary', () => {
     });
   });
 
-  it('classifies only the exact settlement projection verifier as JVM-only support', () => {
+  it('classifies only the exact settlement deploy verifiers as JVM-only support', () => {
     const jvmPath = 'server/jvm-weekly-api/src/main/java/example/Settlement.java';
     const verifierPath = 'scripts/verify-cashflow-settlement-cycle-projection.mjs';
+    const candidatePath = 'scripts/verify-cashflow-settlement-candidate.mjs';
     expect(classifyCashflowSettlementProductionRelease([
       jvmPath,
       verifierPath,
+      candidatePath,
     ])).toEqual({
       releaseMode: 'jvm_only',
-      jvm: [jvmPath, verifierPath],
+      jvm: [jvmPath, verifierPath, candidatePath],
       bffFrontendCutover: [],
       unexpectedPaths: [],
     });
 
     expect(classifyCashflowSettlementProductionRelease([verifierPath]).releaseMode).toBe('jvm_only');
+    expect(classifyCashflowSettlementProductionRelease([candidatePath]).releaseMode).toBe('jvm_only');
 
     const unexpectedPaths = [
       'scripts/verify-cashflow-settlement-cycle-projection.ts',

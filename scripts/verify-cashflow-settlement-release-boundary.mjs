@@ -60,7 +60,8 @@ export function classifyCashflowSettlementReleasePaths(paths, { rolloutSupportIs
   const normalized = [...new Set(paths.map((path) => String(path || '').trim()).filter(Boolean))];
   return {
     jvm: normalized.filter((path) => path.startsWith(JVM_ROOT)
-      || path === 'scripts/verify-cashflow-settlement-cycle-projection.mjs'),
+      || path === 'scripts/verify-cashflow-settlement-cycle-projection.mjs'
+      || path === 'scripts/verify-cashflow-settlement-candidate.mjs'),
     bffFrontendCutover: normalized.filter((path) => (
       (!JVM_ROLLOUT_SUPPORT_PATHS.has(path) || rolloutSupportIsLive)
       &&
