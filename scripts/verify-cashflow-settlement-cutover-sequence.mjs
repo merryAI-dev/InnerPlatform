@@ -193,6 +193,29 @@ export function vercelMutationDrainSeconds(configuration) {
   return seconds;
 }
 
+export function assertFirestoreRecoveryReady({ backups, database }, now = Date.now()) {
+  const databaseName = String(database?.name || '');
+  const validDatabase = databaseName.endsWith('/databases/(default)');
+  const recentBackup = validDatabase && Array.isArray(backups) && backups.some((backup) => {
+    const createdAt = ISO_INSTANT.test(backup?.createTime || '') ? Date.parse(backup.createTime) : NaN;
+    return backup?.database === databaseName && backup?.state === 'READY'
+      && Number.isFinite(createdAt) && createdAt >= now - 48 * 60 * 60 * 1_000 && createdAt <= now;
+  });
+  const retention = /^(\d+)s$/.exec(database?.versionRetentionPeriod || '');
+  const earliestVersion = ISO_INSTANT.test(database?.earliestVersionTime || '')
+    ? Date.parse(database.earliestVersionTime)
+    : NaN;
+  const readyPitr = validDatabase
+    && database?.pointInTimeRecoveryEnablement === 'POINT_IN_TIME_RECOVERY_ENABLED'
+    && Number(retention?.[1]) >= 7 * 24 * 60 * 60
+    && Number.isFinite(earliestVersion)
+    && earliestVersion <= Math.floor(now / 60_000) * 60_000;
+  if (!recentBackup && !readyPitr) {
+    throw new Error('A recent Firestore backup or seven-day point-in-time recovery is required.');
+  }
+  return { ready: true, mode: recentBackup ? 'backup' : 'pitr' };
+}
+
 function documentRecord(document) {
   const seconds = Number(document?.updateTime?.seconds ?? document?.updateTime?._seconds);
   const nanoseconds = Number(document?.updateTime?.nanoseconds ?? document?.updateTime?._nanoseconds);
@@ -415,6 +438,8 @@ async function main(args) {
     return assertCashflowSettlementCutoverPreflightUnchanged(expected, report);
   } if (command === 'wait-vercel-drain' && second === undefined) {
     return waitForVercelMutationDrain(first);
+  } if (command === 'verify-firestore-recovery' && second === undefined) {
+    return assertFirestoreRecoveryReady(JSON.parse(readFileSync(first, 'utf8')));
   } if (command === 'capture-protected' && second && third && fourth) {
     const plan = JSON.parse(readFileSync(fourth, 'utf8'));
     const snapshot = await readProtectedCashflowSnapshot(first, second, plan);

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 
 import {
   advanceCashflowSettlementCutover,
+  assertFirestoreRecoveryReady,
   assertProtectedCashflowSnapshotAfterNormalization,
   assertCashflowSettlementCutoverPreflightUnchanged,
   assertProtectedCashflowSnapshotUnchanged,
@@ -72,6 +73,26 @@ function report(overrides: Record<string, unknown> = {}) {
 }
 
 describe('cashflow settlement atomic cutover decisions', () => {
+  it('accepts native recovery only when it covers the cutover window', () => {
+    const now = Date.parse('2026-09-04T04:15:00Z');
+    const database = {
+      name: 'projects/live/databases/(default)',
+      pointInTimeRecoveryEnablement: 'POINT_IN_TIME_RECOVERY_ENABLED',
+      versionRetentionPeriod: '604800s',
+      earliestVersionTime: '2026-08-28T04:15:00Z',
+    };
+    expect(assertFirestoreRecoveryReady({ backups: [], database }, now)).toMatchObject({ mode: 'pitr' });
+    expect(assertFirestoreRecoveryReady({
+      backups: [{ database: database.name, state: 'READY', createTime: '2026-09-04T04:00:00Z' }],
+      database: { ...database, pointInTimeRecoveryEnablement: 'DISABLED' },
+    }, now)).toMatchObject({ mode: 'backup' });
+    for (const override of [
+      { versionRetentionPeriod: '3600s' },
+      { pointInTimeRecoveryEnablement: 'DISABLED' },
+      { earliestVersionTime: '2026-09-04T04:16:00Z' },
+    ]) expect(() => assertFirestoreRecoveryReady({ backups: [], database: { ...database, ...override } }, now)).toThrow();
+  });
+
   it('compares legacy state while allowing the approved monthly deadline change', () => {
     const core = (value: object) => execFileSync(
       'jq', ['-S', '-c', '-f', 'scripts/cashflow-settlement-legacy-parity.jq'],

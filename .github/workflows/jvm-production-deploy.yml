@@ -607,7 +607,7 @@ jobs:
               <<< "${candidate_cycle_dashboard}" >/dev/null
           fi
 
-      - name: Verify a ready Firestore backup exists
+      - name: Verify Firestore recovery is ready
         if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
         env:
           CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
@@ -618,20 +618,15 @@ jobs:
             --project "${PROJECT_ID}" \
             --location nam5 \
             --format=json)"
-          jq -e --arg database "projects/${PROJECT_ID}/databases/(default)" \
-            'def create_epoch:
-              .createTime
-              | select(type == "string")
-              | select(test("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"))
-              | sub("\\.[0-9]+Z$"; "Z")
-              | fromdateiso8601?;
-            now as $now
-            | [.[]
-                | select(.database == $database and .state == "READY")
-                | create_epoch
-                | select(. >= ($now - 172800) and . <= $now)]
-            | length > 0' \
-            <<< "${backups}" >/dev/null
+          database="$(gcloud firestore databases describe \
+            --project "${PROJECT_ID}" \
+            --database='(default)' \
+            --format=json)"
+          recovery_file="${RUNNER_TEMP}/firestore-recovery.json"
+          jq -n --argjson backups "${backups}" --argjson database "${database}" \
+            '{ backups: $backups, database: $database }' > "${recovery_file}"
+          node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
+            verify-firestore-recovery "${recovery_file}"
 
       - name: Recheck frozen inventory before maintenance
         if: steps.release_boundary.outputs.release_mode == 'atomic_cutover'
