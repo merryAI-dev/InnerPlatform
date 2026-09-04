@@ -3885,24 +3885,6 @@ function assertWeeklyWorkspaceOrRoleAllowed(req, allowedRoles, action, authMode,
   assertActorRoleAllowed(req, allowedRoles, action);
 }
 
-export function mergeRegistryCreditsWithPeople(credits, persons) {
-  const personsByEmail = new Map(persons.map((person) => [readOptionalText(person.email).toLowerCase(), person]));
-  let unmatchedCount = 0;
-  const people = credits.map((credit) => {
-    const person = personsByEmail.get(readOptionalText(credit.workEmail).toLowerCase());
-    if (!person) unmatchedCount += 1;
-    const name = readOptionalText(person?.name);
-    const nickname = readOptionalText(person?.nickname);
-    return {
-      personId: person?.personId || null,
-      displayName: name ? `${name}${nickname ? `(${nickname})` : ''}` : '이름 미등록',
-      totalCredit: Number(credit.totalCredit) || 0,
-      recordCount: Number(credit.recordCount) || 0,
-    };
-  });
-  return { source: 'station', readOnly: true, unmatchedCount, people };
-}
-
 export function mountJvmWeeklyApiRoutes(app, {
   db,
   env = process.env,
@@ -4021,21 +4003,6 @@ export function mountJvmWeeklyApiRoutes(app, {
   function proxyJavaWeeklyRequest(options) {
     return javaWeeklyClient.requestJson(options);
   }
-
-  app.get('/api/v1/registry-credits', asyncHandler(async (req, res) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read Registry credits', authMode, workspaceEmailDomain);
-    const [credits, personsSnap] = await Promise.all([
-      proxyJavaWeeklyRequest({ context: req.context, method: 'GET', path: '/api/v1/registry-credits' }),
-      db.collection(`orgs/${req.context.tenantId}/persons`).get(),
-    ]);
-    if (credits?.source !== 'station' || credits?.readOnly !== true || !Array.isArray(credits?.people)) {
-      throw createHttpError(502, 'Station 크레딧 응답을 확인할 수 없습니다.', 'station_registry_credits_invalid');
-    }
-    const persons = personsSnap.docs.map((doc) => ({ personId: doc.id, ...(doc.data() || {}) }));
-    res.status(200).set('Cache-Control', 'private, no-store').json(
-      mergeRegistryCreditsWithPeople(credits.people, persons),
-    );
-  }));
 
   async function readCanonicalCashflowMonthReopenAuthority(req, projectId) {
     return assertCashflowMonthReopenAuthorityResult(
