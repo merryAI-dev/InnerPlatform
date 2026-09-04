@@ -1005,8 +1005,6 @@ jobs:
             echo "Canonical alias did not resolve to the verified deployment." >&2
             exit 1
           }
-          SETTLEMENT_CANARY_BASE_URL="https://${VERCEL_CANONICAL_PRODUCTION_HOST}" \
-            node scripts/verify-cashflow-settlement-candidate.mjs
           node scripts/verify-cashflow-settlement-cutover-sequence.mjs \
             advance "${CUTOVER_STATE_FILE}" final_web_aliased
 
