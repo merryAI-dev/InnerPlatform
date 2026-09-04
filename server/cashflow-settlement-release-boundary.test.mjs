@@ -70,10 +70,12 @@ describe('cashflow settlement release boundary', () => {
       verifierPath,
     ])).toEqual({
       releaseMode: 'jvm_only',
-      jvm: [jvmPath],
+      jvm: [jvmPath, verifierPath],
       bffFrontendCutover: [],
       unexpectedPaths: [],
     });
+
+    expect(classifyCashflowSettlementProductionRelease([verifierPath]).releaseMode).toBe('jvm_only');
 
     const unexpectedPaths = [
       'scripts/verify-cashflow-settlement-cycle-projection.ts',
