@@ -555,12 +555,10 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
-    const serviceAccountJson = JSON.stringify({ client_email: 'live-invoker@example.iam.gserviceaccount.com' });
     const resolveIdentityToken = vi.fn(async () => 'live-id-token');
     const client = createJavaWeeklyClient({
       env: liveEnv({
         JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://live-jvm.example',
-        JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: serviceAccountJson,
       }),
       fetchImpl,
       jvmWeeklyApiIdentityTokenResolver: resolveIdentityToken,
@@ -575,7 +573,7 @@ describe('Java weekly cashflow client', () => {
 
     expect(resolveIdentityToken).toHaveBeenCalledWith({
       audience: 'https://live-jvm.example',
-      serviceAccountJson,
+      serviceAccountJson: '',
       signal: expect.any(AbortSignal),
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
