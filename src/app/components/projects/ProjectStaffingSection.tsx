@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { featureFlags } from '../../config/feature-flags';
-import type { ProjectStaffing, ProjectStaffingSlot } from '../../data/types';
-import { fetchPersonsViaBff, type PersonRecord } from '../../lib/platform-bff-client';
+import type { ProjectStaffing, ProjectStaffingOtherRole, ProjectStaffingSlot } from '../../data/types';
+import {
+  fetchPersonsViaBff,
+  fetchProjectStaffingRolesViaBff,
+  type PersonRecord,
+} from '../../lib/platform-bff-client';
 import type { ActorLike } from '../../lib/platform-bff-client';
 import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import { MemberPicker } from '../ui/member-picker';
 import { cn } from '../ui/utils';
 import {
   FIELD_W_MD,
   FIELD_W_SM,
+  FIELD_W_XS,
   FORM_CONTROL_CLASS,
   ProjectFormRow,
   ProjectFormSection,
 } from './project-form-layout';
+import { PROJECT_STAFFING_OTHERS_MAX, PROJECT_STAFFING_ROLE_MAX_LENGTH } from '../../platform/project-editor';
 import type { OrgMemberPickerOption } from '../../data/project-team-member-options';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -23,6 +30,8 @@ import {
 const UNASSIGNED = '__unassigned__';
 /** 정산지원 담당 후보. 운영 결정으로 고정된 두 사람이다 - 바뀌면 여기만 고친다. */
 const SETTLEMENT_SUPPORT_CHOICES = ['도담', '써니'];
+/** 기타 역할명 후보 목록의 datalist id. 한 화면에 이 섹션은 하나뿐이다. */
+const ROLE_SUGGESTION_LIST_ID = 'project-staffing-role-suggestions';
 
 function personLabel(person: PersonRecord): string {
   const nickname = String(person.nickname || '').trim();
@@ -73,6 +82,17 @@ export function ProjectStaffingSection({
     return () => { cancelled = true; };
   }, [enabled, orgId, actor]);
 
+  // 다른 사람이 이미 쓴 역할명. 실패해도 직접 입력은 그대로 되므로 오류를 띄우지 않는다.
+  const [roleSuggestions, setRoleSuggestions] = useState<string[]>([]);
+  useEffect(() => {
+    if (!enabled || !orgId || !actor) return;
+    let cancelled = false;
+    fetchProjectStaffingRolesViaBff({ tenantId: orgId, actor })
+      .then((roles) => { if (!cancelled) setRoleSuggestions(roles); })
+      .catch(() => { if (!cancelled) setRoleSuggestions([]); });
+    return () => { cancelled = true; };
+  }, [enabled, orgId, actor]);
+
   const options = useMemo<OrgMemberPickerOption[]>(() => {
     const rows = people.map((person) => ({
       uid: person.personId,
@@ -89,6 +109,16 @@ export function ProjectStaffingSection({
   }, [people]);
 
   const patch = (partial: Partial<ProjectStaffing>) => onChange({ ...staffing, ...partial });
+  const patchOther = (index: number, partial: Partial<ProjectStaffingOtherRole>) => patch({
+    others: staffing.others.map((item, itemIndex) => (itemIndex === index ? { ...item, ...partial } : item)),
+  });
+  // 이미 쓰고 있는 역할명도 후보에 넣는다 - 방금 적은 값이 목록에서 빠지면 오타로 보인다.
+  const roleOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return [...roleSuggestions, ...staffing.others.map((item) => item.role)]
+      .map((role) => role.trim())
+      .filter((role) => role !== '' && !seen.has(role) && seen.add(role));
+  }, [roleSuggestions, staffing.others]);
   // 아직 사람을 안 고른 "빈 운영매니저 줄" 수. 저장 모델(operators)에는 채워진 슬롯만 담기고,
   // 빈 줄은 화면 상태다 - 최소 한 줄은 항상 보여 준다.
   const [emptyOperatorSlots, setEmptyOperatorSlots] = useState(0);
@@ -98,9 +128,13 @@ export function ProjectStaffingSection({
   ];
   if (operatorSlots.length === 0) operatorSlots.push(null);
 
-  const picker = (slot: ProjectStaffingSlot | null, apply: (next: ProjectStaffingSlot | null) => void) => (
+  const picker = (
+    slot: ProjectStaffingSlot | null,
+    apply: (next: ProjectStaffingSlot | null) => void,
+    widthClass: string = FIELD_W_MD,
+  ) => (
     <MemberPicker
-      className={cn(FIELD_W_MD, FORM_CONTROL_CLASS)}
+      className={cn(widthClass, FORM_CONTROL_CLASS)}
       options={options}
       value={slot?.personId || ''}
       placeholder="인력 명부에서 선택 (미정 가능)"
@@ -169,6 +203,53 @@ export function ProjectStaffingSection({
           onClick={() => setEmptyOperatorSlots((count) => count + 1)}
         >
           <Plus className="h-3.5 w-3.5" /> 운영매니저 추가
+        </Button>
+      </ProjectFormRow>
+
+      {/*
+        기타 역할. 고정 역할로 담기지 않는 자리(멘토·강사 등)를 역할명과 함께 적는다.
+        역할명은 프로젝트 문서에 그대로 남고, 서버가 그 값을 모아 다음 사람의 후보로 돌려준다.
+      */}
+      <datalist id={ROLE_SUGGESTION_LIST_ID}>
+        {roleOptions.map((role) => <option key={role} value={role} />)}
+      </datalist>
+      {staffing.others.map((item, index) => (
+        <ProjectFormRow key={`other-${index}`} label={`기타 ${index + 1}`} note="역할명을 직접 적습니다">
+          <div className="flex items-center gap-2">
+            <Input
+              className={cn(FIELD_W_XS, FORM_CONTROL_CLASS)}
+              list={ROLE_SUGGESTION_LIST_ID}
+              maxLength={PROJECT_STAFFING_ROLE_MAX_LENGTH}
+              placeholder="역할명"
+              aria-label={`기타 ${index + 1} 역할명`}
+              value={item.role}
+              disabled={disabled}
+              onChange={(event) => patchOther(index, { role: event.target.value })}
+            />
+            <div className="min-w-0 flex-1">
+              {picker(item.slot, (next) => patchOther(index, { slot: next }), 'w-full')}
+            </div>
+            <Button
+              type="button" variant="outline" size="sm" className="h-9 px-2"
+              aria-label={`기타 ${index + 1} 삭제`}
+              disabled={disabled}
+              onClick={() => patch({ others: staffing.others.filter((_, itemIndex) => itemIndex !== index) })}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </ProjectFormRow>
+      ))}
+      <ProjectFormRow
+        label={staffing.others.length ? '' : '기타'}
+        note={staffing.others.length ? '' : '실제 수행할 역할 기재 (멘토, 강사 등)'}
+      >
+        <Button
+          type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
+          disabled={disabled || staffing.others.length >= PROJECT_STAFFING_OTHERS_MAX}
+          onClick={() => patch({ others: [...staffing.others, { role: '', slot: null }] })}
+        >
+          <Plus className="h-3.5 w-3.5" /> 기타 역할 추가
         </Button>
       </ProjectFormRow>
 

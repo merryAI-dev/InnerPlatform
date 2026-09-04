@@ -943,6 +943,10 @@ describe('project information private drafts', () => {
           lead: { personId: 'person-lead', name: '김총괄', nickname: '리드' },
           pm: { personId: 'person-pm', name: '박실무', nickname: '' },
           operators: [{ personId: 'person-op', name: '이운영', nickname: '오퍼' }],
+          others: [
+            { role: '멘토', slot: { personId: 'person-mentor', name: '박하늘', nickname: '하늘' } },
+            { role: '', slot: { personId: 'person-drop', name: '역할없음', nickname: '' } },
+          ],
           settlementSupport: '도담',
         },
       }),
@@ -956,12 +960,15 @@ describe('project information private drafts', () => {
       lead: { personId: 'person-lead' },
       pm: { personId: 'person-pm' },
       operators: [{ personId: 'person-op' }],
+      // 역할명이 빈 줄은 저장되지 않는다.
+      others: [{ role: '멘토', slot: { personId: 'person-mentor' } }],
       settlementSupport: '도담',
     });
+    expect(request.proposedSnapshot.staffing.others).toHaveLength(1);
     expect(request.proposedSnapshot.settlementSystemOther).toBe('자체 정산 시트');
     const staffingChange = (request.changedFields || []).find((change) => change.key === 'staffing');
     expect(staffingChange).toMatchObject({ label: '실제 투입인력' });
-    expect(staffingChange.after).toBe('총괄 리드 / 실무 박실무 / 운영 오퍼 / 정산지원 도담');
+    expect(staffingChange.after).toBe('총괄 리드 / 실무 박실무 / 운영 오퍼 / 멘토 하늘 / 정산지원 도담');
   });
 
   it('does not reopen organization-head review while management planning is still pending', async () => {

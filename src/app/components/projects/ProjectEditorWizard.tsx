@@ -430,7 +430,7 @@ const STEP_PREPARATION_NOTES: Record<ProjectEditorStep, string[]> = {
     '계약금액과 선금 · 중도금 · 잔금 입금 시점을 계약서에서 확인해 두면 한 번에 끝납니다.',
   ],
   team: [
-    '사업 담당자와 최종 결재자를 구성원 원장에서 고를 수 있어야 합니다.',
+    '최종 보고자 (실무책임자)와 최종 결재자 (총괄책임자)를 구성원 원장에서 고를 수 있어야 합니다.',
     '참여인력은 참여율 시트에서 연동합니다. 시트 링크를 먼저 넣어 주세요.',
   ],
   review: [
@@ -1630,7 +1630,7 @@ export function ProjectEditorWizard({
     }
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
     if (!draft.executiveApproverId || !selectedExecutiveApprover) {
-      issues.push({ step: 'team', label: '최종 결재자 지정 (사업총괄)' });
+      issues.push({ step: 'team', label: '최종 결재자 (총괄책임자)' });
     }
     // 참여인력은 시트에서 온다. 역할 구성(운영매니저 1인 이상)은 시트를 보고 사람이 판단할
     // 일이라 저장을 막지 않는다. 대신 시트 링크가 없으면 참여율을 적을 곳 자체가 없어 막는다.
@@ -2788,7 +2788,7 @@ export function ProjectEditorWizard({
       />
       <ProjectFormSection title="담당자와 결재자">
         <ProjectFormRow
-          label="사업 담당자"
+          label="최종 보고자 (실무책임자)"
           required
           issueLabel="PM"
           errors={[
@@ -2823,11 +2823,11 @@ export function ProjectEditorWizard({
           />
         </ProjectFormRow>
         <ProjectFormRow
-          label="최종 결재자 지정 (사업총괄)"
+          label="최종 결재자 (총괄책임자)"
           required
-          issueLabel="최종 결재자 지정 (사업총괄)"
+          issueLabel="최종 결재자 (총괄책임자)"
           errors={[
-            ...fieldIssues('최종 결재자 지정 (사업총괄)'),
+            ...fieldIssues('최종 결재자 (총괄책임자)'),
             ...(hasUnlinkedStoredExecutiveApprover
               ? ['현재 저장된 결재자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.']
               : []),
@@ -3344,7 +3344,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
-            <ReviewRow label="최종 결재자 지정 (사업총괄)" value={draft.executiveApproverName} />
+            <ReviewRow label="최종 결재자 (총괄책임자)" value={draft.executiveApproverName} />
             <ReviewRow label="실제 투입인력" value={formatProjectStaffingSummary(draft.staffing)} />
             <ReviewRow label="서류상 참여인력" value={teamMembersSummary} />
             <ReviewRow label="참여율 시트 링크" value={draft.participationSheetLink} />

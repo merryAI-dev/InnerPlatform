@@ -25,6 +25,7 @@ import type {
   SettlementSheetPolicy,
   SettlementType,
   ProjectStaffing,
+  ProjectStaffingOtherRole,
   ProjectStaffingSlot,
 } from '../data/types';
 import {
@@ -241,7 +242,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   managerName: '',
   teamName: '',
   teamMembersDetailed: [],
-  staffing: { lead: null, pm: null, operators: [], settlementSupport: '' },
+  staffing: { lead: null, pm: null, operators: [], others: [], settlementSupport: '' },
   participantCondition: '',
   note: '',
   paymentPlanDesc: '',
@@ -514,8 +515,8 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'settlementSystem', label: '정산 시스템', before: (project) => normalizeSettlementSystemCode(project.settlementSystem) === 'OTHER' ? normalizeChangeValue(project.settlementSystemOther) : SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(project.settlementSystem)] || '-', after: (draft) => normalizeSettlementSystemCode(draft.settlementSystem) === 'OTHER' ? normalizeChangeValue(draft.settlementSystemOther) : SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(draft.settlementSystem)] || '-' },
   { key: 'laborSettlementBasis', label: '인건비 정산 기준', before: (project) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(project.laborSettlementBasis)] || '-', after: (draft) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(draft.laborSettlementBasis)] || '-' },
   { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
-  { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
-  { key: 'executiveApproverName', label: '최종 결재자 지정 (사업총괄)', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
+  { key: 'registeredByName', label: '최종 보고자 (실무책임자)', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
+  { key: 'executiveApproverName', label: '최종 결재자 (총괄책임자)', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
   { key: 'staffing', label: '실제 투입인력', before: (project) => formatProjectStaffingSummary(project.staffing), after: (draft) => formatProjectStaffingSummary(draft.staffing) },
   { key: 'teamMembersDetailed', label: '서류상 참여인력', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
@@ -799,15 +800,32 @@ function normalizeStaffingSlot(value: unknown): ProjectStaffingSlot | null {
   return { personId, name: text(slot.name), nickname: text(slot.nickname) };
 }
 
+export const PROJECT_STAFFING_ROLE_MAX_LENGTH = 20;
+export const PROJECT_STAFFING_OTHERS_MAX = 10;
+
+/** 기타 역할명 표기 통일. 앞뒤·중복 공백을 없애고 길이를 제한한다. */
+export function normalizeStaffingRoleName(value: unknown): string {
+  return text(value).replace(/\s+/g, ' ').slice(0, PROJECT_STAFFING_ROLE_MAX_LENGTH);
+}
+
 export function normalizeProjectStaffing(value: unknown): ProjectStaffing {
   const source = (value && typeof value === 'object' ? value : {}) as Partial<ProjectStaffing>;
   const operators = (Array.isArray(source.operators) ? source.operators : [])
     .map((slot) => normalizeStaffingSlot(slot))
     .filter((slot): slot is ProjectStaffingSlot => slot !== null);
+  // 역할명이 비면 저장하지 않는다 - 사람만 있고 역할이 없는 줄은 읽는 쪽에서 뜻을 알 수 없다.
+  const others: ProjectStaffingOtherRole[] = [];
+  for (const item of Array.isArray(source.others) ? source.others : []) {
+    const role = normalizeStaffingRoleName((item as ProjectStaffingOtherRole | undefined)?.role);
+    if (!role) continue;
+    others.push({ role, slot: normalizeStaffingSlot((item as ProjectStaffingOtherRole).slot) });
+    if (others.length >= PROJECT_STAFFING_OTHERS_MAX) break;
+  }
   return {
     lead: normalizeStaffingSlot(source.lead),
     pm: normalizeStaffingSlot(source.pm),
     operators,
+    others,
     settlementSupport: text(source.settlementSupport),
   };
 }
@@ -820,6 +838,9 @@ export function formatProjectStaffingSummary(value: unknown): string {
     `총괄 ${slotLabel(staffing.lead)}`,
     `실무 ${slotLabel(staffing.pm)}`,
     `운영 ${staffing.operators.length ? staffing.operators.map((slot) => slot.nickname || slot.name).join('·') : '미정'}`,
+    ...(staffing.others.length
+      ? [staffing.others.map((item) => `${item.role} ${slotLabel(item.slot)}`).join(' / ')]
+      : []),
     `정산지원 ${staffing.settlementSupport || '해당 없음'}`,
   ];
   return parts.join(' / ');

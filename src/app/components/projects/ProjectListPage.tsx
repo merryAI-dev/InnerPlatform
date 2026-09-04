@@ -231,7 +231,7 @@ export function ProjectListPage() {
                   </span>
                 </TableHead>
                 <TableHead className="min-w-[90px]">계약 기간</TableHead>
-                <TableHead className="min-w-[80px]">사업 담당자</TableHead>
+                <TableHead className="min-w-[80px]">최종 보고자 (실무책임자)</TableHead>
                 <TableHead className="text-right min-w-[100px] cursor-pointer" onClick={() => handleSort('contractAmount')}>
                   <span className="flex items-center justify-end gap-1">
                     계약금액 <ArrowUpDown className="w-3 h-3" />
