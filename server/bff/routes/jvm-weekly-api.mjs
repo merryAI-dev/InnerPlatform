@@ -5752,7 +5752,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
     const before = await readCanonicalCashflowSettlementCycleState(req, projectId, cycleYearMonth);
     const monthCloseTargetYearMonth = previousYearMonth(cycleYearMonth);
-    const monthClose = objectValue(before.source?.monthClose);
+    const monthClose = objectValue(before.source?.latestRun);
     const recordLedgerRevision = before.record?.ledgerRevision;
     const event = objectValue(decision ? before.record?.reopenDecision : before.record?.reopenRequest);
     const initial = decision
@@ -5850,7 +5850,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       { cashflowWrite: true, deadlineAtMs: Date.now() + monthCloseRouteTimeoutMs },
     ), expectation);
     const after = await readCanonicalCashflowSettlementCycleState(req, projectId, cycleYearMonth);
-    const afterMonthClose = objectValue(after.source?.monthClose);
+    const afterMonthClose = objectValue(after.source?.latestRun);
     const afterEvent = objectValue(decision ? after.record?.reopenDecision : after.record?.reopenRequest);
     const expectedBusinessState = decision ? terminalBusinessState : 'REOPEN_REQUESTED';
     const expectedRecordStatus = decision ? terminalRecordStatus : 'REOPEN_REQUESTED';

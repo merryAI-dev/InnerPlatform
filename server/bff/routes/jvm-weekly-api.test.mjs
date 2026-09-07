@@ -991,6 +991,7 @@ function canonicalCycleMonthCloseFixture(cycleYearMonth = '2026-09', {
     dashboard = withCanonicalLockedCycle(monthDashboardSource(monthClose), {
       provenanceLedgerRevision: 7, rootHash: manifestHash,
     });
+    dashboard.monthClose = { ...dashboard.monthClose, status: 'OPEN' };
   } else if (transitionAction || approve) {
     const canonicalRequest = canonicalMonthCloseRequest(cycleYearMonth, 'PENDING_APPROVAL', {
       requestedAt: `${cycleYearMonth}-10T02:00:00Z`, reviewWarnings: ['canonical-reread'],
@@ -1120,6 +1121,7 @@ function canonicalCycleMonthCloseFixture(cycleYearMonth = '2026-09', {
           REJECT_MONTH_REOPEN: { allowed: true, reasonCode: '' },
         },
       });
+      dashboard.monthClose = { ...dashboard.monthClose, status: 'OPEN' };
       acceptedReopenRequestBody = body;
       acceptedReopenRequestReceipt = {
         ok: true, commandName: 'cashflowMonth.requestReopen', projectId: 'project-a',
@@ -1165,6 +1167,7 @@ function canonicalCycleMonthCloseFixture(cycleYearMonth = '2026-09', {
         provenanceLedgerRevision: 7, rootHash: body.manifestHash,
         workflowRevision: body.expectedWorkflowRevision + 1,
       });
+      dashboard.monthClose = { ...dashboard.monthClose, status: 'OPEN' };
       acceptedReopenDecisionBody = body;
       acceptedReopenDecisionReceipt = {
         ok: true, commandName: 'cashflowMonth.decideReopen', projectId: 'project-a',
